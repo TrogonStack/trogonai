@@ -8,8 +8,8 @@ date: 2026-07-07
 # ADR#0017: AAuth Agent Authentication over a Trogon NATS PoP Binding
 
 > **Superseded in part by [ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
-> (2026-10-30).** AAuth runs only at the external HTTP edge and defaults to
-> `enforce` in release builds; `shadow` and `off` require an explicit
+> (2026-10-30).** AAuth runs only at the external HTTP edge and, once that
+> edge integration lands, defaults to `enforce` in release builds; `shadow` and `off` require an explicit
 > development flag and log a warning, and `shadow` no longer admits a request
 > as anonymous (Decision 6). No NATS hop runs the binding of Decision 2,
 > including the first hop of a client that connects to NATS directly. Replay

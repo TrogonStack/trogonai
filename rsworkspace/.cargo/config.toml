@@ -1,8 +1,12 @@
 [alias]
+# Codegen output (buf protobuf bindings, Weaver semconv) is not code this workspace
+# writes, so it stays out of the coverage gate.
 cov = [
     "llvm-cov",
     "--all-features",
     "--workspace",
+    "--ignore-filename-regex",
+    "/src/gen/",
 ]
 
 [target.wasm32-wasip2]

@@ -1,30 +1,46 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use {
+    a2a_auth_callout::XkeyPublic,
     a2a_bridge::{
         AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
-        AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, GatewayInboundPublisher, StubAuthCalloutClient,
-        StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
+        AuthCalloutJsonMintClient, BearerOnlyGuard, BridgeError, BridgeTenantAccount, CallerConnectTimeout,
+        ENV_AUTH_CALLOUT_XKEY_PUBLIC, EdgeAuthConfig, EdgeAuthMode, EdgeGuard, GatewayInboundPublisher,
+        GatewayRpcTimeout, StubAuthCalloutClient, StubInboundGatewayPublish, StubTaskJetStreamPort,
+        edge_auth::{ENV_AAUTH_DEV_UNENFORCED, EdgeAuthConfigError, ProofPolicy},
+        gateway_router,
     },
     a2a_nats::{A2aPrefix, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
     std::{future::Future, net::SocketAddr, sync::Arc, time::Duration},
-    trogon_std::env::{ReadEnv, SystemEnv},
+    tracing::{Event as TraceEvent, Level, Value},
+    trogon_aauth_verify::{
+        InMemoryReplayStore, NatsKvReplayStore, ReplayBucketError, ReplayStore, constants::AAUTH_REPLAY_BUCKET,
+    },
+    trogon_nats::NatsConfig,
+    trogon_std::{
+        env::{ReadEnv, SystemEnv},
+        fs::{ReadFile, SystemFs},
+    },
 };
 
 #[tokio::main]
 #[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() {
     tracing_subscriber::fmt::try_init().ok();
-    if let Err(err) = run(&SystemEnv, std::future::pending()).await {
+    if let Err(err) = run(&SystemEnv, &SystemFs, std::future::pending()).await {
         tracing::error!(%err, "a2a-bridge exited with error");
         std::process::exit(1);
     }
 }
 
-async fn run(env: &impl ReadEnv, shutdown: impl Future<Output = ()> + Send + 'static) -> Result<(), BootstrapError> {
+async fn run(
+    env: &impl ReadEnv,
+    fs: &impl ReadFile,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), BootstrapError> {
     let transport = env.var("A2A_BRIDGE_TRANSPORT").unwrap_or_else(|_| "stub".into());
 
-    let nats_url = env.var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
+    let nats = NatsConfig::from_env(env);
 
     let listen: SocketAddr = env
         .var("BRIDGE_LISTEN_ADDR")
@@ -39,9 +55,19 @@ async fn run(env: &impl ReadEnv, shutdown: impl Future<Output = ()> + Send + 'st
     // subject and JetStream stream name than the rest of the stack.
     let prefix = resolve_a2a_prefix(env)?;
 
+    let edge = EdgeAuthConfig::from_env(env, fs).map_err(BootstrapError::EdgeAuth)?;
+    if edge.mode() != EdgeAuthMode::Enforce {
+        emit_bootstrap_warning(
+            "AAuth proof of possession is not enforced at the HTTP edge, which is only for development",
+            edge.mode().as_str(),
+            Some(ENV_AAUTH_DEV_UNENFORCED),
+            None,
+        );
+    }
+
     let state = match transport.as_str() {
-        "stub" => bootstrap_stub_transport(env, &nats_url, prefix),
-        "nats" => bootstrap_nats_transport(env, &nats_url, prefix).await?,
+        "stub" => bootstrap_stub_transport(env, &nats, prefix, edge)?,
+        "nats" => bootstrap_nats_transport(env, &nats, prefix, edge).await?,
         other => return Err(BootstrapError::UnknownTransport(other.into())),
     };
 
@@ -62,6 +88,12 @@ async fn run(env: &impl ReadEnv, shutdown: impl Future<Output = ()> + Send + 'st
 enum BootstrapError {
     #[error("BRIDGE_LISTEN_ADDR must be a SocketAddr")]
     BadListenAddr,
+    #[error("NATS_URL does not name any server")]
+    NoNatsServers,
+    #[error("NATS connect failed: {0}")]
+    NatsConnect(#[source] trogon_nats::ConnectError),
+    #[error("{env_var} is not a curve public key: {0}", env_var = ENV_AUTH_CALLOUT_XKEY_PUBLIC)]
+    CalloutXkey(#[source] a2a_auth_callout::AuthCalloutError),
     #[error("bind failed: {0}")]
     Listen(#[source] std::io::Error),
     #[error("{0}")]
@@ -70,6 +102,15 @@ enum BootstrapError {
     UnknownTransport(String),
     #[error("HTTP server failed: {0}")]
     Serve(#[source] std::io::Error),
+    #[error("AAuth edge configuration is invalid: {0}")]
+    EdgeAuth(#[source] EdgeAuthConfigError),
+    #[error("AAuth proof of possession is enforced, but its replay store is unusable: {0}")]
+    ReplayBucket(#[source] ReplayBucketError),
+    #[error(
+        "AAuth proof of possession is enforced, which needs the {AAUTH_REPLAY_BUCKET} bucket that only \
+         A2A_BRIDGE_TRANSPORT=nats reaches"
+    )]
+    EnforcedWithoutReplayStore,
 }
 
 fn resolve_a2a_prefix(env: &impl ReadEnv) -> Result<A2aPrefix, BridgeError> {
@@ -79,35 +120,89 @@ fn resolve_a2a_prefix(env: &impl ReadEnv) -> Result<A2aPrefix, BridgeError> {
     A2aPrefix::new(raw).map_err(|e| BridgeError::NatsPublish(format!("{ENV_A2A_PREFIX} is invalid: {e}")))
 }
 
-fn bootstrap_stub_transport(env: &impl ReadEnv, nats_url: &str, prefix: A2aPrefix) -> AppState {
-    let auth_callout_url = env
-        .var("AUTH_CALLOUT_NATS_URL")
-        .unwrap_or_else(|_| nats_url.trim().to_owned());
+fn resolve_callout_xkey(env: &impl ReadEnv) -> Result<Option<XkeyPublic>, BootstrapError> {
+    match env.var(ENV_AUTH_CALLOUT_XKEY_PUBLIC) {
+        Ok(raw) if !raw.trim().is_empty() => XkeyPublic::parse(raw).map(Some).map_err(BootstrapError::CalloutXkey),
+        _ => Ok(None),
+    }
+}
+
+fn bootstrap_stub_transport(
+    env: &impl ReadEnv,
+    nats: &NatsConfig,
+    prefix: A2aPrefix,
+    edge: EdgeAuthConfig,
+) -> Result<AppState, BootstrapError> {
+    let edge: Arc<dyn EdgeGuard> = match edge {
+        EdgeAuthConfig::Off => Arc::new(BearerOnlyGuard),
+        EdgeAuthConfig::Proof(settings) => match settings.policy() {
+            ProofPolicy::Enforce => return Err(BootstrapError::EnforcedWithoutReplayStore),
+            ProofPolicy::Shadow => {
+                emit_bootstrap_warning(
+                    "AAuth replay records stay in this process on the stub transport",
+                    settings.policy().mode().as_str(),
+                    None,
+                    None,
+                );
+                Arc::new(settings.guard(Arc::new(InMemoryReplayStore::default())))
+            }
+        },
+    };
+    let nats_url = nats.servers.join(",");
+    let auth_callout_url = env.var("AUTH_CALLOUT_NATS_URL").unwrap_or_else(|_| nats_url.clone());
     tracing::warn!(
         transport = "stub",
-        nats_url = %nats_url.trim(),
+        nats_url = %nats_url,
         auth_callout_url = %auth_callout_url,
         prefix = %prefix.as_str(),
         "using stub transports; outbound NATS/token paths no-op unless A2A_BRIDGE_TRANSPORT=nats"
     );
-    AppState::new(
+    Ok(AppState::new(
         Arc::new(StubAuthCalloutClient),
         Arc::new(StubInboundGatewayPublish),
         Arc::new(StubTaskJetStreamPort),
         prefix,
-    )
+        edge,
+    ))
+}
+
+/// The guard for the NATS transport. Enforce refuses to start without a
+/// usable replay bucket, so a replayed request cannot slip through an
+/// instance that keeps no shared record of what it admitted.
+async fn nats_edge_guard(
+    edge: EdgeAuthConfig,
+    client: &async_nats::Client,
+) -> Result<Arc<dyn EdgeGuard>, BootstrapError> {
+    let settings = match edge {
+        EdgeAuthConfig::Off => return Ok(Arc::new(BearerOnlyGuard)),
+        EdgeAuthConfig::Proof(settings) => settings,
+    };
+    let jetstream = async_nats::jetstream::new(client.clone());
+    let replay: Arc<dyn ReplayStore> = match (NatsKvReplayStore::open(&jetstream).await, settings.policy()) {
+        (Ok(store), _) => Arc::new(store),
+        (Err(error), ProofPolicy::Enforce) => return Err(BootstrapError::ReplayBucket(error)),
+        (Err(error), ProofPolicy::Shadow) => {
+            let error = error.to_string();
+            emit_bootstrap_warning(
+                "AAuth replay records stay in this process, since the shared replay bucket is unusable",
+                settings.policy().mode().as_str(),
+                None,
+                Some(error.as_str()),
+            );
+            Arc::new(InMemoryReplayStore::default())
+        }
+    };
+    Ok(Arc::new(settings.guard(replay)))
 }
 
 async fn bootstrap_nats_transport(
     env: &impl ReadEnv,
-    nats_raw: &str,
+    nats: &NatsConfig,
     prefix: A2aPrefix,
-) -> Result<AppState, BridgeError> {
-    let servers = parse_nats_servers(nats_raw);
-    if servers.is_empty() {
-        return Err(BridgeError::NatsPublish(
-            "NATS_URL/NATS bootstrap string produced zero servers".into(),
-        ));
+    edge: EdgeAuthConfig,
+) -> Result<AppState, BootstrapError> {
+    if nats.servers.is_empty() {
+        return Err(BootstrapError::NoNatsServers);
     }
 
     let connect_timeout = Duration::from_secs(parse_u64_env(env, "BRIDGE_CONNECT_TIMEOUT_SECS").unwrap_or(30).max(1));
@@ -118,16 +213,13 @@ async fn bootstrap_nats_transport(
             .unwrap_or(180)
             .max(1),
     );
+    let callout_xkey = resolve_callout_xkey(env)?;
 
-    let mut connect_opts = async_nats::ConnectOptions::new().connection_timeout(connect_timeout);
-    if let (Ok(user), Ok(password)) = (env.var("NATS_USER"), env.var("NATS_PASSWORD")) {
-        connect_opts = connect_opts.user_and_password(user, password);
-    }
-    let client = connect_opts
-        .connect(servers.as_slice())
+    let client = trogon_nats::connect(nats, connect_timeout)
         .await
-        .map_err(|e| BridgeError::NatsPublish(format!("NATS connect failed: {e}")))?;
+        .map_err(BootstrapError::NatsConnect)?;
 
+    let edge = nats_edge_guard(edge, &client).await?;
     let client_arc = Arc::new(client);
     let wire = AsyncNatsAuthMintWire::new(client_arc.clone(), mint_wire_timeout);
 
@@ -144,19 +236,27 @@ async fn bootstrap_nats_transport(
         _ => None,
     };
 
-    let auth_client = Arc::new(AuthCalloutJsonMintClient::with_tenant_account(
-        Arc::new(wire),
-        mint_subject,
-        tenant_account,
-    ));
+    let auth_client = AuthCalloutJsonMintClient::with_tenant_account(Arc::new(wire), mint_subject, tenant_account);
+    let auth_client = Arc::new(match callout_xkey {
+        Some(callout_xkey) => auth_client.sealing_to(callout_xkey),
+        None => {
+            tracing::warn!(
+                env_var = ENV_AUTH_CALLOUT_XKEY_PUBLIC,
+                "no callout xkey is configured, so every caller credential mint is refused"
+            );
+            auth_client
+        }
+    });
 
+    let caller_connect_timeout = CallerConnectTimeout::new(connect_timeout);
     let unary = GatewayInboundPublisher::new(Arc::new(AsyncNatsTokenGatewayUnary::new(
-        servers.clone(),
-        gateway_rpc_timeout,
+        nats.clone(),
+        caller_connect_timeout,
+        GatewayRpcTimeout::new(gateway_rpc_timeout),
     )));
 
     tracing::info!(
-        server_urls = ?servers.as_slice(),
+        server_urls = ?nats.servers.as_slice(),
         connect_timeout_secs = connect_timeout.as_secs(),
         mint_wire_secs = mint_wire_timeout.as_secs(),
         gateway_rpc_secs = gateway_rpc_timeout.as_secs(),
@@ -167,23 +267,36 @@ async fn bootstrap_nats_transport(
     Ok(AppState::new(
         auth_client,
         Arc::new(unary),
-        Arc::new(AsyncNatsTokenTaskJetstream::new(servers.clone(), gateway_rpc_timeout)),
+        Arc::new(AsyncNatsTokenTaskJetstream::new(nats.clone(), caller_connect_timeout)),
         prefix,
+        edge,
     ))
 }
 
-fn parse_nats_servers(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-            if s.starts_with("nats://") || s.starts_with("tls://") {
-                s.to_owned()
-            } else {
-                format!("nats://{s}")
-            }
-        })
-        .collect()
+fn emit_bootstrap_warning(message: &str, mode: &str, flag: Option<&str>, error: Option<&str>) {
+    static METADATA: tracing::Metadata<'static> = tracing::metadata! {
+        name: "event crates/a2a/a2a-bridge/src/main.rs:bootstrap_warning",
+        target: module_path!(),
+        level: Level::WARN,
+        fields: &["message", "mode", "flag", "error"],
+        callsite: &CALLSITE,
+        kind: tracing::metadata::Kind::EVENT,
+    };
+    static CALLSITE: tracing::__macro_support::MacroCallsite = tracing::__macro_support::MacroCallsite::new(&METADATA);
+
+    let interest = CALLSITE.interest();
+    if interest.is_never()
+        || (interest.is_sometimes() && !tracing::dispatcher::get_default(|subscriber| subscriber.enabled(&METADATA)))
+    {
+        return;
+    }
+    let values: [Option<&dyn Value>; 4] = [
+        Some(&message),
+        Some(&mode),
+        flag.as_ref().map(|value| value as &dyn Value),
+        error.as_ref().map(|value| value as &dyn Value),
+    ];
+    TraceEvent::dispatch(&METADATA, &METADATA.fields().value_set_all(&values));
 }
 
 fn parse_u64_env(env: &impl ReadEnv, key: &str) -> Option<u64> {

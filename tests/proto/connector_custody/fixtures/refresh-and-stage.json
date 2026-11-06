@@ -1,0 +1,2776 @@
+[
+  {
+    "name": "RejectRefresh rejects custody persistence/preflight reason 6",
+    "type": "trogonai.secrets.credentials.v1alpha1.RejectRefresh",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 6
+    },
+    "valid": false,
+    "violations": [
+      "must be in list"
+    ]
+  },
+  {
+    "name": "RejectRefresh rejects custody persistence/preflight reason 7",
+    "type": "trogonai.secrets.credentials.v1alpha1.RejectRefresh",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 7
+    },
+    "valid": false,
+    "violations": [
+      "must be in list"
+    ]
+  },
+  {
+    "name": "RejectRefresh rejects custody persistence/preflight reason 8",
+    "type": "trogonai.secrets.credentials.v1alpha1.RejectRefresh",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 8
+    },
+    "valid": false,
+    "violations": [
+      "must be in list"
+    ]
+  },
+  {
+    "name": "RejectRefresh accepts definite no-replacement reason 1",
+    "type": "trogonai.secrets.credentials.v1alpha1.RejectRefresh",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 1
+    },
+    "valid": true
+  },
+  {
+    "name": "RejectRefresh accepts definite no-replacement reason 2",
+    "type": "trogonai.secrets.credentials.v1alpha1.RejectRefresh",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 2,
+      "retryAfter": "1s"
+    },
+    "valid": true
+  },
+  {
+    "name": "RejectRefresh accepts definite no-replacement reason 3",
+    "type": "trogonai.secrets.credentials.v1alpha1.RejectRefresh",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 3,
+      "retryAfter": "1s"
+    },
+    "valid": true
+  },
+  {
+    "name": "RejectRefresh accepts definite no-replacement reason 4",
+    "type": "trogonai.secrets.credentials.v1alpha1.RejectRefresh",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 4
+    },
+    "valid": true
+  },
+  {
+    "name": "RejectRefresh accepts definite no-replacement reason 5",
+    "type": "trogonai.secrets.credentials.v1alpha1.RejectRefresh",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 5,
+      "providerError": 8
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialRefreshRejected rejects custody persistence/preflight reason 6",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialRefreshRejected",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 6
+    },
+    "valid": false,
+    "violations": [
+      "must be in list"
+    ]
+  },
+  {
+    "name": "CredentialRefreshRejected rejects custody persistence/preflight reason 7",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialRefreshRejected",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 7
+    },
+    "valid": false,
+    "violations": [
+      "must be in list"
+    ]
+  },
+  {
+    "name": "CredentialRefreshRejected rejects custody persistence/preflight reason 8",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialRefreshRejected",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 8
+    },
+    "valid": false,
+    "violations": [
+      "must be in list"
+    ]
+  },
+  {
+    "name": "CredentialRefreshRejected accepts definite no-replacement reason 1",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialRefreshRejected",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 1
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialRefreshRejected accepts definite no-replacement reason 2",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialRefreshRejected",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 2,
+      "retryAfter": "1s"
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialRefreshRejected accepts definite no-replacement reason 3",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialRefreshRejected",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 3,
+      "retryAfter": "1s"
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialRefreshRejected accepts definite no-replacement reason 4",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialRefreshRejected",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 4
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialRefreshRejected accepts definite no-replacement reason 5",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialRefreshRejected",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "operationId": {
+        "value": "refresh-operation"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "reason": 5,
+      "providerError": 8
+    },
+    "valid": true
+  },
+  {
+    "name": "exchange.RefreshRejected rejects custody persistence/preflight reason 6",
+    "type": "trogonai.secrets.exchange.v1alpha1.RefreshRejected",
+    "message": {
+      "reason": 6
+    },
+    "valid": false,
+    "violations": [
+      "must be in list"
+    ]
+  },
+  {
+    "name": "exchange.RefreshRejected rejects custody persistence/preflight reason 7",
+    "type": "trogonai.secrets.exchange.v1alpha1.RefreshRejected",
+    "message": {
+      "reason": 7
+    },
+    "valid": false,
+    "violations": [
+      "must be in list"
+    ]
+  },
+  {
+    "name": "exchange.RefreshRejected rejects custody persistence/preflight reason 8",
+    "type": "trogonai.secrets.exchange.v1alpha1.RefreshRejected",
+    "message": {
+      "reason": 8
+    },
+    "valid": false,
+    "violations": [
+      "must be in list"
+    ]
+  },
+  {
+    "name": "exchange.RefreshRejected accepts definite no-replacement reason 1",
+    "type": "trogonai.secrets.exchange.v1alpha1.RefreshRejected",
+    "message": {
+      "reason": 1
+    },
+    "valid": true
+  },
+  {
+    "name": "exchange.RefreshRejected accepts definite no-replacement reason 2",
+    "type": "trogonai.secrets.exchange.v1alpha1.RefreshRejected",
+    "message": {
+      "reason": 2,
+      "retryAfter": "1s"
+    },
+    "valid": true
+  },
+  {
+    "name": "exchange.RefreshRejected accepts definite no-replacement reason 3",
+    "type": "trogonai.secrets.exchange.v1alpha1.RefreshRejected",
+    "message": {
+      "reason": 3,
+      "retryAfter": "1s"
+    },
+    "valid": true
+  },
+  {
+    "name": "exchange.RefreshRejected accepts definite no-replacement reason 4",
+    "type": "trogonai.secrets.exchange.v1alpha1.RefreshRejected",
+    "message": {
+      "reason": 4
+    },
+    "valid": true
+  },
+  {
+    "name": "exchange.RefreshRejected accepts definite no-replacement reason 5",
+    "type": "trogonai.secrets.exchange.v1alpha1.RefreshRejected",
+    "message": {
+      "reason": 5,
+      "providerError": 8
+    },
+    "valid": true
+  },
+  {
+    "name": "stage close requires authoritative discarded evidence",
+    "type": "trogonai.secrets.credentials.v1alpha1.CloseStage",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "discarded": 5
+    },
+    "valid": false,
+    "violations": [
+      "requires"
+    ]
+  },
+  {
+    "name": "stage close requires authoritative promotedTo evidence",
+    "type": "trogonai.secrets.credentials.v1alpha1.CloseStage",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotedTo": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    "valid": false,
+    "violations": [
+      "requires"
+    ]
+  },
+  {
+    "name": "attempt authorization requires protected stage receipt",
+    "type": "trogonai.connections.connections.v1alpha1.AuthorizationRecord",
+    "message": {
+      "grantedAuthority": {
+        "evidence": 3
+      },
+      "authorizationGeneration": "1",
+      "attemptId": {
+        "value": "attempt-one"
+      }
+    },
+    "valid": false,
+    "violations": [
+      "requires"
+    ]
+  },
+  {
+    "name": "ProtectStagePromotion exact binding",
+    "type": "trogonai.secrets.credentials.v1alpha1.ProtectStagePromotion",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "binding": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "stagedBundleRef": {
+          "secret": {
+            "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          "version": "1"
+        },
+        "connectionId": {
+          "value": "connection-one"
+        },
+        "authorizationGeneration": "1"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "ProtectStagePromotion wrong staged secret",
+    "type": "trogonai.secrets.credentials.v1alpha1.ProtectStagePromotion",
+    "message": {
+      "secretRef": {
+        "id": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+      },
+      "binding": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "stagedBundleRef": {
+          "secret": {
+            "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          "version": "1"
+        },
+        "connectionId": {
+          "value": "connection-one"
+        },
+        "authorizationGeneration": "1"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      }
+    },
+    "valid": false,
+    "violations": [
+      "exact staged ref"
+    ]
+  },
+  {
+    "name": "ProtectStagePromotion foreign custody",
+    "type": "trogonai.secrets.credentials.v1alpha1.ProtectStagePromotion",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "binding": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "stagedBundleRef": {
+          "secret": {
+            "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          "version": "1"
+        },
+        "connectionId": {
+          "value": "connection-one"
+        },
+        "authorizationGeneration": "1"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "other-project"
+          }
+        }
+      }
+    },
+    "valid": false,
+    "violations": [
+      "custody parent"
+    ]
+  },
+  {
+    "name": "CredentialStagePromotionProtected exact binding",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialStagePromotionProtected",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "binding": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "stagedBundleRef": {
+          "secret": {
+            "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          "version": "1"
+        },
+        "connectionId": {
+          "value": "connection-one"
+        },
+        "authorizationGeneration": "1"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialStagePromotionProtected wrong staged secret",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialStagePromotionProtected",
+    "message": {
+      "secretRef": {
+        "id": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+      },
+      "binding": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "stagedBundleRef": {
+          "secret": {
+            "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          "version": "1"
+        },
+        "connectionId": {
+          "value": "connection-one"
+        },
+        "authorizationGeneration": "1"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      }
+    },
+    "valid": false,
+    "violations": [
+      "exact staged ref"
+    ]
+  },
+  {
+    "name": "CredentialStagePromotionProtected foreign custody",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialStagePromotionProtected",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "binding": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "stagedBundleRef": {
+          "secret": {
+            "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          "version": "1"
+        },
+        "connectionId": {
+          "value": "connection-one"
+        },
+        "authorizationGeneration": "1"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "other-project"
+          }
+        }
+      }
+    },
+    "valid": false,
+    "violations": [
+      "custody parent"
+    ]
+  },
+  {
+    "name": "protection receipt requires positive append revision",
+    "type": "trogonai.connections.types.v1alpha1.StagePromotionProtection",
+    "message": {
+      "binding": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "stagedBundleRef": {
+          "secret": {
+            "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          "version": "1"
+        },
+        "connectionId": {
+          "value": "connection-one"
+        },
+        "authorizationGeneration": "1"
+      },
+      "stageStreamRevision": "0"
+    },
+    "valid": false
+  },
+  {
+    "name": "authorization keeps exact protected receipt",
+    "type": "trogonai.connections.connections.v1alpha1.AuthorizationRecord",
+    "message": {
+      "grantedAuthority": {
+        "evidence": 3
+      },
+      "authorizationGeneration": "1",
+      "attemptId": {
+        "value": "attempt-one"
+      },
+      "stagePromotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "authorization cannot borrow another attempt protection",
+    "type": "trogonai.connections.connections.v1alpha1.AuthorizationRecord",
+    "message": {
+      "grantedAuthority": {
+        "evidence": 3
+      },
+      "authorizationGeneration": "1",
+      "attemptId": {
+        "value": "other-attempt"
+      },
+      "stagePromotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": false,
+    "violations": [
+      "exact stage promotion protection"
+    ]
+  },
+  {
+    "name": "authorization cannot borrow another generation protection",
+    "type": "trogonai.connections.connections.v1alpha1.AuthorizationRecord",
+    "message": {
+      "grantedAuthority": {
+        "evidence": 3
+      },
+      "authorizationGeneration": "2",
+      "attemptId": {
+        "value": "attempt-one"
+      },
+      "stagePromotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": false,
+    "violations": [
+      "exact stage promotion protection"
+    ]
+  },
+  {
+    "name": "nonattempt method has no staged protection",
+    "type": "trogonai.connections.connections.v1alpha1.AuthorizationRecord",
+    "message": {
+      "grantedAuthority": {
+        "evidence": 3
+      },
+      "authorizationGeneration": "1"
+    },
+    "valid": true
+  },
+  {
+    "name": "nonattempt method cannot import staged protection",
+    "type": "trogonai.connections.connections.v1alpha1.AuthorizationRecord",
+    "message": {
+      "grantedAuthority": {
+        "evidence": 3
+      },
+      "authorizationGeneration": "1",
+      "stagePromotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": false,
+    "violations": [
+      "requires"
+    ]
+  },
+  {
+    "name": "unprotected orphan close carries terminal attempt evidence",
+    "type": "trogonai.secrets.credentials.v1alpha1.CloseStage",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "discarded": 5,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "discardEvidence": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "terminalAttemptRevision": "7",
+        "terminalOutcome": 1
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "expired timestamp cannot replace terminal attempt evidence",
+    "type": "trogonai.secrets.credentials.v1alpha1.CloseStage",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "discarded": 5,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "discardEvidence": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "terminalAttemptRevision": "7",
+        "terminalOutcome": 0
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "orphan close cannot borrow another custody terminal evidence",
+    "type": "trogonai.secrets.credentials.v1alpha1.CloseStage",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "discarded": 5,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "discardEvidence": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "other-project"
+            }
+          }
+        },
+        "terminalAttemptRevision": "7",
+        "terminalOutcome": 1
+      }
+    },
+    "valid": false,
+    "violations": [
+      "custody parent"
+    ]
+  },
+  {
+    "name": "expiry reason requires expiry outcome",
+    "type": "trogonai.secrets.credentials.v1alpha1.CloseStage",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "discarded": 4,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "discardEvidence": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "terminalAttemptRevision": "7",
+        "terminalOutcome": 1
+      }
+    },
+    "valid": false,
+    "violations": [
+      "terminal attempt outcome"
+    ]
+  },
+  {
+    "name": "verified expired unprotected attempt can close",
+    "type": "trogonai.secrets.credentials.v1alpha1.CloseStage",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "discarded": 4,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "discardEvidence": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "terminalAttemptRevision": "7",
+        "terminalOutcome": 2
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "promoted close retains exact protection receipt",
+    "type": "trogonai.secrets.credentials.v1alpha1.CloseStage",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "promotedTo": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "promoted close refuses another stage receipt",
+    "type": "trogonai.secrets.credentials.v1alpha1.CloseStage",
+    "message": {
+      "secretRef": {
+        "id": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+      },
+      "promotedTo": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": false,
+    "violations": [
+      "exact stage"
+    ]
+  },
+  {
+    "name": "discard cannot carry promotion authority",
+    "type": "trogonai.secrets.credentials.v1alpha1.CloseStage",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "discarded": 5,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "discardEvidence": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "terminalAttemptRevision": "7",
+        "terminalOutcome": 1
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": false,
+    "violations": [
+      "requires"
+    ]
+  },
+  {
+    "name": "stage discard event retains verified terminal evidence",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialStageDiscarded",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 5,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "discardEvidence": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "terminalAttemptRevision": "7",
+        "terminalOutcome": 1
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "stage discard event requires definite terminal outcome",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialStageDiscarded",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 5,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "discardEvidence": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "terminalAttemptRevision": "7",
+        "terminalOutcome": 0
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "stage discard event rejects mismatched reason",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialStageDiscarded",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 4,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "discardEvidence": {
+        "attemptRef": {
+          "attemptId": {
+            "value": "attempt-one"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "custody-project"
+            }
+          }
+        },
+        "terminalAttemptRevision": "7",
+        "terminalOutcome": 1
+      }
+    },
+    "valid": false,
+    "violations": [
+      "terminal attempt outcome"
+    ]
+  },
+  {
+    "name": "stage promotion event retains protection receipt",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialStagePromoted",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "promotedTo": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "stage promotion event requires positive protection revision",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialStagePromoted",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "promotedTo": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "0"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "PromoteTokenBundle exact activation recovery receipt",
+    "type": "trogonai.secrets.credentials.v1alpha1.PromoteTokenBundle",
+    "message": {
+      "secretRef": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "attemptRef": {
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "resourceParent": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "stagedSecretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "bundleGeneration": "1",
+      "bundle": {
+        "secretVersionRef": {
+          "secret": {
+            "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          },
+          "version": "1"
+        },
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "accessExpiry": {
+          "unknown": {}
+        }
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "PromoteTokenBundle refuses different protected target",
+    "type": "trogonai.secrets.credentials.v1alpha1.PromoteTokenBundle",
+    "message": {
+      "secretRef": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "connectionId": {
+        "value": "other-connection"
+      },
+      "attemptRef": {
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "resourceParent": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "stagedSecretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "bundleGeneration": "1",
+      "bundle": {
+        "secretVersionRef": {
+          "secret": {
+            "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          },
+          "version": "1"
+        },
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "accessExpiry": {
+          "unknown": {}
+        }
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": false,
+    "violations": [
+      "protected attempt"
+    ]
+  },
+  {
+    "name": "PromoteTokenBundle refuses different attempt",
+    "type": "trogonai.secrets.credentials.v1alpha1.PromoteTokenBundle",
+    "message": {
+      "secretRef": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "attemptRef": {
+        "attemptId": {
+          "value": "other-attempt"
+        },
+        "resourceParent": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "stagedSecretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "bundleGeneration": "1",
+      "bundle": {
+        "secretVersionRef": {
+          "secret": {
+            "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          },
+          "version": "1"
+        },
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "accessExpiry": {
+          "unknown": {}
+        }
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": false,
+    "violations": [
+      "protected attempt"
+    ]
+  },
+  {
+    "name": "PromoteTokenBundle requires protection append revision",
+    "type": "trogonai.secrets.credentials.v1alpha1.PromoteTokenBundle",
+    "message": {
+      "secretRef": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "attemptRef": {
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "resourceParent": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "stagedSecretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "bundleGeneration": "1",
+      "bundle": {
+        "secretVersionRef": {
+          "secret": {
+            "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          },
+          "version": "1"
+        },
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "accessExpiry": {
+          "unknown": {}
+        }
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "0"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "CredentialTokenSetPromoted exact activation recovery receipt",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialTokenSetPromoted",
+    "message": {
+      "secretRef": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "attemptRef": {
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "resourceParent": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "stagedSecretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "bundleGeneration": "1",
+      "bundle": {
+        "secretVersionRef": {
+          "secret": {
+            "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          },
+          "version": "1"
+        },
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "accessExpiry": {
+          "unknown": {}
+        }
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialTokenSetPromoted refuses different protected target",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialTokenSetPromoted",
+    "message": {
+      "secretRef": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "connectionId": {
+        "value": "other-connection"
+      },
+      "attemptRef": {
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "resourceParent": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "stagedSecretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "bundleGeneration": "1",
+      "bundle": {
+        "secretVersionRef": {
+          "secret": {
+            "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          },
+          "version": "1"
+        },
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "accessExpiry": {
+          "unknown": {}
+        }
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": false,
+    "violations": [
+      "protected attempt"
+    ]
+  },
+  {
+    "name": "CredentialTokenSetPromoted refuses different attempt",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialTokenSetPromoted",
+    "message": {
+      "secretRef": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "attemptRef": {
+        "attemptId": {
+          "value": "other-attempt"
+        },
+        "resourceParent": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "stagedSecretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "bundleGeneration": "1",
+      "bundle": {
+        "secretVersionRef": {
+          "secret": {
+            "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          },
+          "version": "1"
+        },
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "accessExpiry": {
+          "unknown": {}
+        }
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "2"
+      }
+    },
+    "valid": false,
+    "violations": [
+      "protected attempt"
+    ]
+  },
+  {
+    "name": "CredentialTokenSetPromoted requires protection append revision",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialTokenSetPromoted",
+    "message": {
+      "secretRef": {
+        "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "attemptRef": {
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "resourceParent": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "stagedSecretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "bundleGeneration": "1",
+      "bundle": {
+        "secretVersionRef": {
+          "secret": {
+            "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          },
+          "version": "1"
+        },
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "accessExpiry": {
+          "unknown": {}
+        }
+      },
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "custody-project"
+          }
+        }
+      },
+      "promotionProtection": {
+        "binding": {
+          "attemptRef": {
+            "attemptId": {
+              "value": "attempt-one"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "custody-project"
+              }
+            }
+          },
+          "stagedBundleRef": {
+            "secret": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            },
+            "version": "1"
+          },
+          "connectionId": {
+            "value": "connection-one"
+          },
+          "authorizationGeneration": "1"
+        },
+        "stageStreamRevision": "0"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "ActivateConnection exact protected target",
+    "type": "trogonai.connections.connections.v1alpha1.ActivateConnection",
+    "message": {
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "configuration": {
+        "configuration": {
+          "contractVersion": "1",
+          "connectorReleaseRef": {
+            "releaseId": {
+              "value": "release-one"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "resourceParent": {
+              "connectorId": {
+                "value": "provider-one"
+              }
+            }
+          },
+          "providerAppRef": {
+            "providerAppId": {
+              "value": "app-one"
+            },
+            "resourceParent": {
+              "platform": {}
+            }
+          },
+          "actorSubjectKind": 1,
+          "authentication": {
+            "oauthAuthorizationGrant": {}
+          }
+        },
+        "configurationDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "configurationBytes": "AA=="
+      },
+      "authorization": {
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "authorizationGeneration": "1",
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "stagePromotionProtection": {
+          "binding": {
+            "attemptRef": {
+              "attemptId": {
+                "value": "attempt-one"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "custody-project"
+                }
+              }
+            },
+            "stagedBundleRef": {
+              "secret": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              },
+              "version": "1"
+            },
+            "connectionId": {
+              "value": "connection-one"
+            },
+            "authorizationGeneration": "1"
+          },
+          "stageStreamRevision": "2"
+        }
+      },
+      "resourceParent": {
+        "projectId": {
+          "value": "custody-project"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "ActivateConnection refuses another target receipt",
+    "type": "trogonai.connections.connections.v1alpha1.ActivateConnection",
+    "message": {
+      "connectionId": {
+        "value": "other-connection"
+      },
+      "configuration": {
+        "configuration": {
+          "contractVersion": "1",
+          "connectorReleaseRef": {
+            "releaseId": {
+              "value": "release-one"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "resourceParent": {
+              "connectorId": {
+                "value": "provider-one"
+              }
+            }
+          },
+          "providerAppRef": {
+            "providerAppId": {
+              "value": "app-one"
+            },
+            "resourceParent": {
+              "platform": {}
+            }
+          },
+          "actorSubjectKind": 1,
+          "authentication": {
+            "oauthAuthorizationGrant": {}
+          }
+        },
+        "configurationDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "configurationBytes": "AA=="
+      },
+      "authorization": {
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "authorizationGeneration": "1",
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "stagePromotionProtection": {
+          "binding": {
+            "attemptRef": {
+              "attemptId": {
+                "value": "attempt-one"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "custody-project"
+                }
+              }
+            },
+            "stagedBundleRef": {
+              "secret": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              },
+              "version": "1"
+            },
+            "connectionId": {
+              "value": "connection-one"
+            },
+            "authorizationGeneration": "1"
+          },
+          "stageStreamRevision": "2"
+        }
+      },
+      "resourceParent": {
+        "projectId": {
+          "value": "custody-project"
+        }
+      }
+    },
+    "valid": false,
+    "violations": [
+      "exact connection"
+    ]
+  },
+  {
+    "name": "ActivateConnection refuses foreign custody receipt",
+    "type": "trogonai.connections.connections.v1alpha1.ActivateConnection",
+    "message": {
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "configuration": {
+        "configuration": {
+          "contractVersion": "1",
+          "connectorReleaseRef": {
+            "releaseId": {
+              "value": "release-one"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "resourceParent": {
+              "connectorId": {
+                "value": "provider-one"
+              }
+            }
+          },
+          "providerAppRef": {
+            "providerAppId": {
+              "value": "app-one"
+            },
+            "resourceParent": {
+              "platform": {}
+            }
+          },
+          "actorSubjectKind": 1,
+          "authentication": {
+            "oauthAuthorizationGrant": {}
+          }
+        },
+        "configurationDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "configurationBytes": "AA=="
+      },
+      "authorization": {
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "authorizationGeneration": "1",
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "stagePromotionProtection": {
+          "binding": {
+            "attemptRef": {
+              "attemptId": {
+                "value": "attempt-one"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "custody-project"
+                }
+              }
+            },
+            "stagedBundleRef": {
+              "secret": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              },
+              "version": "1"
+            },
+            "connectionId": {
+              "value": "connection-one"
+            },
+            "authorizationGeneration": "1"
+          },
+          "stageStreamRevision": "2"
+        }
+      },
+      "resourceParent": {
+        "projectId": {
+          "value": "other-project"
+        }
+      }
+    },
+    "valid": false,
+    "violations": [
+      "custody parent"
+    ]
+  },
+  {
+    "name": "ConnectionActivated exact protected target",
+    "type": "trogonai.connections.connections.v1alpha1.ConnectionActivated",
+    "message": {
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "configuration": {
+        "configuration": {
+          "contractVersion": "1",
+          "connectorReleaseRef": {
+            "releaseId": {
+              "value": "release-one"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "resourceParent": {
+              "connectorId": {
+                "value": "provider-one"
+              }
+            }
+          },
+          "providerAppRef": {
+            "providerAppId": {
+              "value": "app-one"
+            },
+            "resourceParent": {
+              "platform": {}
+            }
+          },
+          "actorSubjectKind": 1,
+          "authentication": {
+            "oauthAuthorizationGrant": {}
+          }
+        },
+        "configurationDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "configurationBytes": "AA=="
+      },
+      "authorization": {
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "authorizationGeneration": "1",
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "stagePromotionProtection": {
+          "binding": {
+            "attemptRef": {
+              "attemptId": {
+                "value": "attempt-one"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "custody-project"
+                }
+              }
+            },
+            "stagedBundleRef": {
+              "secret": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              },
+              "version": "1"
+            },
+            "connectionId": {
+              "value": "connection-one"
+            },
+            "authorizationGeneration": "1"
+          },
+          "stageStreamRevision": "2"
+        }
+      },
+      "resourceParent": {
+        "projectId": {
+          "value": "custody-project"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "ConnectionActivated refuses another target receipt",
+    "type": "trogonai.connections.connections.v1alpha1.ConnectionActivated",
+    "message": {
+      "connectionId": {
+        "value": "other-connection"
+      },
+      "configuration": {
+        "configuration": {
+          "contractVersion": "1",
+          "connectorReleaseRef": {
+            "releaseId": {
+              "value": "release-one"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "resourceParent": {
+              "connectorId": {
+                "value": "provider-one"
+              }
+            }
+          },
+          "providerAppRef": {
+            "providerAppId": {
+              "value": "app-one"
+            },
+            "resourceParent": {
+              "platform": {}
+            }
+          },
+          "actorSubjectKind": 1,
+          "authentication": {
+            "oauthAuthorizationGrant": {}
+          }
+        },
+        "configurationDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "configurationBytes": "AA=="
+      },
+      "authorization": {
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "authorizationGeneration": "1",
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "stagePromotionProtection": {
+          "binding": {
+            "attemptRef": {
+              "attemptId": {
+                "value": "attempt-one"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "custody-project"
+                }
+              }
+            },
+            "stagedBundleRef": {
+              "secret": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              },
+              "version": "1"
+            },
+            "connectionId": {
+              "value": "connection-one"
+            },
+            "authorizationGeneration": "1"
+          },
+          "stageStreamRevision": "2"
+        }
+      },
+      "resourceParent": {
+        "projectId": {
+          "value": "custody-project"
+        }
+      }
+    },
+    "valid": false,
+    "violations": [
+      "exact connection"
+    ]
+  },
+  {
+    "name": "ConnectionActivated refuses foreign custody receipt",
+    "type": "trogonai.connections.connections.v1alpha1.ConnectionActivated",
+    "message": {
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "configuration": {
+        "configuration": {
+          "contractVersion": "1",
+          "connectorReleaseRef": {
+            "releaseId": {
+              "value": "release-one"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "resourceParent": {
+              "connectorId": {
+                "value": "provider-one"
+              }
+            }
+          },
+          "providerAppRef": {
+            "providerAppId": {
+              "value": "app-one"
+            },
+            "resourceParent": {
+              "platform": {}
+            }
+          },
+          "actorSubjectKind": 1,
+          "authentication": {
+            "oauthAuthorizationGrant": {}
+          }
+        },
+        "configurationDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "configurationBytes": "AA=="
+      },
+      "authorization": {
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "authorizationGeneration": "1",
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "stagePromotionProtection": {
+          "binding": {
+            "attemptRef": {
+              "attemptId": {
+                "value": "attempt-one"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "custody-project"
+                }
+              }
+            },
+            "stagedBundleRef": {
+              "secret": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              },
+              "version": "1"
+            },
+            "connectionId": {
+              "value": "connection-one"
+            },
+            "authorizationGeneration": "1"
+          },
+          "stageStreamRevision": "2"
+        }
+      },
+      "resourceParent": {
+        "projectId": {
+          "value": "other-project"
+        }
+      }
+    },
+    "valid": false,
+    "violations": [
+      "custody parent"
+    ]
+  },
+  {
+    "name": "CompleteReconnect exact protected target",
+    "type": "trogonai.connections.connections.v1alpha1.CompleteReconnect",
+    "message": {
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "authorization": {
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "authorizationGeneration": "2",
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "stagePromotionProtection": {
+          "binding": {
+            "attemptRef": {
+              "attemptId": {
+                "value": "attempt-one"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "custody-project"
+                }
+              }
+            },
+            "stagedBundleRef": {
+              "secret": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              },
+              "version": "1"
+            },
+            "connectionId": {
+              "value": "connection-one"
+            },
+            "authorizationGeneration": "2"
+          },
+          "stageStreamRevision": "2"
+        }
+      },
+      "resourceParent": {
+        "projectId": {
+          "value": "custody-project"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "CompleteReconnect refuses stale target receipt",
+    "type": "trogonai.connections.connections.v1alpha1.CompleteReconnect",
+    "message": {
+      "connectionId": {
+        "value": "other-connection"
+      },
+      "authorization": {
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "authorizationGeneration": "2",
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "stagePromotionProtection": {
+          "binding": {
+            "attemptRef": {
+              "attemptId": {
+                "value": "attempt-one"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "custody-project"
+                }
+              }
+            },
+            "stagedBundleRef": {
+              "secret": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              },
+              "version": "1"
+            },
+            "connectionId": {
+              "value": "connection-one"
+            },
+            "authorizationGeneration": "2"
+          },
+          "stageStreamRevision": "2"
+        }
+      },
+      "resourceParent": {
+        "projectId": {
+          "value": "custody-project"
+        }
+      }
+    },
+    "valid": false,
+    "violations": [
+      "exact connection"
+    ]
+  },
+  {
+    "name": "ConnectionReconnected exact protected target",
+    "type": "trogonai.connections.connections.v1alpha1.ConnectionReconnected",
+    "message": {
+      "connectionId": {
+        "value": "connection-one"
+      },
+      "authorization": {
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "authorizationGeneration": "2",
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "stagePromotionProtection": {
+          "binding": {
+            "attemptRef": {
+              "attemptId": {
+                "value": "attempt-one"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "custody-project"
+                }
+              }
+            },
+            "stagedBundleRef": {
+              "secret": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              },
+              "version": "1"
+            },
+            "connectionId": {
+              "value": "connection-one"
+            },
+            "authorizationGeneration": "2"
+          },
+          "stageStreamRevision": "2"
+        }
+      },
+      "resourceParent": {
+        "projectId": {
+          "value": "custody-project"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "ConnectionReconnected refuses stale target receipt",
+    "type": "trogonai.connections.connections.v1alpha1.ConnectionReconnected",
+    "message": {
+      "connectionId": {
+        "value": "other-connection"
+      },
+      "authorization": {
+        "grantedAuthority": {
+          "evidence": 3
+        },
+        "authorizationGeneration": "2",
+        "attemptId": {
+          "value": "attempt-one"
+        },
+        "stagePromotionProtection": {
+          "binding": {
+            "attemptRef": {
+              "attemptId": {
+                "value": "attempt-one"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "custody-project"
+                }
+              }
+            },
+            "stagedBundleRef": {
+              "secret": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              },
+              "version": "1"
+            },
+            "connectionId": {
+              "value": "connection-one"
+            },
+            "authorizationGeneration": "2"
+          },
+          "stageStreamRevision": "2"
+        }
+      },
+      "resourceParent": {
+        "projectId": {
+          "value": "custody-project"
+        }
+      }
+    },
+    "valid": false,
+    "violations": [
+      "exact connection"
+    ]
+  }
+]

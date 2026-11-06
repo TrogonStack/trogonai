@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::constants::FULL_WILDCARD_SUBJECT;
 use crate::permissions::IssuedPermissions;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -12,10 +13,13 @@ pub struct NatsSubjectPermission {
 
 impl NatsSubjectPermission {
     pub fn allow_only(patterns: impl IntoIterator<Item = String>) -> Self {
-        Self {
-            allow: patterns.into_iter().collect(),
-            deny: Vec::new(),
-        }
+        let allow: Vec<String> = patterns.into_iter().collect();
+        let deny = if allow.is_empty() {
+            vec![FULL_WILDCARD_SUBJECT.to_owned()]
+        } else {
+            Vec::new()
+        };
+        Self { allow, deny }
     }
 }
 
@@ -35,3 +39,6 @@ impl From<&IssuedPermissions> for NatsPermissionClaims {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 pub const DEFAULT_A2A_PREFIX: &str = "a2a";
 pub const ENV_A2A_PREFIX: &str = "A2A_PREFIX";
+pub const ENV_A2A_CALLER_JWT: &str = "A2A_CALLER_JWT";
 
 pub const ENV_OPERATION_TIMEOUT_SECS: &str = "A2A_OPERATION_TIMEOUT_SECS";
 pub const ENV_TASK_TIMEOUT_SECS: &str = "A2A_TASK_TIMEOUT_SECS";
@@ -39,9 +40,12 @@ pub const EVENT_STREAM_QUEUE_CAPACITY: usize = 128;
 /// Defined once in `trogon-nats` (ADR#0013 / RFC 6648 `Trogon-` prefix).
 pub use trogon_nats::REQ_ID_HEADER;
 
-/// Optional correlate external caller identity on gateway ingress (`a2a-gateway` records it on spans /
-/// audits). **`a2a-bridge`** should copy HTTP header [`GATEWAY_CALLER_ID_HTTP`] into this NATS header when
-/// publishing to `{prefix}.v1.gateway.>`.
+/// Optional correlate external caller identity on gateway ingress. **`a2a-bridge`** may copy HTTP header
+/// [`GATEWAY_CALLER_ID_HTTP`] into this NATS header when publishing to `{prefix}.v1.gateway.>`.
+///
+/// A routing hint at most: inside the bus the caller is the principal the subject carries
+/// (ADR#0082), never this header. `a2a-gateway` strips it at ingress, so no policy tier, audit,
+/// agent, event or dead letter reads it.
 ///
 /// Stable wire token (case-insensitive matching on ingress); prefer `GatewayCallerId` casing in observability prose.
 pub const GATEWAY_CALLER_ID_HEADER: &str = "X-A2a-Caller-Id";
@@ -49,8 +53,8 @@ pub const GATEWAY_CALLER_ID_HEADER: &str = "X-A2a-Caller-Id";
 /// HTTP correlate for [`GATEWAY_CALLER_ID_HEADER`] on the bridge ingress path (`POST /`).
 pub const GATEWAY_CALLER_ID_HTTP: &str = "x-a2a-caller-id";
 
-/// JSON-encoded minted User JWT `data` claim (SpiceDB principal payload) forwarded by gateway
-/// ingress onto agent-bound NATS messages. Agent `Bridge` reads this for push DLQ `{caller_id}`.
+/// Legacy JSON-encoded SpiceDB principal payload. Never identity (ADR#0082): `a2a-gateway` strips it
+/// at ingress and nothing downstream reads it, so a publisher cannot use it to re-attribute a caller.
 pub const GATEWAY_PRINCIPAL_HEADER: &str = "X-A2a-Spicedb-Principal";
 
 /// Maximum attempts for terminal task push delivery over HTTPS, core NATS (`subject:` URLs), and JetStream (`jetstream:` URLs).
@@ -59,12 +63,6 @@ pub const GATEWAY_PRINCIPAL_HEADER: &str = "X-A2a-Spicedb-Principal";
 /// attempt cap with exponential backoff in [`crate::push::NatsPublishPushDispatcher`] and
 /// [`crate::push::JetStreamPublishPushDispatcher`].
 pub const HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS: u32 = 3;
-
-/// Default `{caller_id}` segment for `{prefix}.v1.push.dlq.{caller_id}.{task_id}` when the agent
-/// bridge has no authenticated external caller identity (until gateway/auth-callout propagates one).
-pub const DEFAULT_PUSH_DLQ_CALLER_SEGMENT: &str = "_";
-
-pub const ENV_PUSH_DLQ_CALLER_SEGMENT: &str = "A2A_PUSH_DLQ_CALLER_SEGMENT";
 
 /// In-process LRU capacity for push DLQ publish dedupe (agent + gateway mirror).
 pub const ENV_PUSH_DLQ_DEDUP_LRU_SIZE: &str = "A2A_PUSH_DLQ_DEDUP_LRU_SIZE";
@@ -153,26 +151,6 @@ pub const VERSION_NOT_SUPPORTED: i32 = -32009;
 
 /// Binding-specific: no agent replicas are reachable on the agent subject (no responders).
 pub const AGENT_UNAVAILABLE: i32 = -32050;
-
-// -- gateway_ingress --
-
-/// Recognized dotted method suffix tokens after `{prefix}.v1.agents.{agent_id}.` /
-/// ingress remainder (same spelling as [`crate::server::dispatch::A2aMethod`] mapping).
-///
-/// Listed longest-first to ensure deterministic matching.
-pub const GATEWAY_INGRESS_METHOD_SUFFIXES: &[&[&str]] = &[
-    &["message", "stream"],
-    &["message", "send"],
-    &["tasks", "resubscribe"],
-    &["tasks", "cancel"],
-    &["tasks", "list"],
-    &["tasks", "get"],
-    &["push", "set"],
-    &["push", "get"],
-    &["push", "list"],
-    &["push", "delete"],
-    &["card"],
-];
 
 // -- jetstream::consumers --
 

@@ -10,16 +10,19 @@
 //! Each tier folds its own error variant into [`error::PolicyError`] so
 //! the runtime keeps a single audit surface across tiers.
 
+pub mod caller_spicedb_subject;
 pub mod error;
 pub mod per_skill;
 #[cfg(feature = "spicedb")]
 pub mod spicedb_tier1;
 pub mod tier1_declarative;
+pub mod tier1_gate;
 pub mod tier2;
 pub mod tier2_cel;
 pub mod tier3_redaction;
 pub mod wasmtime_substrate;
 
+pub use caller_spicedb_subject::CallerSpiceDbSubject;
 pub use error::{PolicyError, Tier2EvalError};
 pub use per_skill::{
     PerSkillDecision, PerSkillPolicy, PerSkillPolicyConfig, PerSkillRequest, ResolvedRule, SkillEffect, SkillRule,
@@ -32,6 +35,11 @@ pub use tier1_declarative::{
     Tier1DeclarativeDecision, Tier1DeclarativeEffect, Tier1DeclarativeGate, Tier1DeclarativeLoadError,
     Tier1DeclarativeMatch, Tier1DeclarativeRule, Tier1DeclarativeRuleId, Tier1DeclarativeSchemaError,
     Tier1ResourceKind, tier1_declarative_audit_rule_fired,
+};
+pub use tier1_gate::{
+    GatewayTier1Layer, NoopSpiceDbTier1Gate, OwnerEmitError, OwnerTupleEmitter, SpiceDbTier1Gate,
+    Tier1AuthorizeOutcome, Tier1OwnerTuple, Tier1SessionKey, Tier1SpiceDbBuildError, Tier1SpiceDbConfig, derive_tuple,
+    tier1_principal_from_caller, tier1_session_from_caller,
 };
 pub use tier2::rule_name::RuleName;
 pub use tier2::{DenyAllTier2Evaluator, NoopTier2Evaluator, Tier2CelEvaluator, Tier2Decision, Tier2EvaluationContext};

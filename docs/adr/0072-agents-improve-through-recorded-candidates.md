@@ -7,6 +7,9 @@ date: 2026-10-21
 
 # ADR#0072: Agents Improve by Running Recorded Candidates, Scored Blind, and Promoted Only Through Proposals
 
+> **Proposed connector refinement:** [ADR#0096](./0096-connection-use-by-agents.md) remains a draft. Explicit relay integration checks the logical upstream against Session egress and connection permissions; transparent interception is deferred. This note does not change either ADR's status.
+
+
 ## Context
 
 [ADR#0025](./0025-agent-definition-data-ownership.md) settles that an Agent's

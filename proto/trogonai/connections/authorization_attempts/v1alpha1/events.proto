@@ -1,0 +1,140 @@
+edition = "2024";
+
+package trogonai.connections.authorization_attempts.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/callback.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/exchange.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/failure.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/request.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/target.proto";
+import "trogonai/connections/types/v1alpha1/discovery.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+import "trogonai/secrets/v1alpha1/secret_ref.proto";
+
+// Each concrete event records immutable resource containment. Replay verifies
+// resource_parent against the stream route and genesis; a parent mismatch is
+// invalid history, never a resource move.
+
+// An unset or unknown event rejects replay, as does an invalid transition;
+// skipping one could let a replayed callback win a second claim or let an
+// attempt whose exchange was sent appear cancellable. Actor identity and
+// occurrence time come from the event envelope. No event carries the code, the
+// verifier, the signed state, the authorize URL, a token or provider error text.
+message AuthorizationAttemptEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    AuthorizationBegun begun = 1;
+    OAuthCallbackClaimed callback_claimed = 2;
+    CodeExchangeStarted exchange_started = 3;
+    ExchangeUnknownRecorded exchange_unknown_recorded = 4;
+    GrantedAuthorityCaptured granted_authority_captured = 5;
+    AuthorizationCompleted completed = 6;
+    AuthorizationFailed failed = 7;
+    AuthorizationCancelled cancelled = 8;
+    AuthorizationExpired expired = 9;
+  }
+}
+
+// Genesis, appended with NoStream. Fixes the target, the request and the
+// callback binding for the attempt's life. The attempt is AwaitingConsent.
+message AuthorizationBegun {
+  option (buf.validate.message).cel = {
+    id: "authorizationbegun.target_parent"
+    message: "the attempt and target connection share one custody parent"
+    expression: "this.target.resource_parent == this.resource_parent"
+  };
+
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationTarget target = 2 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationRequest request = 3 [features.field_presence = LEGACY_REQUIRED];
+  CallbackBinding callback = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.secrets.v1alpha1.SecretRef capsule_ref = 5 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp expires_at = 6 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 7 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The single winning claim. Everything it checked is already recorded, so it
+// carries only the attempt.
+message OAuthCallbackClaimed {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The write-ahead record of the exchange: the token endpoint origin, the
+// redirect URI and the resource the exchange sends (ADR#0094 Decision 4). The
+// redirect URI and resource repeat the request so the record stands alone, and
+// the decider copies them from state.
+message CodeExchangeStarted {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ExchangeOrigin exchange_origin = 2 [features.field_presence = LEGACY_REQUIRED];
+  RedirectUri redirect_uri = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.CanonicalResourceUri resource = 4;
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The exchange outcome is unknown. The attempt is OutcomeUnknown until
+// reconciliation completes or fails it.
+message ExchangeUnknownRecorded {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The staged bundle, the probed account and the granted authority, recorded
+// before HoldProviderAccount (ADR#0094 Decision 5). The phase is unchanged.
+message GrantedAuthorityCaptured {
+  option (buf.validate.message).cel = {
+    id: "grantedauthoritycaptured.captured_parent"
+    message: "the captured stage receipt and attempt share one custody parent"
+    expression: "this.captured.resource_parent == this.resource_parent"
+  };
+
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CapturedAuthority captured = 2 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Terminal. The connection is active at this authorization_generation and the
+// staged bundle has been promoted.
+message AuthorizationCompleted {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 authorization_generation = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Terminal. Unprotected staged material is discarded with terminal evidence;
+// a promotion-protected stage remains held until attributable recovery or an
+// authoritative abort fence. The residual is recorded, not hidden
+// (ADR#0094 Decisions 4 and 5, ADR#0095 Decision 12).
+message AuthorizationFailed {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationFailure failure = 2 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Terminal, before any exchange was sent.
+message AuthorizationCancelled {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Terminal, before any exchange was sent.
+message AuthorizationExpired {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}

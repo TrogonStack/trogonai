@@ -16,6 +16,7 @@ use a2a_nats::jetstream::streams::events_stream_name;
 use async_nats::jetstream::{self, AckKind};
 use futures::{Stream, StreamExt};
 use tracing::{debug, warn};
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsDoubleAck, JsMessageRef};
 
 use crate::constants::STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS;
@@ -54,33 +55,6 @@ impl StreamingMaxInflightPerCaller {
     pub fn as_usize(self) -> usize {
         self.0
     }
-}
-
-/// Validated identifier for the caller bucket in the per-caller inflight
-/// gate. Construction trims and refuses empty values so a configuration
-/// bug can't widen every caller into a single "" bucket.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct CallerKey(String);
-
-impl CallerKey {
-    pub fn new(raw: impl Into<String>) -> Result<Self, CallerKeyError> {
-        let value = raw.into();
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return Err(CallerKeyError::Empty);
-        }
-        Ok(Self(trimmed.to_owned()))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum CallerKeyError {
-    #[error("caller key must not be empty")]
-    Empty,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,7 +130,7 @@ pub enum StreamingIngressKind {
 pub struct StreamingIngressSpawn {
     pub kind: StreamingIngressKind,
     pub reply: async_nats::Subject,
-    pub caller_key: CallerKey,
+    pub caller: SubjectPrincipal,
 }
 
 impl StreamingIngressSpawn {
@@ -179,7 +153,7 @@ impl StreamingIngressSpawn {
 /// against the same gateway. The runtime constructs one instance and hands
 /// it to every `spawn_streaming_ingress_pump` call — otherwise each pump
 /// would build a fresh gate and `max_inflight_per_caller` would never
-/// constrain concurrent pumps for the same `caller_key`.
+/// constrain concurrent pumps for the same caller.
 #[derive(Clone)]
 pub struct StreamingIngressGate {
     inner: std::sync::Arc<CallerInflightGate>,
@@ -195,15 +169,15 @@ impl StreamingIngressGate {
         }
     }
 
-    fn try_acquire(&self, caller_key: &CallerKey) -> Option<CallerInflightPermit> {
-        self.inner.clone().try_acquire(caller_key)
+    fn try_acquire(&self, caller: &SubjectPrincipal) -> Option<CallerInflightPermit> {
+        self.inner.clone().try_acquire(caller)
     }
 }
 
 #[derive(Debug)]
 struct CallerInflightGate {
     limit: usize,
-    inflight: Mutex<HashMap<String, usize>>,
+    inflight: Mutex<HashMap<SubjectPrincipal, usize>>,
 }
 
 impl CallerInflightGate {
@@ -217,17 +191,16 @@ impl CallerInflightGate {
     /// Take a permit. Returns `None` once the per-caller bucket has reached
     /// the configured limit. The returned permit holds an `Arc` back to the
     /// gate so it can be moved into a spawned task and released on drop.
-    fn try_acquire(self: std::sync::Arc<Self>, caller_key: &CallerKey) -> Option<CallerInflightPermit> {
+    fn try_acquire(self: std::sync::Arc<Self>, caller: &SubjectPrincipal) -> Option<CallerInflightPermit> {
         // Recover from a poisoned lock — the inflight map is plain counters;
         // a partial inc/dec can't leave it logically corrupt, and panicking
         // every caller after an unrelated panic would turn the gate into a
         // service-wide DoS.
-        let key = caller_key.as_str().to_owned();
         let mut guard = match self.inflight.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        let count = guard.entry(key.clone()).or_insert(0);
+        let count = guard.entry(caller.clone()).or_insert(0);
         if *count >= self.limit {
             return None;
         }
@@ -235,7 +208,7 @@ impl CallerInflightGate {
         drop(guard);
         Some(CallerInflightPermit {
             gate: self,
-            caller_key: key,
+            caller: caller.clone(),
         })
     }
 }
@@ -243,7 +216,7 @@ impl CallerInflightGate {
 #[derive(Debug)]
 pub struct CallerInflightPermit {
     gate: std::sync::Arc<CallerInflightGate>,
-    caller_key: String,
+    caller: SubjectPrincipal,
 }
 
 impl Drop for CallerInflightPermit {
@@ -256,10 +229,10 @@ impl Drop for CallerInflightPermit {
         // decrements only its own key, so the entry is always present here.
         // Use `entry().or_insert(0)` instead of `if let Some` to avoid a
         // defensive branch that the type system already rules out.
-        let count = guard.entry(self.caller_key.clone()).or_insert(0);
+        let count = guard.entry(self.caller.clone()).or_insert(0);
         *count = count.saturating_sub(1);
         if *count == 0 {
-            guard.remove(&self.caller_key);
+            guard.remove(&self.caller);
         }
     }
 }
@@ -271,8 +244,8 @@ pub enum StreamingIngressSpawnError {
     /// The shared gate refused this spawn because the caller is already at
     /// `max_inflight_per_caller`. The request path should map this to a
     /// 429-style response to the caller.
-    #[error("caller {caller:?} is at the per-caller inflight limit")]
-    PerCallerLimit { caller: String },
+    #[error("caller {caller} is at the per-caller inflight limit")]
+    PerCallerLimit { caller: SubjectPrincipal },
 }
 
 /// Spawn the streaming-ingress pump on a background task.
@@ -304,9 +277,9 @@ fn try_acquire_streaming_permit(
     gate: &StreamingIngressGate,
     spawn: &StreamingIngressSpawn,
 ) -> Result<CallerInflightPermit, StreamingIngressSpawnError> {
-    gate.try_acquire(&spawn.caller_key)
+    gate.try_acquire(&spawn.caller)
         .ok_or_else(|| StreamingIngressSpawnError::PerCallerLimit {
-            caller: spawn.caller_key.as_str().to_owned(),
+            caller: spawn.caller.clone(),
         })
 }
 
@@ -372,11 +345,15 @@ async fn run_streaming_ingress_pump(
 
     let consumer_config = match &spawn.kind {
         StreamingIngressKind::MessageStream { last_seq, .. } => {
-            gateway_stream_events_consumer(&prefix, *last_seq, config.max_ack_pending.as_i64())
+            gateway_stream_events_consumer(&prefix, &spawn.caller, *last_seq, config.max_ack_pending.as_i64())
         }
-        StreamingIngressKind::TasksResubscribe { task_id, last_seq, .. } => {
-            resubscribe_consumer_with_flow(&prefix, task_id, *last_seq, config.max_ack_pending.as_i64())
-        }
+        StreamingIngressKind::TasksResubscribe { task_id, last_seq, .. } => resubscribe_consumer_with_flow(
+            &prefix,
+            task_id,
+            &spawn.caller,
+            *last_seq,
+            config.max_ack_pending.as_i64(),
+        ),
     };
 
     let consumer = match stream.create_consumer(consumer_config).await {

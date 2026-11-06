@@ -5,9 +5,13 @@ mod user_jwt_subject;
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use a2a_identity_types::MintedUserJwtError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
+use trogon_identity_types::{
+    PrincipalId, PrincipalIdError, PrincipalKind, PrincipalKindError, SubjectPrincipal, SubjectPrincipalError,
+};
 
 pub use nats_permission_claims::{NatsPermissionClaims, NatsSubjectPermission};
 pub use nats_user_jwt::decode_nats_user_payload;
@@ -16,7 +20,7 @@ pub use user_jwt_subject::UserJwtSubject;
 use crate::credentials::oidc::OidcIssuerUrl;
 use crate::error::AuthCalloutError;
 use crate::permissions::IssuedPermissions;
-use crate::signing_key_source::{KeyVersion, MintingMaterial, SigningKeyHandle, SigningKeySource};
+use crate::signing_key_source::{KeyVersion, MintingMaterial, SigningKeyHandle, VerifyingKeySource};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AccountName(String);
@@ -333,6 +337,14 @@ pub enum JwtError {
     NoSigningKeyForKid,
     #[error("invalid account signing seed: {0}")]
     InvalidSigningSeed(String),
+    #[error("principal_kind is not a principal kind")]
+    InvalidPrincipalKind(#[source] PrincipalKindError),
+    #[error("caller_id is not a principal id")]
+    InvalidPrincipalId(#[source] PrincipalIdError),
+    #[error("caller cannot take a subject principal position")]
+    InvalidSubjectPrincipal(#[source] SubjectPrincipalError),
+    #[error(transparent)]
+    MintedClaims(#[from] MintedUserJwtError),
 }
 
 impl From<JwtError> for AuthCalloutError {
@@ -348,6 +360,7 @@ pub struct UserJwtClaims {
     pub aud: AccountName,
     pub data: SpiceDbPrincipal,
     pub caller_id: CallerId,
+    pub principal_kind: PrincipalKind,
     pub nats_permissions: IssuedPermissions,
 }
 
@@ -362,7 +375,7 @@ impl UserJwtClaims {
         nats_user_jwt::mint_nats_user_jwt(self, material, user_subject, issued_at, ttl)
     }
 
-    pub fn verify_with_source(token: &str, source: &dyn SigningKeySource) -> Result<Self, JwtError> {
+    pub fn verify_with_source(token: &str, source: &(impl VerifyingKeySource + ?Sized)) -> Result<Self, JwtError> {
         nats_user_jwt::verify_nats_user_jwt_with_source(token, source)
     }
 
@@ -372,7 +385,7 @@ impl UserJwtClaims {
 
     pub fn verify_minted_user_jwt(
         token: &str,
-        source: &dyn SigningKeySource,
+        source: &(impl VerifyingKeySource + ?Sized),
         expected_aud: &AccountName,
     ) -> Result<Self, JwtError> {
         let claims = Self::verify_with_source(token, source)?;
@@ -402,6 +415,13 @@ impl UserJwtClaims {
         Ok(claims)
     }
 
+    /// The principal the caller stands for in a subject, built the way a reader
+    /// of the minted user JWT builds it.
+    pub fn subject_principal(&self) -> Result<SubjectPrincipal, JwtError> {
+        let id = PrincipalId::new(self.caller_id.as_str()).map_err(JwtError::InvalidPrincipalId)?;
+        SubjectPrincipal::from_credential(self.principal_kind, &id).map_err(JwtError::InvalidSubjectPrincipal)
+    }
+
     #[cfg(test)]
     fn mint_for_test_ttl(
         &self,
@@ -418,16 +438,23 @@ impl UserJwtClaims {
     }
 }
 
-/// Reads `caller_id` from a freshly minted User JWT without signature verification.
+/// Reads `caller_id` from a minted User JWT without signature verification.
 ///
-/// The bridge uses this only on tokens it just received from the auth callout mint path.
+/// Use this only on tokens received from the mint path or from configuration.
 pub fn caller_id_from_minted_jwt(token: &str) -> Result<CallerId, JwtError> {
-    let payload: serde_json::Value = nats_user_jwt::decode_nats_user_payload(token)?;
-    let caller_id = payload
-        .get("caller_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| JwtError::Decode("minted user JWT missing caller_id".into()))?;
-    CallerId::new(caller_id)
+    CallerId::new(minted_claims(token)?.caller_id()?.as_str())
+}
+
+/// Reads the principal a minted User JWT names, in the form a subject
+/// carries it, without signature verification.
+///
+/// Use this only on tokens received from the mint path or from configuration.
+pub fn subject_principal_from_minted_jwt(token: &str) -> Result<SubjectPrincipal, JwtError> {
+    Ok(minted_claims(token)?.subject_principal()?)
+}
+
+fn minted_claims(token: &str) -> Result<a2a_identity_types::MintedUserJwt, MintedUserJwtError> {
+    a2a_identity_types::MintedUserJwt::new(token).map_err(MintedUserJwtError::from)
 }
 
 /// RFC 7519 and OIDC Core key a principal on (iss, sub); a `sub` alone is
@@ -440,6 +467,18 @@ pub(crate) enum CallerNamespace<'a> {
 }
 
 impl CallerNamespace<'_> {
+    /// The kind of actor a credential verified under this namespace names.
+    ///
+    /// Interim until credentials assert their own kind: the kind follows the
+    /// scheme the callout verified, so an OIDC token names a person and an
+    /// mTLS certificate or an API key names a service.
+    pub(crate) const fn principal_kind(&self) -> PrincipalKind {
+        match self {
+            Self::Oidc { .. } => PrincipalKind::Person,
+            Self::Mtls | Self::ApiKey => PrincipalKind::Service,
+        }
+    }
+
     fn segments(&self) -> Vec<&[u8]> {
         match self {
             Self::Oidc { issuer } => vec![b"oidc", issuer.as_str().as_bytes()],

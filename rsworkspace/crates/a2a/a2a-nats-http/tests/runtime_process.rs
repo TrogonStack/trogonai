@@ -88,6 +88,7 @@ impl Drop for RuntimeProcess {
 
 #[tokio::test]
 async fn startup_reports_invalid_configuration_before_serving() -> Result<(), FixtureError> {
+    let caller = caller_jwt(fresh_expiration()?);
     for (settings, expected) in [
         (vec![], "A2A_AGENT_ID environment variable is required"),
         (vec![("A2A_PREFIX", "bad prefix")], "invalid A2A prefix"),
@@ -97,7 +98,11 @@ async fn startup_reports_invalid_configuration_before_serving() -> Result<(), Fi
             "invalid bind address",
         ),
         (
-            vec![("A2A_AGENT_ID", "worker"), ("NATS_URL", "invalid://server")],
+            vec![
+                ("A2A_AGENT_ID", "worker"),
+                ("A2A_CALLER_JWT", caller.as_str()),
+                ("NATS_URL", "invalid://server"),
+            ],
             "NATS connection failed",
         ),
     ] {
@@ -106,36 +111,60 @@ async fn startup_reports_invalid_configuration_before_serving() -> Result<(), Fi
     Ok(())
 }
 
-fn caller_jwt(expiration: u64) -> String {
+fn jwt(claims: &str) -> String {
     let encode = &base64::engine::general_purpose::URL_SAFE_NO_PAD;
     format!(
         "{}.{}.{}",
         encode.encode(br#"{"alg":"HS256","typ":"JWT"}"#),
-        encode.encode(format!(r#"{{"exp":{expiration}}}"#)),
+        encode.encode(claims),
         encode.encode(b"test-signature")
     )
 }
 
+fn caller_jwt(expiration: u64) -> String {
+    jwt(&format!(
+        r#"{{"exp":{expiration},"caller_id":"worker-caller","principal_kind":"service"}}"#
+    ))
+}
+
+fn fresh_expiration() -> Result<u64, FixtureError> {
+    Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600)
+}
+
 #[tokio::test]
-async fn gateway_routing_requires_a_well_formed_unexpired_caller() -> Result<(), FixtureError> {
+async fn startup_requires_a_fresh_caller_naming_a_principal_in_every_mode() -> Result<(), FixtureError> {
     let server = CoreTestServer::start().await;
-    for caller in [None, Some("malformed".to_owned()), Some(caller_jwt(1))] {
-        let mut settings = vec![
-            ("A2A_AGENT_ID", "worker"),
-            ("NATS_URL", server.address()),
-            ("NATS_TLS_DISABLED", "true"),
-            ("A2A_USE_GATEWAY", " On "),
-        ];
-        if let Some(caller) = caller.as_deref() {
-            settings.push(("A2A_GATEWAY_CALLER_JWT", caller));
+    let expiration = fresh_expiration()?;
+    let cases = [
+        (None, "A2A_CALLER_JWT environment variable is required"),
+        (Some("malformed".to_owned()), "invalid caller JWT"),
+        (Some(caller_jwt(1)), "invalid caller JWT"),
+        (
+            Some(jwt(&format!(r#"{{"exp":{expiration},"caller_id":"worker-caller"}}"#))),
+            "caller JWT names no caller principal",
+        ),
+        (
+            Some(jwt(&format!(
+                r#"{{"exp":{expiration},"caller_id":"worker-caller","principal_kind":"robot"}}"#
+            ))),
+            "caller JWT names no caller principal",
+        ),
+    ];
+    for gateway in [false, true] {
+        for (caller, expected) in &cases {
+            let mut settings = vec![
+                ("A2A_AGENT_ID", "worker"),
+                ("NATS_URL", server.address()),
+                ("NATS_TLS_DISABLED", "true"),
+            ];
+            if gateway {
+                settings.push(("A2A_USE_GATEWAY", " On "));
+            }
+            if let Some(caller) = caller.as_deref() {
+                settings.push(("A2A_CALLER_JWT", caller));
+            }
+            RuntimeProcess::start(&settings)?.failure(expected).await?;
         }
-        RuntimeProcess::start(&settings)?
-            .failure(if caller.is_none() {
-                "A2A_GATEWAY_CALLER_JWT is required"
-            } else {
-                "invalid gateway caller JWT"
-            })
-            .await?;
     }
     Ok(())
 }
@@ -143,10 +172,12 @@ async fn gateway_routing_requires_a_well_formed_unexpired_caller() -> Result<(),
 #[tokio::test]
 async fn startup_reports_an_occupied_http_listener() -> Result<(), FixtureError> {
     let server = CoreTestServer::start().await;
+    let caller = caller_jwt(fresh_expiration()?);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?.to_string();
     RuntimeProcess::start(&[
         ("A2A_AGENT_ID", "worker"),
+        ("A2A_CALLER_JWT", &caller),
         ("NATS_URL", server.address()),
         ("NATS_TLS_DISABLED", "true"),
         ("A2A_HTTP_BIND", &address),
@@ -158,8 +189,7 @@ async fn startup_reports_an_occupied_http_listener() -> Result<(), FixtureError>
 #[tokio::test]
 async fn serves_http_and_gracefully_stops_in_direct_and_gateway_modes() -> Result<(), FixtureError> {
     let server = CoreTestServer::start().await;
-    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600;
-    let caller = caller_jwt(expiration);
+    let caller = caller_jwt(fresh_expiration()?);
     for gateway in [false, true] {
         let reservation = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = reservation.local_addr()?;
@@ -167,12 +197,13 @@ async fn serves_http_and_gracefully_stops_in_direct_and_gateway_modes() -> Resul
         drop(reservation);
         let mut settings = vec![
             ("A2A_AGENT_ID", "worker"),
+            ("A2A_CALLER_JWT", &caller),
             ("NATS_URL", server.address()),
             ("NATS_TLS_DISABLED", "true"),
             ("A2A_HTTP_BIND", &bind),
         ];
         if gateway {
-            settings.extend([("A2A_USE_GATEWAY", "true"), ("A2A_GATEWAY_CALLER_JWT", &caller)]);
+            settings.push(("A2A_USE_GATEWAY", "true"));
         }
         let mut process = RuntimeProcess::start(&settings)?;
         let mut socket = tokio::time::timeout(Duration::from_secs(15), async {
