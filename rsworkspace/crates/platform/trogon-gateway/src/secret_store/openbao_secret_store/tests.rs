@@ -47,7 +47,7 @@ fn rotated_credential_ref_preserves_integration_scope() {
         SourceIntegrationId::new("primary").unwrap(),
     );
     let credential = CredentialRef::new(
-        CredentialId::new("openbao:tenant-1:github/primary:webhook_secret").unwrap(),
+        CredentialId::derive(&scope, CredentialKind::WebhookSecret),
         CredentialVersion::initial(),
         &scope,
         CredentialKind::WebhookSecret,
@@ -185,7 +185,7 @@ async fn answer_as_openbao(State(openbao): State<FakeOpenBao>, method: Method, u
 
 fn discord_bot_token(version: CredentialVersion) -> CredentialRef {
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
-    let id = openbao_credential_id(&scope, CredentialKind::BotToken).unwrap();
+    let id = CredentialId::derive(&scope, CredentialKind::BotToken);
     CredentialRef::new(id, version, &scope, CredentialKind::BotToken)
 }
 
@@ -329,7 +329,7 @@ async fn metadata_fingerprints_the_metadata_path_and_version() {
         SourceIntegrationId::new("compose-smoke").unwrap(),
     );
     let credential = CredentialRef::new(
-        openbao_credential_id(&scope, CredentialKind::WebhookSecret).unwrap(),
+        CredentialId::derive(&scope, CredentialKind::WebhookSecret),
         CredentialVersion::new(2).unwrap(),
         &scope,
         CredentialKind::WebhookSecret,
@@ -640,7 +640,7 @@ async fn assert_roundtrip(store: &OpenBaoSecretStore) -> CredentialRef {
 
     assert_eq!(output, TEST_INPUT);
     assert_eq!(metadata.status(), CredentialStatus::Active);
-    assert_eq!(metadata.storage_backend(), StorageBackend::OpenBao);
+    assert_eq!(metadata.storage_locator().backend(), StorageBackend::OpenBao);
     assert_custom_metadata(store, &credential).await;
     credential
 }
@@ -682,11 +682,11 @@ async fn openbao_testcontainer_roundtrips_precise_value() {
     let credential = assert_roundtrip(&store).await;
 
     assert_eq!(
-        store.data_path(&credential),
+        store.data_path(&credential).unwrap(),
         "secret/data/trogonai/tenant-e2e/credentials/openbao%3Atenant-e2e%3Agithub%2Fcopy-in-out%3Awebhook_secret"
     );
     assert_eq!(
-        store.metadata_path(&credential),
+        store.metadata_path(&credential).unwrap(),
         "secret/metadata/trogonai/tenant-e2e/credentials/openbao%3Atenant-e2e%3Agithub%2Fcopy-in-out%3Awebhook_secret"
     );
 }
@@ -758,8 +758,8 @@ async fn openbao_dev_server_roundtrips_precise_value() {
             "credential_ref": credential.to_string(),
             "input": TEST_INPUT,
             "output": TEST_INPUT,
-            "data_path": store.data_path(&credential),
-            "metadata_path": store.metadata_path(&credential),
+            "data_path": store.data_path(&credential).unwrap(),
+            "metadata_path": store.metadata_path(&credential).unwrap(),
         })
     );
 }

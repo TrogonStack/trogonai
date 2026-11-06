@@ -1,7 +1,7 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::CredentialMetadata;
+use super::domain::{CredentialMetadata, CredentialStreamId};
 use super::proto::{active_credential_ref, decode_message_field, rotated_to_proto};
 use super::state::{
     CredentialDecideError, CredentialEvolveError, validate_activation_metadata, validate_newer_version,
@@ -10,17 +10,21 @@ use super::state::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActivateCredentialRotation {
+    stream_id: CredentialStreamId,
     metadata: CredentialMetadata,
 }
 
 impl ActivateCredentialRotation {
     pub fn new(metadata: CredentialMetadata) -> Self {
-        Self { metadata }
+        Self {
+            stream_id: CredentialStreamId::from(metadata.reference()),
+            metadata,
+        }
     }
 }
 
 impl Decider for ActivateCredentialRotation {
-    type StreamId = str;
+    type StreamId = CredentialStreamId;
     type State = state_v1::CredentialStateSnapshot;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
@@ -29,7 +33,7 @@ impl Decider for ActivateCredentialRotation {
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.metadata.reference().id().as_str()
+        &self.stream_id
     }
 
     fn initial_state() -> Self::State {

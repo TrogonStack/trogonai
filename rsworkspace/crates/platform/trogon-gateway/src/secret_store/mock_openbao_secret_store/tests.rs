@@ -12,15 +12,15 @@ async fn writes_secret_with_openbao_kv_v2_paths() {
         .unwrap();
 
     assert_eq!(
-        MockOpenBaoSecretStore::data_path(&credential),
-        format!("secret/data/trogonai/tenant-1/credentials/{}", credential.id())
+        MockOpenBaoSecretStore::data_path(&credential).unwrap(),
+        "secret/data/trogonai/tenant-1/credentials/openbao:tenant-1:discord:bot_token"
     );
     assert_eq!(
-        MockOpenBaoSecretStore::metadata_path(&credential),
-        format!("secret/metadata/trogonai/tenant-1/credentials/{}", credential.id())
+        MockOpenBaoSecretStore::metadata_path(&credential).unwrap(),
+        "secret/metadata/trogonai/tenant-1/credentials/openbao:tenant-1:discord:bot_token"
     );
     assert_eq!(
-        store.metadata(&credential).await.unwrap().storage_backend(),
+        store.metadata(&credential).await.unwrap().storage_locator().backend(),
         StorageBackend::OpenBao
     );
     assert_eq!(
@@ -226,7 +226,7 @@ async fn destroy_of_unknown_ref_returns_missing() {
     let store = MockOpenBaoSecretStore::default();
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let unknown = CredentialRef::new(
-        openbao_credential_id(&scope, CredentialKind::BotToken).unwrap(),
+        CredentialId::derive(&scope, CredentialKind::BotToken),
         CredentialVersion::initial(),
         &scope,
         CredentialKind::BotToken,
@@ -278,7 +278,7 @@ async fn destroying_previous_version_leaves_active_version_readable() {
 fn unknown_credential() -> CredentialRef {
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     CredentialRef::new(
-        openbao_credential_id(&scope, CredentialKind::BotToken).unwrap(),
+        CredentialId::derive(&scope, CredentialKind::BotToken),
         CredentialVersion::initial(),
         &scope,
         CredentialKind::BotToken,

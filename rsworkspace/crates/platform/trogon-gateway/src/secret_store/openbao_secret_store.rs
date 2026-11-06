@@ -16,21 +16,9 @@ use super::{
     SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
 };
 use crate::credential::commands::domain::{
-    CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialPath, CredentialRef,
-    CredentialScope, CredentialStatus, CredentialVersion, StorageBackend,
+    CredentialId, CredentialKind, CredentialMetadata, CredentialPath, CredentialRef, CredentialScope, CredentialStatus,
+    CredentialVersion, StorageBackend, StorageLocator,
 };
-
-pub(crate) fn openbao_credential_id(
-    scope: &CredentialScope,
-    kind: CredentialKind,
-) -> Result<CredentialId, CredentialIdError> {
-    CredentialId::new(format!(
-        "openbao:{}:{}:{}",
-        scope.owner_id(),
-        scope.scope_key(),
-        kind.as_str()
-    ))
-}
 
 #[derive(Clone)]
 pub struct OpenBaoSecretStore {
@@ -71,29 +59,24 @@ impl OpenBaoSecretStore {
         })
     }
 
-    pub fn data_path(&self, credential: &CredentialRef) -> String {
-        format!("{}/data/{}", self.mount, self.credential_path(credential))
+    pub fn data_path(&self, credential: &CredentialRef) -> Result<String, SecretStoreError> {
+        Ok(format!("{}/data/{}", self.mount, self.credential_path(credential)?))
     }
 
-    pub fn metadata_path(&self, credential: &CredentialRef) -> String {
-        format!("{}/metadata/{}", self.mount, self.credential_path(credential))
+    pub fn metadata_path(&self, credential: &CredentialRef) -> Result<String, SecretStoreError> {
+        Ok(format!("{}/metadata/{}", self.mount, self.credential_path(credential)?))
     }
 
-    fn credential_ref(
-        &self,
-        scope: &CredentialScope,
-        kind: CredentialKind,
-        version: CredentialVersion,
-    ) -> Result<CredentialRef, SecretStoreError> {
-        let id = openbao_credential_id(scope, kind).map_err(|error| self.backend_error(error.to_string()))?;
-        Ok(CredentialRef::new(id, version, scope, kind))
+    fn credential_ref(scope: &CredentialScope, kind: CredentialKind, version: CredentialVersion) -> CredentialRef {
+        CredentialRef::new(CredentialId::derive(scope, kind), version, scope, kind)
     }
 
-    fn credential_path(&self, credential: &CredentialRef) -> String {
-        CredentialPath::from(credential)
+    fn credential_path(&self, credential: &CredentialRef) -> Result<String, SecretStoreError> {
+        let locator = StorageLocator::openbao(credential).map_err(|error| self.backend_error(error.to_string()))?;
+        Ok(CredentialPath::new(credential.owner_id().clone(), locator)
             .segments()
             .map(encode_path_segment)
-            .join("/")
+            .join("/"))
     }
 
     fn endpoint(&self, kind: OpenBaoEndpoint, credential: &CredentialRef) -> Result<Url, SecretStoreError> {
@@ -102,7 +85,7 @@ impl OpenBaoSecretStore {
                 "/v1/{}/{}/{}",
                 self.mount,
                 kind.as_str(),
-                self.credential_path(credential)
+                self.credential_path(credential)?
             ))
             .map_err(|error| SecretStoreError::BackendUnavailable {
                 backend: StorageBackend::OpenBao,
@@ -283,14 +266,14 @@ impl SecretStorePut for OpenBaoSecretStore {
         kind: CredentialKind,
         value: SecretString,
     ) -> Result<CredentialRef, Self::Error> {
-        let initial_ref = self.credential_ref(&scope, kind, CredentialVersion::initial())?;
+        let initial_ref = Self::credential_ref(&scope, kind, CredentialVersion::initial());
         let response: OpenBaoWriteResponse = self
             .send_json(
                 self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Data, &initial_ref)?))
                     .json(&OpenBaoWriteRequest::new(&value)),
             )
             .await?;
-        let credential = self.credential_ref(&scope, kind, response.data.version()?)?;
+        let credential = Self::credential_ref(&scope, kind, response.data.version()?);
         self.describe_stored(&credential).await;
         Ok(credential)
     }
@@ -412,14 +395,15 @@ impl SecretStoreMetadata for OpenBaoSecretStore {
 
         let fingerprint = fingerprint::digest(
             "openbao",
-            format!("{}#{}", self.metadata_path(credential), credential.version().get()),
+            format!("{}#{}", self.metadata_path(credential)?, credential.version().get()),
         )
         .map_err(|error| self.backend_error(error.to_string()))?;
+        let locator = StorageLocator::openbao(credential).map_err(|error| self.backend_error(error.to_string()))?;
 
         Ok(CredentialMetadata::new(
             credential.clone(),
             status,
-            StorageBackend::OpenBao,
+            locator,
             fingerprint,
         ))
     }

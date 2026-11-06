@@ -9,10 +9,9 @@ use super::{
     SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
 };
 use crate::credential::commands::domain::{
-    CredentialKind, CredentialMetadata, CredentialPath, CredentialRef, CredentialScope, CredentialStatus,
-    CredentialVersion, StorageBackend,
+    CredentialId, CredentialKind, CredentialMetadata, CredentialPath, CredentialRef, CredentialScope, CredentialStatus,
+    CredentialVersion, StorageBackend, StorageLocator, StorageLocatorError,
 };
-use crate::secret_store::openbao_secret_store::openbao_credential_id;
 
 #[derive(Clone, Default)]
 pub struct MockOpenBaoSecretStore {
@@ -32,23 +31,25 @@ struct MockOpenBaoVersion {
 }
 
 impl MockOpenBaoSecretStore {
-    pub fn data_path(credential: &CredentialRef) -> String {
-        format!("secret/data/{}", CredentialPath::from(credential))
+    pub fn data_path(credential: &CredentialRef) -> Result<String, StorageLocatorError> {
+        Ok(format!("secret/data/{}", Self::credential_path(credential)?))
     }
 
-    pub fn metadata_path(credential: &CredentialRef) -> String {
-        format!("secret/metadata/{}", CredentialPath::from(credential))
+    pub fn metadata_path(credential: &CredentialRef) -> Result<String, StorageLocatorError> {
+        Ok(format!("secret/metadata/{}", Self::credential_path(credential)?))
+    }
+
+    fn credential_path(credential: &CredentialRef) -> Result<CredentialPath, StorageLocatorError> {
+        Ok(CredentialPath::new(
+            credential.owner_id().clone(),
+            StorageLocator::openbao(credential)?,
+        ))
     }
 }
 
 impl MockOpenBaoSecretStoreState {
-    fn next_credential_ref(
-        &mut self,
-        scope: CredentialScope,
-        kind: CredentialKind,
-    ) -> Result<CredentialRef, SecretStoreError> {
-        let id = openbao_credential_id(&scope, kind)
-            .map_err(SecretStoreError::invalid_generated(StorageBackend::OpenBao))?;
+    fn next_credential_ref(&mut self, scope: CredentialScope, kind: CredentialKind) -> CredentialRef {
+        let id = CredentialId::derive(&scope, kind);
         let current = self
             .versions
             .keys()
@@ -57,7 +58,7 @@ impl MockOpenBaoSecretStoreState {
             .max();
         let version = current.map_or_else(CredentialVersion::initial, CredentialVersion::next);
 
-        Ok(CredentialRef::new(id, version, &scope, kind))
+        CredentialRef::new(id, version, &scope, kind)
     }
 }
 
@@ -71,7 +72,7 @@ impl SecretStorePut for MockOpenBaoSecretStore {
         value: SecretString,
     ) -> Result<CredentialRef, Self::Error> {
         let mut state = self.state.lock().await;
-        let credential = state.next_credential_ref(scope, kind)?;
+        let credential = state.next_credential_ref(scope, kind);
         let active_metadata = metadata(&credential, CredentialStatus::Active)?;
         for (stored_ref, stored) in &mut state.versions {
             if stored_ref.id() == credential.id() && stored.metadata.status() == CredentialStatus::Active {
@@ -215,16 +216,19 @@ fn metadata(credential: &CredentialRef, status: CredentialStatus) -> Result<Cred
         "openbao",
         format!(
             "{}#{}",
-            MockOpenBaoSecretStore::metadata_path(credential),
+            MockOpenBaoSecretStore::metadata_path(credential)
+                .map_err(SecretStoreError::invalid_generated(StorageBackend::OpenBao))?,
             credential.version().get()
         ),
     )
     .map_err(SecretStoreError::invalid_generated(StorageBackend::OpenBao))?;
+    let locator =
+        StorageLocator::openbao(credential).map_err(SecretStoreError::invalid_generated(StorageBackend::OpenBao))?;
 
     Ok(CredentialMetadata::new(
         credential.clone(),
         status,
-        StorageBackend::OpenBao,
+        locator,
         fingerprint,
     ))
 }

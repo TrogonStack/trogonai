@@ -1,19 +1,19 @@
 use std::fmt;
 
 use super::constants::{COLLECTION_SEGMENT, CREDENTIAL_PATH_SEGMENTS, ROOT_SEGMENT};
-use super::{CredentialId, CredentialOwnerId, CredentialRef};
+use super::{CredentialOwnerId, StorageLocator};
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CredentialPath {
     owner_id: CredentialOwnerId,
-    credential_id: CredentialId,
+    storage_locator: StorageLocator,
 }
 
 impl CredentialPath {
-    pub fn new(owner_id: CredentialOwnerId, credential_id: CredentialId) -> Self {
+    pub fn new(owner_id: CredentialOwnerId, storage_locator: StorageLocator) -> Self {
         Self {
             owner_id,
-            credential_id,
+            storage_locator,
         }
     }
 
@@ -22,21 +22,15 @@ impl CredentialPath {
             ROOT_SEGMENT,
             self.owner_id.as_str(),
             COLLECTION_SEGMENT,
-            self.credential_id.as_str(),
+            self.storage_locator.as_str(),
         ]
-    }
-}
-
-impl From<&CredentialRef> for CredentialPath {
-    fn from(credential: &CredentialRef) -> Self {
-        Self::new(credential.owner_id().clone(), credential.id().clone())
     }
 }
 
 impl fmt::Display for CredentialPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let [root, owner_id, collection, credential_id] = self.segments();
-        write!(f, "{root}/{owner_id}/{collection}/{credential_id}")
+        let [root, owner_id, collection, locator] = self.segments();
+        write!(f, "{root}/{owner_id}/{collection}/{locator}")
     }
 }
 

@@ -11,6 +11,7 @@ mod credential_path;
 mod credential_ref;
 mod credential_scope;
 mod credential_status;
+mod credential_stream_id;
 mod credential_version;
 mod injection_location;
 mod public_credential_id;
@@ -18,6 +19,7 @@ mod runtime_release_policy;
 mod runtime_service_id;
 mod source_kind;
 mod storage_backend;
+mod storage_locator;
 
 #[allow(unused_imports)]
 pub use allowed_host::{AllowedHost, AllowedHostError, AllowedHosts};
@@ -32,6 +34,7 @@ pub use credential_path::CredentialPath;
 pub use credential_ref::CredentialRef;
 pub use credential_scope::CredentialScope;
 pub use credential_status::CredentialStatus;
+pub use credential_stream_id::CredentialStreamId;
 pub use credential_version::{CredentialVersion, CredentialVersionError};
 #[allow(unused_imports)]
 pub use injection_location::{InjectionLocation, InjectionLocationError, InjectionLocations};
@@ -44,3 +47,4 @@ pub use runtime_release_policy::{
 pub use runtime_service_id::{AllowedRuntimeServices, RuntimeServiceId, RuntimeServiceIdError};
 pub use source_kind::SourceKind;
 pub use storage_backend::{StorageBackend, StorageBackendError};
+pub use storage_locator::{StorageLocator, StorageLocatorError};

@@ -1,28 +1,42 @@
 use std::fmt;
 use std::sync::Arc;
 
-use super::constants::MAX_CREDENTIAL_ID_LEN;
+use uuid::Uuid;
 
+use super::constants::{CREDENTIAL_ID_LEN, CREDENTIAL_ID_NAMESPACE};
+use super::{CredentialKind, CredentialScope};
+
+/// Opaque identity of a credential aggregate.
+///
+/// The value carries no owner, scope, kind, or storage backend: it is thirty-two
+/// lowercase hex digits. It is derived rather than random because a credential
+/// is addressed by `PublicCredentialId` (owner, scope, kind) and nothing keeps
+/// an index from that composite to a minted id, so the same slot has to yield
+/// the same id every time. The id is unique only within its project, which is
+/// why the aggregate's stream identity pairs it with the owner.
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CredentialId(Arc<str>);
 
 impl CredentialId {
+    pub fn derive(scope: &CredentialScope, kind: CredentialKind) -> Self {
+        let name = format!("{}\0{}\0{}", scope.owner_id(), scope.scope_key(), kind.as_str());
+        let uuid = Uuid::new_v5(&CREDENTIAL_ID_NAMESPACE, name.as_bytes());
+        Self(Arc::from(uuid.as_simple().to_string()))
+    }
+
     pub fn new(value: impl AsRef<str>) -> Result<Self, CredentialIdError> {
         let value = value.as_ref();
         let char_count = value.chars().count();
         if char_count == 0 {
             return Err(CredentialIdError::Empty);
         }
-        if char_count > MAX_CREDENTIAL_ID_LEN {
-            return Err(CredentialIdError::TooLong(char_count));
+        if char_count != CREDENTIAL_ID_LEN {
+            return Err(CredentialIdError::InvalidLength(char_count));
         }
         for ch in value.chars() {
-            if !is_credential_id_char(ch) {
+            if !matches!(ch, '0'..='9' | 'a'..='f') {
                 return Err(CredentialIdError::InvalidCharacter(ch));
             }
-        }
-        if value.split('/').any(|segment| matches!(segment, "." | "..")) {
-            return Err(CredentialIdError::DotSegment);
         }
         Ok(Self(Arc::from(value)))
     }
@@ -50,14 +64,8 @@ pub enum CredentialIdError {
     Empty,
     #[error("credential id contains invalid character '{0}'")]
     InvalidCharacter(char),
-    #[error("credential id exceeds maximum length: {0}")]
-    TooLong(usize),
-    #[error("credential id must not contain a dot path segment")]
-    DotSegment,
-}
-
-fn is_credential_id_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/')
+    #[error("credential id must be 32 characters, got {0}")]
+    InvalidLength(usize),
 }
 
 #[cfg(test)]

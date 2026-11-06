@@ -14,15 +14,15 @@ use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateS
 
 use super::domain::{
     CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind,
-    CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
-    SourceKind, StorageBackend,
+    CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialStreamId,
+    CredentialVersion, SourceKind, StorageBackend, StorageLocator,
 };
 use super::proto::{
     CredentialFieldInvalidError, CredentialProtoDecodeError, activated_to_proto, credential_metadata_to_proto_state,
-    credential_ref_to_proto, decode_active_state, decode_credential_metadata, decode_message_field,
-    decode_pending_write_state, decode_write_requested, destroy_failed_to_proto, destroy_requested_to_proto,
-    destroyed_to_proto, pending_write_to_proto_state, revoked_to_proto, rotated_to_proto, rotation_failed_to_proto,
-    rotation_requested_to_proto, write_failed_to_proto, write_requested_to_proto,
+    credential_ref_to_proto, decode_activated, decode_active_state, decode_pending_write_state, decode_write_requested,
+    destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, pending_write_to_proto_state,
+    revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
+    write_requested_to_proto,
 };
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 use super::state::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};
@@ -53,33 +53,40 @@ impl CredentialTestStore {
     }
 }
 
-impl StreamRead<str> for CredentialTestStore {
+impl StreamRead<CredentialStreamId> for CredentialTestStore {
     type Error = CredentialTestStoreError;
 
-    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+    async fn read_stream(
+        &self,
+        request: ReadStreamRequest<'_, CredentialStreamId>,
+    ) -> Result<ReadStreamResponse, Self::Error> {
         let start = match request.from {
             ReadFrom::Beginning => 1,
             ReadFrom::Position(position) => position.as_u64(),
         };
+        let stream_id = request.stream_id.to_string();
         let events = self.events.lock().unwrap();
         let stream_events = events
             .iter()
-            .filter(|event| event.stream_id() == request.stream_id && event.stream_position.as_u64() >= start)
+            .filter(|event| event.stream_id() == stream_id && event.stream_position.as_u64() >= start)
             .cloned()
             .collect();
         Ok(ReadStreamResponse {
-            current_position: current_position(&events, request.stream_id),
+            current_position: current_position(&events, &stream_id),
             events: stream_events,
         })
     }
 }
 
-impl StreamAppend<str> for CredentialTestStore {
+impl StreamAppend<CredentialStreamId> for CredentialTestStore {
     type Error = CredentialTestStoreError;
 
-    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+    async fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, CredentialStreamId>,
+    ) -> Result<AppendStreamResponse, Self::Error> {
         let mut events = self.events.lock().unwrap();
-        let current_position = current_position(&events, request.stream_id);
+        let current_position = current_position(&events, &request.stream_id.to_string());
         self.write_preconditions
             .lock()
             .unwrap()
@@ -122,8 +129,12 @@ fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).unwrap()
 }
 
+fn stream_id_of(credential_id: CredentialId) -> CredentialStreamId {
+    CredentialStreamId::new(owner_id(), credential_id)
+}
+
 fn credential_id() -> CredentialId {
-    CredentialId::new("openbao:tenant-1:github/primary:webhook_secret").unwrap()
+    CredentialId::derive(&scope(), CredentialKind::WebhookSecret)
 }
 
 fn owner_id() -> CredentialOwnerId {
@@ -156,7 +167,7 @@ fn active_metadata(credential_ref: CredentialRef) -> CredentialMetadata {
     CredentialMetadata::new(
         credential_ref,
         CredentialStatus::Active,
-        StorageBackend::OpenBao,
+        StorageLocator::new("openbao:tenant-1:github/primary:webhook_secret").unwrap(),
         fingerprint,
     )
 }
@@ -173,7 +184,7 @@ fn write_requested() -> proto::CredentialEvent {
 
 fn write_failed(reason: CredentialFailureReason) -> proto::CredentialEvent {
     proto::CredentialEvent {
-        event: Some(write_failed_to_proto(&credential_id(), &reason).into()),
+        event: Some(write_failed_to_proto(&stream_id_of(credential_id()), &reason).into()),
     }
 }
 
@@ -492,7 +503,10 @@ fn given_when_then_records_pending_write_failure() {
 
     TestCase::<RecordCredentialWriteFailure>::new()
         .given([write_requested()])
-        .when(RecordCredentialWriteFailure::new(credential_id(), reason.clone()))
+        .when(RecordCredentialWriteFailure::new(
+            stream_id_of(credential_id()),
+            reason.clone(),
+        ))
         .then([write_failed(reason)]);
 }
 
@@ -707,7 +721,7 @@ fn given_when_then_rejects_write_failure_without_a_pending_write() {
         .given([write_requested()])
         .given([activated(1)])
         .when(RecordCredentialWriteFailure::new(
-            credential_id(),
+            stream_id_of(credential_id()),
             CredentialFailureReason::secret_store_write_failed(),
         ))
         .then_error(CredentialDecideError::CredentialWriteNotPending {
@@ -809,7 +823,7 @@ fn evolve_rejects_restart_after_destroy_for_a_different_credential() {
         destroy_requested(1),
         destroyed(1),
     ]);
-    let other_id = CredentialId::new("openbao:tenant-1:github/secondary:webhook_secret").unwrap();
+    let other_id = CredentialId::derive(&integration_scope("secondary"), CredentialKind::WebhookSecret);
     let restart = proto::CredentialEvent {
         event: Some(
             write_requested_to_proto(
@@ -846,7 +860,10 @@ fn pending_write_keeps_the_requested_scope() {
 
 #[test]
 fn write_requested_round_trips_a_source_scope() {
-    let credential_id = CredentialId::new("memory:discord:bot_token:1").unwrap();
+    let credential_id = CredentialId::derive(
+        &CredentialScope::source(owner_id(), SourceKind::Discord),
+        CredentialKind::BotToken,
+    );
     let scope = CredentialScope::source(owner_id(), SourceKind::Discord);
 
     let event = write_requested_to_proto(&credential_id, &scope, CredentialKind::BotToken);
@@ -906,7 +923,7 @@ fn evolve_rejects_rotation_into_a_different_scope() {
 fn evolve_rejects_write_retry_for_a_different_credential() {
     let reason = CredentialFailureReason::new("openbao write failed").unwrap();
     let failed = rebuild_state_from_events([write_requested(), write_failed(reason)]);
-    let other_id = CredentialId::new("openbao:tenant-1:github/secondary:webhook_secret").unwrap();
+    let other_id = CredentialId::derive(&integration_scope("secondary"), CredentialKind::WebhookSecret);
     let retry = proto::CredentialEvent {
         event: Some(
             write_requested_to_proto(
@@ -969,11 +986,7 @@ fn event_codec_preserves_integration_scope_key() {
     let Some(CredentialEventCase::Activated(activated)) = decoded.event else {
         panic!("expected activated event");
     };
-    let metadata = decode_credential_metadata(
-        "metadata",
-        decode_message_field("metadata", &activated.metadata).unwrap(),
-    )
-    .unwrap();
+    let metadata = decode_activated(&activated).unwrap();
     assert_eq!(metadata.reference().scope_key(), "github/primary");
 }
 
@@ -1046,7 +1059,7 @@ fn event_codec_rejects_a_write_request_without_a_scope() {
 fn event_codec_rejects_scope_key_that_does_not_match_source() {
     let payload = proto::CredentialRotationRequested {
         credential_ref: MessageField::some(proto::CredentialRef {
-            id: "openbao:tenant-1:github/primary:webhook_secret".to_string(),
+            id: credential_id().as_str().to_string(),
             version: Some(1),
             owner_id: "tenant-1".to_string(),
             source: Some(proto::CredentialSource::CREDENTIAL_SOURCE_GITHUB.into()),
@@ -1077,11 +1090,11 @@ fn event_codec_rejects_scope_key_that_does_not_match_source() {
 }
 
 #[test]
-fn event_codec_rejects_activation_for_a_credential_id_with_an_unknown_storage_prefix() {
+fn event_codec_rejects_activation_with_an_unknown_storage_locator_prefix() {
     let payload = proto::CredentialActivated {
         metadata: MessageField::some(proto::CredentialMetadata {
             reference: MessageField::some(proto::CredentialRef {
-                id: "vault:tenant-1:github/primary:webhook_secret".to_string(),
+                id: credential_id().as_str().to_string(),
                 version: Some(1),
                 owner_id: "tenant-1".to_string(),
                 source: Some(proto::CredentialSource::CREDENTIAL_SOURCE_GITHUB.into()),
@@ -1091,6 +1104,7 @@ fn event_codec_rejects_activation_for_a_credential_id_with_an_unknown_storage_pr
             status: Some(proto::CredentialStatus::CREDENTIAL_STATUS_ACTIVE.into()),
             fingerprint: "vault:secret/metadata/webhook_secret".to_string(),
         }),
+        storage_locator: "vault:tenant-1:github/primary:webhook_secret".to_string(),
     }
     .encode_to_vec();
 
@@ -1110,7 +1124,7 @@ fn event_codec_rejects_activation_for_a_credential_id_with_an_unknown_storage_pr
         CredentialEvolveError::InvalidProto(CredentialProtoDecodeError::InvalidField {
             field,
             ..
-        }) if field == "metadata.reference.id"
+        }) if field == "storage_locator"
     ));
 }
 
@@ -1158,6 +1172,9 @@ fn event_codec_ignores_a_legacy_storage_backend_on_the_wire() {
     Tag::new(1, WireType::LengthDelimited).encode(&mut payload);
     encode_varint(metadata_bytes.len() as u64, &mut payload);
     payload.extend_from_slice(&metadata_bytes);
+    Tag::new(2, WireType::LengthDelimited).encode(&mut payload);
+    encode_varint(activated.storage_locator.len() as u64, &mut payload);
+    payload.extend_from_slice(activated.storage_locator.as_bytes());
 
     let decoded = <proto::CredentialEvent as EventDecode>::decode(EventData::new(
         <proto::CredentialActivated as buffa::MessageName>::FULL_NAME,
@@ -1170,12 +1187,8 @@ fn event_codec_ignores_a_legacy_storage_backend_on_the_wire() {
     let Some(CredentialEventCase::Activated(activated)) = decoded.event else {
         panic!("expected activated event");
     };
-    let metadata = decode_credential_metadata(
-        "metadata",
-        decode_message_field("metadata", &activated.metadata).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(metadata.storage_backend(), StorageBackend::OpenBao);
+    let metadata = decode_activated(&activated).unwrap();
+    assert_eq!(metadata.storage_locator().backend(), StorageBackend::OpenBao);
 }
 
 #[tokio::test]
@@ -1233,20 +1246,26 @@ struct ConcurrentReadStore {
     reads: tokio::sync::Barrier,
 }
 
-impl StreamRead<str> for ConcurrentReadStore {
+impl StreamRead<CredentialStreamId> for ConcurrentReadStore {
     type Error = CredentialTestStoreError;
 
-    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+    async fn read_stream(
+        &self,
+        request: ReadStreamRequest<'_, CredentialStreamId>,
+    ) -> Result<ReadStreamResponse, Self::Error> {
         let response = self.inner.read_stream(request).await?;
         self.reads.wait().await;
         Ok(response)
     }
 }
 
-impl StreamAppend<str> for ConcurrentReadStore {
+impl StreamAppend<CredentialStreamId> for ConcurrentReadStore {
     type Error = CredentialTestStoreError;
 
-    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+    async fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, CredentialStreamId>,
+    ) -> Result<AppendStreamResponse, Self::Error> {
         self.inner.append_stream(request).await
     }
 }

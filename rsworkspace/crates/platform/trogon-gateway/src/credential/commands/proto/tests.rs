@@ -42,10 +42,12 @@ const ALL_STATUSES: [CredentialStatus; 6] = [
     CredentialStatus::Destroyed,
 ];
 
-const ALL_BACKENDS: [(StorageBackend, &str); 3] = [
-    (StorageBackend::InMemory, "memory:tenant-1:webhook_secret"),
-    (StorageBackend::OpenBao, "openbao:tenant-1:webhook_secret"),
-    (StorageBackend::StaticConfig, "static-config:tenant-1:webhook_secret"),
+const OPENBAO_LOCATOR: &str = "openbao:tenant-1:github:webhook_secret";
+
+const ALL_LOCATORS: [&str; 3] = [
+    "memory:tenant-1:github:webhook_secret",
+    OPENBAO_LOCATOR,
+    "static-config:github:webhook_secret",
 ];
 
 fn owner_id() -> CredentialOwnerId {
@@ -54,7 +56,7 @@ fn owner_id() -> CredentialOwnerId {
 
 fn credential_ref(source: SourceKind, kind: CredentialKind) -> CredentialRef {
     CredentialRef::new(
-        CredentialId::new("openbao:tenant-1:webhook_secret").unwrap(),
+        CredentialId::derive(&CredentialScope::source(owner_id(), source), kind),
         CredentialVersion::initial(),
         &CredentialScope::source(owner_id(), source),
         kind,
@@ -65,18 +67,20 @@ fn default_ref() -> CredentialRef {
     credential_ref(SourceKind::GitHub, CredentialKind::WebhookSecret)
 }
 
-fn metadata(status: CredentialStatus, backend: StorageBackend, id: &str) -> CredentialMetadata {
-    let reference = CredentialRef::new(
-        CredentialId::new(id).unwrap(),
-        CredentialVersion::initial(),
-        &CredentialScope::source(owner_id(), SourceKind::GitHub),
-        CredentialKind::WebhookSecret,
-    );
+fn metadata(status: CredentialStatus, locator: &str) -> CredentialMetadata {
     CredentialMetadata::new(
-        reference,
+        default_ref(),
         status,
-        backend,
+        StorageLocator::new(locator).unwrap(),
         CredentialFingerprint::new("fingerprint").unwrap(),
+    )
+}
+
+fn decode_event_metadata(value: &CredentialMetadata) -> Result<CredentialMetadata, CredentialProtoDecodeError> {
+    decode_credential_metadata(
+        "metadata",
+        &credential_metadata_to_proto(value),
+        ("storage_locator", value.storage_locator().as_str()),
     )
 }
 
@@ -121,19 +125,16 @@ fn every_credential_kind_round_trips_through_the_wire_form() {
 #[test]
 fn every_credential_status_round_trips_through_event_metadata() {
     for status in ALL_STATUSES {
-        let expected = metadata(status, StorageBackend::OpenBao, "openbao:tenant-1:webhook_secret");
+        let expected = metadata(status, OPENBAO_LOCATOR);
 
-        assert_eq!(
-            decode_credential_metadata("metadata", &credential_metadata_to_proto(&expected)),
-            Ok(expected)
-        );
+        assert_eq!(decode_event_metadata(&expected), Ok(expected));
     }
 }
 
 #[test]
-fn every_storage_backend_round_trips_through_state_metadata() {
-    for (backend, id) in ALL_BACKENDS {
-        let expected = metadata(CredentialStatus::Active, backend, id);
+fn every_storage_locator_round_trips_through_state_metadata() {
+    for locator in ALL_LOCATORS {
+        let expected = metadata(CredentialStatus::Active, locator);
 
         assert_eq!(
             decode_credential_metadata_state("metadata", &credential_metadata_to_proto_state(&expected)),
@@ -148,18 +149,8 @@ fn unspecified_enums_are_rejected_with_the_field_that_carried_them() {
     source.source = Some(v1::CredentialSource::CREDENTIAL_SOURCE_UNSPECIFIED.into());
     let mut kind = credential_ref_to_proto(&default_ref());
     kind.kind = Some(v1::CredentialKind::CREDENTIAL_KIND_UNSPECIFIED.into());
-    let mut status = credential_metadata_to_proto(&metadata(
-        CredentialStatus::Active,
-        StorageBackend::OpenBao,
-        "openbao:tenant-1:webhook_secret",
-    ));
+    let mut status = credential_metadata_to_proto(&metadata(CredentialStatus::Active, OPENBAO_LOCATOR));
     status.status = Some(v1::CredentialStatus::CREDENTIAL_STATUS_UNSPECIFIED.into());
-    let mut backend = credential_metadata_to_proto_state(&metadata(
-        CredentialStatus::Active,
-        StorageBackend::OpenBao,
-        "openbao:tenant-1:webhook_secret",
-    ));
-    backend.storage_backend = Some(state_v1::StorageBackend::STORAGE_BACKEND_UNSPECIFIED.into());
 
     let unspecified = |field: &'static str, kind| CredentialProtoDecodeError::InvalidField {
         field: field.into(),
@@ -175,15 +166,8 @@ fn unspecified_enums_are_rejected_with_the_field_that_carried_them() {
         Err(unspecified("credential_ref.kind", UnspecifiedEnumKind::CredentialKind))
     );
     assert_eq!(
-        decode_credential_metadata("metadata", &status),
+        decode_credential_metadata("metadata", &status, ("storage_locator", OPENBAO_LOCATOR)),
         Err(unspecified("metadata.status", UnspecifiedEnumKind::CredentialStatus))
-    );
-    assert_eq!(
-        decode_credential_metadata_state("metadata", &backend),
-        Err(unspecified(
-            "metadata.storage_backend",
-            UnspecifiedEnumKind::StorageBackend
-        ))
     );
 }
 
@@ -193,7 +177,6 @@ fn decode_errors_render_the_field_and_the_unspecified_kind() {
         (UnspecifiedEnumKind::SourceKind, "source kind"),
         (UnspecifiedEnumKind::CredentialKind, "credential kind"),
         (UnspecifiedEnumKind::CredentialStatus, "credential status"),
-        (UnspecifiedEnumKind::StorageBackend, "storage backend"),
     ];
     for (kind, label) in kinds {
         assert_eq!(
@@ -219,16 +202,30 @@ fn event_metadata_names_the_missing_or_invalid_reference() {
         status: Some(v1::CredentialStatus::CREDENTIAL_STATUS_ACTIVE.into()),
         fingerprint: "fingerprint".to_string(),
     };
+    let locator = ("storage_locator", OPENBAO_LOCATOR);
 
     assert_eq!(
-        decode_credential_metadata("metadata", &missing),
+        decode_credential_metadata("metadata", &missing, locator),
         Err(CredentialProtoDecodeError::MissingField {
             field: "metadata.reference".into()
         })
     );
     assert_eq!(
-        decode_credential_metadata("metadata", &invalid),
+        decode_credential_metadata("metadata", &invalid, locator),
         Err(invalid_id_error("metadata.reference.id"))
+    );
+}
+
+#[test]
+fn event_metadata_names_an_invalid_storage_locator() {
+    let value = credential_metadata_to_proto(&metadata(CredentialStatus::Active, OPENBAO_LOCATOR));
+
+    assert_eq!(
+        decode_credential_metadata("metadata", &value, ("storage_locator", "")),
+        Err(CredentialProtoDecodeError::InvalidField {
+            field: "storage_locator".into(),
+            reason: CredentialFieldInvalidError::StorageLocator(StorageLocatorError::Empty),
+        })
     );
 }
 
@@ -249,9 +246,9 @@ fn event_decoders_name_an_invalid_credential_ref() {
             previous_credential_ref: invalid(),
             metadata: MessageField::some(credential_metadata_to_proto(&metadata(
                 CredentialStatus::Active,
-                StorageBackend::OpenBao,
-                "openbao:tenant-1:webhook_secret",
+                OPENBAO_LOCATOR,
             ))),
+            storage_locator: OPENBAO_LOCATOR.to_string(),
         }),
         Err(invalid_id_error("previous_credential_ref.id"))
     );
