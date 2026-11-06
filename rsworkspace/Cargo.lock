@@ -7499,6 +7499,7 @@ dependencies = [
  "trogon-audit",
  "trogon-nats",
  "trogon-std",
+ "trogon-workload-identity",
  "trogonai-proto",
  "x509-parser",
 ]
@@ -7803,15 +7804,20 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures",
+ "prost",
  "rcgen",
  "rustls",
  "sha2 0.11.1",
  "spiffe",
  "tempfile",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tokio-rustls",
+ "tokio-stream",
  "tokio-util",
+ "tonic",
+ "tonic-prost",
  "tracing",
  "x509-parser",
 ]
