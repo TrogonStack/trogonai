@@ -74,3 +74,8 @@ pub(crate) const AUDIT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const POLICY_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
 pub(crate) const DENIAL_AUDIT_TIMEOUT: Duration = Duration::from_secs(1);
 pub(crate) const MAX_SESSION_LIFETIME: Duration = Duration::from_secs(330);
+
+#[cfg(test)]
+pub(crate) const LIVE_POLICY_TEST_WAIT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+pub(crate) const LIVE_POLICY_TEST_POLL: Duration = Duration::from_millis(20);

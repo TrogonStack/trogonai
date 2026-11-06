@@ -1,4 +1,5 @@
 use std::fmt;
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 
 /// Where a policy snapshot came from. Every audit event names it, so a
@@ -7,13 +8,20 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PolicySource {
     /// An operator-authored file. Not a system of record, no revocation clock.
-    StaticFile { path: PathBuf },
+    StaticFile {
+        path: PathBuf,
+    },
+    NatsKv {
+        bucket: String,
+        incarnation: NonZeroU64,
+    },
 }
 
 impl PolicySource {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::StaticFile { .. } => "static_file",
+            Self::NatsKv { .. } => "nats_kv",
         }
     }
 }
@@ -22,6 +30,7 @@ impl fmt::Display for PolicySource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::StaticFile { path } => write!(f, "static_file:{}", path.display()),
+            Self::NatsKv { bucket, incarnation } => write!(f, "nats_kv:{bucket}:{incarnation}"),
         }
     }
 }

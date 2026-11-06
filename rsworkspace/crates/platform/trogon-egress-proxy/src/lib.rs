@@ -32,6 +32,7 @@ pub mod fault;
 pub mod first_record;
 pub mod host_name;
 pub mod limits;
+pub mod live_policy;
 pub mod mtls;
 pub mod peer_certificate;
 pub mod peer_identity;
@@ -48,3 +49,6 @@ pub use agent_id::AgentId;
 pub use config::{Args, Config};
 pub use runtime::{StartupError, start};
 pub use server::Server;
+
+#[cfg(test)]
+mod live_policy_tests;
