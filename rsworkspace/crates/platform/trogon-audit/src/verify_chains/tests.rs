@@ -103,7 +103,7 @@ fn continues_a_chain_from_its_trusted_head_and_opens_the_rest_at_genesis() {
 }
 
 #[test]
-fn the_later_of_two_trusted_heads_of_one_chain_is_used() {
+fn the_higher_trusted_head_of_one_chain_is_used_when_it_comes_last() {
     let mut builder = chain_builder();
     let records = valid_chain(&mut builder, 4);
     let older = verify_chain_range(builder.genesis(), records[..2].to_vec())
@@ -114,6 +114,22 @@ fn the_later_of_two_trusted_heads_of_one_chain_is_used() {
         .into_head();
 
     let verification = verify_chains([older, newer], vec![records[3].clone()]).unwrap();
+
+    assert!(verification.is_verified());
+}
+
+#[test]
+fn the_higher_trusted_head_of_one_chain_is_used_when_it_comes_first() {
+    let mut builder = chain_builder();
+    let records = valid_chain(&mut builder, 4);
+    let older = verify_chain_range(builder.genesis(), records[..2].to_vec())
+        .unwrap()
+        .into_head();
+    let newer = verify_chain_range(builder.genesis(), records[..3].to_vec())
+        .unwrap()
+        .into_head();
+
+    let verification = verify_chains([newer, older], vec![records[3].clone()]).unwrap();
 
     assert!(verification.is_verified());
 }

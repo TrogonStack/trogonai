@@ -2,6 +2,7 @@
 //! writers and their chains.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use buffa::Message;
 use trogonai_proto::platform::audit::v1::AuditRecord;
@@ -23,10 +24,11 @@ use crate::writer_id::WriterId;
 ///
 /// A chain continues from its head in `trusted` and otherwise must open with its
 /// genesis inside the range. When `trusted` holds two heads of one chain, the
-/// later one is used. A message is placed by the writer and chain its payload
-/// names, or by its `Trogon-Audit-Writer` and `Trogon-Audit-Chain` headers when
-/// the payload does not decode; the chain's own walk then checks it in full. The
-/// stream holds no order across writers, so none is checked.
+/// one with the higher sequence is used, whatever their order. A message is
+/// placed by the writer and chain its payload names, or by its
+/// `Trogon-Audit-Writer` and `Trogon-Audit-Chain` headers when the payload does
+/// not decode; the chain's own walk then checks it in full. The stream holds no
+/// order across writers, so none is checked.
 pub fn verify_chains(
     trusted: impl IntoIterator<Item = VerifiedChainHead>,
     records: impl IntoIterator<Item = StoredAuditRecord>,
@@ -54,8 +56,18 @@ pub fn verify_chains(
         return Err(ChainVerificationError::EmptyRange);
     }
 
-    let mut heads: HashMap<ChainKey, VerifiedChainHead> =
-        trusted.into_iter().map(|head| (head.key().clone(), head)).collect();
+    let mut heads: HashMap<ChainKey, VerifiedChainHead> = HashMap::new();
+    for head in trusted {
+        match heads.entry(head.key().clone()) {
+            Entry::Occupied(mut kept) if head.sequence() > kept.get().sequence() => {
+                kept.insert(head);
+            }
+            Entry::Occupied(_) => {}
+            Entry::Vacant(slot) => {
+                slot.insert(head);
+            }
+        }
+    }
     let chains = partitions
         .into_iter()
         .map(|(key, records)| {
