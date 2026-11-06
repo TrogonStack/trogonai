@@ -73,3 +73,34 @@ impl fmt::Display for AuthAccount {
         f.write_str(&self.0)
     }
 }
+
+/// An account public key a verifier accepts as the issuer of a minted user JWT.
+///
+/// Holds no seed: a process that only checks tokens is given this and never the
+/// signing key that mints them.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IssuerPublicKey(String);
+
+impl IssuerPublicKey {
+    pub fn parse(raw: &str) -> Result<Self, AccountPublicKeyError> {
+        account_public_key(raw).map(Self)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for IssuerPublicKey {
+    type Err = AccountPublicKeyError;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Self::parse(raw)
+    }
+}
+
+impl fmt::Display for IssuerPublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}

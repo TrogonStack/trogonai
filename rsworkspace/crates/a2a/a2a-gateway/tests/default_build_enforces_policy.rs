@@ -94,7 +94,10 @@ impl Drop for GatewayTask {
 fn gateway_env(bundle_dir: &Path) -> Result<InMemoryEnv, FixtureError> {
     let env = InMemoryEnv::new();
     env.set("NATS_TLS_DISABLED", "true");
-    env.set("AUTH_CALLOUT_SIGNING_SECRET", nkeys::KeyPair::new_account().seed()?);
+    env.set(
+        "A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS",
+        nkeys::KeyPair::new_account().public_key(),
+    );
     env.set("A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED", "true");
     env.set("A2A_GATEWAY_TIER1_BUNDLE_DIR", bundle_dir.to_string_lossy());
     env.set("A2A_GATEWAY_AUDIT_PUBLISH", "true");

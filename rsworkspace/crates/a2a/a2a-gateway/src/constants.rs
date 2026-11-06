@@ -65,6 +65,7 @@ pub(crate) const RETRY_BASE_DELAY: Duration = Duration::from_millis(100);
 // --- ingress_identity.rs ---
 
 pub const ENV_GATEWAY_JWT_AUDIENCE: &str = "A2A_GATEWAY_JWT_AUDIENCE";
+pub const ENV_GATEWAY_CALLER_JWT_ISSUER_KEYS: &str = "A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS";
 
 // --- runtime/dispatch.rs ---
 

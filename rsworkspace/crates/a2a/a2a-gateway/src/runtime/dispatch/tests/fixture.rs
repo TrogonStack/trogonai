@@ -3,8 +3,8 @@ use std::time::{Duration, SystemTime};
 
 use a2a_auth_callout::jwt::ExternalSubject;
 use a2a_auth_callout::{
-    AccountName, CallerId, CallerJwtHeaderValue, IssuedPermissions, KeyVersion, NkeyPublic, SigningKeySource,
-    StaticSigningKeySource, UserJwtClaims, UserJwtSubject,
+    AccountName, CallerId, CallerJwtHeaderValue, IssuedPermissions, IssuerPublicKeys, KeyVersion, NkeyPublic,
+    SigningKeySource, StaticSigningKeySource, UserJwtClaims, UserJwtSubject,
 };
 use a2a_nats::A2aAgentId;
 use a2a_nats::catalog::agent_view::AgentViewCheckOutcome;
@@ -71,6 +71,8 @@ pub enum FixtureError {
     KeyVersion(#[from] a2a_auth_callout::KeyVersionError),
     #[error("signing key source failed: {0}")]
     AuthCallout(#[from] a2a_auth_callout::AuthCalloutError),
+    #[error("issuer public keys failed: {0}")]
+    IssuerKeys(#[from] a2a_auth_callout::IssuerPublicKeysError),
     #[error("caller JWT minting failed: {0}")]
     Jwt(#[from] a2a_auth_callout::jwt::JwtError),
     #[error("NATS subscription failed: {0}")]
@@ -162,11 +164,13 @@ impl<S> DispatchFixture<S> {
             },
             &env,
         )?;
-        let signing = Arc::new(StaticSigningKeySource::new(
-            &nkeys::KeyPair::new_account().seed()?,
-            KeyVersion::new("test")?,
-        )?);
-        let caller_jwt = ForwardedCallerJwtVerifier::new(signing.clone(), AccountName::new(GATEWAY_AUDIENCE));
+        let issuer = nkeys::KeyPair::new_account();
+        let signing = Arc::new(StaticSigningKeySource::new(&issuer.seed()?, KeyVersion::new("test")?)?);
+        // The gateway verifies against the public key alone; the seed stays with the minting side.
+        let caller_jwt = ForwardedCallerJwtVerifier::new(
+            Arc::new(IssuerPublicKeys::parse(&issuer.public_key())?),
+            AccountName::new(GATEWAY_AUDIENCE),
+        );
         let agents = client.subscribe("a2a.v1.agents.>").await?;
         let replies = client.subscribe("_INBOX.dispatch").await?;
         let audits = client.subscribe("a2a.v1.audit.>").await?;

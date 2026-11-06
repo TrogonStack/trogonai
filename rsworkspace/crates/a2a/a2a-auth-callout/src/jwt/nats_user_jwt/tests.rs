@@ -105,7 +105,7 @@ fn minted_jwt_has_nats_header_and_verifies() {
     assert_eq!(payload["nats"]["pub"]["allow"][0], "a2a.v1.gateway.>");
 
     let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
-    let verified = verify_with_material(token.as_str(), &handle.minting_material()).unwrap();
+    let verified = verify_with_key(token.as_str(), &handle.verifying_key()).unwrap();
     assert_eq!(verified.caller_id.as_str(), "caller1");
     assert_eq!(verified.principal_kind, PrincipalKind::Service);
     assert_eq!(verified.aud.as_str(), "tenant-acme");
@@ -126,7 +126,7 @@ fn verify_with_material_returns_the_principal_kind_that_was_minted() {
             Duration::from_secs(60),
         );
 
-        let verified = verify_with_material(token.as_str(), &handle.minting_material()).unwrap();
+        let verified = verify_with_key(token.as_str(), &handle.verifying_key()).unwrap();
 
         assert_eq!(verified.principal_kind, kind);
     }
@@ -147,7 +147,7 @@ fn verify_with_material_never_defaults_a_missing_principal_kind() {
         payload.as_object_mut().unwrap().remove("principal_kind");
     });
     let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
-    let err = verify_with_material(stripped.as_str(), &handle.minting_material()).unwrap_err();
+    let err = verify_with_key(stripped.as_str(), &handle.verifying_key()).unwrap_err();
     assert!(decode_err_contains(err, "principal_kind"));
 }
 
@@ -166,7 +166,7 @@ fn verify_with_material_rejects_a_principal_kind_outside_the_closed_set() {
         payload["principal_kind"] = json!("user");
     });
     let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
-    let err = verify_with_material(tampered.as_str(), &handle.minting_material()).unwrap_err();
+    let err = verify_with_key(tampered.as_str(), &handle.verifying_key()).unwrap_err();
     assert!(matches!(
         err,
         JwtError::InvalidPrincipalKind(PrincipalKindError::Unknown)
@@ -283,7 +283,7 @@ fn verify_nats_user_jwt_returns_last_verification_error() {
 fn verify_with_material_rejects_invalid_segment_count() {
     let (material, issuer_seed, _, _) = fixture_material();
     let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
-    let err = verify_with_material("only.two", &handle.minting_material()).unwrap_err();
+    let err = verify_with_key("only.two", &handle.verifying_key()).unwrap_err();
     assert!(decode_err_contains(err, "invalid JWT segment count"));
 }
 
@@ -302,7 +302,7 @@ fn verify_with_material_rejects_unsupported_header() {
         header.header_type = "JWS".into();
     });
     let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
-    let err = verify_with_material(tampered.as_str(), &handle.minting_material()).unwrap_err();
+    let err = verify_with_key(tampered.as_str(), &handle.verifying_key()).unwrap_err();
     assert!(decode_err_contains(err, "unsupported NATS user JWT header"));
 }
 
@@ -321,7 +321,7 @@ fn verify_with_material_rejects_issuer_mismatch() {
         payload["iss"] = json!("wrong-issuer");
     });
     let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
-    let err = verify_with_material(tampered.as_str(), &handle.minting_material()).unwrap_err();
+    let err = verify_with_key(tampered.as_str(), &handle.verifying_key()).unwrap_err();
     assert!(decode_err_contains(err, "issuer does not match signing key"));
 }
 
@@ -340,7 +340,7 @@ fn verify_with_material_falls_back_to_spicedb_subject_without_ext_sub() {
         payload.as_object_mut().unwrap().remove("ext_sub");
     });
     let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
-    let verified = verify_with_material(legacy.as_str(), &handle.minting_material()).unwrap();
+    let verified = verify_with_key(legacy.as_str(), &handle.verifying_key()).unwrap();
     assert_eq!(verified.sub.as_str(), "user/alice");
 }
 
@@ -360,7 +360,7 @@ fn verify_with_material_rejects_missing_external_subject() {
         payload["data"] = json!({});
     });
     let handle = SigningKeyHandle::new(material.version().clone(), SigningKey::from_seed(&issuer_seed).unwrap());
-    let err = verify_with_material(stripped.as_str(), &handle.minting_material()).unwrap_err();
+    let err = verify_with_key(stripped.as_str(), &handle.verifying_key()).unwrap_err();
     assert!(decode_err_contains(err, "missing ext_sub / spicedb_subject"));
 }
 

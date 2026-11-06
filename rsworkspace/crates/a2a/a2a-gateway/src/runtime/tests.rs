@@ -53,8 +53,8 @@ async fn startup_preserves_enabled_policy_configuration_failures() {
         let env = InMemoryEnv::new();
         env.set("NATS_TLS_DISABLED", "true");
         env.set(
-            "AUTH_CALLOUT_SIGNING_SECRET",
-            nkeys::KeyPair::new_account().seed().unwrap(),
+            "A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS",
+            nkeys::KeyPair::new_account().public_key(),
         );
         env.set(*setting, "true");
         let error = run_with_args(
@@ -79,8 +79,8 @@ async fn enabled_spicedb_tier1_is_a_startup_error_in_the_default_build() {
     let env = InMemoryEnv::new();
     env.set("NATS_TLS_DISABLED", "true");
     env.set(
-        "AUTH_CALLOUT_SIGNING_SECRET",
-        nkeys::KeyPair::new_account().seed().unwrap(),
+        "A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS",
+        nkeys::KeyPair::new_account().public_key(),
     );
     env.set("A2A_GATEWAY_TIER1_SPICEDB_ENABLED", "true");
     let error = run_with_args(
@@ -122,8 +122,8 @@ async fn run_with_args_preserves_subscription_error_source() {
     let env = InMemoryEnv::new();
     env.set("NATS_TLS_DISABLED", "true");
     env.set(
-        "AUTH_CALLOUT_SIGNING_SECRET",
-        nkeys::KeyPair::new_account().seed().expect("account signing seed"),
+        "A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS",
+        nkeys::KeyPair::new_account().public_key(),
     );
     let args = Args {
         nats_url: server.address().to_owned(),
