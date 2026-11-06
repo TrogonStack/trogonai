@@ -1,0 +1,34 @@
+[package]
+name = "trogon-workload-registration"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Governed scoped workload registration publication"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true }
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+bs58 = "=0.5.1"
+bytes = { workspace = true }
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
+spiffe = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+trogon-audit = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
+trogon-workload-identity = { workspace = true }
+trogonai-proto = { workspace = true, features = ["audit"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-audit = { workspace = true, features = ["test-support"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }
