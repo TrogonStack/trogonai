@@ -1,6 +1,8 @@
 #[path = "live_policy_runtime/constants.rs"]
 mod constants;
 mod support;
+#[path = "live_policy_runtime/workload_identity.rs"]
+mod workload_identity;
 
 use std::error::Error;
 use std::io;
