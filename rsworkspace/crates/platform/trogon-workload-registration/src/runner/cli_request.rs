@@ -3,7 +3,12 @@ use super::configuration_wire::ConfigurationWire;
 use super::operation::Operation;
 
 #[derive(clap::Parser)]
-#[command(version, about = "Protected scoped registration administration")]
+#[command(
+    name = "trogon-workload-registration",
+    bin_name = "trogon-workload-registration",
+    version,
+    about = "Protected scoped registration administration"
+)]
 pub(super) struct CliRequest {
     #[command(subcommand)]
     command: CommandWire,
