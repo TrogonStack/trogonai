@@ -29,6 +29,12 @@ impl DenialPublisherConfig {
     }
 }
 
+/// The queue group every callout replica joins, operator-overridable and
+/// shared by the server callout and the bridge mint subscriptions.
+pub(crate) fn queue_group(env: &impl ReadEnv) -> String {
+    ReadEnv::var(env, "AUTH_CALLOUT_QUEUE_GROUP").unwrap_or_else(|_| "a2a-auth-callout".to_string())
+}
+
 /// Subscriber loop that listens on `$SYS.REQ.USER.AUTH` and delegates each
 /// request to the injected `AuthDispatcher`.
 pub struct Subscriber<D> {
@@ -54,7 +60,7 @@ impl<D: AuthDispatcher> Subscriber<D> {
         // server request and producing unpredictable client connect outcomes.
         // The queue name is operator-overridable but defaults to a constant
         // so two callout deployments at the same scope share it.
-        let queue = ReadEnv::var(env, "AUTH_CALLOUT_QUEUE_GROUP").unwrap_or_else(|_| "a2a-auth-callout".to_string());
+        let queue = queue_group(env);
         let mut sub = self
             .client
             .queue_subscribe(AUTH_CALLOUT_SUBJECT, queue)

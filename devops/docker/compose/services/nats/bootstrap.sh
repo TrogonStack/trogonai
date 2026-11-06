@@ -28,6 +28,9 @@ CALLOUT_MOUNT=/run/secrets/nats
 # The gateway verifies the user JWTs the callout mints for tenant DEV, so its
 # gateway.env names that tenant's issuer public key. It never holds the seed.
 GATEWAY_DIR="$CLIENTS_DIR/a2a-gateway"
+# The subject an a2a-bridge sends its mint requests to and the callout answers
+# on. It is the default of both, so neither sets AUTH_CALLOUT_MINT_SUBJECT.
+BRIDGE_MINT_SUBJECT=a2a.bridge.auth.callout.request
 
 umask 077
 
@@ -90,10 +93,13 @@ ensure_jetstream() {
   fi
 }
 
+# Any further arguments are nsc permission flags, applied when the user is
+# created. A user that already exists keeps the permissions it was issued with.
 ensure_user() {
   account=$1 name=$2 owner=$3
+  shift 3
   if [ ! -f "$STORE/accounts/$account/users/$name.jwt" ]; then
-    nsc add user --account "$account" --name "$name" --private-key "$(account_signing_key "$account")"
+    nsc add user --account "$account" --name "$name" --private-key "$(account_signing_key "$account")" "$@"
   fi
   dir="$CLIENTS_DIR/$name"
   mkdir -p "$dir"
@@ -101,6 +107,25 @@ ensure_user() {
   chown "$owner" "$dir" "$dir/nats.creds"
   chmod 0700 "$dir"
   chmod 0400 "$dir/nats.creds"
+}
+
+# The bridge's mint request crosses from PLATFORM into AUTH as a service. AUTH
+# exports it privately, so only an account holding an activation token for
+# PLATFORM can import it, and PLATFORM imports it under the same subject.
+# Replies travel back through the service on their own.
+ensure_bridge_mint_exchange() {
+  if [ "$(nsc describe account --name AUTH --json |
+    jq --arg subject "$BRIDGE_MINT_SUBJECT" '[.nats.exports // [] | .[] | select(.subject == $subject)] | length')" -eq 0 ]; then
+    nsc add export --account AUTH --name bridge-mint --subject "$BRIDGE_MINT_SUBJECT" --service --private
+  fi
+  if [ "$(nsc describe account --name PLATFORM --json |
+    jq --arg subject "$BRIDGE_MINT_SUBJECT" '[.nats.imports // [] | .[] | select(.subject == $subject)] | length')" -eq 0 ]; then
+    token=$(mktemp)
+    nsc generate activation --account AUTH --target-account "$(account_key PLATFORM)" \
+      --subject "$BRIDGE_MINT_SUBJECT" --output-file "$token"
+    nsc add import --account PLATFORM --name bridge-mint --token "$token" --service
+    rm -f "$token"
+  fi
 }
 
 # The identity of every client that presents no user JWT. It may neither
@@ -144,9 +169,21 @@ for account in PLATFORM DEV; do
   ensure_jetstream "$account"
 done
 
-# account, user name, and the uid the consuming image runs as.
+ensure_bridge_mint_exchange
+
+# account, user name, and the uid the consuming image runs as. Only the bridge
+# may publish a mint request, and no PLATFORM user may subscribe to the subject,
+# so nothing in PLATFORM can read the requests or race the callout's answer.
+# AUTH holds no user but the callout and the sentinel, which may not subscribe,
+# so the callout is the only one that can answer.
 while read -r account name owner; do
-  ensure_user "$account" "$name" "$owner"
+  case "$account/$name" in
+    PLATFORM/a2a-bridge) ensure_user "$account" "$name" "$owner" --deny-sub "$BRIDGE_MINT_SUBJECT" ;;
+    PLATFORM/*)
+      ensure_user "$account" "$name" "$owner" --deny-pub "$BRIDGE_MINT_SUBJECT" --deny-sub "$BRIDGE_MINT_SUBJECT"
+      ;;
+    *) ensure_user "$account" "$name" "$owner" ;;
+  esac
 done <<'USERS'
 SYS sys 0
 AUTH auth-callout 1000
@@ -159,6 +196,7 @@ PLATFORM mcp-nats 0
 PLATFORM channel-bridge-telegram 0
 PLATFORM nats-cli 0
 PLATFORM kv-provisioner 0
+PLATFORM audit-provisioner 0
 USERS
 
 ensure_sentinel
@@ -227,7 +265,9 @@ A2A_GATEWAY_JWT_AUDIENCE=$(account_key DEV)
 GATEWAY
 install_env_file "$GATEWAY_DIR/gateway.env"
 
-printf 'AUTH_CALLOUT_XKEY_PUBLIC=%s\n' "$xkey" > "$CLIENTS_DIR/a2a-bridge/bridge.env"
+# The callout mints the bridge's users into this tenant, and a request that
+# names none is refused.
+printf 'AUTH_CALLOUT_XKEY_PUBLIC=%s\nBRIDGE_TENANT_ACCOUNT=%s\n' "$xkey" "$(account_key DEV)" > "$CLIENTS_DIR/a2a-bridge/bridge.env"
 install_env_file "$CLIENTS_DIR/a2a-bridge/bridge.env"
 
 for account in SYS AUTH PLATFORM DEV; do
