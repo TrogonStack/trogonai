@@ -38,8 +38,12 @@ pub struct Integrity {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub previous_hash: ::core::option::Option<::buffa::alloc::vec::Vec<u8>>,
-    /// SHA-256 over the deterministic encoding of the record with this field
-    /// empty.
+    /// SHA-256 over the exact encoded bytes of the record with this field absent.
+    ///
+    /// The writer appends it after those bytes as a second occurrence of the
+    /// record's integrity field, which every protobuf decoder merges here. A
+    /// verifier strips that trailer and hashes the bytes before it, so the stored
+    /// bytes are hashed as they are and never re-serialized.
     ///
     /// Field 4: `record_hash`
     #[serde(
@@ -49,6 +53,17 @@ pub struct Integrity {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub record_hash: ::core::option::Option<::buffa::alloc::vec::Vec<u8>>,
+    /// The chain the record belongs to, a UUIDv7. Every process start begins a new
+    /// chain under the same writer id, so a chain is named by writer id and chain
+    /// id together. It also rides in the Trogon-Audit-Chain header.
+    ///
+    /// Field 5: `chain_id`
+    #[serde(
+        rename = "chainId",
+        alias = "chain_id",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub chain_id: ::core::option::Option<::buffa::alloc::string::String>,
 }
 impl ::core::fmt::Debug for Integrity {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -57,6 +72,7 @@ impl ::core::fmt::Debug for Integrity {
             .field("sequence", &self.sequence)
             .field("previous_hash", &self.previous_hash)
             .field("record_hash", &self.record_hash)
+            .field("chain_id", &self.chain_id)
             .finish()
     }
 }
@@ -88,6 +104,16 @@ impl Integrity {
         self.record_hash = Some(value.into());
         self
     }
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::chain_id`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_chain_id(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.chain_id = Some(value.into());
+        self
+    }
 }
 ::buffa::impl_default_instance!(Integrity);
 impl ::buffa::MessageName for Integrity {
@@ -117,6 +143,9 @@ impl ::buffa::Message for Integrity {
         if let Some(ref v) = self.record_hash {
             size += 1u64 + ::buffa::types::bytes_encoded_len(v) as u64;
         }
+        if let Some(ref v) = self.chain_id {
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -133,6 +162,9 @@ impl ::buffa::Message for Integrity {
         }
         if let Some(ref v) = self.record_hash {
             ::buffa::types::put_shared_bytes_field(4u32, v, buf);
+        }
+        if let Some(ref v) = self.chain_id {
+            ::buffa::types::put_string_field(5u32, v, buf);
         }
     }
     fn merge_field(
@@ -180,6 +212,18 @@ impl ::buffa::Message for Integrity {
                     buf,
                 )?;
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(
+                    self
+                        .chain_id
+                        .get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -191,6 +235,7 @@ impl ::buffa::Message for Integrity {
         self.sequence = 0u64;
         self.previous_hash = ::core::option::Option::None;
         self.record_hash = ::core::option::Option::None;
+        self.chain_id = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for Integrity {

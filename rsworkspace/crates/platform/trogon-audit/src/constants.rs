@@ -29,6 +29,7 @@ pub const TERMINAL_SIGNED: &str = "signed";
 /// Provenance travels in headers, never in payload fields (ADR#0039).
 pub const HEADER_WRITER: &str = "Trogon-Audit-Writer";
 pub const HEADER_SEQUENCE: &str = "Trogon-Audit-Seq";
+pub const HEADER_CHAIN: &str = "Trogon-Audit-Chain";
 
 /// Longest name a record may carry. A target, a resource name or a host is a
 /// name; content does not fit in this and is rejected on character set first.
@@ -52,6 +53,29 @@ pub const NAME_PUNCTUATION: &str = "._:/@+-[]";
 pub const CONSISTENCY_TOKEN_PUNCTUATION: &str = "+/=-_.:~";
 
 pub const RECORD_ID_UUID_VERSION: usize = 7;
+pub const CHAIN_ID_UUID_VERSION: usize = 7;
+
+/// A record hash is a SHA-256 digest.
+pub const RECORD_HASH_BYTES: usize = 32;
+
+const PROTOBUF_WIRE_TYPE_LENGTH_DELIMITED: u8 = 2;
+/// `AuditRecord.integrity`.
+const AUDIT_RECORD_INTEGRITY_FIELD: u8 = 12;
+/// `Integrity.record_hash`.
+const INTEGRITY_RECORD_HASH_FIELD: u8 = 4;
+/// The record hash as a length-delimited `Integrity.record_hash`: tag and length.
+const RECORD_HASH_FIELD_HEADER_BYTES: usize = 2;
+
+/// The bytes that open a sealed record's trailer: a second `AuditRecord.integrity`
+/// holding only `record_hash`, as one-byte tags and one-byte lengths. A decoder
+/// merges it into the record's integrity.
+pub const SEAL_TRAILER_PREFIX: [u8; 4] = [
+    (AUDIT_RECORD_INTEGRITY_FIELD << 3) | PROTOBUF_WIRE_TYPE_LENGTH_DELIMITED,
+    (RECORD_HASH_FIELD_HEADER_BYTES + RECORD_HASH_BYTES) as u8,
+    (INTEGRITY_RECORD_HASH_FIELD << 3) | PROTOBUF_WIRE_TYPE_LENGTH_DELIMITED,
+    RECORD_HASH_BYTES as u8,
+];
+pub const SEAL_TRAILER_BYTES: usize = SEAL_TRAILER_PREFIX.len() + RECORD_HASH_BYTES;
 
 /// A lost ack is retried inside the stream's duplicate window (two minutes), so
 /// three attempts of a couple of seconds stay well within it.
