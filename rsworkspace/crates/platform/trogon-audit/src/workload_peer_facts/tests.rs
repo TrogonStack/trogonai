@@ -1,4 +1,4 @@
-use buffa::{EnumValue, MessageField};
+use buffa::{EnumValue, Message, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use trogonai_proto::platform::audit::v1::audit_actor::Unattributed;
 use trogonai_proto::platform::audit::v1::audit_record::Detail;
@@ -291,4 +291,16 @@ async fn stored_workload_decisions_verify_and_refuse_rehashed_identity_confusion
             Err(ChainVerificationError::SubjectMismatch { stream_sequence: 2 })
         );
     }
+}
+
+
+#[test]
+fn workload_peer_facts_reject_unknown_timestamp_bytes() {
+    let mut message = peer();
+    let mut bytes = message.peer_path_expires_at.encode_to_vec();
+    bytes.extend_from_slice(&[0x7a, 1, b'A']);
+    let timestamp = Timestamp::decode_from_slice(&bytes).unwrap();
+    assert!(!timestamp.__buffa_unknown_fields.is_empty());
+    message.peer_path_expires_at = MessageField::some(timestamp);
+    assert_eq!(WorkloadPeerEvidenceFacts::try_from(message), Err(WorkloadPeerFactsError::Validity));
 }

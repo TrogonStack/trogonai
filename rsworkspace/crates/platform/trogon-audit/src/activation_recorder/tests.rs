@@ -1,4 +1,4 @@
-use buffa::{EnumValue, MessageField};
+use buffa::{EnumValue, Message, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use trogonai_proto::platform::audit::v1::AuditClass;
 use trogonai_proto::platform::audit::v1::audit_record::Detail;
@@ -336,4 +336,16 @@ async fn offline_verification_refuses_resealed_activation_authority_confusion() 
             Err(ChainVerificationError::SubjectMismatch { stream_sequence: 2 })
         );
     }
+}
+
+
+#[test]
+fn activation_facts_reject_unknown_timestamp_bytes() {
+    let mut message = activation();
+    let mut bytes = message.expires_at.encode_to_vec();
+    bytes.extend_from_slice(&[0x7a, 1, b'A']);
+    let timestamp = Timestamp::decode_from_slice(&bytes).unwrap();
+    assert!(!timestamp.__buffa_unknown_fields.is_empty());
+    message.expires_at = MessageField::some(timestamp);
+    assert_eq!(CredentialActivationFacts::try_from(message), Err(ActivationFactsError::Validity));
 }
