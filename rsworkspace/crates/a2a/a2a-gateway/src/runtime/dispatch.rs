@@ -635,16 +635,34 @@ async fn dispatch_routed<E: ReadEnv>(
         None
     };
 
-    let disposition = forward_to_agent(
-        client,
-        env,
-        agent_subject.as_str(),
-        method_dots.as_str(),
-        reply.clone(),
-        headers_owned.clone(),
-        payload.clone(),
-    )
-    .await;
+    let disposition = if reply.as_str().starts_with("_R_.") {
+        let request = async_nats::Request::new()
+            .headers(headers_owned.clone())
+            .payload(payload.clone());
+        match crate::runtime::imported_reply_relay::IMPORTED_REPLY_RELAY.forward(
+            client.clone(),
+            agent_subject.clone().into(),
+            reply.clone(),
+            request,
+            unary_deadline_for_method(env, method_dots.as_str())
+                .unwrap_or(a2a_nats::constants::DEFAULT_OPERATION_TIMEOUT),
+            shutdown.clone(),
+        ) {
+            Ok(()) => ForwardDisposition::Ok,
+            Err(error) => ForwardDisposition::Publish(error.into()),
+        }
+    } else {
+        forward_to_agent(
+            client,
+            env,
+            &agent_subject,
+            method_dots.as_str(),
+            reply.clone(),
+            headers_owned.clone(),
+            payload.clone(),
+        )
+        .await
+    };
 
     let (rewrites, stream_consumer) = merge_forward_audit_rewrites(
         &tier3_rewrites,
@@ -965,7 +983,15 @@ fn owner_tuple_for_message_send(
 enum ForwardDisposition {
     Ok,
     Deadline,
-    Publish(async_nats::client::PublishError),
+    Publish(ForwardError),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ForwardError {
+    #[error(transparent)]
+    Publish(#[from] async_nats::client::PublishError),
+    #[error(transparent)]
+    Capacity(#[from] tokio::sync::TryAcquireError),
 }
 
 async fn forward_to_agent<E: ReadEnv>(
@@ -986,7 +1012,7 @@ async fn forward_to_agent<E: ReadEnv>(
         .await
         {
             Ok(Ok(())) => ForwardDisposition::Ok,
-            Ok(Err(err)) => ForwardDisposition::Publish(err),
+            Ok(Err(err)) => ForwardDisposition::Publish(err.into()),
             Err(_elapsed) => ForwardDisposition::Deadline,
         },
         None => match client
@@ -994,7 +1020,7 @@ async fn forward_to_agent<E: ReadEnv>(
             .await
         {
             Ok(()) => ForwardDisposition::Ok,
-            Err(err) => ForwardDisposition::Publish(err),
+            Err(err) => ForwardDisposition::Publish(err.into()),
         },
     }
 }

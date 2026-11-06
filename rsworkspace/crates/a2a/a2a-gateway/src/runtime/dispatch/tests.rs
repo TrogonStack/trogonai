@@ -303,7 +303,7 @@ async fn owner_write_failure_preserves_authorized_forwarding() -> TestResult {
     let mut fixture = DispatchFixture::new().await?;
     fixture.tier1 = Arc::new(RecordingTier1::new(Tier1AuthorizeOutcome::Allowed { zed_token: None }));
     let owner = Arc::new(RecordingOwner {
-        failure: Some(OwnerEmitError::new("test outage")),
+        failure: std::sync::Mutex::new(Some(OwnerEmitError::new(std::io::Error::other("test outage")))),
         ..Default::default()
     });
     fixture.owner = Some(owner.clone());

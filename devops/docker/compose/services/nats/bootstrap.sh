@@ -11,6 +11,7 @@
 # only in the callout's own directory and never in nsc's keystore.
 set -eu
 
+# shellcheck source=install-seed.sh
 . /bootstrap/install-seed.sh
 
 SECRETS=/secrets
@@ -200,6 +201,52 @@ USERS
 
 ensure_sentinel
 
+# The server binds tenant traffic to its account key before PLATFORM sees it.
+platform_key=$(account_key PLATFORM)
+tenant_key=$(account_key DEV)
+for route in requests events; do
+  route_changed=false
+  if [ "$route" = requests ]; then
+    subject='a2a.v1.gateway.*.*.*.>'
+    route_type=service
+    service_flag=--service
+    response_flags=--response-type=Stream
+  else
+    subject='a2a.v1.gateway.*.*.events'
+    route_type=stream
+    service_flag=
+    response_flags=
+  fi
+  if ! nsc describe account --name PLATFORM --json | jq -e \
+    --arg subject "*.$subject" --arg type "$route_type" \
+    'any(.nats.exports[]?; .subject == $subject and .type == $type and .account_token_position == 1 and ($type != "service" or .response_type == "Stream"))' >/dev/null; then
+    if nsc describe account --name PLATFORM --json | jq -e --arg subject "*.$subject" \
+      'any(.nats.exports[]?; .subject == $subject)' >/dev/null; then
+      # nsc edit export clears account_token_position, so replace the stale route.
+      nsc delete export --account PLATFORM --subject "*.$subject"
+    fi
+    route_changed=true
+    nsc add export --account PLATFORM --name "a2a-gateway-$route" \
+      --subject "*.$subject" --account-token-position 1 $service_flag $response_flags
+  fi
+  if [ "$route_changed" = true ] && nsc describe account --name DEV --json | jq -e \
+    --arg subject "$tenant_key.$subject" --arg platform "$platform_key" \
+    'any(.nats.imports[]?; .account == $platform and .subject == $subject)' >/dev/null; then
+    # NATS caches an import's response mode until the importing account is reloaded.
+    # JWT issue times have second precision; an identical token would not reload it.
+    sleep 1
+    nsc delete import --account DEV --src-account "$platform_key" --subject "$tenant_key.$subject"
+  fi
+  if ! nsc describe account --name DEV --json | jq -e \
+    --arg subject "$tenant_key.$subject" --arg local "$subject" \
+    --arg platform "$platform_key" --arg type "$route_type" \
+    'any(.nats.imports[]?; .account == $platform and .subject == $subject and .local_subject == $local and .type == $type)' >/dev/null; then
+    nsc add import --account DEV --name "a2a-gateway-$route" \
+      --src-account "$platform_key" --remote-subject "$tenant_key.$subject" \
+      --local-subject "$subject" $service_flag
+  fi
+done
+
 if [ "$(nsc describe account --name AUTH --json | jq '.nats.authorization.auth_users // [] | length')" -eq 0 ]; then
   nsc edit authcallout --account AUTH \
     --auth-user "$(user_key AUTH auth-callout)" \
@@ -260,7 +307,8 @@ fi
 # the caller into, so the gateway expects the DEV account public key there.
 cat > "$GATEWAY_DIR/gateway.env" <<GATEWAY
 A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS=$tenant_dev_public
-A2A_GATEWAY_JWT_AUDIENCE=$(account_key DEV)
+A2A_GATEWAY_JWT_AUDIENCE=$tenant_key
+A2A_PREFIX=$tenant_key.a2a
 GATEWAY
 install_env_file "$GATEWAY_DIR/gateway.env"
 
