@@ -133,11 +133,14 @@ struct WireIdentity {
 struct WireResponse {
     #[prost(message, repeated, tag = "1")]
     svids: Vec<WireIdentity>,
+    #[prost(bytes = "vec", repeated, tag = "2")]
+    crls: Vec<Vec<u8>>,
 }
 
 impl From<Vec<TestIdentity>> for WireResponse {
     fn from(identities: Vec<TestIdentity>) -> Self {
         Self {
+            crls: Vec::new(),
             svids: identities
                 .into_iter()
                 .map(|id| WireIdentity {
@@ -263,6 +266,11 @@ impl WorkloadApiFixture {
     }
     pub fn replace(&self, identities: Vec<TestIdentity>) {
         drop(self.updates.send_replace(Ok(identities.into())));
+    }
+    pub fn replace_with_crls(&self, identities: Vec<TestIdentity>, crls: Vec<Vec<u8>>) {
+        let mut response = WireResponse::from(identities);
+        response.crls = crls;
+        drop(self.updates.send_replace(Ok(response)));
     }
     pub fn permission_denied(&self) {
         drop(
