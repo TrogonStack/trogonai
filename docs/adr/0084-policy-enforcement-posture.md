@@ -165,7 +165,7 @@ a missing policy, unless the explicit development flag that
 [ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
 Decision 4 requires for Shadow and Off at the HTTP edge is also set. This
 record adds no second development flag and does not name that one; the
-implementation of ADR#0082 Decision 4 does, and every point reads the same
+implementation of [ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md) Decision 4 does, and every point reads the same
 variable. The same flag gates `A2A_GATEWAY_ALLOW_DRY_RUN_ONLY` in release
 builds.
 
