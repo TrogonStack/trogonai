@@ -338,7 +338,6 @@ async fn offline_verification_refuses_resealed_activation_authority_confusion() 
     }
 }
 
-
 #[test]
 fn activation_facts_reject_unknown_timestamp_bytes() {
     let mut message = activation();
@@ -347,5 +346,8 @@ fn activation_facts_reject_unknown_timestamp_bytes() {
     let timestamp = Timestamp::decode_from_slice(&bytes).unwrap();
     assert!(!timestamp.__buffa_unknown_fields.is_empty());
     message.expires_at = MessageField::some(timestamp);
-    assert_eq!(CredentialActivationFacts::try_from(message), Err(ActivationFactsError::Validity));
+    assert_eq!(
+        CredentialActivationFacts::try_from(message),
+        Err(ActivationFactsError::Validity)
+    );
 }

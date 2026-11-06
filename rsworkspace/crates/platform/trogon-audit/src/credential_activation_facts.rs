@@ -109,6 +109,7 @@ fn bounded_name(value: &str, limit: usize, allow_colon: bool) -> bool {
 pub(crate) fn timestamp_nanos(timestamp: &Timestamp) -> Option<i128> {
     (timestamp.seconds > 0
         && timestamp.seconds <= MAX_PROTOBUF_TIMESTAMP_SECONDS
+        && timestamp.__buffa_unknown_fields.is_empty()
         && (0..NANOSECONDS_PER_SECOND).contains(&i128::from(timestamp.nanos)))
     .then(|| i128::from(timestamp.seconds) * NANOSECONDS_PER_SECOND + i128::from(timestamp.nanos))
 }

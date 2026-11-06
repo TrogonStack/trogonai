@@ -293,7 +293,6 @@ async fn stored_workload_decisions_verify_and_refuse_rehashed_identity_confusion
     }
 }
 
-
 #[test]
 fn workload_peer_facts_reject_unknown_timestamp_bytes() {
     let mut message = peer();
@@ -302,5 +301,8 @@ fn workload_peer_facts_reject_unknown_timestamp_bytes() {
     let timestamp = Timestamp::decode_from_slice(&bytes).unwrap();
     assert!(!timestamp.__buffa_unknown_fields.is_empty());
     message.peer_path_expires_at = MessageField::some(timestamp);
-    assert_eq!(WorkloadPeerEvidenceFacts::try_from(message), Err(WorkloadPeerFactsError::Validity));
+    assert_eq!(
+        WorkloadPeerEvidenceFacts::try_from(message),
+        Err(WorkloadPeerFactsError::Validity)
+    );
 }
