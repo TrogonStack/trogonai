@@ -110,6 +110,9 @@ expiry as well as the configured broker TTL. Expiry is checked again immediately
 before minting. OIDC not-before dates are enforced without early-activation
 leeway; malformed dates and unsupported critical JOSE extensions are refused.
 This profile requires representable integer Unix-second dates.
+Every broker mint requires at least one whole second of authorized lifetime.
+Zero or subsecond maxima are refused, including legacy API-key and direct mint
+calls; positive fractional maxima are rounded down.
 Finite verification evidence is separate from serialized identity
 claims. Deprecated API-key admission remains an explicit compatibility branch,
 not a fallback after another verifier refuses a credential.

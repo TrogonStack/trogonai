@@ -4,7 +4,7 @@ use crate::test_support::{ed25519_fixture, jwks_with_key, p256_fixture, p384_fix
 use crate::time_source::SystemTimeSource;
 use std::sync::Arc;
 
-mod registered_dates;
+mod registered_dates_tests;
 
 fn freshness_clock(value: Arc<std::sync::atomic::AtomicI64>) -> impl TimeSource {
     struct C(Arc<std::sync::atomic::AtomicI64>);

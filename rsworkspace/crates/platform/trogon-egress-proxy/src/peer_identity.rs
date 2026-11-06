@@ -10,7 +10,7 @@ use crate::agent_id::AgentId;
 use crate::peer_certificate::{PeerIdentityError, agent_id_from_certificate};
 use crate::trust_domain::TrustDomain;
 
-pub(crate) const MAX_SESSION_LIFETIME: Duration = Duration::from_secs(330);
+use crate::constants::MAX_SESSION_LIFETIME;
 
 /// Identity and finite validity extracted from an already verified TLS peer.
 /// The deadline also limits each session to 330 seconds; it cannot establish

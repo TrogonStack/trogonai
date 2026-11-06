@@ -127,6 +127,9 @@ Implementation:
 - [x] Bound derived broker user JWTs by verified OIDC/certificate-path expiry
   as well as configured admission TTL, and recheck expiry immediately before
   minting. Preserve finite evidence separately from serialized identity claims.
+- [x] Refuse zero or subsecond broker lifetimes at the shared mint boundary,
+  including legacy API-key and direct mint calls. Encoding an integer-second
+  token cannot round a configured maximum up into new authority.
 - [ ] Bound pending state, retention, replay protection and concurrency in the
   real service; an in-memory library store is not HA acceptance.
 

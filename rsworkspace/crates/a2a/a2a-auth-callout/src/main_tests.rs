@@ -1,6 +1,7 @@
 use a2a_auth_callout::AudienceAccount;
 use a2a_auth_callout::credentials::mtls::ClientCertPem;
 use a2a_auth_callout::error::AuthCalloutError;
+use a2a_auth_callout::tenant_admission::{ENV_TENANT_MEMBERSHIPS, TenantAdmissionError};
 use trogon_nats::{ClientCertificate, Location, NatsTls};
 use trogon_std::env::InMemoryEnv;
 use wiremock::matchers::{method, path};
@@ -28,7 +29,6 @@ enum FixtureError {
 
 #[tokio::test]
 async fn tenant_admission_is_required_and_validated_before_use() -> Result<(), FixtureError> {
-    use a2a_auth_callout::tenant_admission::{ENV_TENANT_MEMBERSHIPS, TenantAdmissionError};
     let env = InMemoryEnv::new();
     assert!(matches!(
         build_tenant_admission(&env).await,
@@ -109,7 +109,10 @@ async fn oidc_remains_disabled_without_an_issuer_or_audience() {
     env.set("AUTH_CALLOUT_OIDC_ISSUER", "///");
     assert!(build_oidc_verifier(&env).await.is_none());
     let server = MockServer::start().await;
-    env.set("AUTH_CALLOUT_OIDC_ISSUER", server.uri());
+    env.set(
+        "AUTH_CALLOUT_OIDC_ISSUER",
+        server.uri().replacen("http://", "https://", 1),
+    );
     env.set("AUTH_CALLOUT_OIDC_AUDIENCES", " , ");
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(500))

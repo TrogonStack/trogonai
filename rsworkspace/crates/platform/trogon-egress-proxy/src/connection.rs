@@ -23,7 +23,6 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU16;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, copy_bidirectional};
 use tokio::net::TcpStream;
@@ -35,7 +34,7 @@ use crate::agent_id::AgentId;
 use crate::audit::{AuditEvent, AuditSink, Decision};
 use crate::audit_error::AuditError;
 use crate::connect_request::{Request, RequestError, read_request};
-use crate::constants::CONNECTION_ESTABLISHED;
+use crate::constants::{CONNECTION_ESTABLISHED, DENIAL_AUDIT_TIMEOUT, POLICY_RECHECK_INTERVAL};
 use crate::destination::Destination;
 use crate::destination_host::DestinationHost;
 use crate::dial_targets::dial_targets;
@@ -46,9 +45,6 @@ use crate::limits::Limits;
 use crate::peer_identity::PeerIdentity;
 use crate::policy_snapshot::PolicySnapshot;
 use crate::resolver::Resolver;
-
-const POLICY_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
-const DENIAL_AUDIT_TIMEOUT: Duration = Duration::from_secs(1);
 
 struct EndedAuthority {
     destination: Option<Destination>,

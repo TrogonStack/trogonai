@@ -1,9 +1,41 @@
 use super::*;
 use crate::bridge_mint::BridgeCredentialError;
+use crate::credentials::oidc::{OidcIssuerUrl, OidcIssuerUrlError};
+use crate::tenant_admission::TenantAdmissionError;
+use std::error::Error;
+
+#[test]
+fn rejected_issuer_configuration_keeps_typed_sources_and_an_opaque_wire_category() {
+    for issuer in [
+        "not an issuer URL",
+        "http://issuer.example",
+        "https://issuer.example/#administration",
+    ] {
+        let rejected = OidcIssuerUrl::parse(issuer).unwrap_err();
+        let error = AuthCalloutError::from(rejected);
+        let credential_source = error.source().unwrap().downcast_ref::<CredentialError>().unwrap();
+        let issuer_source = credential_source
+            .source()
+            .unwrap()
+            .downcast_ref::<OidcIssuerUrlError>()
+            .unwrap();
+        match issuer {
+            "not an issuer URL" => {
+                assert!(matches!(issuer_source, OidcIssuerUrlError::InvalidUrl(_)));
+                assert!(issuer_source.source().is_some());
+            }
+            "http://issuer.example" => assert!(matches!(issuer_source, OidcIssuerUrlError::HttpsRequired)),
+            _ => assert!(matches!(issuer_source, OidcIssuerUrlError::UnsupportedComponents)),
+        }
+        let category = DenialCategory::from_auth_callout_error(&error);
+        let reason = crate::DenialReason::new(category).unwrap();
+        assert_eq!(reason.as_str(), "invalid_credentials");
+        assert!(!reason.as_str().contains(issuer));
+    }
+}
 
 #[test]
 fn tenant_membership_denial_is_opaque_and_authority_failure_is_unavailable() {
-    use crate::tenant_admission::TenantAdmissionError;
     for error in [TenantAdmissionError::NotMember, TenantAdmissionError::AudienceMismatch] {
         assert_eq!(
             DenialCategory::from_auth_callout_error(&error.into()),

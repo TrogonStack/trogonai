@@ -947,7 +947,7 @@ async fn the_hard_session_deadline_closes_before_a_stalled_denial_audit() {
     let mut response = [0; 39];
     client.read_exact(&mut response).await.expect("established");
     tokio::time::pause();
-    tokio::time::advance(crate::peer_identity::MAX_SESSION_LIFETIME).await;
+    tokio::time::advance(crate::constants::MAX_SESSION_LIFETIME).await;
     let mut rest = Vec::new();
     timeout(Duration::from_millis(1), client.read_to_end(&mut rest))
         .await
@@ -1027,4 +1027,141 @@ async fn certificate_expiry_during_dns_cannot_start_an_upstream_connection() {
         "expired source authority cannot initiate an upstream connection"
     );
     assert!(audit.events().iter().all(|event| event.2 != Decision::Permitted));
+}
+
+#[derive(Clone, Copy)]
+enum FirstRecordRevocation {
+    Destination,
+    PrivateAddress,
+}
+
+struct FirstRecordPolicy {
+    source: PolicySource,
+    revoked: Arc<AtomicBool>,
+    scope: FirstRecordRevocation,
+}
+
+impl PolicySnapshot for FirstRecordPolicy {
+    fn source(&self) -> &PolicySource {
+        &self.source
+    }
+
+    fn lookup(&self, _: &AgentId, destination: &Destination, _: SystemTime) -> SnapshotVerdict {
+        let revoked_destination = match self.scope {
+            FirstRecordRevocation::Destination => matches!(destination.host(), DestinationHost::Name(_)),
+            FirstRecordRevocation::PrivateAddress => matches!(destination.host(), DestinationHost::Ip(_)),
+        };
+        if self.revoked.load(Ordering::SeqCst) && revoked_destination {
+            SnapshotVerdict::NotPermitted
+        } else {
+            SnapshotVerdict::Permitted
+        }
+    }
+}
+
+struct RevokeWhileReadingFirstRecord {
+    inner: DuplexStream,
+    armed: Arc<AtomicBool>,
+    revoked: Arc<AtomicBool>,
+}
+
+impl AsyncRead for RevokeWhileReadingFirstRecord {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        let before = buffer.filled().len();
+        let result = Pin::new(&mut self.inner).poll_read(cx, buffer);
+        if matches!(result, Poll::Ready(Ok(()))) && buffer.filled().len() > before && self.armed.load(Ordering::SeqCst)
+        {
+            self.revoked.store(true, Ordering::SeqCst);
+        }
+        result
+    }
+}
+
+impl AsyncWrite for RevokeWhileReadingFirstRecord {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(cx, bytes)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+fn first_record_for(host: &str) -> Vec<u8> {
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .expect("versions")
+        .with_root_certificates(rustls::RootCertStore::empty())
+        .with_no_client_auth();
+    let name = rustls::pki_types::ServerName::try_from(host.to_owned()).expect("name");
+    let mut client = rustls::ClientConnection::new(Arc::new(config), name).expect("TLS client");
+    let mut hello = Vec::new();
+    client.write_tls(&mut hello).expect("ClientHello");
+    hello
+}
+
+#[tokio::test]
+async fn first_record_revocation_stops_bytes_before_the_periodic_policy_check() {
+    for scope in [
+        FirstRecordRevocation::Destination,
+        FirstRecordRevocation::PrivateAddress,
+    ] {
+        let (port, upstream_received) = counting_upstream().await;
+        let revoked = Arc::new(AtomicBool::new(false));
+        let armed = Arc::new(AtomicBool::new(false));
+        let snapshot = Arc::new(FirstRecordPolicy {
+            source: PolicySource::StaticFile {
+                path: "test-policy.toml".into(),
+            },
+            revoked: revoked.clone(),
+            scope,
+        });
+        let (proxy, audit) = proxy(snapshot, &[("upstream.test", "127.0.0.1")], &[]);
+        let peer = PeerIdentity::for_test(agent(), Duration::from_secs(60));
+        let (mut client, server) = tokio::io::duplex(64 * 1024);
+        let server = RevokeWhileReadingFirstRecord {
+            inner: server,
+            armed: armed.clone(),
+            revoked: revoked.clone(),
+        };
+        let script = async {
+            client
+                .write_all(format!("CONNECT upstream.test:{port} HTTP/1.1\r\n\r\n").as_bytes())
+                .await
+                .expect("request");
+            let mut established = [0; 39];
+            client.read_exact(&mut established).await.expect("established");
+            assert_eq!(&established, CONNECTION_ESTABLISHED);
+            tokio::time::pause();
+            let before_record = tokio::time::Instant::now();
+            armed.store(true, Ordering::SeqCst);
+            let mut first_record = first_record_for("upstream.test");
+            first_record.extend_from_slice(b"must-not-be-forwarded");
+            client.write_all(&first_record).await.expect("first record");
+            let mut response = Vec::new();
+            timeout(Duration::from_millis(1), client.read_to_end(&mut response))
+                .await
+                .expect("authority rechecked at the first-record boundary")
+                .expect("closed");
+            assert!(
+                revoked.load(Ordering::SeqCst),
+                "revocation occurred while consuming the first record"
+            );
+            assert!(response.is_empty());
+            assert!(before_record.elapsed() < POLICY_RECHECK_INTERVAL);
+            tokio::time::resume();
+        };
+        tokio::join!(proxy.serve(server, &peer), script);
+        assert_eq!(upstream_received.await.expect("upstream closed"), 0);
+        let expected = match scope {
+            FirstRecordRevocation::Destination => Fault::NoPermit,
+            FirstRecordRevocation::PrivateAddress => Fault::AddressForbidden,
+        };
+        assert_eq!(audit.events().last().expect("refusal").2, Decision::Refused(expected));
+    }
 }

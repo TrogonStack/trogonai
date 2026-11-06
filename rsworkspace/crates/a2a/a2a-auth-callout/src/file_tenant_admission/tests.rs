@@ -1,9 +1,12 @@
 use super::*;
 use crate::admission_keys::TenantAccount;
+use crate::constants::MAX_MEMBERSHIPS;
+use crate::credentials::mtls::{ClientCertPem, TrustAnchorPem, X509MtlsVerifier};
 use crate::credentials::oidc::OidcIssuerUrl;
+use crate::jwt::AudienceAccount;
 use crate::jwt::ExternalSubject;
 use crate::tenant_admission::TenantMembership;
-use crate::tenant_memberships::MAX_MEMBERSHIPS;
+use rcgen::{CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, KeyPair, KeyUsagePurpose};
 use serde_json::json;
 use trogon_identity_types::PrincipalKind;
 use trogon_identity_types::SubjectPrincipal;
@@ -123,9 +126,6 @@ async fn tagged_oidc_enrollment_preserves_exact_issuer_and_subject_identity() {
 
 #[tokio::test]
 async fn tagged_legacy_enrollment_matches_the_actual_generated_cli_certificate_identity() {
-    use crate::credentials::mtls::{ClientCertPem, TrustAnchorPem, X509MtlsVerifier};
-    use crate::jwt::AudienceAccount;
-    use rcgen::{CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, KeyPair, KeyUsagePurpose};
     let account = tenant();
     let mut params = CertificateParams::default();
     params.distinguished_name = DistinguishedName::new();
@@ -143,6 +143,13 @@ async fn tagged_legacy_enrollment_matches_the_actual_generated_cli_certificate_i
         )
         .unwrap();
     assert_eq!(verified.claims().sub.as_str(), "CN=nats-cli");
+    let other = tenant();
+    let rejected = TenantMembership::from_verified_credential(other, &verified).unwrap_err();
+    assert!(matches!(rejected, TenantAdmissionError::AudienceMismatch));
+    assert_eq!(
+        crate::DenialCategory::from_auth_callout_error(&rejected.into()),
+        crate::DenialCategory::InvalidCredentials
+    );
     let member = TenantMembership::from_verified_credential(account.clone(), &verified).unwrap();
     let registry = json!({"version":1,"memberships":[{
         "account":account.as_str(),"identity":{"type":"legacy_mtls","subject":"CN=nats-cli"}
@@ -150,7 +157,7 @@ async fn tagged_legacy_enrollment_matches_the_actual_generated_cli_certificate_i
     let memberships = TenantMemberships::from_json(&serde_json::to_vec(&registry).unwrap()).unwrap();
     assert_eq!(
         memberships
-            .authorize(TenantAdmissionRequest::new(&account, member.principal()))
+            .authorize(TenantAdmissionRequest::new(member.tenant(), member.principal()))
             .await
             .unwrap(),
         TenantAdmissionDecision::Permit
@@ -224,6 +231,33 @@ fn duplicate_memberships_and_oversized_documents_are_rejected() {
         TenantMemberships::from_json(&vec![b' '; MAX_REGISTRY_BYTES + 1]),
         Err(TenantAdmissionError::TooLarge)
     ));
+}
+
+#[tokio::test]
+async fn direct_enrollment_iterator_enforces_the_documented_membership_capacity() {
+    let account = tenant();
+    let entries = |count| {
+        (0..count).map(|index| {
+            TenantMembership::new(
+                account.clone(),
+                principal(PrincipalKind::Person, &format!("caller-{index}")),
+            )
+        })
+    };
+    let full = TenantMemberships::new(entries(4096)).unwrap();
+    let last = principal(PrincipalKind::Person, "caller-4095");
+    assert_eq!(
+        full.authorize(TenantAdmissionRequest::new(&account, &last))
+            .await
+            .unwrap(),
+        TenantAdmissionDecision::Permit
+    );
+    let error = TenantMemberships::new(entries(4097)).unwrap_err();
+    assert!(matches!(error, TenantAdmissionError::TooManyMemberships));
+    assert_eq!(
+        crate::DenialCategory::from_auth_callout_error(&error.into()),
+        crate::DenialCategory::ServiceUnavailable
+    );
 }
 
 #[tokio::test]

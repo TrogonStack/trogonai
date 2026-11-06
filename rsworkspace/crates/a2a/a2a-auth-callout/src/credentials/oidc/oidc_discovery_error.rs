@@ -2,7 +2,7 @@ use serde::de::DeserializeOwned;
 
 use crate::error::{AuthCalloutError, CredentialError};
 
-const MAX_DOCUMENT_BYTES: usize = 256 * 1024;
+use crate::constants::MAX_DOCUMENT_BYTES;
 
 #[derive(Debug, thiserror::Error)]
 pub enum OidcDiscoveryError {

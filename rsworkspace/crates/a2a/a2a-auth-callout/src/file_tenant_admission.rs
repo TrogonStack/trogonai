@@ -1,17 +1,15 @@
+use crate::constants::{MAX_CONCURRENT_READS, MAX_REGISTRY_BYTES, READ_TIMEOUT};
 use crate::tenant_admission::{
     TenantAdmission, TenantAdmissionDecision, TenantAdmissionError, TenantAdmissionRequest, TenantMemberships,
 };
-use crate::tenant_memberships::MAX_REGISTRY_BYTES;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Semaphore;
 
-const MAX_CONCURRENT_READS: usize = 16;
-const READ_TIMEOUT: Duration = Duration::from_secs(1);
-pub const ENV_TENANT_MEMBERSHIPS: &str = "AUTH_CALLOUT_TENANT_MEMBERSHIPS";
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
 pub struct FileTenantAdmission {
     path: PathBuf,
@@ -37,7 +35,6 @@ impl FileTenantAdmission {
             options.read(true);
             #[cfg(unix)]
             {
-                use std::os::unix::fs::OpenOptionsExt;
                 options.custom_flags(libc::O_NONBLOCK);
             }
             #[cfg(not(unix))]

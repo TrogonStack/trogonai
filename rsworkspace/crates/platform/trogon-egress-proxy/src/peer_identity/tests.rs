@@ -70,3 +70,17 @@ fn trailing_der_and_empty_chains_are_refused() {
         Err(PeerIdentityError::NoUriSan)
     ));
 }
+
+#[test]
+fn malformed_or_trailing_der_in_a_presented_intermediate_is_refused() {
+    let domain = TrustDomain::new("trogon.example").expect("domain");
+    let leaf = certificate(Duration::from_secs(60));
+    let mut trailing = certificate(Duration::from_secs(60)).as_ref().to_vec();
+    trailing.push(0);
+    for malformed in [vec![0], trailing] {
+        assert!(matches!(
+            PeerIdentity::from_verified_certificates(&[leaf.clone(), CertificateDer::from(malformed)], &domain),
+            Err(PeerIdentityError::Unparsable)
+        ));
+    }
+}

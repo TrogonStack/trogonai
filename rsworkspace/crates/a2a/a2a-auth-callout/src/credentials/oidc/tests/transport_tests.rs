@@ -1,4 +1,5 @@
 use super::*;
+use std::io::{Read, Write};
 
 async fn issuer_server(status: u16, issuer_suffix: &str, padding: usize) -> wiremock::MockServer {
     let server = wiremock::MockServer::start().await;
@@ -71,8 +72,6 @@ async fn jwks_rejects_oversized_document() {
 
 #[tokio::test]
 async fn chunked_jwks_cannot_bypass_the_body_limit() {
-    use std::io::{Read, Write};
-
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let serving = std::thread::spawn(move || {

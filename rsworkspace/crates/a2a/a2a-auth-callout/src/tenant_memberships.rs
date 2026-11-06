@@ -8,8 +8,7 @@ use serde::Deserialize;
 use std::collections::BTreeSet;
 use trogon_identity_types::SubjectPrincipal;
 
-pub(crate) const MAX_REGISTRY_BYTES: usize = 1_048_576;
-pub(crate) const MAX_MEMBERSHIPS: usize = 4096;
+use crate::constants::{MAX_MEMBERSHIPS, MAX_REGISTRY_BYTES};
 
 #[derive(Debug, Clone)]
 pub struct TenantMemberships(BTreeSet<TenantMembership>);

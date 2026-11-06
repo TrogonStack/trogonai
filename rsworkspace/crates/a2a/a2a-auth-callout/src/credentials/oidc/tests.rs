@@ -672,4 +672,4 @@ fn bearer_token_debug_does_not_leak_the_assertion() {
     assert!(dbg.contains("<redacted>"), "{dbg}");
     assert_eq!(token.as_str(), "hhh.ppp.sss");
 }
-mod transport;
+mod transport_tests;

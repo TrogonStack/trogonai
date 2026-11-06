@@ -26,6 +26,13 @@ pub const BRIDGE_MINT_SUBJECT_VAR: &str = "AUTH_CALLOUT_MINT_SUBJECT";
 
 pub(crate) const DEFAULT_DENIAL_TTL: Duration = Duration::from_secs(60);
 
+pub(crate) const MAX_DOCUMENT_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_REGISTRY_BYTES: usize = 1_048_576;
+pub(crate) const MAX_MEMBERSHIPS: usize = 4096;
+pub(crate) const MAX_CONCURRENT_READS: usize = 16;
+pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(1);
+pub const ENV_TENANT_MEMBERSHIPS: &str = "AUTH_CALLOUT_TENANT_MEMBERSHIPS";
+
 /// JWT `aud` on authorization **request** claims (`nats-server` `AuthRequestSubject`).
 pub const AUTH_REQUEST_AUDIENCE: &str = "nats-authorization-request";
 

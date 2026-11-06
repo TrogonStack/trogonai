@@ -16,8 +16,8 @@ use nkeys::KeyPair;
 use serde_json::json;
 use trogon_identity_types::{PrincipalId, PrincipalKind, SubjectPrincipal};
 
-mod admission;
-mod lifetime;
+mod admission_tests;
+mod lifetime_tests;
 
 const FIXTURE_CLIENT_CERT: &str = "-----BEGIN CERT-----\n-----END CERT-----";
 

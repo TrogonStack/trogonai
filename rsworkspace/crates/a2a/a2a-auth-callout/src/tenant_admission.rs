@@ -1,4 +1,5 @@
-pub use crate::file_tenant_admission::{ENV_TENANT_MEMBERSHIPS, FileTenantAdmission};
+pub use crate::constants::ENV_TENANT_MEMBERSHIPS;
+pub use crate::file_tenant_admission::FileTenantAdmission;
 pub use crate::tenant_admission_decision::TenantAdmissionDecision;
 pub use crate::tenant_admission_error::TenantAdmissionError;
 pub use crate::tenant_admission_request::TenantAdmissionRequest;

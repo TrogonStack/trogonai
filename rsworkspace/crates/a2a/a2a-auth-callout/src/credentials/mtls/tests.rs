@@ -261,6 +261,78 @@ fn rejects_intermediate_without_key_cert_sign() {
 }
 
 #[test]
+fn a_trust_anchor_without_certificate_signing_usage_cannot_authorize_a_leaf() {
+    let root_key = KeyPair::generate().unwrap();
+    let mut root_params = params("invalid-root-usage", IsCa::Ca(BasicConstraints::Unconstrained));
+    root_params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+    let root = root_params.self_signed(&root_key).unwrap();
+    let (leaf, _) = signed(&params("client", IsCa::NoCa), &root_params, &root_key);
+    let error = X509MtlsVerifier::new(TrustAnchorPem::new(root.pem()))
+        .verify_sync(
+            &ClientCertPem::new(leaf.pem()),
+            &AudienceAccount::new("tenant"),
+            OffsetDateTime::now_utc(),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        AuthCalloutError::CredentialVerification(CredentialError::MtlsCertificate(
+            CertificateVerificationError::IssuerKeyUsage
+        ))
+    ));
+}
+
+#[test]
+fn empty_subject_certificates_keep_distinct_stable_legacy_identities() {
+    let (root, root_params, root_key) = root();
+    let mut leaf_params = CertificateParams::default();
+    leaf_params.distinguished_name = DistinguishedName::new();
+    leaf_params.subject_alt_names = vec![rcgen::SanType::URI(
+        "spiffe://legacy.example/workload".try_into().unwrap(),
+    )];
+    let (first, _) = signed(&leaf_params, &root_params, &root_key);
+    let (second, _) = signed(&leaf_params, &root_params, &root_key);
+    let verifier = X509MtlsVerifier::new(TrustAnchorPem::new(root.pem()));
+    let account = AudienceAccount::new("tenant");
+    let verify = |certificate: &Certificate| {
+        verifier
+            .verify_sync(
+                &ClientCertPem::new(certificate.pem()),
+                &account,
+                OffsetDateTime::now_utc(),
+            )
+            .unwrap()
+    };
+    let first_identity = verify(&first);
+    let repeated = verify(&first);
+    let second_identity = verify(&second);
+    assert!(first_identity.claims().sub.as_str().starts_with("mtls|"));
+    assert_eq!(first_identity.claims().sub, repeated.claims().sub);
+    assert_eq!(first_identity.claims().caller_id, repeated.claims().caller_id);
+    assert_ne!(first_identity.claims().sub, second_identity.claims().sub);
+    assert_ne!(first_identity.claims().caller_id, second_identity.claims().caller_id);
+}
+
+#[test]
+fn malformed_trust_anchor_pem_cannot_authenticate_a_valid_client() {
+    let (_, root_params, root_key) = root();
+    let (leaf, _) = signed(&params("client", IsCa::NoCa), &root_params, &root_key);
+    let verifier = X509MtlsVerifier::new(TrustAnchorPem::new(
+        "-----BEGIN CERTIFICATE-----\ninvalid-base64!\n-----END CERTIFICATE-----",
+    ));
+    assert!(matches!(
+        verifier.verify_sync(
+            &ClientCertPem::new(leaf.pem()),
+            &AudienceAccount::new("tenant"),
+            OffsetDateTime::now_utc(),
+        ),
+        Err(AuthCalloutError::CredentialVerification(
+            CredentialError::InvalidCredentials(_)
+        ))
+    ));
+}
+
+#[test]
 fn rejects_intermediate_exceeding_path_length() {
     let (root, root_params, root_key) = root();
     let first_params = params("first-intermediate", IsCa::Ca(BasicConstraints::Constrained(0)));
