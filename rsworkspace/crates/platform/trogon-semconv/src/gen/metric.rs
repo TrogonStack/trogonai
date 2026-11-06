@@ -8,6 +8,24 @@
 //! instrument, so call sites never restate them. The registry under
 //! `otel/semconv/` is authoritative for name, instrument, description, and unit.
 
+/// Imported reply requests refused by concurrent admission limits
+///
+/// Instrument: `counter`. Unit: `{request}`.
+pub const A2A_GATEWAY_IMPORTED_REPLY_CAPACITY_REFUSALS: &str = "a2a.gateway.imported_reply.capacity_refusals";
+
+/// Imported reply requests refused by concurrent admission limits
+///
+/// Instrument: `counter`. Unit: `{request}`.
+pub fn build_a2a_gateway_imported_reply_capacity_refusals(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(A2A_GATEWAY_IMPORTED_REPLY_CAPACITY_REFUSALS)
+        .with_description("Imported reply requests refused by concurrent admission limits.")
+        .with_unit("{request}")
+        .build()
+}
+
 /// Total number of ACP errors by operation and reason
 ///
 /// Instrument: `counter`. Unit: `{error}`.
