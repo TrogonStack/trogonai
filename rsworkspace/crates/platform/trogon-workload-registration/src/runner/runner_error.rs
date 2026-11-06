@@ -34,8 +34,6 @@ pub enum RunnerError {
     Producer(#[source] Box<RegistrationError>),
     #[error("protected publication deadline elapsed")]
     OperationTimeout,
-    #[error("producer authority is poisoned")]
-    Poisoned,
     #[error("approved authority expired")]
     Expired,
     #[error("administrative execution was cancelled")]
@@ -73,7 +71,7 @@ impl RunnerError {
             | Self::Output(_) => 2,
             Self::Input(_) | Self::FrameBounds | Self::FrameTimeout => 3,
             Self::Approval(_) | Self::ExpectedDenial => 4,
-            Self::Producer(_) | Self::OperationTimeout | Self::Poisoned => 5,
+            Self::Producer(_) | Self::OperationTimeout => 5,
             Self::Expired | Self::Cancelled => 6,
         }
     }
@@ -86,3 +84,6 @@ impl std::fmt::Debug for RunnerError {
             .finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -223,7 +223,7 @@ async fn audited(
 #[tokio::test]
 async fn real_runner_uses_scoped_roles_shared_audit_and_terminal_authority_bounds() {
     let key = SigningKey::from_bytes(&[7; 32]);
-    let configs: Vec<_> = (1..=3)
+    let configs: Vec<_> = (1..=4)
         .map(|fence| {
             ProducerConfig::new(
                 "acme",
@@ -288,6 +288,19 @@ async fn real_runner_uses_scoped_roles_shared_audit_and_terminal_authority_bound
     let publisher = cluster
         .config(&role_name(RegistrationRole::Publisher, 1))
         .expect("scoped publisher");
+    let (_, grant) = approval(config, 1, Duration::from_secs(30), Effect::Grant);
+    completed_frame(&mut command(&publisher, config, "withdraw"), &grant, 4).await;
+    assert_eq!(
+        context
+            .get_stream(profile.live_config().name)
+            .await
+            .expect("provisioned but unclaimed stream")
+            .cached_info()
+            .state
+            .last_sequence,
+        0,
+        "emergency withdrawal cannot publish a grant"
+    );
     let (first, frame) = approval(config, 1, Duration::from_secs(30), Effect::Grant);
     let (mut child, mut input) = start(&mut command(&publisher, config, "serve"), &frame).await;
     assert_eq!(live(&context, profile, 1, Some(&mut child)).await, first);
@@ -343,6 +356,23 @@ async fn real_runner_uses_scoped_roles_shared_audit_and_terminal_authority_bound
     assert_eq!(live(&context, profile, 1, None).await, original);
     let (_, frame) = approval(config, 2, Duration::from_secs(30), Effect::Grant);
     completed_frame(&mut command(&publisher, config, "serve"), &frame, 5).await;
+
+    let config = &configs[3];
+    let profile = &profiles[3];
+    let publisher = cluster
+        .config(&role_name(RegistrationRole::Publisher, 4))
+        .expect("incomplete-renewal publisher");
+    let (original, frame) = approval(config, 1, Duration::from_secs(4), Effect::Grant);
+    let (mut child, mut input) = start(&mut command(&publisher, config, "serve"), &frame).await;
+    assert_eq!(live(&context, profile, 1, Some(&mut child)).await, original);
+    input.write_all(&[0]).await.expect("begin an incomplete renewal frame");
+    let status = tokio::time::timeout(Duration::from_secs(6), child.wait())
+        .await
+        .expect("partial frame cannot extend the approved lease")
+        .expect("reap incomplete-renewal runner");
+    assert_eq!(status.code(), Some(6));
+    drop(input);
+    assert_eq!(live(&context, profile, 1, None).await, original);
 
     let config = &configs[2];
     let profile = &profiles[2];

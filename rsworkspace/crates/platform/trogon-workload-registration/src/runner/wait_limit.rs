@@ -11,6 +11,9 @@ pub(super) struct WaitLimit {
     cause: TimeoutCause,
 }
 
+#[cfg(test)]
+mod tests;
+
 impl WaitLimit {
     const IO_TIMEOUT: Duration = Duration::from_secs(5);
 

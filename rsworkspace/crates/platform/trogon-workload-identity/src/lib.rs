@@ -23,6 +23,7 @@ mod time_observation;
 mod tls;
 mod tls_guards;
 mod unix_endpoint;
+mod workload_context;
 mod workload_id;
 mod workload_identity_wire;
 mod workload_project;

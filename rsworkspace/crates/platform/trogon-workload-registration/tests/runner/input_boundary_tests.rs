@@ -9,6 +9,10 @@ use ed25519_dalek::SigningKey;
 use trogon_workload_registration::MAX_SNAPSHOT_BYTES;
 
 fn configured(operation: &str) -> Command {
+    configured_for_tenant(operation, "acme")
+}
+
+fn configured_for_tenant(operation: &str, tenant: &str) -> Command {
     let key: String = SigningKey::from_bytes(&[7; 32])
         .verifying_key()
         .to_bytes()
@@ -23,7 +27,7 @@ fn configured(operation: &str) -> Command {
         .args([
             operation,
             "--tenant",
-            "acme",
+            tenant,
             "--project",
             "payments",
             "--trust-domain",
@@ -163,5 +167,32 @@ fn explicit_verified_authenticated_nats_configuration_is_required() {
         let mut anonymous = configured(operation);
         anonymous.env_remove("NATS_TOKEN");
         assert_eq!(anonymous.output().expect("anonymous refusal").status.code(), Some(2));
+        for url in ["", "   ", ", , ,"] {
+            let mut empty = configured(operation);
+            empty.env("NATS_URL", url);
+            assert_eq!(
+                empty.output().expect("empty explicit URL refusal").status.code(),
+                Some(2)
+            );
+        }
+        let mut unsigned_jwt = configured(operation);
+        unsigned_jwt
+            .env_remove("NATS_TOKEN")
+            .env("NATS_JWT", "canary-unsigned-jwt");
+        let output = unsigned_jwt.output().expect("unsigned JWT refusal");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("canary-unsigned-jwt"));
+    }
+}
+
+#[test]
+fn invalid_scope_is_rejected_without_echoing_administrative_input() {
+    for operation in ["serve", "withdraw", "provision"] {
+        let output = configured_for_tenant(operation, "canary-private-scope!")
+            .output()
+            .expect("invalid scope refusal");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("canary-private-scope"));
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("canary-private-scope"));
     }
 }

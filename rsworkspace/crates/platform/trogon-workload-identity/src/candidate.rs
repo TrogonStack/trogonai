@@ -5,13 +5,14 @@ use std::time::SystemTime;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::sign::CertifiedKey;
 use sha2::{Digest, Sha256};
-use spiffe::{SpiffeId, X509Context};
+use spiffe::SpiffeId;
 use tokio::time::Instant;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
 use crate::certificate_validation::{leaf_profile, verify_chain};
-use crate::constants::{MAX_CONTEXT_BYTES, MAX_IDENTITIES, MAX_ROOTS};
+use crate::constants::MAX_ROOTS;
 use crate::material_error::MaterialError;
+use crate::workload_context::WorkloadContext;
 
 pub(crate) struct Candidate {
     pub certified_key: Arc<CertifiedKey>,
@@ -26,31 +27,15 @@ pub(crate) struct Candidate {
 }
 
 impl Candidate {
-    pub fn parse(context: X509Context, expected: &SpiffeId) -> Result<Self, MaterialError> {
-        if context.svids().len() > MAX_IDENTITIES || context.bundle_set().len() > MAX_ROOTS {
+    pub fn parse(context: WorkloadContext, expected: &SpiffeId) -> Result<Self, MaterialError> {
+        if context.bundle_set().len() > MAX_ROOTS {
             return Err(MaterialError::Bounds);
         }
-        let mut bytes = 0usize;
         let mut ids = BTreeSet::new();
         for svid in context.svids() {
             if !ids.insert(svid.spiffe_id()) {
                 return Err(MaterialError::Identity);
             }
-            bytes = bytes.saturating_add(svid.private_key().as_bytes().len());
-            for certificate in svid.cert_chain() {
-                bytes = bytes.saturating_add(certificate.as_bytes().len());
-            }
-        }
-        for (_, bundle) in context.bundle_set().iter() {
-            if bundle.authorities().len() > MAX_ROOTS {
-                return Err(MaterialError::Bounds);
-            }
-            for root in bundle.authorities() {
-                bytes = bytes.saturating_add(root.as_bytes().len());
-            }
-        }
-        if bytes > MAX_CONTEXT_BYTES {
-            return Err(MaterialError::Bounds);
         }
         let svid = context
             .svids()
@@ -61,9 +46,6 @@ impl Candidate {
             .bundle_set()
             .get(expected.trust_domain())
             .ok_or(MaterialError::Identity)?;
-        if bundle.authorities().is_empty() {
-            return Err(MaterialError::Identity);
-        }
         let roots: Vec<_> = bundle
             .authorities()
             .iter()
@@ -71,9 +53,6 @@ impl Candidate {
             .collect();
         let mut root_hashes: Vec<[u8; 32]> = roots.iter().map(|root| Sha256::digest(root).into()).collect();
         root_hashes.sort_unstable();
-        if root_hashes.windows(2).any(|pair| pair[0] == pair[1]) {
-            return Err(MaterialError::Identity);
-        }
         let mut hash = Sha256::new();
         for root in &root_hashes {
             hash.update(root);

@@ -71,3 +71,47 @@ async fn tls12_uses_registered_spiffe_verification_and_live_signing_authority() 
     client_task.await.unwrap();
     fixture.stop().await;
 }
+
+#[tokio::test]
+async fn client_verification_cannot_promote_a_downstream_pkix_denial() {
+    let ca = TestCa::new();
+    let stricter_ca = TestCa::new();
+    let identity = ca.issue(PEER_ID, Duration::from_secs(600));
+    let fixture = WorkloadApiFixture::start(vec![ca.issue(LOCAL_ID, Duration::from_secs(600))]).await;
+    let (store, driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), local(), revision(1)),
+        Arc::new(Recorder::default()),
+    );
+    store.replace_registration(registration(&ca)).unwrap();
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(driver.run(shutdown.clone()));
+    let lease = material(&store).await;
+    let mut roots = RootCertStore::empty();
+    roots.add(stricter_ca.root()).unwrap();
+    let inner = WebPkiClientVerifier::builder_with_provider(
+        Arc::new(roots),
+        Arc::new(rustls::crypto::aws_lc_rs::default_provider()),
+    )
+    .build()
+    .unwrap();
+    let certificates = identity.certificates();
+    let now = UnixTime::now();
+    let expected = inner
+        .verify_client_cert(&certificates[0], &[], now)
+        .expect_err("stricter trust policy must reject this signing chain");
+    assert!(matches!(&expected, rustls::Error::InvalidCertificate(_)));
+    let verifier = RegisteredClientVerifier {
+        inner,
+        roots: vec![ca.root()],
+        registration: registration(&ca),
+        authority: MaterialAuthority::new(Arc::new(LeaseStatus(lease.clone()))),
+    };
+    assert_eq!(
+        verifier.verify_client_cert(&certificates[0], &[], now).unwrap_err(),
+        expected
+    );
+    assert!(lease.is_current());
+    shutdown.cancel();
+    task.await.unwrap();
+    fixture.stop().await;
+}

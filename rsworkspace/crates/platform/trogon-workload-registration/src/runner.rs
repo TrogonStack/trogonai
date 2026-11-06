@@ -14,7 +14,7 @@ use clap::Parser;
 use clap::error::ErrorKind;
 use trogon_std::SystemEnv;
 use trogon_workload_registration::{
-    ProducerStatus, ProductionRegistrationProducer, production_emergency_withdrawal, provision_streams,
+    ProductionRegistrationProducer, production_emergency_withdrawal, provision_streams,
 };
 
 use cli_request::CliRequest;
@@ -72,9 +72,6 @@ async fn serve(config: RunnerConfig) -> Result<(), RunnerError> {
         })
         .await?;
     loop {
-        if producer.status() != ProducerStatus::Active {
-            return Err(RunnerError::Poisoned);
-        }
         let current_deadline = producer.current_deadline();
         let next = controller
             .next(Some(current_deadline))

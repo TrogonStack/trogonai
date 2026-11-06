@@ -130,3 +130,6 @@ pub(crate) fn verify_chain(
         .ok_or(MaterialError::Certificate)?;
     Ok(expiry.min(root_expiry))
 }
+
+#[cfg(test)]
+mod tests;

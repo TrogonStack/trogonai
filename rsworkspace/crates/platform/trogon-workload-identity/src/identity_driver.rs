@@ -44,7 +44,7 @@ impl IdentityDriver {
         let Ok(Some(Ok(context))) = first else {
             return;
         };
-        let Ok(context) = context.into_context() else {
+        let Ok(context) = crate::workload_context::WorkloadContext::from_wire(context) else {
             return;
         };
         let Ok(candidate) = Candidate::parse(context, self.store.config().local().spiffe_id()) else {
@@ -59,7 +59,7 @@ impl IdentityDriver {
             let Some(Ok(context)) = context else {
                 return;
             };
-            let Ok(context) = context.into_context() else {
+            let Ok(context) = crate::workload_context::WorkloadContext::from_wire(context) else {
                 return;
             };
             let Ok(candidate) = Candidate::parse(context, self.store.config().local().spiffe_id()) else {

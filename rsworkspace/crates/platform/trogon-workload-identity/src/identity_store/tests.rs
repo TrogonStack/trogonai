@@ -148,3 +148,53 @@ async fn poisoned_host_state_cannot_retain_or_reactivate_a_key() {
     task.await.unwrap();
     fixture.stop().await;
 }
+
+#[test]
+fn poisoned_host_state_refuses_late_source_and_durable_activation_callbacks() {
+    let ca = TestCa::new();
+    let candidate = || {
+        let identity = ca.issue(LOCAL_ID, Duration::from_secs(600));
+        let wire = crate::workload_response_wire::WorkloadResponseWire {
+            svids: vec![crate::workload_identity_wire::WorkloadIdentityWire {
+                spiffe_id: LOCAL_ID.into(),
+                x509_svid: identity.certificates()[0].to_vec(),
+                x509_svid_key: identity.private_key().secret_der().to_vec(),
+                bundle: ca.root().to_vec(),
+                hint: String::new(),
+            }],
+            crls: Vec::new(),
+            federated_bundles: Default::default(),
+        };
+        Candidate::parse(
+            crate::workload_context::WorkloadContext::from_wire(wire).unwrap(),
+            local().spiffe_id(),
+        )
+        .unwrap()
+    };
+    let (store, _driver) = IdentityStore::new(
+        IdentityConfig::new(
+            crate::UnixEndpoint::new("unix:///nonexistent-workload.sock").unwrap(),
+            local(),
+            revision(1),
+        ),
+        Arc::new(Recorder::default()),
+    );
+    store.replace_registration(registration(&ca)).unwrap();
+    store.observe(candidate());
+    let pending = store.prepare().expect("fully validated pending audit activation");
+    let late_source = candidate();
+    let poison = store.clone();
+    assert!(
+        std::thread::spawn(move || {
+            let _guard = poison.inner.state.lock().unwrap();
+            panic!("simulate host interruption after validation");
+        })
+        .join()
+        .is_err()
+    );
+    store.activate(pending);
+    store.observe(late_source);
+    assert!(store.material().is_none());
+    assert!(store.prepare().is_none());
+    assert_eq!(store.source_revision(), u64::MAX);
+}
