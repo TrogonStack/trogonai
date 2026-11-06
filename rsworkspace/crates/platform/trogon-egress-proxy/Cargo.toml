@@ -42,5 +42,6 @@ buffa = { workspace = true }
 rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
 tempfile = { workspace = true }
 trogon-audit = { workspace = true, features = ["test-support"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
 trogonai-proto = { workspace = true, features = ["audit"] }
