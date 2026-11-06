@@ -19,12 +19,18 @@ Configuration and policy regressions run locally without an issuer:
 
 ```sh
 mise exec -- python3 -m unittest discover -s devops/kubernetes/spire -p 'test_*.py'
-mise exec go@1.27.3 -- go -C devops/kubernetes/spire/celtest test -count=1 ./...
+mise exec go@1.27.3 python@3.14.5 -- python3 devops/kubernetes/spire/check_policies.py
 ```
 
+The policy runner generates resources and supervisor patches from the production
+builders into a private temporary JSON fixture. It passes its path to the Go CEL
+suite through `SPIRE_POLICY_FIXTURE` and removes it when the suite exits. It runs
+`go test -count=1` with local toolchain selection and read-only modules, so each
+invocation evaluates fresh input and returns the test process's exit status.
+Fixture generation does not assert release trust or emit verification evidence.
+
 The CEL suite evaluates the generated admission expressions with the CEL version
-used by Kubernetes 1.37. Disable the Go test cache so a changed Python renderer
-is evaluated. Production acceptance additionally requires API-server
+used by Kubernetes 1.37. Production acceptance additionally requires API-server
 type checking and actual admission attempts in the selected cluster.
 
 The admission baseline applies cluster-wide and allows host privileges only

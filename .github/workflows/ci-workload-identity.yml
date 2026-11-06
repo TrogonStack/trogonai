@@ -47,7 +47,7 @@ jobs:
         run: mise exec python@3.14.5 -- python3 -m unittest discover -s devops/kubernetes/spire -p 'test_*.py'
 
       - name: Test generated admission expressions without cached results
-        run: mise exec go@1.27.3 python@3.14.5 -- go -C devops/kubernetes/spire/celtest test -count=1 ./...
+        run: mise exec go@1.27.3 python@3.14.5 -- python3 devops/kubernetes/spire/check_policies.py
 
       - name: Validate every generated Kubernetes resource
         run: mise exec python@3.14.5 kubeconform@0.8.0 -- python3 devops/kubernetes/spire/check_schemas.py

@@ -3,7 +3,7 @@ package policytest
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
+	"os"
 	"strings"
 	"testing"
 
@@ -16,17 +16,15 @@ type policyDocument struct {
 	Patches   []map[string]any `json:"patches"`
 }
 
-func generated(t *testing.T) policyDocument {
+func loadFixture(t *testing.T) policyDocument {
 	t.Helper()
-	code := `import json,sys
-from pathlib import Path
-sys.path.insert(0,"..")
-from render import render
-files=render(json.loads(Path("../deployment.example.json").read_text()),lambda image: [])
-print(json.dumps({"resources":json.loads(files["manifests.json"]),"patches":json.loads(files["supervisor-patches.json"])}))`
-	data, err := exec.Command("python3", "-c", code).CombinedOutput()
+	path := os.Getenv("SPIRE_POLICY_FIXTURE")
+	if path == "" {
+		t.Fatal("SPIRE_POLICY_FIXTURE is required; run check_policies.py to generate fresh fixtures")
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("render test fixture: %v: %s", err, data)
+		t.Fatalf("read generated policy fixture: %v", err)
 	}
 	var result policyDocument
 	if err := json.Unmarshal(data, &result); err != nil {
@@ -86,7 +84,7 @@ func admitted(policy map[string]any, pod map[string]any) (bool, error) {
 }
 
 func TestSocketAdmissionBoundary(t *testing.T) {
-	fixture := generated(t)
+	fixture := loadFixture(t)
 	var policy map[string]any
 	var issuerPods []map[string]any
 	for _, resource := range asList(fixture.Resources["items"]) {
@@ -247,7 +245,7 @@ func TestSocketAdmissionBoundary(t *testing.T) {
 }
 
 func TestIdentityNamespaceBindingsStayOnApprovedNodes(t *testing.T) {
-	fixture := generated(t)
+	fixture := loadFixture(t)
 	var policy map[string]any
 	for _, resource := range asList(fixture.Resources["items"]) {
 		item := asMap(resource)
