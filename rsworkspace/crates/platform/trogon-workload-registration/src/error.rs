@@ -1,7 +1,43 @@
 #[derive(Debug, thiserror::Error)]
 pub enum RegistrationError {
-    #[error("protected registration publication is unavailable")]
-    NotImplemented,
+    #[error("registration requires authenticated verified TLS")]
+    Transport,
+    #[error("registration connection failed")]
+    Connection(#[source] trogon_nats::ConnectError),
+    #[error("registration stream lookup failed")]
+    Stream(#[source] async_nats::jetstream::context::GetStreamError),
+    #[error("registration stream provisioning failed")]
+    Provision(#[source] async_nats::jetstream::context::CreateStreamError),
+    #[error("registration stream inspection failed")]
+    Inspect(#[source] async_nats::jetstream::stream::InfoError),
+    #[error("registration stored message lookup failed")]
+    Read(#[source] async_nats::jetstream::stream::RawMessageError),
+    #[error("registration compare-and-publish failed")]
+    Publish(#[source] async_nats::jetstream::context::PublishError),
+    #[error("registration stream does not enforce the protected profile")]
+    StreamProfile,
+    #[error("registration stream incarnation or acknowledged head changed")]
+    HeadChanged,
+    #[error("registration ownership cannot be reclaimed in this recovery fence")]
+    AlreadyClaimed,
+    #[error("registration writer is permanently poisoned")]
+    Poisoned,
+    #[error("registration set changes require a signed whole-scope withdrawal first")]
+    WithdrawalRequired,
+    #[error("emergency withdrawal requires an empty binding or root set")]
+    NotWithdrawal,
+    #[error("registration operation exceeded its bounded approval window")]
+    Timeout,
+    #[error("registration audit name is invalid")]
+    AuditName(#[source] trogon_audit::AuditNameError),
+    #[error("registration audit was not acknowledged")]
+    Audit(#[source] trogon_audit::AuditUnavailableError),
+    #[error("withdrawal is live at sequence {live_sequence}, but bookkeeping or audit is incomplete")]
+    WithdrawalIncomplete {
+        live_sequence: std::num::NonZeroU64,
+        control: Option<Box<RegistrationError>>,
+        audit: Option<Box<RegistrationError>>,
+    },
     #[error("registration scope name is invalid")]
     ScopeName,
     #[error("registration project is not a supported subject token")]

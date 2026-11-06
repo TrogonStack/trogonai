@@ -135,6 +135,9 @@ impl ApprovedRegistration {
     pub fn roots(&self) -> &[Sha256Digest] {
         &self.roots
     }
+    pub fn is_withdrawal(&self) -> bool {
+        self.bindings.is_empty() || self.roots.is_empty()
+    }
     pub fn check_current(&self) -> Result<(), RegistrationError> {
         self.lease.check_current()
     }

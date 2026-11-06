@@ -6,13 +6,14 @@ use std::time::{Duration, SystemTime};
 use buffa::{EnumValue, Message, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use ed25519_dalek::{Signer, SigningKey};
+use serde_json::json;
 use trogon_audit::{AuditName, AuditWriter, MemorySink, Stamper, WriterConfig, WriterId, WriterIdentity};
 use trogon_nats::test_support::TlsJetStreamCluster;
 use trogon_nats::{NatsConfig, NatsToken, connect_once};
 use trogon_std::{SystemClock, UuidV7Generator};
 use trogon_workload_registration::{
-    ApprovedRegistration, ProducerConfig, ProducerStatus, RegistrationProducer, SIGNING_CONTEXT, StreamProfile,
-    emergency_withdrawal, provision_streams,
+    ApprovedRegistration, ProducerConfig, ProducerStatus, RegistrationProducer, RegistrationRole, SIGNING_CONTEXT,
+    StreamProfile, emergency_withdrawal, provision_streams,
 };
 use trogonai_proto::platform::workload_identity::v1alpha1::{RegistrationBinding, RegistrationSnapshot, WorkloadRole};
 
@@ -74,10 +75,6 @@ async fn latest(nats: &NatsConfig, profile: &StreamProfile) -> async_nats::jetst
 
 #[tokio::test]
 async fn acknowledged_emergency_denial_fences_a_grant_waiting_for_audit_and_same_fence_reclaim() {
-    let cluster = TlsJetStreamCluster::start(&[]).await;
-    let nats = cluster
-        .config(&NatsToken::new("fixture-admin").expect("administrator"))
-        .expect("fixture credential");
     let key = SigningKey::from_bytes(&[7; 32]);
     let config = ProducerConfig::new(
         "acme",
@@ -88,7 +85,25 @@ async fn acknowledged_emergency_denial_fences_a_grant_waiting_for_audit_and_same
     )
     .expect("configuration");
     let profile = StreamProfile::new(&config);
-    provision_streams(&nats, &config)
+    let publisher = NatsToken::new("publisher").expect("publisher");
+    let revoker = NatsToken::new("revoker").expect("revoker");
+    let users = [
+        (publisher.clone(), RegistrationRole::Publisher),
+        (revoker.clone(), RegistrationRole::Revoker),
+    ]
+    .map(|(name, role)| {
+        (
+            name,
+            json!({"publish": profile.publish_allowlist(role), "subscribe": profile.subscribe_allowlist(role)}),
+        )
+    });
+    let cluster = TlsJetStreamCluster::start(&users).await;
+    let nats = cluster.config(&publisher).expect("publisher credential");
+    let emergency = cluster.config(&revoker).expect("revoker credential");
+    let admin = cluster
+        .config(&NatsToken::new("fixture-admin").expect("administrator"))
+        .expect("fixture credential");
+    provision_streams(&admin, &config)
         .await
         .expect("protected production stream provisioning");
     let sink = MemorySink::new();
@@ -102,7 +117,7 @@ async fn acknowledged_emergency_denial_fences_a_grant_waiting_for_audit_and_same
     .await
     .expect("one protected writer claims fresh scope");
     assert_eq!(producer.status(), ProducerStatus::Active);
-    let initial = latest(&nats, &profile).await;
+    let initial = latest(&admin, &profile).await;
     assert_eq!(
         RegistrationSnapshot::decode_from_slice(&initial.payload)
             .expect("runtime wire contract")
@@ -125,14 +140,14 @@ async fn acknowledged_emergency_denial_fences_a_grant_waiting_for_audit_and_same
         .await
         .expect("grant reaches actual held audit sink");
         let denial = emergency_withdrawal(
-            &nats,
+            &emergency,
             &config,
             approved(&config, 3, issued + Duration::from_secs(2), true),
             &writer(MemorySink::new()),
         )
         .await
         .expect("independent denial acknowledged before grant audit is released");
-        let denied = latest(&nats, &profile).await;
+        let denied = latest(&admin, &profile).await;
         let restarted_reader =
             RegistrationSnapshot::decode_from_slice(&denied.payload).expect("new reader receives complete denial");
         assert!(restarted_reader.bindings.is_empty());
@@ -148,7 +163,7 @@ async fn acknowledged_emergency_denial_fences_a_grant_waiting_for_audit_and_same
         "superseded grant must fail its broker sequence comparison"
     );
     assert_eq!(producer.status(), ProducerStatus::Poisoned);
-    let final_message = latest(&nats, &profile).await;
+    let final_message = latest(&admin, &profile).await;
     assert_eq!(
         RegistrationSnapshot::decode_from_slice(&final_message.payload)
             .expect("final authority")

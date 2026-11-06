@@ -29,6 +29,7 @@ trogon-workload-identity = { workspace = true }
 trogonai-proto = { workspace = true, features = ["audit"] }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "process"] }
 trogon-audit = { workspace = true, features = ["test-support"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
