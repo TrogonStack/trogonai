@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use a2a_nats::agent_id::A2aAgentId;
-use trogon_audit::{MemorySink, ReadOnly, SinkError, WriterConfig, WriterId};
+use trogon_audit::{
+    ChainAnchor, MemorySink, ReadOnly, SealedRecord, SinkError, WriterConfig, WriterId, WriterIdentity,
+    verify_chain_range,
+};
 use trogon_identity_types::SubjectPrincipal;
 use trogon_std::log_capture::{CapturedEvent, CapturedEvents, LevelFilter};
 
@@ -9,18 +12,37 @@ use super::super::decision_event::AllowedLayers;
 use super::super::deny_reason::DenyReason;
 use super::*;
 
+fn writer() -> WriterId {
+    WriterId::new("a2a-gateway:test").expect("writer")
+}
+
+/// The decisions the sink stored, after checking that everything it stored is
+/// one gap-free chain opened by the writer's chain reset, which is left out.
+fn decisions(sink: &MemorySink) -> Vec<SealedRecord> {
+    let stored = sink.stored();
+    let Some(genesis) = stored.first() else {
+        return Vec::new();
+    };
+    let anchor = ChainAnchor::Genesis {
+        writer: writer(),
+        chain: genesis.chain(),
+    };
+    let verified = verify_chain_range(anchor, sink.stored_records()).expect("one gap-free chain");
+    assert_eq!(verified.records(), stored.len());
+    stored.into_iter().skip(1).collect()
+}
+
 fn audit() -> (WriterAudit<MemorySink>, MemorySink) {
     let sink = MemorySink::new();
-    let writer = AuditWriter::new(
-        sink.clone(),
-        WriterId::new("a2a-gateway:test").expect("writer"),
-        WriterConfig::default(),
-    );
-    let audit = WriterAudit::new(
-        writer,
+    let identity = WriterIdentity::new(
+        writer(),
+        NatsToken::new("a2a_gateway").expect("component"),
         AuditName::new("acme").expect("tenant"),
         NatsToken::new("payments").expect("project"),
     );
+    let stamper = Stamper::new(SystemClock, UuidV7Generator);
+    let writer = AuditWriter::new(sink.clone(), identity.clone(), WriterConfig::default(), &stamper);
+    let audit = WriterAudit::new(writer, identity.tenant().clone(), identity.project().clone());
     (audit, sink)
 }
 
@@ -83,7 +105,7 @@ async fn an_allow_that_acts_is_stored_before_it_returns_and_logged() {
     let (audit, sink) = audit();
     let (outcome, line) = recorded(&audit, "message/send", ReadOnly::Undeclared, allow()).await;
     assert_eq!(outcome, Ok(()));
-    let stored = sink.stored();
+    let stored = decisions(&sink);
     assert_eq!(stored.len(), 1);
     assert_eq!(stored[0].subject(), "platform.v1.audit.decision.payments.allow");
     assert_eq!(line.field("agent"), Some("planner"));
@@ -99,7 +121,7 @@ async fn an_allow_that_acts_and_cannot_be_stored_fails() {
     sink.fail_all(SinkError::Unreachable);
     let (outcome, line) = recorded(&audit, "message/send", ReadOnly::Undeclared, allow()).await;
     assert!(matches!(outcome, Err(AuditError::Unavailable(_))), "{outcome:?}");
-    assert!(sink.stored().is_empty());
+    assert!(decisions(&sink).is_empty());
     assert_eq!(line.field("audit"), Some("unavailable"));
     assert_eq!(line.field("audit_failure"), Some("unreachable"));
 }
@@ -118,11 +140,11 @@ async fn a_deny_stands_when_the_stream_is_down_and_is_stored_once_it_returns() {
     assert_eq!(outcome, Ok(()));
     assert_eq!(line.field("decision"), Some("tier2_denied"));
     assert_eq!(line.field("audit"), Some("retrying"));
-    assert!(sink.stored().is_empty());
+    assert!(decisions(&sink).is_empty());
 
     sink.recover();
     audit.writer().drain_once().await;
-    let stored = sink.stored();
+    let stored = decisions(&sink);
     assert_eq!(stored.len(), 1);
     assert_eq!(stored[0].subject(), "platform.v1.audit.decision.payments.deny");
 }
@@ -144,7 +166,7 @@ async fn a_read_only_allow_is_stored_by_the_drain_once_the_stream_returns() {
     assert_eq!(outcome, Ok(()));
     sink.recover();
     audit.writer().drain_once().await;
-    assert_eq!(sink.stored().len(), 1);
+    assert_eq!(decisions(&sink).len(), 1);
 }
 
 #[tokio::test]
@@ -164,7 +186,7 @@ async fn run_flushes_what_was_buffered_when_the_gateway_stops() {
     let shutdown = CancellationToken::new();
     shutdown.cancel();
     audit.run(shutdown).await;
-    assert_eq!(sink.stored().len(), 1);
+    assert_eq!(decisions(&sink).len(), 1);
 }
 
 #[test]

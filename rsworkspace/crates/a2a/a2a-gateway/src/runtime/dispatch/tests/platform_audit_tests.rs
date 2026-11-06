@@ -6,13 +6,15 @@ use std::sync::Arc;
 use async_nats::jetstream::stream::Config as StreamConfig;
 use buffa::{EnumValue, Message};
 use serde_json::{Value, json};
-use trogon_audit::{MemorySink, SealedRecord, SinkError};
+use trogon_audit::{ChainAnchor, MemorySink, SealedRecord, SinkError, verify_chain_range};
 use trogon_nats::test_support::JetStreamTestServer;
 use trogonai_proto::platform::audit::v1::audit_record::Detail;
 use trogonai_proto::platform::audit::v1::{AuditDecision, AuditRecord};
 
 use super::RejectingGate;
-use super::fixture::{AUDIT_PROJECT, DispatchFixture, RecordingOwner, RecordingTier1, TestResult, receive, request};
+use super::fixture::{
+    AUDIT_PROJECT, DispatchFixture, RecordingOwner, RecordingTier1, TestResult, audit_writer_id, receive, request,
+};
 use crate::policy::spicedb_tier1::Tier1AuthorizeOutcome;
 use crate::policy::tier2::DenyAllTier2Evaluator;
 use crate::policy::tier3_redaction::Tier3RedactionDecision;
@@ -23,8 +25,24 @@ fn decoded(record: &SealedRecord) -> AuditRecord {
     AuditRecord::decode_from_slice(record.payload()).expect("a record the writer sealed decodes")
 }
 
+/// The decisions the sink stored, after checking that everything it stored is
+/// one gap-free chain opened by the writer's chain reset, which is left out.
+fn decisions(sink: &MemorySink) -> Vec<SealedRecord> {
+    let stored = sink.stored();
+    let Some(genesis) = stored.first() else {
+        return Vec::new();
+    };
+    let anchor = ChainAnchor::Genesis {
+        writer: audit_writer_id(),
+        chain: genesis.chain(),
+    };
+    let verified = verify_chain_range(anchor, sink.stored_records()).expect("one gap-free chain");
+    assert_eq!(verified.records(), stored.len());
+    stored.into_iter().skip(1).collect()
+}
+
 fn only(sink: &MemorySink) -> SealedRecord {
-    let mut stored = sink.stored();
+    let mut stored = decisions(sink);
     assert_eq!(stored.len(), 1, "stored: {}", stored.len());
     stored.remove(0)
 }
@@ -66,7 +84,7 @@ async fn an_allow_that_acts_and_cannot_be_recorded_is_refused_and_never_forwarde
     fixture.dispatch(request("message.send", json!({}))).await;
     let body = fixture.denied(-32804, json!("request-7")).await?;
     assert_eq!(body["error"]["data"]["reason"], "audit_unavailable");
-    assert!(sink.stored().is_empty());
+    assert!(decisions(&sink).is_empty());
     Ok(())
 }
 
@@ -89,7 +107,7 @@ async fn a_read_declared_allow_is_forwarded_even_when_the_record_cannot_be_taken
     sink.fail_all(SinkError::Unreachable);
     fixture.dispatch(request("tasks.get", json!({"id": "task-1"}))).await;
     receive(&mut fixture.agents).await?;
-    assert!(sink.stored().is_empty());
+    assert!(decisions(&sink).is_empty());
 
     sink.recover();
     writer.drain_once().await;
@@ -105,7 +123,7 @@ async fn a_deny_is_replied_whatever_the_stream_does_and_is_stored_when_it_return
     sink.fail_all(SinkError::Unreachable);
     fixture.dispatch(request("message.send", json!({"id": "task-1"}))).await;
     fixture.denied(-32801, json!("request-7")).await?;
-    assert!(sink.stored().is_empty());
+    assert!(decisions(&sink).is_empty());
 
     sink.recover();
     writer.drain_once().await;
@@ -161,8 +179,7 @@ async fn every_tier_records_its_own_reason_when_it_denies() -> TestResult {
         fixture.denied(code, json!("request-7")).await?;
     }
 
-    let reasons: Vec<Option<String>> = sink
-        .stored()
+    let reasons: Vec<Option<String>> = decisions(&sink)
         .iter()
         .map(|record| decoded(record).attribution.reason_code.clone())
         .collect();

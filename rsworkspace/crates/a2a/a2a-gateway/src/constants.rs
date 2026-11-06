@@ -120,6 +120,10 @@ pub const ENV_GATEWAY_AUDIT_INSTANCE: &str = "A2A_GATEWAY_AUDIT_INSTANCE";
 #[cfg(feature = "spicedb")]
 pub(crate) const AUDIT_WRITER_ID_PREFIX: &str = "a2a-gateway:";
 #[cfg(feature = "spicedb")]
+/// The component token the gateway's own integrity records, such as the chain
+/// reset that opens every chain, are published under.
+pub(crate) const AUDIT_COMPONENT: &str = "a2a_gateway";
+#[cfg(feature = "spicedb")]
 pub(crate) const AUDIT_LOG_TARGET: &str = "a2a_gateway_audit";
 /// Names of the layers an allow record says evaluated the request.
 #[cfg(feature = "spicedb")]

@@ -15,16 +15,18 @@ use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
-use trogon_audit::{AuditName, AuditWriter, MemorySink, WriterConfig, WriterId};
+use trogon_audit::{AuditName, AuditWriter, MemorySink, Stamper, WriterConfig, WriterId, WriterIdentity};
 use trogon_identity_types::PrincipalKind;
 use trogon_nats::NatsToken;
 use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer};
 use trogon_std::env::InMemoryEnv;
+use trogon_std::time::SystemClock;
+use trogon_std::uuid::UuidV7Generator;
 
 use crate::config::{Args, Config, config_from_args};
 use crate::constants::{
-    AUDIT_WRITER_ID_PREFIX, ENV_GATEWAY_AUDIT_INSTANCE, ENV_GATEWAY_AUDIT_PROJECT, ENV_GATEWAY_AUDIT_PUBLISH,
-    ENV_GATEWAY_AUDIT_TENANT,
+    AUDIT_COMPONENT, AUDIT_WRITER_ID_PREFIX, ENV_GATEWAY_AUDIT_INSTANCE, ENV_GATEWAY_AUDIT_PROJECT,
+    ENV_GATEWAY_AUDIT_PUBLISH, ENV_GATEWAY_AUDIT_TENANT,
 };
 use crate::gw_ingress_stream::{
     GatewayStreamingIngressConfig, StreamingIngressGate, StreamingMaxAckPending, StreamingMaxInflightPerCaller,
@@ -42,7 +44,7 @@ pub const AUDIT_PROJECT: &str = "payments";
 const AUDIT_TENANT: &str = "acme";
 const AUDIT_INSTANCE: &str = "test";
 
-fn audit_writer_id() -> WriterId {
+pub fn audit_writer_id() -> WriterId {
     WriterId::new(format!("{AUDIT_WRITER_ID_PREFIX}{AUDIT_INSTANCE}")).expect("writer id")
 }
 
@@ -195,7 +197,14 @@ impl<S> DispatchFixture<S> {
     /// sink fail and recover, and returns the sink with the writer to drain.
     pub fn enable_memory_audit(&mut self) -> (MemorySink, AuditWriter<MemorySink>) {
         let sink = MemorySink::new();
-        let writer = AuditWriter::new(sink.clone(), audit_writer_id(), WriterConfig::default());
+        let identity = WriterIdentity::new(
+            audit_writer_id(),
+            NatsToken::new(AUDIT_COMPONENT).expect("component"),
+            audit_tenant(),
+            audit_project(),
+        );
+        let stamper = Stamper::new(SystemClock, UuidV7Generator);
+        let writer = AuditWriter::new(sink.clone(), identity, WriterConfig::default(), &stamper);
         self.platform_audit = Some(Arc::new(WriterAudit::new(
             writer.clone(),
             audit_tenant(),

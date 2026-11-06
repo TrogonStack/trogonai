@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
-use trogon_audit::{AuditWriter, JetStreamSink, WriterConfig};
+use trogon_audit::{AuditWriter, JetStreamSink, Stamper, WriterConfig};
 use trogon_std::env::ReadEnv;
+use trogon_std::time::SystemClock;
+use trogon_std::uuid::UuidV7Generator;
 
 use super::DecisionAudit;
 use super::config::{PlatformAuditConfig, PlatformAuditConfigError};
@@ -24,8 +26,10 @@ pub fn jetstream_audit_from_env<E: ReadEnv>(
     }
     let config = PlatformAuditConfig::from_env(env)?;
     let sink = JetStreamSink::with_defaults(async_nats::jetstream::new(client.clone()));
-    let writer = AuditWriter::new(sink, config.writer, WriterConfig::default());
-    Ok(Some(Arc::new(WriterAudit::new(writer, config.tenant, config.project))))
+    let stamper = Stamper::new(SystemClock, UuidV7Generator);
+    let writer = AuditWriter::new(sink, config.identity.clone(), WriterConfig::default(), &stamper);
+    let (tenant, project) = (config.identity.tenant().clone(), config.identity.project().clone());
+    Ok(Some(Arc::new(WriterAudit::new(writer, tenant, project))))
 }
 
 #[cfg(test)]

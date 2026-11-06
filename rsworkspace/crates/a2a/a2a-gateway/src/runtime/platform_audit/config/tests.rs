@@ -13,9 +13,10 @@ fn env() -> InMemoryEnv {
 #[test]
 fn the_three_settings_name_the_tenant_project_and_writer() {
     let config = PlatformAuditConfig::from_env(&env()).expect("config");
-    assert_eq!(config.tenant.as_str(), "acme");
-    assert_eq!(config.project.as_str(), "payments");
-    assert_eq!(config.writer.as_str(), "a2a-gateway:gw-1");
+    assert_eq!(config.identity.tenant().as_str(), "acme");
+    assert_eq!(config.identity.project().as_str(), "payments");
+    assert_eq!(config.identity.writer().as_str(), "a2a-gateway:gw-1");
+    assert_eq!(config.identity.component().as_str(), "a2a_gateway");
 }
 
 #[test]

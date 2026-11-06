@@ -1,9 +1,10 @@
-use trogon_audit::{AuditName, AuditNameError, WriterId};
+use trogon_audit::{AuditName, AuditNameError, WriterId, WriterIdentity};
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 use trogon_std::env::ReadEnv;
 
 use crate::constants::{
-    AUDIT_WRITER_ID_PREFIX, ENV_GATEWAY_AUDIT_INSTANCE, ENV_GATEWAY_AUDIT_PROJECT, ENV_GATEWAY_AUDIT_TENANT,
+    AUDIT_COMPONENT, AUDIT_WRITER_ID_PREFIX, ENV_GATEWAY_AUDIT_INSTANCE, ENV_GATEWAY_AUDIT_PROJECT,
+    ENV_GATEWAY_AUDIT_TENANT,
 };
 
 /// Whose records these are and which process writes them (ADR#0086 Decision 1).
@@ -13,10 +14,9 @@ use crate::constants::{
 /// for any of the three: a record that names no tenant is not a record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlatformAuditConfig {
-    pub tenant: AuditName,
-    pub project: NatsToken,
-    /// Derived from the instance name, so a restarted replica is the same writer.
-    pub writer: WriterId,
+    /// The writer id is derived from the instance name, so a restarted replica is
+    /// the same writer.
+    pub identity: WriterIdentity,
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -29,6 +29,8 @@ pub enum PlatformAuditConfigError {
     Project(#[source] SubjectTokenViolationError),
     #[error("{ENV_GATEWAY_AUDIT_INSTANCE} is not a valid audit name")]
     Instance(#[source] AuditNameError),
+    #[error("the audit component is not a valid subject token")]
+    Component(#[source] SubjectTokenViolationError),
 }
 
 impl PlatformAuditConfig {
@@ -36,11 +38,13 @@ impl PlatformAuditConfig {
         let tenant = required(env, ENV_GATEWAY_AUDIT_TENANT)?;
         let project = required(env, ENV_GATEWAY_AUDIT_PROJECT)?;
         let instance = required(env, ENV_GATEWAY_AUDIT_INSTANCE)?;
+        let tenant = AuditName::new(tenant).map_err(PlatformAuditConfigError::Tenant)?;
+        let project = NatsToken::new(project).map_err(PlatformAuditConfigError::Project)?;
+        let writer =
+            WriterId::new(format!("{AUDIT_WRITER_ID_PREFIX}{instance}")).map_err(PlatformAuditConfigError::Instance)?;
+        let component = NatsToken::new(AUDIT_COMPONENT).map_err(PlatformAuditConfigError::Component)?;
         Ok(Self {
-            tenant: AuditName::new(tenant).map_err(PlatformAuditConfigError::Tenant)?,
-            project: NatsToken::new(project).map_err(PlatformAuditConfigError::Project)?,
-            writer: WriterId::new(format!("{AUDIT_WRITER_ID_PREFIX}{instance}"))
-                .map_err(PlatformAuditConfigError::Instance)?,
+            identity: WriterIdentity::new(writer, component, tenant, project),
         })
     }
 }
