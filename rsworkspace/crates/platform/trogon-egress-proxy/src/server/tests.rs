@@ -24,6 +24,7 @@ use crate::resolver::SystemResolver;
 use crate::static_snapshot::StaticSnapshot;
 
 mod connection_budget_tests;
+mod readiness_tests;
 
 const WAIT: Duration = Duration::from_secs(5);
 const TRUST_DOMAIN: &str = "trogon.example";
