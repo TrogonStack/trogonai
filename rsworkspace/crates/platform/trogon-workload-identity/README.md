@@ -53,7 +53,10 @@ The client limits decoded gRPC responses to 1 MiB before SDK domain parsing. The
 platform additionally bounds credential and bundle bytes to 1 MiB, SVID entries
 to 32, bundle entries to
 16, roots per bundle to 16, and registration bindings to 256. Duplicate SPIFFE IDs
-and root fingerprints are refused. No implicit trust-domain federation is enabled.
+and root fingerprints are refused. Each reported identity must match its
+certificate. Bundles for the same SVID trust domain must contain the same roots,
+independently of order. A federated entry cannot replace an SVID domain's bundle.
+No implicit trust-domain federation is enabled.
 
 The SDK's parsed X.509 context does not preserve Workload API CRLs. The client
 therefore decodes the official wire response before SDK SVID and bundle parsing.
@@ -61,6 +64,13 @@ Any supplied CRL withdraws authority and prevents activation. This profile uses
 governed identity and root withdrawal with bounded credential validity. A
 deployment requiring CRLs needs complete CRL verification before enablement.
 Owned wire private-key buffers are redacted in debug output and zeroized on drop.
+
+The wire schema and `/SpiffeWorkloadAPI/FetchX509SVID` RPC path follow the
+[SPIFFE Workload API](https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#5-x509-svid-profile)
+and the [pinned SDK schema](https://github.com/maxlambrecht/rust-spiffe/blob/ac70f979975939773ecc79d9763b2dba07d57746/spiffe/src/proto/workload.proto).
+The response uses tags 1 for SVIDs, 2 for CRLs and 3 for federated bundles. The
+SDK supplies the Unix connector and SVID and bundle parsing; this crate owns
+bounded raw gRPC decoding and the activation profile checks.
 
 Issuance, node and workload attestation, constrained SPIRE registration, signing-key
 custody, socket isolation, HA and recovery belong to the deployment. The real Unix

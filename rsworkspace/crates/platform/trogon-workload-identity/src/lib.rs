@@ -4,6 +4,7 @@ mod activation_audit;
 mod activation_audit_error;
 mod activation_fact;
 mod application_id;
+mod bundle_roots;
 mod candidate;
 mod certificate_use;
 mod certificate_validation;

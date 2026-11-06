@@ -5,6 +5,7 @@ use prost::Message;
 use spiffe::{TrustDomain, X509Bundle, X509BundleSet, X509Context, X509Svid};
 
 use crate::MaterialError;
+use crate::bundle_roots::BundleRoots;
 use crate::constants::{MAX_CONTEXT_BYTES, MAX_IDENTITIES, MAX_ROOTS};
 use crate::workload_identity_wire::WorkloadIdentityWire;
 
@@ -52,12 +53,22 @@ impl WorkloadResponseWire {
             }
             let bundle = X509Bundle::parse_from_der(svid.spiffe_id().trust_domain().clone(), &entry.bundle)
                 .map_err(|_| MaterialError::Certificate)?;
+            let roots = BundleRoots::new(&bundle)?;
+            if let Some(previous) = bundles.get(svid.spiffe_id().trust_domain())
+                && BundleRoots::new(&previous)? != roots
+            {
+                return Err(MaterialError::Identity);
+            }
             bundles.add_bundle(bundle);
             svids.push(Arc::new(svid));
         }
         for (domain, bytes) in self.federated_bundles {
             let domain = TrustDomain::new(&domain).map_err(|_| MaterialError::Identity)?;
+            if bundles.get(&domain).is_some() {
+                return Err(MaterialError::Identity);
+            }
             let bundle = X509Bundle::parse_from_der(domain, &bytes).map_err(|_| MaterialError::Certificate)?;
+            BundleRoots::new(&bundle)?;
             bundles.add_bundle(bundle);
         }
         Ok(X509Context::new(svids, bundles))
