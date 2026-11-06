@@ -48,11 +48,13 @@
   "cases": [
     {
       "name": "finite registration snapshot",
-      "template": "snapshot"
+      "template": "snapshot",
+      "violations": []
     },
     {
       "name": "bounded activation intent",
-      "template": "activation"
+      "template": "activation",
+      "violations": []
     },
     {
       "name": "registration cannot cross tenant",
@@ -65,7 +67,7 @@
         }
       ],
       "violations": [
-        "registration_snapshot.scope"
+        "every registration belongs to this exact tenant and project"
       ]
     },
     {
@@ -79,7 +81,7 @@
         }
       ],
       "violations": [
-        "registration_binding.application_identity"
+        "only an agent registration has an application identity"
       ]
     },
     {
@@ -93,7 +95,7 @@
         }
       ],
       "violations": [
-        "registration_snapshot.lease"
+        "registration authority has a positive lease no longer than 330 seconds"
       ]
     },
     {
@@ -107,7 +109,7 @@
         }
       ],
       "violations": [
-        "credential_activation.lifetime"
+        "an SVID has positive validity no longer than one hour"
       ]
     },
     {
@@ -121,7 +123,7 @@
         }
       ],
       "violations": [
-        "bytes.len"
+        "must be 32 bytes"
       ]
     },
     {
@@ -135,7 +137,7 @@
         }
       ],
       "violations": [
-        "repeated.min_items"
+        "must contain at least 1 item(s)"
       ]
     }
   ]
