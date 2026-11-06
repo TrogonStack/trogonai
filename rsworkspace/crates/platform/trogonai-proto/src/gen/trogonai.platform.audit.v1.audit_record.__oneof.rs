@@ -11,6 +11,9 @@ pub mod audit_record {
         ),
         CredentialUse(::buffa::alloc::boxed::Box<super::super::super::CredentialUse>),
         Change(::buffa::alloc::boxed::Box<super::super::super::Change>),
+        WriterLifecycle(
+            ::buffa::alloc::boxed::Box<super::super::super::WriterLifecycle>,
+        ),
     }
     impl ::buffa::Oneof for Detail {}
     impl From<super::super::super::GatewayDecision> for Detail {
@@ -43,6 +46,16 @@ pub mod audit_record {
             Self::Some(Detail::from(v))
         }
     }
+    impl From<super::super::super::WriterLifecycle> for Detail {
+        fn from(v: super::super::super::WriterLifecycle) -> Self {
+            Self::WriterLifecycle(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::WriterLifecycle> for ::core::option::Option<Detail> {
+        fn from(v: super::super::super::WriterLifecycle) -> Self {
+            Self::Some(Detail::from(v))
+        }
+    }
     impl serde::Serialize for Detail {
         fn serialize<S: serde::Serializer>(
             &self,
@@ -59,6 +72,9 @@ pub mod audit_record {
                 }
                 Self::Change(v) => {
                     map.serialize_entry("change", v)?;
+                }
+                Self::WriterLifecycle(v) => {
+                    map.serialize_entry("writerLifecycle", v)?;
                 }
             }
             map.end()

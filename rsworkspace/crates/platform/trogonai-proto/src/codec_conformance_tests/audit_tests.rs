@@ -3,7 +3,8 @@ use serde_json::json;
 
 use super::{assert_json_codec, assert_wire_codec};
 use crate::platform::audit::v1::{
-    AuditClass, AuditRecord, Change, ChangeKind, CredentialUse, CredentialUseKind, Integrity,
+    AuditCheckpoint, AuditClass, AuditRecord, ChainResetReason, Change, ChangeKind, CheckpointStatement, CredentialUse,
+    CredentialUseKind, Integrity, WriterLifecycle, WriterLifecycleKind,
 };
 
 #[test]
@@ -160,6 +161,113 @@ fn integrity_round_trips_hashes_as_bytes() {
 
     assert_eq!(integrity.record_hash, Some(vec![1, 2, 3]));
     assert_eq!(integrity.previous_hash, None);
+}
+
+#[test]
+fn integrity_round_trips_the_chain_id() {
+    let integrity = assert_json_codec::<Integrity>(json!({
+        "writerId": "w1",
+        "sequence": "2",
+        "previousHash": "AQID",
+        "recordHash": "BAUG",
+        "chainId": "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f04"
+    }));
+
+    assert_eq!(
+        integrity.chain_id.as_deref(),
+        Some("01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f04")
+    );
+}
+
+#[test]
+fn chain_reset_record_carries_no_attribution() {
+    let record = assert_json_codec::<AuditRecord>(json!({
+        "recordId": "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f04",
+        "class": "AUDIT_CLASS_MUST",
+        "occurredAt": "2026-11-03T10:00:00Z",
+        "recordedAt": "2026-11-03T10:00:01Z",
+        "tenant": {"value": "node_tenant"},
+        "project": {"value": "project_1"},
+        "actor": {"unattributed": {}},
+        "integrity": {
+            "writerId": "egress-proxy-1",
+            "sequence": "1",
+            "chainId": "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f04"
+        },
+        "writerLifecycle": {
+            "kind": "WRITER_LIFECYCLE_KIND_CHAIN_RESET",
+            "resetReason": "CHAIN_RESET_REASON_PROCESS_START_WITHOUT_RESUME"
+        }
+    }));
+
+    assert!(record.attribution.is_unset());
+}
+
+#[test]
+fn writer_lifecycle_wire_layout_is_stable() {
+    let wire = [
+        0x08, 0x02, // kind = CHAIN_RESET
+        0x10, 0x01, // reset_reason = PROCESS_START_WITHOUT_RESUME
+    ];
+    let lifecycle = WriterLifecycle {
+        kind: WriterLifecycleKind::WRITER_LIFECYCLE_KIND_CHAIN_RESET.into(),
+        reset_reason: Some(ChainResetReason::CHAIN_RESET_REASON_PROCESS_START_WITHOUT_RESUME.into()),
+    };
+
+    assert_eq!(lifecycle.try_encode_to_vec().expect("encode"), wire);
+    assert_wire_codec(&wire, &lifecycle);
+}
+
+#[test]
+fn checkpoint_statement_round_trips_through_json_and_wire() {
+    let statement = assert_json_codec::<CheckpointStatement>(json!({
+        "writerId": "egress-proxy-1",
+        "chainId": "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f04",
+        "headSequence": "1000",
+        "headHash": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        "auditStream": "AUDIT",
+        "auditStreamSequence": "31415",
+        "issuedAt": "2026-11-03T10:01:00Z",
+        "keyId": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+        "checkpointId": "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f05",
+        "component": "egress_proxy"
+    }));
+
+    assert_eq!(statement.head_hash, vec![1; 32]);
+    assert_eq!(statement.audit_stream_sequence, 31415);
+}
+
+#[test]
+fn audit_checkpoint_carries_the_statement_bytes_verbatim() {
+    let statement = CheckpointStatement {
+        writer_id: "egress-proxy-1".to_string(),
+        chain_id: "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f04".to_string(),
+        head_sequence: 1,
+        head_hash: vec![1; 32],
+        audit_stream: "AUDIT".to_string(),
+        audit_stream_sequence: 7,
+        key_id: "did:key:z6Mk".to_string(),
+        checkpoint_id: "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f05".to_string(),
+        component: "egress_proxy".to_string(),
+        ..Default::default()
+    };
+    let statement_bytes = statement.try_encode_to_vec().expect("encode");
+    let checkpoint = AuditCheckpoint {
+        statement: statement_bytes.clone(),
+        detached_jws: "eyJhbGciOiJFZERTQSJ9..c2ln".to_string(),
+    };
+
+    let decoded = AuditCheckpoint::decode_from_slice(&checkpoint.try_encode_to_vec().expect("encode")).expect("decode");
+    assert_eq!(decoded.statement, statement_bytes);
+    assert_eq!(
+        CheckpointStatement::decode_from_slice(&decoded.statement).expect("statement"),
+        statement
+    );
+
+    assert_json_codec::<AuditCheckpoint>(json!({
+        "statement": "CgFh",
+        "detachedJws": "eyJhbGciOiJFZERTQSJ9..c2ln"
+    }));
 }
 
 #[test]

@@ -13,11 +13,13 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use trogon_audit::{
-    AuditName, AuditStream, AuditWriter, JetStreamSink, MemorySink, SealedRecord, SinkError, WriterConfig, WriterId,
-    ensure_audit_stream,
+    AuditName, AuditStream, AuditWriter, ChainAnchor, JetStreamSink, MemorySink, SealedRecord, SinkError, Stamper,
+    WriterConfig, WriterId, WriterIdentity, ensure_audit_stream, verify_chain_range,
 };
 use trogon_nats::NatsToken;
 use trogon_nats::test_support::JetStreamTestServer;
+use trogon_std::time::SystemClock;
+use trogon_std::uuid::UuidV7Generator;
 use trogonai_proto::platform::audit::v1::AuditRecord;
 
 use super::*;
@@ -510,16 +512,15 @@ fn audited_proxy_over<S: trogon_audit::AuditSink>(
     names: &[(&str, &str)],
     non_tls: &[u16],
 ) -> Proxy {
-    let writer = AuditWriter::new(
-        sink,
-        WriterId::new("egress-proxy:test").expect("writer"),
-        WriterConfig::default(),
-    );
-    let audit = WriterAudit::new(
-        writer,
+    let identity = WriterIdentity::new(
+        writer(),
+        NatsToken::new("egress_proxy").expect("component"),
         AuditName::new("acme").expect("tenant"),
         NatsToken::new("payments").expect("project"),
     );
+    let stamper = Stamper::new(SystemClock, UuidV7Generator);
+    let writer = AuditWriter::new(sink, identity.clone(), WriterConfig::default(), &stamper);
+    let audit = WriterAudit::new(writer, identity.tenant().clone(), identity.project().clone());
     let resolver = Names(
         names
             .iter()
@@ -533,6 +534,26 @@ fn audited_proxy_over<S: trogon_audit::AuditSink>(
         limits(),
         non_tls.iter().map(|p| NonZeroU16::new(*p).expect("port")).collect(),
     )
+}
+
+fn writer() -> WriterId {
+    WriterId::new("egress-proxy:test").expect("writer")
+}
+
+/// The decision records stored, once everything stored is checked to be one
+/// gap-free chain opened by the writer's chain reset.
+fn decisions(sink: &MemorySink) -> Vec<SealedRecord> {
+    let stored = sink.stored();
+    let Some(genesis) = stored.first() else {
+        return Vec::new();
+    };
+    let anchor = ChainAnchor::Genesis {
+        writer: writer(),
+        chain: genesis.chain(),
+    };
+    let verified = verify_chain_range(anchor, sink.stored_records()).expect("one gap-free chain");
+    assert_eq!(verified.records(), stored.len());
+    stored.into_iter().skip(1).collect()
 }
 
 fn decoded(record: &SealedRecord) -> AuditRecord {
@@ -577,7 +598,7 @@ async fn a_permit_is_stored_before_the_client_is_told_the_tunnel_is_open() {
             let mut established = vec![0u8; 39];
             client.read_exact(&mut established).await.expect("read");
             assert_eq!(text(&established), "HTTP/1.1 200 Connection Established\r\n\r\n");
-            *observed.lock().expect("lock") = sink.stored();
+            *observed.lock().expect("lock") = decisions(&sink);
             Vec::new()
         }
     })
@@ -602,7 +623,7 @@ async fn a_permit_that_cannot_be_recorded_gets_503_and_the_upstream_sees_no_byte
     assert!(response.contains("retry-after: 5\r\n"), "{response}");
     assert!(!response.contains("200 Connection Established"), "{response}");
     assert_eq!(upstream_received.await.expect("upstream closed"), 0);
-    assert!(sink.stored().is_empty());
+    assert!(decisions(&sink).is_empty());
     assert_eq!(
         sink.attempts(),
         1,
@@ -620,8 +641,11 @@ async fn a_request_with_no_permit_is_still_refused_with_403_when_audit_is_down()
     })
     .await;
     assert_refusal(&response, "403", "NO_PERMIT");
-    assert!(sink.attempts() >= 1, "the refusal was still offered to the stream");
-    assert!(sink.stored().is_empty());
+    assert!(
+        sink.attempts() >= 1,
+        "the stream was tried before the refusal was buffered"
+    );
+    assert!(decisions(&sink).is_empty());
 }
 
 #[tokio::test]
@@ -633,7 +657,7 @@ async fn a_refusal_is_stored_with_its_reason_when_audit_is_up() {
     })
     .await;
     assert_refusal(&response, "403", "NO_PERMIT");
-    let stored = sink.stored();
+    let stored = decisions(&sink);
     assert_eq!(stored.len(), 1);
     let (decision, reason) = decision_of(&stored[0]);
     assert!(decision.contains("DENY"), "{decision}");
@@ -653,7 +677,7 @@ async fn an_sni_mismatch_leaves_the_permit_that_opened_the_tunnel_and_a_refusal(
     let request = format!("CONNECT upstream.test:{port} HTTP/1.1\r\n\r\nGET / HTTP/1.1\r\n\r\n");
     let response = exchange(&proxy, |client| send_and_read_all(client, request.into_bytes())).await;
     assert_eq!(text(&response), "HTTP/1.1 200 Connection Established\r\n\r\n");
-    let stored = sink.stored();
+    let stored = decisions(&sink);
     assert_eq!(stored.len(), 2);
     let (first, first_reason) = decision_of(&stored[0]);
     assert!(first.contains("ALLOW"), "{first}");
@@ -682,7 +706,7 @@ async fn no_header_value_reaches_a_record() {
     let refused = format!("CONNECT other.example:443 HTTP/1.1\r\nAuthorization: {canary}\r\n\r\n");
     exchange(&proxy, |client| send_and_read_all(client, refused.into_bytes())).await;
 
-    let stored = sink.stored();
+    let stored = decisions(&sink);
     assert_eq!(stored.len(), 3);
     for record in &stored {
         let payload = String::from_utf8_lossy(record.payload()).into_owned();
@@ -724,8 +748,12 @@ async fn a_refused_connect_is_stored_as_a_deny_decision_on_the_audit_stream() {
 
     assert_refusal(&response, "403", "NO_PERMIT");
     let stream = js.get_stream("AUDIT").await.expect("AUDIT");
-    assert_eq!(stream.cached_info().state.messages, 1);
-    let stored = stream.get_raw_message(1).await.expect("the stored decision");
+    assert_eq!(
+        stream.cached_info().state.messages,
+        2,
+        "the chain reset, then the decision"
+    );
+    let stored = stream.get_raw_message(2).await.expect("the stored decision");
     assert_eq!(stored.subject.as_str(), "platform.v1.audit.decision.payments.deny");
     let record = AuditRecord::decode_from_slice(&stored.payload).expect("an audit record");
     assert!(format!("{:?}", record.attribution.decision).contains("DENY"));

@@ -461,6 +461,37 @@ impl<'a> ::buffa::MessageView<'a> for AuditRecordView<'a> {
                     );
                 }
             }
+            16u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::audit_record::Detail::WriterLifecycle(
+                        ref mut existing,
+                    ),
+                ) = view.detail
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.detail = Some(
+                        super::super::__buffa::view::oneof::audit_record::Detail::WriterLifecycle(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::WriterLifecycleView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -588,6 +619,15 @@ impl<'a> ::buffa::MessageView<'a> for AuditRecordView<'a> {
                                     ),
                                 )
                             }
+                            super::super::__buffa::view::oneof::audit_record::Detail::WriterLifecycle(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::audit_record::Detail::WriterLifecycle(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
                         },
                     )
                 }
@@ -708,6 +748,16 @@ impl<'a> ::buffa::ViewEncode<'a> for AuditRecordView<'a> {
                         += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
                             + inner as u64;
                 }
+                super::super::__buffa::view::oneof::audit_record::Detail::WriterLifecycle(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
+                }
             }
         }
         ::buffa::saturate_size(size)
@@ -822,6 +872,16 @@ impl<'a> ::buffa::ViewEncode<'a> for AuditRecordView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
+                super::super::__buffa::view::oneof::audit_record::Detail::WriterLifecycle(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        16u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
             }
         }
     }
@@ -908,6 +968,11 @@ impl<'__a> ::serde::Serialize for AuditRecordView<'__a> {
                 }
                 super::super::__buffa::view::oneof::audit_record::Detail::Change(v) => {
                     __map.serialize_entry("change", v)?;
+                }
+                super::super::__buffa::view::oneof::audit_record::Detail::WriterLifecycle(
+                    v,
+                ) => {
+                    __map.serialize_entry("writerLifecycle", v)?;
                 }
             }
         }

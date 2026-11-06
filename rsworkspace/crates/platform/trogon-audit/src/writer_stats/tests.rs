@@ -10,6 +10,7 @@ fn an_empty_snapshot_is_all_zero() {
     assert!(!stats.degraded());
     assert_eq!(stats.retry_buffered(), 0);
     assert_eq!(stats.best_effort_queued(), 0);
+    assert_eq!(stats.possible_duplicates(), 0);
 }
 
 #[test]

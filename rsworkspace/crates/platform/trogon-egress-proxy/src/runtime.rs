@@ -12,8 +12,10 @@ use std::sync::Arc;
 
 use tokio::net::TcpListener;
 
-use trogon_audit::{AuditWriter, JetStreamSink, WriterConfig};
+use trogon_audit::{AuditWriter, JetStreamSink, Stamper, WriterConfig};
 use trogon_nats::ConnectError;
+use trogon_std::time::SystemClock;
+use trogon_std::uuid::UuidV7Generator;
 
 use crate::audit::AuditSink;
 use crate::audit_config::AuditConfig;
@@ -72,8 +74,14 @@ async fn connect_audit(
 ) -> Result<WriterAudit<JetStreamSink<async_nats::jetstream::Context>>, ConnectError> {
     let client = trogon_nats::connect(&config.nats, AUDIT_CONNECT_TIMEOUT).await?;
     let sink = JetStreamSink::with_defaults(async_nats::jetstream::new(client));
-    let writer = AuditWriter::new(sink, config.writer.clone(), WriterConfig::default());
-    Ok(WriterAudit::new(writer, config.tenant.clone(), config.project.clone()))
+    let stamper = Stamper::new(SystemClock, UuidV7Generator);
+    let writer = AuditWriter::new(sink, config.identity.clone(), WriterConfig::default(), &stamper);
+    let identity = &config.identity;
+    Ok(WriterAudit::new(
+        writer,
+        identity.tenant().clone(),
+        identity.project().clone(),
+    ))
 }
 
 pub async fn start_with(

@@ -12,12 +12,16 @@ pub enum FailureReason {
     Timeout,
     /// The stream is full and is configured with `discard: new`.
     StreamFull,
-    /// The deny retry buffer is full, so the writer is audit-degraded.
+    /// The writer is audit-degraded: the chain's head is waiting to be stored,
+    /// or the deny retry buffer is full.
     Degraded,
     /// The best-effort queue is full.
     QueueFull,
     /// A deny could not be buffered because the retry buffer is full.
     BufferFull,
+    /// The record is larger than the stream stores, so it was turned away
+    /// before it took a place in the chain.
+    TooLarge,
 }
 
 impl FailureReason {
@@ -29,6 +33,7 @@ impl FailureReason {
             Self::Degraded => "degraded",
             Self::QueueFull => "queue_full",
             Self::BufferFull => "buffer_full",
+            Self::TooLarge => "too_large",
         }
     }
 }

@@ -89,6 +89,7 @@ dependencies = [
  "a2a-redaction",
  "async-nats",
  "async-trait",
+ "buffa",
  "bytes",
  "cel-interpreter",
  "clap",
@@ -108,9 +109,11 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "trogon-audit",
  "trogon-identity-types",
  "trogon-nats",
  "trogon-std",
+ "trogonai-proto",
  "uuid",
 ]
 
@@ -7173,6 +7176,7 @@ dependencies = [
  "buffa-types",
  "bytes",
  "serde_json",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",

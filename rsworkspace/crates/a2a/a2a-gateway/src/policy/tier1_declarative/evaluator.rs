@@ -272,9 +272,9 @@ impl Tier1DeclarativeConfig {
         // Trim the value before passing it to the loader. Operators
         // routinely set env vars from shell scripts that leave trailing
         // whitespace; without the trim the loader would try to open a
-        // path like `/etc/tier1/ ` which silently fails the
-        // `exists()` check and returns an empty bundle, defeating the
-        // "fail fast on misconfiguration" goal.
+        // path like `/etc/tier1/ ` which fails the `exists()` check
+        // and surfaces as a missing-directory error for a path the
+        // operator did create.
         let bundle_dir = match env.var(ENV_TIER1_BUNDLE_DIR) {
             Ok(value) if !value.trim().is_empty() => value.trim().to_string(),
             Ok(_) => return Err(Tier1DeclarativeBuildError::BundleDirEmpty),

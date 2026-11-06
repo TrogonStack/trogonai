@@ -3,8 +3,8 @@ use std::time::{Duration, SystemTime};
 
 use a2a_auth_callout::jwt::ExternalSubject;
 use a2a_auth_callout::{
-    AccountName, CallerId, CallerJwtHeaderValue, IssuedPermissions, KeyVersion, NkeyPublic, SigningKeySource,
-    StaticSigningKeySource, UserJwtClaims, UserJwtSubject,
+    AccountName, CallerId, CallerJwtHeaderValue, IssuedPermissions, IssuerPublicKeys, KeyVersion, NkeyPublic,
+    SigningKeySource, StaticSigningKeySource, UserJwtClaims, UserJwtSubject,
 };
 use a2a_nats::A2aAgentId;
 use a2a_nats::catalog::agent_view::AgentViewCheckOutcome;
@@ -15,22 +15,47 @@ use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
+use trogon_audit::{AuditName, AuditWriter, MemorySink, Stamper, WriterConfig, WriterId, WriterIdentity};
 use trogon_identity_types::PrincipalKind;
+use trogon_nats::NatsToken;
 use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer};
 use trogon_std::env::InMemoryEnv;
+use trogon_std::time::SystemClock;
+use trogon_std::uuid::UuidV7Generator;
 
 use crate::config::{Args, Config, config_from_args};
-use crate::constants::ENV_GATEWAY_AUDIT_PUBLISH;
+use crate::constants::{
+    AUDIT_COMPONENT, AUDIT_WRITER_ID_PREFIX, ENV_GATEWAY_AUDIT_INSTANCE, ENV_GATEWAY_AUDIT_PROJECT,
+    ENV_GATEWAY_AUDIT_PUBLISH, ENV_GATEWAY_AUDIT_TENANT,
+};
 use crate::gw_ingress_stream::{
     GatewayStreamingIngressConfig, StreamingIngressGate, StreamingMaxAckPending, StreamingMaxInflightPerCaller,
 };
 use crate::ingress_identity::ForwardedCallerJwtVerifier;
-use crate::policy::spicedb_tier1::{
-    NoopSpiceDbTier1Gate, OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1OwnerTuple, Tier1SessionKey,
-};
 use crate::policy::tier1_declarative::{NoopTier1DeclarativeGate, Tier1DeclarativeGate};
+use crate::policy::tier1_gate::{
+    NoopSpiceDbTier1Gate, OwnerEmitError, OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1OwnerTuple,
+    Tier1SessionKey,
+};
 use crate::runtime::dispatch::dispatch_gateway_ingress;
+use crate::runtime::platform_audit::{DecisionAudit, WriterAudit, jetstream_audit_from_env};
 use crate::runtime::policy_stack::GatewayPolicyStack;
+
+pub const AUDIT_PROJECT: &str = "payments";
+const AUDIT_TENANT: &str = "acme";
+const AUDIT_INSTANCE: &str = "test";
+
+pub fn audit_writer_id() -> WriterId {
+    WriterId::new(format!("{AUDIT_WRITER_ID_PREFIX}{AUDIT_INSTANCE}")).expect("writer id")
+}
+
+fn audit_tenant() -> AuditName {
+    AuditName::new(AUDIT_TENANT).expect("tenant")
+}
+
+fn audit_project() -> NatsToken {
+    NatsToken::new(AUDIT_PROJECT).expect("project")
+}
 
 pub type TestResult<T = ()> = Result<T, FixtureError>;
 
@@ -46,6 +71,8 @@ pub enum FixtureError {
     KeyVersion(#[from] a2a_auth_callout::KeyVersionError),
     #[error("signing key source failed: {0}")]
     AuthCallout(#[from] a2a_auth_callout::AuthCalloutError),
+    #[error("issuer public keys failed: {0}")]
+    IssuerKeys(#[from] a2a_auth_callout::IssuerPublicKeysError),
     #[error("caller JWT minting failed: {0}")]
     Jwt(#[from] a2a_auth_callout::jwt::JwtError),
     #[error("NATS subscription failed: {0}")]
@@ -90,6 +117,8 @@ pub struct DispatchFixture<S = CoreTestServer> {
     pub owner: Option<Arc<dyn OwnerTupleEmitter>>,
     pub declarative: Arc<dyn Tier1DeclarativeGate>,
     pub policy: GatewayPolicyStack,
+    /// The platform audit path; `None` until a test turns one on.
+    pub platform_audit: Option<Arc<dyn DecisionAudit>>,
     signing: Arc<StaticSigningKeySource>,
     caller_jwt: ForwardedCallerJwtVerifier,
     pub shutdown: CancellationToken,
@@ -135,11 +164,13 @@ impl<S> DispatchFixture<S> {
             },
             &env,
         )?;
-        let signing = Arc::new(StaticSigningKeySource::new(
-            &nkeys::KeyPair::new_account().seed()?,
-            KeyVersion::new("test")?,
-        )?);
-        let caller_jwt = ForwardedCallerJwtVerifier::new(signing.clone(), AccountName::new(GATEWAY_AUDIENCE));
+        let issuer = nkeys::KeyPair::new_account();
+        let signing = Arc::new(StaticSigningKeySource::new(&issuer.seed()?, KeyVersion::new("test")?)?);
+        // The gateway verifies against the public key alone; the seed stays with the minting side.
+        let caller_jwt = ForwardedCallerJwtVerifier::new(
+            Arc::new(IssuerPublicKeys::parse(&issuer.public_key())?),
+            AccountName::new(GATEWAY_AUDIENCE),
+        );
         let agents = client.subscribe("a2a.v1.agents.>").await?;
         let replies = client.subscribe("_INBOX.dispatch").await?;
         let audits = client.subscribe("a2a.v1.audit.>").await?;
@@ -157,6 +188,7 @@ impl<S> DispatchFixture<S> {
             owner: None,
             declarative: Arc::new(NoopTier1DeclarativeGate),
             policy: GatewayPolicyStack::noop(),
+            platform_audit: None,
             signing,
             caller_jwt,
             shutdown: CancellationToken::new(),
@@ -164,6 +196,35 @@ impl<S> DispatchFixture<S> {
             streaming_config,
             streaming_gate: StreamingIngressGate::new(streaming_config),
         })
+    }
+
+    /// Routes the platform audit records into memory, where a test can make the
+    /// sink fail and recover, and returns the sink with the writer to drain.
+    pub fn enable_memory_audit(&mut self) -> (MemorySink, AuditWriter<MemorySink>) {
+        let sink = MemorySink::new();
+        let identity = WriterIdentity::new(
+            audit_writer_id(),
+            NatsToken::new(AUDIT_COMPONENT).expect("component"),
+            audit_tenant(),
+            audit_project(),
+        );
+        let stamper = Stamper::new(SystemClock, UuidV7Generator);
+        let writer = AuditWriter::new(sink.clone(), identity, WriterConfig::default(), &stamper);
+        self.platform_audit = Some(Arc::new(WriterAudit::new(
+            writer.clone(),
+            audit_tenant(),
+            audit_project(),
+        )));
+        (sink, writer)
+    }
+
+    /// Builds the platform audit writer the way the gateway does at start, over
+    /// the stream this fixture's connection reaches.
+    pub fn enable_jetstream_audit(&mut self) {
+        self.env.set(ENV_GATEWAY_AUDIT_TENANT, AUDIT_TENANT);
+        self.env.set(ENV_GATEWAY_AUDIT_PROJECT, AUDIT_PROJECT);
+        self.env.set(ENV_GATEWAY_AUDIT_INSTANCE, AUDIT_INSTANCE);
+        self.platform_audit = jetstream_audit_from_env(&self.env, &self.client).expect("platform audit settings");
     }
 
     pub async fn dispatch(&self, message: Message) {
@@ -178,6 +239,7 @@ impl<S> DispatchFixture<S> {
             self.streaming_enabled,
             self.streaming_config,
             &self.streaming_gate,
+            self.platform_audit.as_deref(),
             self.shutdown.clone(),
             &self.env,
             message,
@@ -316,13 +378,13 @@ impl SpiceDbTier1Gate for RecordingTier1 {
 
 #[derive(Default)]
 pub struct RecordingOwner {
-    pub failure: Option<tonic::Status>,
+    pub failure: Option<OwnerEmitError>,
     pub calls: Mutex<Vec<Tier1OwnerTuple>>,
 }
 
 #[async_trait::async_trait]
 impl OwnerTupleEmitter for RecordingOwner {
-    async fn emit_owner(&self, owner: &Tier1OwnerTuple) -> Result<(), tonic::Status> {
+    async fn emit_owner(&self, owner: &Tier1OwnerTuple) -> Result<(), OwnerEmitError> {
         self.calls.lock().expect("owner calls").push(owner.clone());
         self.failure.clone().map_or(Ok(()), Err)
     }

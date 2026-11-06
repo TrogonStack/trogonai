@@ -4,6 +4,7 @@ use crate::jwt::SigningKey;
 
 use super::key_version::KeyVersion;
 use super::minting_material::MintingMaterial;
+use super::verifying_key::VerifyingKey;
 
 #[derive(Clone)]
 pub struct SigningKeyHandle {
@@ -27,6 +28,11 @@ impl SigningKeyHandle {
 
     pub fn version(&self) -> &KeyVersion {
         &self.version
+    }
+
+    /// The public half of this key, for a verifier that must not hold the seed.
+    pub fn verifying_key(&self) -> VerifyingKey {
+        VerifyingKey::from_handle(self)
     }
 
     pub fn minting_material(&self) -> MintingMaterial {

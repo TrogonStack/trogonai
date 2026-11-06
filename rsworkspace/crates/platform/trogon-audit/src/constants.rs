@@ -29,6 +29,7 @@ pub const TERMINAL_SIGNED: &str = "signed";
 /// Provenance travels in headers, never in payload fields (ADR#0039).
 pub const HEADER_WRITER: &str = "Trogon-Audit-Writer";
 pub const HEADER_SEQUENCE: &str = "Trogon-Audit-Seq";
+pub const HEADER_CHAIN: &str = "Trogon-Audit-Chain";
 
 /// Longest name a record may carry. A target, a resource name or a host is a
 /// name; content does not fit in this and is rejected on character set first.
@@ -52,6 +53,51 @@ pub const NAME_PUNCTUATION: &str = "._:/@+-[]";
 pub const CONSISTENCY_TOKEN_PUNCTUATION: &str = "+/=-_.:~";
 
 pub const RECORD_ID_UUID_VERSION: usize = 7;
+pub const CHAIN_ID_UUID_VERSION: usize = 7;
+
+/// A record hash is a SHA-256 digest.
+pub const RECORD_HASH_BYTES: usize = 32;
+
+const PROTOBUF_WIRE_TYPE_LENGTH_DELIMITED: u8 = 2;
+/// `AuditRecord.integrity`.
+const AUDIT_RECORD_INTEGRITY_FIELD: u8 = 12;
+/// `Integrity.record_hash`.
+const INTEGRITY_RECORD_HASH_FIELD: u8 = 4;
+/// The record hash as a length-delimited `Integrity.record_hash`: tag and length.
+const RECORD_HASH_FIELD_HEADER_BYTES: usize = 2;
+
+/// The bytes that open a sealed record's trailer: a second `AuditRecord.integrity`
+/// holding only `record_hash`, as one-byte tags and one-byte lengths. A decoder
+/// merges it into the record's integrity.
+pub const SEAL_TRAILER_PREFIX: [u8; 4] = [
+    (AUDIT_RECORD_INTEGRITY_FIELD << 3) | PROTOBUF_WIRE_TYPE_LENGTH_DELIMITED,
+    (RECORD_HASH_FIELD_HEADER_BYTES + RECORD_HASH_BYTES) as u8,
+    (INTEGRITY_RECORD_HASH_FIELD << 3) | PROTOBUF_WIRE_TYPE_LENGTH_DELIMITED,
+    RECORD_HASH_BYTES as u8,
+];
+pub const SEAL_TRAILER_BYTES: usize = SEAL_TRAILER_PREFIX.len() + RECORD_HASH_BYTES;
+
+/// The sequence of the record that opens a chain.
+pub const GENESIS_SEQUENCE: u64 = 1;
+
+/// Most records one verification walks. A verifier keeps only the previous
+/// record's position and hash, so the bound limits the work one call does on
+/// input it does not trust; a longer history is verified in ranges, each
+/// continuing from the head the previous range verified.
+pub const MAX_CHAIN_RANGE_RECORDS: usize = 10_000;
+
+/// The NATS server's default `max_payload`, which bounds a message's payload and
+/// headers together. The `AUDIT` stream sets no message size of its own, so this
+/// is the size a record must fit.
+pub const NATS_DEFAULT_MAX_PAYLOAD_BYTES: usize = 1024 * 1024;
+/// Room the writer keeps for what it adds after the size check: the integrity
+/// stamp (a writer id up to [`MAX_NAME_BYTES`], a sequence, a chain id and a
+/// previous hash), the seal trailer and the provenance headers. Their worst case
+/// is under a kilobyte.
+pub const SEAL_HEADROOM_BYTES: usize = 4 * 1024;
+/// Largest encoded record the writer accepts, checked before it is numbered so
+/// a record the stream would reject never takes a place in the chain.
+pub const MAX_RECORD_BYTES: usize = NATS_DEFAULT_MAX_PAYLOAD_BYTES - SEAL_HEADROOM_BYTES;
 
 /// The streams that hold the records (ADR#0086 Decision 2).
 pub const STREAM_AUDIT: &str = "AUDIT";

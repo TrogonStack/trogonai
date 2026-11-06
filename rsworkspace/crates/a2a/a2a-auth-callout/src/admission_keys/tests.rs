@@ -28,11 +28,14 @@ fn account_public_keys_accept_an_account_key_and_drop_surrounding_whitespace() {
 
     let tenant: TenantAccount = format!("  {account}\n").parse().expect("tenant account");
     let auth: AuthAccount = account.parse().expect("auth account");
+    let issuer: IssuerPublicKey = format!("\t{account} ").parse().expect("issuer public key");
 
     assert_eq!(tenant.as_str(), account);
     assert_eq!(auth.as_str(), account);
+    assert_eq!(issuer.as_str(), account);
     assert_eq!(tenant.to_string(), account);
     assert_eq!(auth.to_string(), account);
+    assert_eq!(issuer.to_string(), account);
 }
 
 #[test]

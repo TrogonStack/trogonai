@@ -16,11 +16,11 @@ use trogon_std::log_capture::CapturedLogs;
 use trogon_std::log_capture::LevelFilter;
 
 use super::*;
-use crate::constants::{HEADER_SEQUENCE, HEADER_WRITER};
-use crate::fixtures::{allow, stamper, writer_id};
+use crate::constants::{HEADER_CHAIN, HEADER_SEQUENCE, HEADER_WRITER};
+use crate::fixtures::{CHAIN, allow, sealed_at, stamper};
 
 fn sealed() -> SealedRecord {
-    SealedRecord::seal(allow(&stamper()), &writer_id(), 4)
+    sealed_at(allow(&stamper()), 4)
 }
 
 fn attempts(count: u32) -> NonZeroU32 {
@@ -101,8 +101,9 @@ async fn publishes_the_encoded_record_under_its_record_id() {
     let sink = JetStreamSink::with_defaults(publisher.clone());
     let record = sealed();
 
-    sink.publish(&record).await.unwrap();
+    let acknowledged = sink.publish(&record).await.unwrap();
 
+    assert_eq!(acknowledged, StoredAck::new("mock-stream", 1, false));
     let messages = publisher.published_messages();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].subject, "platform.v1.audit.decision.project_1.allow");
@@ -113,6 +114,7 @@ async fn publishes_the_encoded_record_under_its_record_id() {
     );
     assert_eq!(messages[0].headers.get(HEADER_WRITER).unwrap().as_str(), "gateway-1");
     assert_eq!(messages[0].headers.get(HEADER_SEQUENCE).unwrap().as_str(), "4");
+    assert_eq!(messages[0].headers.get(HEADER_CHAIN).unwrap().as_str(), CHAIN);
 }
 
 #[tokio::test]
@@ -147,7 +149,7 @@ async fn a_timeout_is_retried_under_the_same_message_id() {
     let sink = JetStreamSink::new(publisher.clone(), DEFAULT_ACK_TIMEOUT, attempts(3));
     let record = sealed();
 
-    sink.publish(&record).await.unwrap();
+    assert_eq!(sink.publish(&record).await, Ok(StoredAck::from(ack())));
 
     let ids = publisher.message_ids();
     assert_eq!(ids.len(), 3);
@@ -174,20 +176,27 @@ async fn a_single_attempt_does_not_retry() {
 #[test]
 fn a_failed_claim_check_store_is_unreachable() {
     let outcome = PublishOutcome::<MockError>::StoreFailed(Box::new(MockError("store".to_owned())));
-    assert_eq!(failure_of(outcome), Some(SinkError::Unreachable));
+    assert_eq!(stored(outcome), Err(SinkError::Unreachable));
 }
 
 #[test]
-fn a_published_outcome_is_not_a_failure() {
-    assert_eq!(failure_of(PublishOutcome::<MockError>::Published), None);
+fn a_published_outcome_is_the_streams_ack() {
+    let duplicate = PublishAck {
+        duplicate: true,
+        ..ack()
+    };
+    assert_eq!(
+        stored(PublishOutcome::<MockError>::Published(duplicate)),
+        Ok(StoredAck::new("AUDIT", 1, true))
+    );
 }
 
 #[test]
 fn every_failed_outcome_is_classified() {
     let ack_failed = PublishOutcome::AckFailed(MockError("ack".to_owned()));
-    assert_eq!(failure_of(ack_failed), Some(SinkError::Unreachable));
+    assert_eq!(stored(ack_failed), Err(SinkError::Unreachable));
     let timed_out = PublishOutcome::<MockError>::AckTimedOut(DEFAULT_ACK_TIMEOUT);
-    assert_eq!(failure_of(timed_out), Some(SinkError::Timeout));
+    assert_eq!(stored(timed_out), Err(SinkError::Timeout));
 }
 
 #[tokio::test(start_paused = true)]
