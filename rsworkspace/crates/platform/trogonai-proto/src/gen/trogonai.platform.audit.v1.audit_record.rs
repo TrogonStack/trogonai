@@ -285,6 +285,14 @@ impl ::buffa::Message for AuditRecord {
                         += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
                             + inner as u64;
                 }
+                __buffa::oneof::audit_record::Detail::CredentialActivation(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
+                }
             }
         }
         ::buffa::saturate_size(size)
@@ -397,6 +405,14 @@ impl ::buffa::Message for AuditRecord {
                 __buffa::oneof::audit_record::Detail::WriterLifecycle(x) => {
                     ::buffa::types::put_len_delimited_header(
                         16u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                __buffa::oneof::audit_record::Detail::CredentialActivation(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        17u32,
                         u64::from(__cache.consume_next()),
                         buf,
                     );
@@ -624,6 +640,28 @@ impl ::buffa::Message for AuditRecord {
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.detail = ::core::option::Option::Some(
                         __buffa::oneof::audit_record::Detail::WriterLifecycle(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
+            17u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::audit_record::Detail::CredentialActivation(
+                        ref mut existing,
+                    ),
+                ) = self.detail
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.detail = ::core::option::Option::Some(
+                        __buffa::oneof::audit_record::Detail::CredentialActivation(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -962,6 +1000,32 @@ impl<'de> serde::Deserialize<'de> for AuditRecord {
                                 }
                                 __oneof_detail = Some(
                                     __buffa::oneof::audit_record::Detail::WriterLifecycle(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        "credentialActivation" | "credential_activation" => {
+                            let v: ::core::option::Option<
+                                super::super::workload_identity::v1alpha1::CredentialActivation,
+                            > = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            super::super::workload_identity::v1alpha1::CredentialActivation,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_detail.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'detail'",
+                                        ),
+                                    );
+                                }
+                                __oneof_detail = Some(
+                                    __buffa::oneof::audit_record::Detail::CredentialActivation(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );

@@ -31,6 +31,7 @@
 //! across restarts, signed checkpoints, the remaining integrity records, the
 //! OpenTelemetry counters and the surface adapters are later slices.
 
+pub mod activation_recorder;
 pub mod actor;
 pub mod audit_name;
 pub mod audit_sink;
@@ -53,6 +54,7 @@ pub mod checkpoint_terminal;
 pub mod classify_publish_error;
 pub mod consistency_token;
 pub mod constants;
+pub mod credential_activation_facts;
 pub mod credential_facts;
 pub mod credential_terminal;
 pub mod decision_facts;
@@ -100,6 +102,7 @@ pub mod chain_builder;
 #[cfg(any(test, feature = "test-support"))]
 pub mod memory_sink;
 
+pub use activation_recorder::{ActivationRecorder, ActivationRecorderError};
 pub use actor::Actor;
 pub use audit_name::{AuditName, AuditNameError};
 pub use audit_sink::AuditSink;
@@ -119,6 +122,7 @@ pub use change_terminal::ChangeTerminal;
 pub use checkpoint_terminal::CheckpointTerminal;
 pub use classify_publish_error::ClassifyPublishError;
 pub use consistency_token::{ConsistencyToken, ConsistencyTokenError};
+pub use credential_activation_facts::{ActivationFactsError, ActivationScopeError, CredentialActivationFacts};
 pub use credential_facts::CredentialFacts;
 pub use credential_terminal::CredentialTerminal;
 pub use decision_facts::DecisionFacts;

@@ -35,6 +35,7 @@ pub(crate) fn subject_agrees(subject: &str, record: &AuditRecord) -> bool {
 fn expected(record: &AuditRecord) -> Option<(&'static str, Option<&str>, &'static str)> {
     let project = Some(record.project.value.as_str());
     match record.detail.as_ref()? {
+        Detail::CredentialActivation(_) => None,
         Detail::GatewayDecision(_) => Some((SUBJECT_KIND_DECISION, project, decision_terminal(record)?)),
         Detail::CredentialUse(credential) => {
             let terminal = match credential.kind.as_known()? {

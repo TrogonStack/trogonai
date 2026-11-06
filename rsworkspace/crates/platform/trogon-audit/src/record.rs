@@ -24,6 +24,7 @@ use crate::actor::Actor;
 use crate::audit_subject::AuditSubject;
 use crate::change_facts::ChangeFacts;
 use crate::change_terminal::ChangeTerminal;
+use crate::credential_activation_facts::{ActivationScopeError, CredentialActivationFacts};
 use crate::credential_facts::CredentialFacts;
 use crate::credential_terminal::CredentialTerminal;
 use crate::decision_facts::DecisionFacts;
@@ -49,6 +50,14 @@ pub struct Record {
 }
 
 impl Record {
+    pub fn credential_activation(
+        _scope: RecordScope,
+        _facts: CredentialActivationFacts,
+        _stamp: Stamp,
+    ) -> Result<Self, ActivationScopeError> {
+        Err(ActivationScopeError)
+    }
+
     pub fn decision(scope: RecordScope, facts: DecisionFacts, stamp: Stamp) -> Self {
         let kind = RecordKind::Decision {
             outcome: facts.outcome,
