@@ -6,7 +6,7 @@ use spiffe::{TrustDomain, X509Bundle, X509BundleSet, X509Context, X509Svid};
 
 use crate::MaterialError;
 use crate::bundle_roots::BundleRoots;
-use crate::constants::{MAX_CONTEXT_BYTES, MAX_IDENTITIES, MAX_ROOTS};
+use crate::constants::{MAX_CONTEXT_BYTES, MAX_IDENTITIES, MAX_ROOTS, MAX_SPIFFE_ID_BYTES};
 use crate::workload_identity_wire::WorkloadIdentityWire;
 use crate::workload_response_error::WorkloadResponseError;
 
@@ -44,7 +44,7 @@ impl WorkloadResponseWire {
         let mut svids = Vec::with_capacity(self.svids.len());
         let mut bundles = X509BundleSet::new();
         for entry in &self.svids {
-            if entry.spiffe_id.is_empty() || entry.bundle.is_empty() {
+            if entry.spiffe_id.is_empty() || entry.spiffe_id.len() > MAX_SPIFFE_ID_BYTES || entry.bundle.is_empty() {
                 return Err(MaterialError::Identity.into());
             }
             let svid = X509Svid::parse_from_der(&entry.x509_svid, &entry.x509_svid_key)?;

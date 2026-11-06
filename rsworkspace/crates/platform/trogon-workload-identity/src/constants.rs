@@ -2,6 +2,7 @@ use std::time::Duration;
 
 pub const MAX_REGISTRATION_LIFETIME: Duration = Duration::from_secs(330);
 pub const MAX_SVID_LIFETIME: Duration = Duration::from_secs(3600);
+pub const MAX_SPIFFE_ID_BYTES: usize = 2048;
 pub const MAX_BINDINGS: usize = 256;
 pub const MAX_ROOTS: usize = 16;
 pub const MAX_IDENTITIES: usize = 32;

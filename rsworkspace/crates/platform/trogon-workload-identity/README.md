@@ -53,9 +53,9 @@ ordering. Audit facts contain public identifiers and fingerprints, never keys.
 
 The client limits decoded gRPC responses to 1 MiB before SDK domain parsing. The
 platform additionally bounds credential and bundle bytes to 1 MiB, SVID entries
-to 32, bundle entries to
-16, roots per bundle to 16, and registration bindings to 256. Duplicate SPIFFE IDs
-and root fingerprints are refused. Each reported identity must match its
+to 32, bundle entries to 16, SPIFFE URIs to 2048 octets, roots per bundle to 16,
+and registration bindings to 256. Duplicate SPIFFE IDs and root fingerprints are
+refused. Each reported identity must match its
 certificate. Bundles for the same SVID trust domain must contain the same roots,
 independently of order. A federated entry cannot replace an SVID domain's bundle.
 No implicit trust-domain federation is enabled.
