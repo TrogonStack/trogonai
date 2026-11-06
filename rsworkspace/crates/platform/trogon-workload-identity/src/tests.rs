@@ -18,6 +18,7 @@ use crate::*;
 pub(crate) const LOCAL_ID: &str = "spiffe://example.org/service/egress";
 pub(crate) const PEER_ID: &str = "spiffe://example.org/runtime/workload-1";
 
+mod bundle_snapshot_tests;
 mod crl_tests;
 mod lifecycle_tests;
 mod validation_tests;

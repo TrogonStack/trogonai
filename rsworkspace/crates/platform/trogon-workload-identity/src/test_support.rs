@@ -1,5 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
@@ -139,12 +140,15 @@ struct WireResponse {
     svids: Vec<WireIdentity>,
     #[prost(bytes = "vec", repeated, tag = "2")]
     crls: Vec<Vec<u8>>,
+    #[prost(btree_map = "string, bytes", tag = "3")]
+    federated_bundles: BTreeMap<String, Vec<u8>>,
 }
 
 impl From<Vec<TestIdentity>> for WireResponse {
     fn from(identities: Vec<TestIdentity>) -> Self {
         Self {
             crls: Vec::new(),
+            federated_bundles: BTreeMap::new(),
             svids: identities
                 .into_iter()
                 .map(|id| WireIdentity {
@@ -270,6 +274,11 @@ impl WorkloadApiFixture {
     }
     pub fn replace(&self, identities: Vec<TestIdentity>) {
         drop(self.updates.send_replace(Ok(identities.into())));
+    }
+    pub fn replace_with_federated_bundles(&self, identities: Vec<TestIdentity>, bundles: BTreeMap<String, Vec<u8>>) {
+        let mut response = WireResponse::from(identities);
+        response.federated_bundles = bundles;
+        drop(self.updates.send_replace(Ok(response)));
     }
     pub fn replace_with_crls(&self, identities: Vec<TestIdentity>, crls: Vec<Vec<u8>>) {
         let mut response = WireResponse::from(identities);
