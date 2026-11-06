@@ -55,6 +55,8 @@ pub struct RegistrationSnapshot {
     pub bindings: ::buffa::alloc::vec::Vec<RegistrationBinding>,
     /// SHA-256 of the DER roots authorized for the local trust domain. Matching a
     /// revision number without matching this set cannot authorize a received root.
+    /// An empty set withdraws all trust while retaining the revision floors. It
+    /// cannot authorize material, even when bindings remain in the snapshot.
     ///
     /// Field 9: `approved_root_sha256`
     #[serde(

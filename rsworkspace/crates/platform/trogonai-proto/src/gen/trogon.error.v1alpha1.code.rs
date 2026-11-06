@@ -16,6 +16,7 @@
 ///
 /// Source:
 /// <https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto>
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum Code {

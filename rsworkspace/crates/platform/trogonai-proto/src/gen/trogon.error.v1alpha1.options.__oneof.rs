@@ -10,12 +10,12 @@ pub mod field_options {
         Value(::buffa::alloc::string::String),
     }
     impl ::buffa::Oneof for ValuePolicy {}
-    impl serde::Serialize for ValuePolicy {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for ValuePolicy {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::DefaultValue(v) => {

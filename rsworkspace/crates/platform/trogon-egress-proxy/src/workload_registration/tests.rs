@@ -88,6 +88,21 @@ fn scoped_empty_revocation_projection_preserves_its_revision() {
 }
 
 #[test]
+fn scoped_empty_trust_projection_preserves_its_trust_floor_without_authorizing_roots() {
+    let now = SystemTime::now();
+    let mut message = snapshot(now);
+    message.registration_revision = 100;
+    message.trust_revision = 100;
+    message.approved_root_sha256.clear();
+    let registration = decode_registration(&message.encode_to_vec(), &config(), now)
+        .expect("complete trust withdrawal must reach the generation fence");
+    assert_eq!(registration.registration_revision().get(), 100);
+    assert_eq!(registration.trust_revision().get(), 100);
+    assert!(registration.approved_roots().is_empty());
+    assert_eq!(registration.bindings(), &[config().local().clone()]);
+}
+
+#[test]
 fn application_identity_comes_from_registration_instead_of_the_spiffe_path() {
     let now = SystemTime::now();
     let mut message = snapshot(now);
@@ -214,10 +229,6 @@ fn malformed_or_ambiguous_projection_values_are_refused() {
         },
         RegistrationSnapshot {
             bindings: vec![original.bindings[0].clone(); 2],
-            ..original.clone()
-        },
-        RegistrationSnapshot {
-            approved_root_sha256: Vec::new(),
             ..original.clone()
         },
         RegistrationSnapshot {

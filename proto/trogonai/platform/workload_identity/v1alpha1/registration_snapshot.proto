@@ -58,8 +58,9 @@ message RegistrationSnapshot {
   repeated RegistrationBinding bindings = 8 [(buf.validate.field).repeated.max_items = 4096];
   // SHA-256 of the DER roots authorized for the local trust domain. Matching a
   // revision number without matching this set cannot authorize a received root.
+  // An empty set withdraws all trust while retaining the revision floors. It
+  // cannot authorize material, even when bindings remain in the snapshot.
   repeated bytes approved_root_sha256 = 9 [(buf.validate.field).repeated = {
-    min_items: 1
     max_items: 16
     unique: true
     items: {

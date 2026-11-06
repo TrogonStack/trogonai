@@ -26,14 +26,14 @@ inputs:
       - proto/trogonai/usage
       - proto/trogonai/workflows
 plugins:
-  - local: protoc-gen-buffa
+  - local: [mise, exec, --, protoc-gen-buffa]
     out: rsworkspace/crates/platform/trogonai-proto/src/gen
     include_imports: true
     strategy: all
     opt:
       - json=true
       - unknown_fields=false
-  - local: protoc-gen-buffa-packaging
+  - local: [mise, exec, --, protoc-gen-buffa-packaging]
     out: rsworkspace/crates/platform/trogonai-proto/src/gen
     include_imports: true
     strategy: all

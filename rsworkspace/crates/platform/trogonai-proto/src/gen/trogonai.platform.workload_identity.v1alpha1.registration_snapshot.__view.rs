@@ -30,6 +30,8 @@ pub struct RegistrationSnapshotView<'a> {
     >,
     /// SHA-256 of the DER roots authorized for the local trust domain. Matching a
     /// revision number without matching this set cannot authorize a received root.
+    /// An empty set withdraws all trust while retaining the revision floors. It
+    /// cannot authorize material, even when bindings remain in the snapshot.
     ///
     /// Field 9: `approved_root_sha256`
     pub approved_root_sha256: ::buffa::RepeatedView<'a, &'a [u8]>,
@@ -98,9 +100,11 @@ impl<'a> ::buffa::MessageView<'a> for RegistrationSnapshotView<'a> {
     type Owned = super::super::RegistrationSnapshot;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        let __elem = ::core::cell::Cell::new(::buffa::DEFAULT_ELEMENT_MEMORY_LIMIT);
         <Self as ::buffa::MessageView>::decode_view_ctx(
             buf,
-            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit)
+                .with_element_memory(&__elem),
         )
     }
     fn decode_view_with_ctx(
@@ -597,6 +601,8 @@ impl RegistrationSnapshotOwnedView {
     }
     /// SHA-256 of the DER roots authorized for the local trust domain. Matching a
     /// revision number without matching this set cannot authorize a received root.
+    /// An empty set withdraws all trust while retaining the revision floors. It
+    /// cannot authorize material, even when bindings remain in the snapshot.
     ///
     /// Field 9: `approved_root_sha256`
     #[must_use]
