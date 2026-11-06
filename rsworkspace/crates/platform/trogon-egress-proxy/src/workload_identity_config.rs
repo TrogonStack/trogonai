@@ -55,7 +55,8 @@ impl WorkloadIdentityConfig {
         }
         let registration_bucket =
             SnapshotBucket::new(registration_bucket).map_err(WorkloadIdentityConfigError::Bucket)?;
-        let reply_inbox_prefix = DottedNatsToken::new("_INBOX").map_err(WorkloadIdentityConfigError::ReplyPrefix)?;
+        let reply_inbox_prefix = DottedNatsToken::new(format!("_INBOX.egress.{registration_bucket}"))
+            .map_err(WorkloadIdentityConfigError::ReplyPrefix)?;
         Ok(Self {
             identity: IdentityConfig::new(endpoint, local, recovery_fence),
             registration_bucket,
