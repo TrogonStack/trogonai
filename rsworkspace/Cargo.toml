@@ -62,6 +62,7 @@ trogon-service-config = { path = "crates/platform/trogon-service-config" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
 trogon-egress-proxy = { path = "crates/platform/trogon-egress-proxy" }
+trogon-workload-identity = { path = "crates/platform/trogon-workload-identity" }
 trogon-policy-eval = { path = "crates/policy/trogon-policy-eval" }
 trogon-policy-cel = { path = "crates/policy/trogon-policy-cel" }
 trogon-channel = { path = "crates/channel/trogon-channel" }
@@ -196,6 +197,7 @@ rustls-pemfile = "=2.2.0"
 rustls-pki-types = { version = "=1.15.1", default-features = false, features = ["std"] }
 rustls-webpki = { version = "=0.103.16", default-features = false, features = ["std", "alloc", "ring"] }
 x509-parser = "=0.18.1"
+spiffe = { version = "=0.19.0", default-features = false, features = ["workload-api-x509"] }
 
 [profile.release]
 lto = "thin"
