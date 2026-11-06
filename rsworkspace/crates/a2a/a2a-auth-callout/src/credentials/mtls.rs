@@ -235,7 +235,7 @@ impl X509MtlsVerifier {
                 continue;
             }
             if ca.key_usage()?.is_some_and(|usage| !usage.value.key_cert_sign()) {
-                return Err(CertificateVerificationError::IssuerKeyUsage);
+                continue;
             }
             anchor_ders.push(CertificateDer::from(pem.contents.as_slice()));
             anchor_expiries.push(ca.validity().not_after.to_datetime());

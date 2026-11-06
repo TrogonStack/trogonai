@@ -218,6 +218,15 @@ fn root() -> (Certificate, CertificateParams, KeyPair) {
     (cert, params, key)
 }
 
+fn root_without_key_cert_sign() -> (Certificate, CertificateParams, KeyPair) {
+    let key = KeyPair::generate().unwrap();
+    let mut params = params("invalid-root-usage", IsCa::Ca(BasicConstraints::Unconstrained));
+    params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+    params.not_after = OffsetDateTime::now_utc() + time::Duration::seconds(30);
+    let cert = params.self_signed(&key).unwrap();
+    (cert, params, key)
+}
+
 fn signed(
     params: &CertificateParams,
     issuer_params: &CertificateParams,
@@ -257,19 +266,9 @@ fn rejects_intermediate_without_key_cert_sign() {
     issuer_params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
     let (issuer, issuer_key) = signed(&issuer_params, &root_params, &root_key);
     let (leaf, _) = signed(&params("client", IsCa::NoCa), &issuer_params, &issuer_key);
-    assert_refused(&[&leaf, &issuer], &root);
-}
-
-#[test]
-fn a_trust_anchor_without_certificate_signing_usage_cannot_authorize_a_leaf() {
-    let root_key = KeyPair::generate().unwrap();
-    let mut root_params = params("invalid-root-usage", IsCa::Ca(BasicConstraints::Unconstrained));
-    root_params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-    let root = root_params.self_signed(&root_key).unwrap();
-    let (leaf, _) = signed(&params("client", IsCa::NoCa), &root_params, &root_key);
     let error = X509MtlsVerifier::new(TrustAnchorPem::new(root.pem()))
         .verify_sync(
-            &ClientCertPem::new(leaf.pem()),
+            &ClientCertPem::new(leaf.pem() + &issuer.pem()),
             &AudienceAccount::new("tenant"),
             OffsetDateTime::now_utc(),
         )
@@ -280,6 +279,82 @@ fn a_trust_anchor_without_certificate_signing_usage_cannot_authorize_a_leaf() {
             CertificateVerificationError::IssuerKeyUsage
         ))
     ));
+}
+
+#[test]
+fn a_trust_anchor_without_certificate_signing_usage_cannot_authorize_a_leaf() {
+    let (root, root_params, root_key) = root_without_key_cert_sign();
+    let (leaf, _) = signed(&params("client", IsCa::NoCa), &root_params, &root_key);
+    let error = X509MtlsVerifier::new(TrustAnchorPem::new(root.pem()))
+        .verify_sync(
+            &ClientCertPem::new(leaf.pem()),
+            &AudienceAccount::new("tenant"),
+            OffsetDateTime::now_utc(),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        AuthCalloutError::CredentialVerification(CredentialError::MtlsCertificate(CertificateVerificationError::Path(
+            webpki::Error::UnknownIssuer
+        )))
+    ));
+}
+
+fn assert_mixed_ca_bundle_accepts_valid_chain(bundle: impl Fn(&Certificate, &Certificate) -> String) {
+    for (anchor_seconds, intermediate_seconds) in [(300, 600), (600, 300)] {
+        let now = OffsetDateTime::now_utc();
+        let (_, mut root_params, root_key) = root();
+        root_params.not_after = now + time::Duration::seconds(anchor_seconds);
+        let root = root_params.self_signed(&root_key).unwrap();
+        let (ineligible, _, _) = root_without_key_cert_sign();
+        let mut intermediate_params = params("intermediate", IsCa::Ca(BasicConstraints::Constrained(0)));
+        intermediate_params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
+        intermediate_params.not_after = now + time::Duration::seconds(intermediate_seconds);
+        let (intermediate, intermediate_key) = signed(&intermediate_params, &root_params, &root_key);
+        let mut leaf_params = params("client", IsCa::ExplicitNoCa);
+        leaf_params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+        leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        leaf_params.not_after = now + time::Duration::seconds(900);
+        let (leaf, _) = signed(&leaf_params, &intermediate_params, &intermediate_key);
+        let verified = X509MtlsVerifier::new(TrustAnchorPem::new(bundle(&root, &ineligible)))
+            .verify_sync(
+                &ClientCertPem::new(leaf.pem() + &intermediate.pem()),
+                &AudienceAccount::new("tenant"),
+                now,
+            )
+            .expect("an unrelated ineligible CA must not poison a valid trust path");
+        assert_eq!(
+            verified.expires_at().unix_seconds(),
+            now.unix_timestamp() + anchor_seconds.min(intermediate_seconds),
+            "source validity must come from the selected certificate path"
+        );
+    }
+}
+
+#[test]
+fn mixed_ca_bundle_accepts_valid_chain_after_ineligible_anchor() {
+    assert_mixed_ca_bundle_accepts_valid_chain(|eligible, ineligible| ineligible.pem() + &eligible.pem());
+}
+
+#[test]
+fn mixed_ca_bundle_accepts_valid_chain_before_ineligible_anchor() {
+    assert_mixed_ca_bundle_accepts_valid_chain(|eligible, ineligible| eligible.pem() + &ineligible.pem());
+}
+
+#[test]
+fn mixed_ca_bundle_cannot_authorize_a_leaf_signed_only_by_an_ineligible_anchor() {
+    let (eligible, _, _) = root();
+    let (ineligible, ineligible_params, ineligible_key) = root_without_key_cert_sign();
+    let (leaf, _) = signed(&params("client", IsCa::NoCa), &ineligible_params, &ineligible_key);
+    for bundle in [eligible.pem() + &ineligible.pem(), ineligible.pem() + &eligible.pem()] {
+        X509MtlsVerifier::new(TrustAnchorPem::new(bundle))
+            .verify_sync(
+                &ClientCertPem::new(leaf.pem()),
+                &AudienceAccount::new("tenant"),
+                OffsetDateTime::now_utc(),
+            )
+            .expect_err("an ineligible CA cannot authorize a client even beside an eligible root");
+    }
 }
 
 #[test]

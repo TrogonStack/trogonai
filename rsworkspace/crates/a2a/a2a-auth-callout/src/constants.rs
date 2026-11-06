@@ -1,5 +1,6 @@
 //! Crate-wide constants for a2a-auth-callout.
 
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 /// Header name carrying a serialized [`crate::caller_jwt_header::CallerJwtHeaderValue`] on
@@ -30,6 +31,9 @@ pub(crate) const MAX_DOCUMENT_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_REGISTRY_BYTES: usize = 1_048_576;
 pub(crate) const MAX_MEMBERSHIPS: usize = 4096;
 pub(crate) const MAX_CONCURRENT_READS: usize = 16;
+pub(crate) const DEFAULT_MAX_IN_FLIGHT_ADMISSIONS: NonZeroUsize = NonZeroUsize::MIN.saturating_add(15);
+#[cfg(test)]
+pub(crate) const ADMISSION_TEST_WAIT: Duration = Duration::from_secs(5);
 pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(1);
 pub const ENV_TENANT_MEMBERSHIPS: &str = "AUTH_CALLOUT_TENANT_MEMBERSHIPS";
 

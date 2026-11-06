@@ -27,6 +27,13 @@ replicas share the load. A mint request must carry a sealed credential. A
 request that is malformed, unsealed or refused gets a reply naming only a
 refusal category, never a JWT.
 
+Both subscribers share a default budget of 16 in-flight admissions in the binary.
+Each request acquires capacity before creating a worker and retains it through
+reply publication. Overload receives an opaque `service_unavailable` denial and
+no credential. Library embedders can supply one validated `AdmissionBudget` to
+both subscribers. Configure broker payload and connection limits alongside this
+worker budget, and size replica capacity using measured reconnect demand.
+
 ## Tenant admission authority
 
 Credential verification does not grant tenant membership. Every dispatcher
@@ -41,6 +48,10 @@ mint. Missing, invalid, oversized or unavailable registry state refuses admissio
 without reusing an earlier decision. An empty membership list denies all callers.
 The registry is limited to 1 MiB and 4096 exact bindings. Reads have a one-second
 deadline and at most 16 workers; saturation refuses new admissions.
+That deadline bounds the admission's wait, not the lifetime of a kernel I/O
+operation. A blocking read retains its worker slot until it finishes. Persistent
+storage faults require I/O recovery or process replacement; admission continues
+to refuse unavailable authority.
 
 ```json
 {
@@ -96,7 +107,10 @@ production HTTPS requirement.
 ## Certificate verification and admission lifetime
 
 CA trust uses standard certificate-path validation with explicit signing-key
-usage checks. A configured end-entity pin trusts exactly that certificate's DER,
+usage checks. Eligible CA anchors have `CA:TRUE` and, when key usage is present,
+`keyCertSign`. Expired CAs, non-CAs and CAs with incompatible signing usage are
+excluded from issuer candidates without blocking other eligible anchors.
+A configured end-entity pin trusts exactly that certificate's DER,
 not another certificate with the same subject or public key. Pins still enforce
 leaf validity, purpose and critical-extension checks. Legacy certificates may
 omit key/extended-key usage; a present incompatible usage is refused.
@@ -104,6 +118,10 @@ omit key/extended-key usage; a present incompatible usage is refused.
 Present a leaf-first certificate chain containing the required intermediates.
 The callout preserves one ordered chain and never combines alternate verified
 paths. Presented and verified alternatives must name the same leaf identity.
+Certificate evidence must come from an authenticated transport or adapter that
+has verified possession of the client's private key. The native HTTP bridge
+accepts bearer credentials; adding certificate forwarding requires that trusted
+adapter boundary.
 
 Derived NATS credentials are bounded by verified OIDC or selected certificate-path
 expiry as well as the configured broker TTL. Expiry is checked again immediately

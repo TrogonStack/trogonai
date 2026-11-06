@@ -23,6 +23,12 @@ trusted configuration adapter, not a deployed HA membership control plane.
 Existing broker credentials remain subject to their own expiry and the separate
 revocation contract.
 
+The callout binary shares a finite admission budget across its direct and bridge
+routes. The default permits 16 workers, acquired before dispatch and retained
+through reply publication. Excess requests receive an opaque refusal without a
+credential or a queued worker. This local bound does not establish replica
+capacity, broker ingress limits or durable service availability.
+
 Egress sessions end at the earlier presented-certificate expiry or a 330-second
 monotonic ceiling. Destination and selected-address policy are checked after
 waits and every five seconds while forwarding. A static snapshot remains static:
@@ -120,6 +126,9 @@ Implementation:
 - [x] Require authoritative caller-to-tenant account admission before minting a
   broker credential. Signing-key availability and a tenant-scoped identity hash
   do not establish membership; absent admission authority refuses the mint.
+- [x] Bound concurrent broker admission before credential verification and
+  registry reads, share the budget across direct and bridge routes, and refuse
+  excess work without an unbounded waiter queue or stale admission fallback.
 - [ ] Keep workload federation separate from delegated user consent; intersect
   relevant policy and delegation before granting on-behalf-of authority.
 - [x] Bound AAuth output validity by the agent and any bound subagent/upstream
@@ -140,6 +149,9 @@ Verification:
 - [x] A valid OIDC or mTLS caller without membership cannot obtain a configured
   tenant account's broker credential by naming that account. Test identity
   namespacing and account admission as distinct boundaries.
+- [x] Hold admission workers over real broker requests, verify both routes
+  promptly refuse excess work without dispatch or a JWT, then release the held
+  work and verify fresh admission recovers under the same shared budget.
 - [x] Advance the clock while a request awaits claims, interaction or approval;
   expired inputs cannot produce a fresh grant. A slow policy cannot mint past
   the authority it evaluated.

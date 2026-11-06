@@ -12,7 +12,9 @@
 )]
 
 pub mod account_resolver;
+mod admission_budget;
 pub mod admission_keys;
+mod admission_limit;
 pub mod bridge_mint;
 pub mod bridge_mint_responder;
 pub mod bridge_mint_subscriber;
@@ -39,14 +41,19 @@ mod tenant_memberships;
 mod verified_credential;
 pub mod wire;
 
+#[cfg(test)]
+mod admission_budget_tests;
+
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
 pub use account_resolver::{AccountResolverError, RequestedAccount};
+pub use admission_budget::AdmissionBudget;
 pub use admission_keys::{
     AccountPublicKeyError, AccountSigningKey, AdmissionKeyError, AdmissionKeys, AuthAccount, CalloutXkey,
     IssuerPublicKey, SigningKeyCustody, TenantAccount, TenantSigningKeys, admission_keys_from_env,
 };
+pub use admission_limit::{AdmissionLimit, AdmissionLimitError};
 
 pub use bridge_mint::{
     BridgeClientInfo, BridgeCredential, BridgeCredentialError, BridgeMintRefusal, BridgeMintReply, BridgeMintRequest,

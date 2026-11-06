@@ -8,7 +8,7 @@ use {
     a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier},
     a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig},
     a2a_auth_callout::tenant_admission::{ENV_TENANT_MEMBERSHIPS, FileTenantAdmission, TenantAdmission},
-    a2a_auth_callout::{AuthCalloutWireCodec, BridgeMintResponder, BridgeMintSubscriber, Subscriber},
+    a2a_auth_callout::{AdmissionBudget, AuthCalloutWireCodec, BridgeMintResponder, BridgeMintSubscriber, Subscriber},
     a2a_nats::{A2aPrefix, A2aPrefixError, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
     std::sync::Arc,
     std::time::Duration,
@@ -187,6 +187,7 @@ async fn main() {
         mtls,
         api_key: None,
     }));
+    let admission_budget = AdmissionBudget::default();
     // The bridge mints its per-caller users over this subject, so a callout
     // that did not answer it would leave every bridge caller refused. It
     // verifies through the same dispatcher as the server callout. Installed
@@ -200,10 +201,11 @@ async fn main() {
     .unwrap_or_else(|e| {
         tracing::error!(error = %e, "failed to subscribe to the bridge mint subject");
         std::process::exit(1);
-    });
+    })
+    .with_admission_budget(admission_budget.clone());
     let bridge_mint_subject = bridge_mint.subject().to_owned();
     let bridge_mint_task = tokio::spawn(bridge_mint.serve());
-    let subscriber = Subscriber::new(client, dispatcher, wire);
+    let subscriber = Subscriber::new(client, dispatcher, wire).with_admission_budget(admission_budget);
 
     info!(bridge_mint_subject = %bridge_mint_subject, "auth callout subscriber running");
 
