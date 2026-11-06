@@ -39,6 +39,8 @@ pub mod constants;
 pub mod gw_ingress_stream;
 pub mod gw_pull_backpressure;
 pub mod ingress_identity;
+mod non_unary_relay_timeout;
+pub use non_unary_relay_timeout::{NonUnaryRelayTimeout, NonUnaryRelayTimeoutError};
 pub mod policy;
 pub mod push_dlq_mirror;
 pub mod runtime;

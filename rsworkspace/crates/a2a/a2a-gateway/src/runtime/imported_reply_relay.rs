@@ -12,13 +12,33 @@ pub(super) struct ImportedReplyRelay {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum RelayError {
+pub(super) enum RelayError {
     #[error(transparent)]
     Request(#[from] async_nats::RequestError),
     #[error(transparent)]
     Publish(#[from] async_nats::client::PublishError),
     #[error(transparent)]
     Deadline(#[from] tokio::time::error::Elapsed),
+}
+
+impl RelayError {
+    pub(super) fn code(&self) -> i32 {
+        match self {
+            Self::Deadline(_) => -32_800,
+            Self::Request(_) | Self::Publish(_) => -32_803,
+        }
+    }
+
+    pub(super) fn message(&self) -> &'static str {
+        match self {
+            Self::Deadline(_) => "gateway imported reply deadline exceeded",
+            Self::Request(error) if error.kind() == async_nats::RequestErrorKind::NoResponders => {
+                "gateway agent has no responders"
+            }
+            Self::Request(_) => "gateway agent request failed",
+            Self::Publish(_) => "gateway caller reply publish failed",
+        }
+    }
 }
 
 impl ImportedReplyRelay {
@@ -28,7 +48,11 @@ impl ImportedReplyRelay {
         }
     }
 
-    pub(super) fn forward(
+    /// Reserves capacity before forwarding and reports the completed relay outcome.
+    /// Cancellation drops the request without inventing an agent error or retrying it.
+    /// The callback owns delivery auditing; admission is not a successful delivery.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn forward<F, Fut>(
         &self,
         client: Client,
         subject: Subject,
@@ -36,7 +60,12 @@ impl ImportedReplyRelay {
         request: Request,
         deadline: Duration,
         shutdown: CancellationToken,
-    ) -> Result<(), TryAcquireError> {
+        complete: F,
+    ) -> Result<(), TryAcquireError>
+    where
+        F: FnOnce(Result<(), RelayError>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send,
+    {
         let permit = self.permits.clone().try_acquire_owned()?;
         tokio::spawn(async move {
             let _permit = permit;
@@ -50,10 +79,14 @@ impl ImportedReplyRelay {
                 Ok::<(), RelayError>(())
             };
             tokio::select! {
+                biased;
                 _ = shutdown.cancelled() => {}
                 result = tokio::time::timeout(deadline, relay) => {
-                    if let Err(error) = result.map_err(RelayError::Deadline).and_then(std::convert::identity) {
-                        tracing::warn!(error = %error, "gateway imported reply relay failed");
+                    let outcome = result.map_err(RelayError::Deadline).and_then(std::convert::identity);
+                    tokio::select! {
+                        biased;
+                        _ = shutdown.cancelled() => {}
+                        _ = tokio::time::timeout(Duration::from_secs(5), complete(outcome)) => {}
                     }
                 }
             }
