@@ -212,6 +212,17 @@
       "violations": [
         "credential activation is must-audit under its exact registered scope"
       ]
+    },
+    {
+      "name": "registered trust-domain identity needs no inferred path",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test"
+        }
+      ]
     }
   ]
 }
