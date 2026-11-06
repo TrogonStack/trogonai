@@ -1,8 +1,8 @@
-# Prepare an enterprise workload identity deployment
+# Prepare a workload identity deployment
 
 Use this procedure to prepare the Kubernetes PSAT and AWS KMS profile under
-draft [ADR#0098](../adr/0098-attested-enterprise-workload-identity.md).
-The [enterprise identity acceptance contract](../reference/enterprise-workload-identity.md)
+draft [ADR#0098](../adr/0098-attested-workload-identity.md).
+The [workload identity acceptance contract](../reference/workload-identity.md)
 remains the enablement gate. Generated manifests and local configuration tests
 do not establish production attestation, isolation, availability or recovery.
 

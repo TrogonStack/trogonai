@@ -1,13 +1,13 @@
-# Enterprise Workload Identity
+# Workload Identity
 
 This reference defines the proposed deployment profile and its acceptance gates
-under draft [ADR#0098](../adr/0098-attested-enterprise-workload-identity.md).
+under draft [ADR#0098](../adr/0098-attested-workload-identity.md).
 The checklists distinguish implemented consumer behavior from the issuer,
 provider and deployment acceptance still required before enabling the profile.
 
 ## Runtime foundation and limits
 
-| Boundary | Foundation | Enterprise gate |
+| Boundary | Foundation | Enablement gate |
 | --- | --- | --- |
 | Egress workload identity | Explicit Unix Workload API consumer, governed application mapping, acknowledged activation and live credential/bundle replacement | Attestor, issuer, isolation and recovery acceptance in the selected deployment |
 | Egress authorization | Exact-destination admission, optional authenticated live KV authority, generation-bound audit and finite sessions | Governed producer, independent recovery fencing and end-to-end revocation acceptance |
@@ -69,7 +69,7 @@ or retired trust set by carrying a newer timestamp or registration revision.
 The egress workload profile uses this consumer for each handshake and retains
 its lease through request handling and forwarding. Both registration and policy
 require dedicated, bounded, authenticated NATS streams. There is no file or
-alternate-identity fallback. Follow the [deployment procedure](../how-to/deploy-enterprise-workload-identity.md)
+alternate-identity fallback. Follow the [deployment procedure](../how-to/deploy-workload-identity.md)
 for configuration and stream isolation.
 
 All workload-profile audit, policy and registration connections use the reply
@@ -149,7 +149,7 @@ restored state and clocks cannot substitute for an independently advanced fence.
 material and governed registration, a current complete policy, audit admission
 capacity and a fresh durable audit acknowledgement. It checks authority again
 after that acknowledgement. Compatibility profiles and a stopped or aborted
-runtime cannot report enterprise readiness. A valid deny-all policy remains a
+runtime cannot report workload readiness. A valid deny-all policy remains a
 usable policy; readiness does not grant a destination permit.
 
 The binary exposes `GET /readyz` on `127.0.0.1:8081` by default. Configure

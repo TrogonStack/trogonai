@@ -80,6 +80,6 @@ bounded raw gRPC decoding and the activation profile checks.
 Issuance, node and workload attestation, constrained SPIRE registration, signing-key
 custody, socket isolation, HA and recovery belong to the deployment. The real Unix
 protocol and TLS fixtures under `test-support` verify this consumer, not those
-production boundaries. The [enterprise identity profile](../../../../docs/reference/enterprise-workload-identity.md)
-and [draft ADR0098](../../../../docs/adr/0098-attested-enterprise-workload-identity.md)
+production boundaries. The [workload identity profile](../../../../docs/reference/workload-identity.md)
+and [draft ADR0098](../../../../docs/adr/0098-attested-workload-identity.md)
 retain their separate acceptance requirements.

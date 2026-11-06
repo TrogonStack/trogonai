@@ -73,7 +73,7 @@ def unique_fields(pairs):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Render the gated enterprise SPIRE deployment.")
+    parser = argparse.ArgumentParser(description="Render the gated SPIRE deployment.")
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

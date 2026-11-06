@@ -23,7 +23,7 @@ async fn status_eventually(readiness: &Readiness, expected: ReadinessStatus) -> 
 }
 
 #[tokio::test]
-async fn enterprise_readiness_follows_real_workload_authority_and_fresh_audit_acknowledgements() -> TestResult<()> {
+async fn readiness_follows_real_workload_authority_and_fresh_audit_acknowledgements() -> TestResult<()> {
     let harness = WorkloadHarness::start("").await?;
     status_eventually(&harness.readiness, ReadinessStatus::Ready).await?;
     let first = harness

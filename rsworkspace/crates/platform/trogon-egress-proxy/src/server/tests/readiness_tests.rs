@@ -112,7 +112,7 @@ async fn the_public_readiness_listener_bounds_and_refuses_untrusted_http_heads()
 }
 
 #[tokio::test]
-async fn a_bound_port_and_a_compatibility_profile_cannot_claim_enterprise_readiness() {
+async fn a_bound_port_and_a_compatibility_profile_cannot_claim_workload_readiness() {
     let (server, _) = server(Pki::new().strict_config(), Limits::default()).await;
     let readiness = server.readiness();
     assert_eq!(readiness.probe().await, ReadinessStatus::Starting);

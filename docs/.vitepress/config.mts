@@ -186,7 +186,7 @@ export default async () => {
                   { text: "Connection HTTP Proxy", link: "/reference/connection-http-proxy" },
                   { text: "Connector Resource Parents", link: "/reference/connector-resource-parents" },
                   { text: "Connector Security Profile", link: "/reference/connector-security-profile" },
-                  { text: "Enterprise Workload Identity", link: "/reference/enterprise-workload-identity" },
+                  { text: "Workload Identity", link: "/reference/workload-identity" },
                   { text: "Connector Account Identity", link: "/reference/connector-account-identity" },
                   { text: "Connector MCP Authorization", link: "/reference/connector-mcp-authorization" },
                   { text: "Connector Control API", link: "/reference/connector-control-api" },

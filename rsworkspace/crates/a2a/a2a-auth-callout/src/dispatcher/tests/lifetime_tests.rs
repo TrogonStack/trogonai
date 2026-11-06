@@ -414,7 +414,7 @@ async fn assert_critical_header_refused(value: serde_json::Value) {
         |_| None,
         |header| {
             header["crit"] = value;
-            header["enterprise-policy"] = json!(true);
+            header["required-policy"] = json!(true);
         },
     );
     let dispatcher = CalloutDispatcher::new(config_with(Some(verifier), None, None, &[&tenant]));
@@ -429,7 +429,7 @@ async fn assert_critical_header_refused(value: serde_json::Value) {
 
 #[tokio::test]
 async fn dispatch_refuses_unsupported_critical_header() {
-    assert_critical_header_refused(json!(["enterprise-policy"])).await;
+    assert_critical_header_refused(json!(["required-policy"])).await;
 }
 
 #[tokio::test]
@@ -444,5 +444,5 @@ async fn dispatch_refuses_null_critical_header() {
 
 #[tokio::test]
 async fn dispatch_refuses_malformed_critical_header() {
-    assert_critical_header_refused(json!("enterprise-policy")).await;
+    assert_critical_header_refused(json!("required-policy")).await;
 }

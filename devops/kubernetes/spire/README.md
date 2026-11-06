@@ -1,13 +1,13 @@
-# Enterprise SPIRE deployment assets
+# SPIRE deployment assets
 
 The renderer prepares the Kubernetes profile described in
-[the operator guide](../../../docs/how-to/deploy-enterprise-workload-identity.md).
+[the operator guide](../../../docs/how-to/deploy-workload-identity.md).
 It requires exact release signature verification before emitting deployment
 output. An image digest or release workflow source alone cannot pass that gate.
 
 The example describes resource identities and references existing credentials;
 it contains no production credentials. Replace its example values with reviewed
-deployment inputs. Rendering does not deploy resources or certify enterprise
+deployment inputs. Rendering does not deploy resources or establish production
 acceptance.
 
 ```sh

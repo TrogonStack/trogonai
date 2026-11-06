@@ -86,7 +86,7 @@ registry or logs.
 
 Use an atomic file replacement to apply membership changes. Removal affects the
 next mint; already issued broker tokens retain their bounded validity and require
-the enterprise session-revocation integration for immediate termination. The
+the session-revocation integration for immediate termination. The
 legacy mTLS and API-key subject helpers reproduce their existing identity
 namespaces and do not supply SPIFFE attestation. Protect legacy certificate
 issuance so a subject cannot be reassigned across accepted issuers.
@@ -136,5 +136,5 @@ claims. Deprecated API-key admission remains an explicit compatibility branch,
 not a fallback after another verifier refuses a credential.
 
 DN-based mTLS identity is separate from the proposed
-[enterprise workload identity profile](../../../../docs/reference/enterprise-workload-identity.md).
+[workload identity profile](../../../../docs/reference/workload-identity.md).
 These verification rules do not implement SPIRE attestation or credential rotation.
