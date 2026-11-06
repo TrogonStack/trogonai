@@ -33,14 +33,15 @@ use crate::enforcement::Enforcement;
 use crate::integrity_terminal::IntegrityTerminal;
 use crate::layer_facts::LayerFacts;
 use crate::obligation::Obligation;
+use crate::read_only::ReadOnly;
 use crate::record_id::RecordId;
 use crate::record_kind::RecordKind;
 use crate::record_scope::RecordScope;
 use crate::stamp::Stamp;
 use crate::surface::Surface;
 use crate::tls_mode::TlsMode;
-use crate::writer_identity::WriterIdentity;
 use crate::workload_peer_facts::{WorkloadPeerEvidenceFacts, WorkloadPeerScopeError};
+use crate::writer_identity::WriterIdentity;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Record {
@@ -52,12 +53,24 @@ pub struct Record {
 
 impl Record {
     pub fn authenticated_workload_decision(
-        _scope: RecordScope,
-        _facts: DecisionFacts,
-        _peer: WorkloadPeerEvidenceFacts,
-        _stamp: Stamp,
+        scope: RecordScope,
+        facts: DecisionFacts,
+        peer: WorkloadPeerEvidenceFacts,
+        stamp: Stamp,
     ) -> Result<Self, WorkloadPeerScopeError> {
-        Err(WorkloadPeerScopeError)
+        if facts.surface != Surface::Egress
+            || facts.read_only != ReadOnly::Undeclared
+            || facts.outcome.enforcement() != Enforcement::Enforce
+        {
+            return Err(WorkloadPeerScopeError);
+        }
+        let Actor::Agent { agent_id } = &scope.actor else {
+            return Err(WorkloadPeerScopeError);
+        };
+        if !peer.matches_binding(scope.tenant.as_str(), scope.project.as_str(), agent_id.as_str()) {
+            return Err(WorkloadPeerScopeError);
+        }
+        Ok(Self::decision_with_peer(scope, facts, Some(peer), stamp))
     }
 
     pub fn credential_activation(
@@ -80,6 +93,15 @@ impl Record {
     }
 
     pub fn decision(scope: RecordScope, facts: DecisionFacts, stamp: Stamp) -> Self {
+        Self::decision_with_peer(scope, facts, None, stamp)
+    }
+
+    fn decision_with_peer(
+        scope: RecordScope,
+        facts: DecisionFacts,
+        peer: Option<WorkloadPeerEvidenceFacts>,
+        stamp: Stamp,
+    ) -> Self {
         let kind = RecordKind::Decision {
             outcome: facts.outcome,
             read_only: facts.read_only,
@@ -87,7 +109,7 @@ impl Record {
         };
         let subject = AuditSubject::decision(scope.project.clone(), facts.outcome.terminal());
         let attribution = attribution(&facts);
-        let detail = Detail::from(gateway_decision(&facts));
+        let detail = Detail::from(gateway_decision(&facts, peer));
         Self::assemble(scope, stamp, kind, subject, attribution, detail)
     }
 
@@ -286,9 +308,9 @@ fn layer_verdict(layer: &LayerFacts) -> LayerVerdict {
     }
 }
 
-fn gateway_decision(facts: &DecisionFacts) -> GatewayDecision {
+fn gateway_decision(facts: &DecisionFacts, peer: Option<WorkloadPeerEvidenceFacts>) -> GatewayDecision {
     GatewayDecision {
-        workload_peer: MessageField::none(),
+        workload_peer: peer.map_or_else(MessageField::none, |peer| MessageField::some(peer.into_message())),
         surface: EnumValue::from(gateway_surface(facts.surface)),
         target: facts.target.to_string(),
         request_bytes: facts.request_bytes,

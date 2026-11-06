@@ -81,7 +81,7 @@ impl CredentialActivationFacts {
     }
 }
 
-fn valid_binding(binding: &RegistrationBinding) -> bool {
+pub(crate) fn valid_binding(binding: &RegistrationBinding) -> bool {
     if !bounded_name(&binding.tenant, MAX_WORKLOAD_SCOPE_BYTES, false)
         || !bounded_name(&binding.project, MAX_WORKLOAD_SCOPE_BYTES, false)
         || binding.spiffe_id.len() > MAX_WORKLOAD_SPIFFE_ID_BYTES
@@ -106,7 +106,7 @@ fn bounded_name(value: &str, limit: usize, allow_colon: bool) -> bool {
         })
 }
 
-fn timestamp_nanos(timestamp: &Timestamp) -> Option<i128> {
+pub(crate) fn timestamp_nanos(timestamp: &Timestamp) -> Option<i128> {
     (timestamp.seconds > 0
         && timestamp.seconds <= MAX_PROTOBUF_TIMESTAMP_SECONDS
         && (0..NANOSECONDS_PER_SECOND).contains(&i128::from(timestamp.nanos)))

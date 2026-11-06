@@ -91,12 +91,12 @@ pub mod verified_chain_head;
 pub mod verified_chain_range;
 pub mod verify_chain_range;
 pub mod verify_chains;
+pub mod workload_peer_facts;
 pub mod writer_config;
 pub mod writer_id;
 pub mod writer_identity;
 pub(crate) mod writer_state;
 pub mod writer_stats;
-pub mod workload_peer_facts;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod chain_builder;
@@ -157,11 +157,11 @@ pub use verified_chain_head::VerifiedChainHead;
 pub use verified_chain_range::VerifiedChainRange;
 pub use verify_chain_range::verify_chain_range;
 pub use verify_chains::verify_chains;
+pub use workload_peer_facts::{WorkloadPeerEvidenceFacts, WorkloadPeerFactsError, WorkloadPeerScopeError};
 pub use writer_config::WriterConfig;
 pub use writer_id::WriterId;
 pub use writer_identity::WriterIdentity;
 pub use writer_stats::WriterStats;
-pub use workload_peer_facts::{WorkloadPeerEvidenceFacts, WorkloadPeerFactsError, WorkloadPeerScopeError};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use chain_builder::ChainBuilder;

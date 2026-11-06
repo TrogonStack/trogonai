@@ -6,9 +6,12 @@
 //! component, which the payload does not name.
 
 use crate::credential_activation_facts::CredentialActivationFacts;
+use crate::workload_peer_facts::WorkloadPeerEvidenceFacts;
+use trogonai_proto::platform::audit::v1::audit_actor::Kind;
 use trogonai_proto::platform::audit::v1::audit_record::Detail;
 use trogonai_proto::platform::audit::v1::{
-    AuditClass, AuditDecision, AuditRecord, ChangeKind, CredentialUseKind, EnforcementMode, WriterLifecycleKind,
+    AuditClass, AuditDecision, AuditRecord, ChangeKind, CredentialUseKind, EnforcementMode, GatewaySurface,
+    WriterLifecycleKind,
 };
 
 use crate::constants::{
@@ -49,7 +52,24 @@ fn expected(record: &AuditRecord) -> Option<(&'static str, Option<&str>, &'stati
             }
             Some((SUBJECT_KIND_CHANGE, project, TERMINAL_CREDENTIAL))
         }
-        Detail::GatewayDecision(_) => Some((SUBJECT_KIND_DECISION, project, decision_terminal(record)?)),
+        Detail::GatewayDecision(decision) => {
+            if let Some(peer) = decision.workload_peer.as_option() {
+                let facts = WorkloadPeerEvidenceFacts::try_from(peer.clone()).ok()?;
+                let attribution = record.attribution.as_option()?;
+                let Some(Kind::Agent(actor)) = record.actor.kind.as_ref() else {
+                    return None;
+                };
+                if record.class.as_known()? != AuditClass::Must
+                    || decision.surface.as_known()? != GatewaySurface::GATEWAY_SURFACE_EGRESS
+                    || attribution.enforcement_mode.as_known()? != EnforcementMode::ENFORCEMENT_MODE_ENFORCE
+                    || attribution.would_deny
+                    || !facts.matches_binding(&record.tenant.value, &record.project.value, &actor.agent_id.value)
+                {
+                    return None;
+                }
+            }
+            Some((SUBJECT_KIND_DECISION, project, decision_terminal(record)?))
+        }
         Detail::CredentialUse(credential) => {
             let terminal = match credential.kind.as_known()? {
                 CredentialUseKind::CREDENTIAL_USE_KIND_RELEASE => TERMINAL_RELEASE,
