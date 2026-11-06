@@ -21,13 +21,16 @@ describes external workload federation and explicitly defers runtime attestation
 The connection drafts separately govern provider consent, custody and use.
 
 The egress proxy verifies a certificate and evaluates destination policy
-separately. It loads TLS files at startup and supports either explicit static
-policy compatibility or an authenticated scoped NATS KV reader. The live reader
+separately. Its compatibility profile loads TLS files at startup. Its explicit
+Workload API profile consumes rotating SVIDs and governed registrations, gates
+activation on durable audit and withdraws captured material on source changes.
+It supports either explicit static policy compatibility or an authenticated
+scoped NATS KV reader. The live reader
 replaces complete policy, binds permit audit to its generation and applies
 producer deadlines to existing tunnels. Its publisher, independent recovery
 fence and operational revocation acceptance remain separate requirements.
-Its provisional SPIFFE-shaped alias does not supply attestation or automatic
-rotation. The NATS callout's existing
+The compatibility profile's provisional SPIFFE-shaped alias does not supply
+attestation or automatic rotation. The NATS callout's existing
 mTLS identity is a certificate DN or fingerprint, not a SPIFFE identity.
 These foundations must not be advertised as the enterprise profile below.
 

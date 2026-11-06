@@ -127,6 +127,13 @@ and a fresh producer-issued lease no greater than 330 seconds, and
 record administrative changes. Do not let the consumer publish or renew its
 own admission authority.
 
+Give each egress workload reader only the exact request APIs and its derived
+`_INBOX.egress.<registration_bucket>.>` reply subscription. Use distinct reply
+prefixes for provisioning, publication and emergency withdrawal. Audit every
+untrusted role in the account for broad `_INBOX.>` and `>` subscriptions, or
+place the authority services in separate accounts. Restricting stream APIs
+without restricting reply subscriptions does not isolate their responses.
+
 ## Render and validate before applying
 
 Run from the repository root with a trusted Cosign installation:
@@ -194,6 +201,36 @@ enablement gated. A listening TCP socket does not establish a current approved
 identity, registration, policy or usable durable audit. Require the runtime's
 actual health signal for that complete join, including failure on withdrawal
 or audit degradation, before routing production traffic.
+
+The egress binary supplies `GET /readyz`, with a loopback listener at
+`127.0.0.1:8081` by default. For a Kubernetes HTTP readiness probe, bind it to
+the pod address and restrict access through the deployment's management-network
+policy. For an IPv4 pod network, add this to the egress container:
+
+```yaml
+env:
+  - name: POD_IP
+    valueFrom:
+      fieldRef:
+        fieldPath: status.podIP
+  - name: TROGON_EGRESS_READINESS_LISTEN
+    value: "$(POD_IP):8081"
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 8081
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 1
+```
+
+Use a bracketed IPv6 socket address for an IPv6 probe listener.
+
+A successful probe requires a fresh durable platform audit write and current
+identity, registration and policy. Use a separate process-liveness signal so
+an issuer or audit outage withdraws routing without restarting a healthy
+enforcement process. Record the deployment acceptance evidence separately from
+this component health result.
 
 The node agent is a trusted host service. It runs as root with host PID access
 and `SYS_PTRACE` for process attestation. The admission exception binds its

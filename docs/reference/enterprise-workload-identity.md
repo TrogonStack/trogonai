@@ -2,14 +2,14 @@
 
 This reference defines the proposed deployment profile and its acceptance gates
 under draft [ADR#0098](../adr/0098-attested-enterprise-workload-identity.md).
-The checklists identify work that must be implemented and verified; they are not
-a claim that a production SPIRE integration exists in this repository.
+The checklists distinguish implemented consumer behavior from the issuer,
+provider and deployment acceptance still required before enabling the profile.
 
 ## Runtime foundation and limits
 
 | Boundary | Foundation | Enterprise gate |
 | --- | --- | --- |
-| Egress workload identity | TLS certificate validation, provisional agent URI mapping and finite certificate-bound sessions | Workload API integration, authorized identity mapping and credential/bundle rotation |
+| Egress workload identity | Explicit Unix Workload API consumer, governed application mapping, acknowledged activation and live credential/bundle replacement | Attestor, issuer, isolation and recovery acceptance in the selected deployment |
 | Egress authorization | Exact-destination admission, optional authenticated live KV authority, generation-bound audit and finite sessions | Governed producer, independent recovery fencing and end-to-end revocation acceptance |
 | NATS admission | Operator accounts, verified credentials and required explicit caller-to-tenant membership authority | Governed membership operations and explicit SPIFFE profile if selected; legacy DN-based mTLS is not that profile |
 | AAuth issuance | Person and Access Server libraries with bounded validity, deferred-request revalidation and injected policies | Real consent/policy adapters and durable bounded operation |
@@ -41,7 +41,128 @@ monotonic ceiling. Destination and selected-address policy are checked after
 waits and while forwarding. Live policy additionally supplies a finite producer
 deadline and update notifications. Explicit static-file compatibility still
 retains its startup policy across reconnects. The presented-chain deadline does
-not track absent trust anchors or implement Workload API bundle withdrawal.
+not track absent trust anchors. The explicit Workload API profile additionally
+withdraws sessions when its captured identity, registration or bundle changes.
+
+## Workload API consumer
+
+The `trogon-workload-identity` crate consumes the exact configured local identity
+over a Unix socket. It validates the SVID, matching private key, certificate
+path, one-hour certificate ceiling and exact approved root fingerprints.
+Registration maps the authenticated peer SPIFFE ID to its tenant, project,
+role and canonical application ID. The URI path cannot choose an application
+principal or grant a destination permit.
+
+A bounded candidate becomes usable only after its platform activation record
+is durably acknowledged and the current source, registration and trust
+generations still match. Replacing or withdrawing authority invalidates captured
+material leases and cached TLS configuration. A lease ends at the earlier
+certificate-path expiry or governed registration deadline, with a registration
+lifetime ceiling of 330 seconds. A source disconnect requires a newer governed
+registration before material can become usable again.
+
+Complete snapshots that omit the local binding, remove every binding or remove
+every approved root are valid withdrawals. They retain their registration and
+trust revision floors. A later document cannot restore an older registration
+or retired trust set by carrying a newer timestamp or registration revision.
+
+The egress workload profile uses this consumer for each handshake and retains
+its lease through request handling and forwarding. Both registration and policy
+require dedicated, bounded, authenticated NATS streams. There is no file or
+alternate-identity fallback. Follow the [deployment procedure](../how-to/deploy-enterprise-workload-identity.md)
+for configuration and stream isolation.
+
+All workload-profile audit, policy and registration connections use the reply
+prefix `_INBOX.egress.<registration_bucket>`, derived from the validated
+registration bucket. Permit subscriptions only beneath that exact prefix.
+Request API allowlists alone do not protect replies: every untrusted role in
+the same account must also lack broad `_INBOX.>` or `>` subscriptions. Isolate
+accounts when that account-wide constraint cannot be enforced. Trusted broker
+administrators remain part of the security boundary.
+
+Local integration tests use real Unix Workload API streams, verified TLS NATS,
+JetStream activation and decision acknowledgements, and TLS-authenticated
+CONNECT forwarding. They cover registration removal, policy withdrawal, source
+`PermissionDenied` and an unavailable audit stream. These receipts establish
+the consumer and enforcement paths, while the attestor, issuer, HSM, cluster
+isolation, HA and restored-state checks below still require deployment evidence.
+
+This consumer rejects every response containing CRLs because its supported
+profile does not implement CRL signature and revocation processing. It does
+not silently discard supplied revocation data. An issuer that requires CRLs
+cannot enable this profile until that support is implemented and verified.
+Governed registration/root withdrawal and bounded credential expiry remain
+separate enforced controls.
+
+## Governed registration publication
+
+The `trogon-workload-registration` service accepts independently signed,
+canonical registration snapshots for its configured scope and recovery fence.
+Signatures bind the operation purpose, exact trust domain and exact canonical
+protobuf bytes, including tenant, project and recovery fence.
+Every renewal needs a fresh approval and a strictly increasing registration
+revision. Changing roots also advances the trust revision. Changing bindings
+or roots requires an acknowledged whole-scope denial before a new grant.
+There is no automatic renewal from an earlier approved snapshot.
+
+Each scope and recovery fence has separate control and live streams. Both
+retain only the latest complete snapshot on one exact subject, use replicated
+file storage and refuse deletion or purge. The live stream expires its data;
+the control stream retains the ownership and revision head. Only an empty,
+never-claimed scope can be claimed. Existing sequence history refuses a new
+writer even after its live data expires.
+
+Grant publication requires a durable platform audit acknowledgement and a
+broker comparison against the captured live sequence. Emergency withdrawal
+publishes the signed complete denial to the live stream first. Later audit or
+bookkeeping failure does not remove that denial. A conflicting publication,
+uncertain effect or cancelled update permanently poisons the writer handle.
+The captured authenticated broker connection must also remain unchanged across
+reads, audit waits and publication acknowledgements. Reconnection does not
+transfer ownership to the replacement connection.
+The native SDK can retain an already-enqueued command after its caller times
+out. Protected connections therefore quarantine later dials for 335 seconds,
+longer than the maximum 330-second approval lifetime. Any pre-disconnect
+snapshot expires before it can reach a replacement transport. Connection checks
+still poison the writer; a timeout does not retract an uncertain effect.
+Recovery requires independently advancing the fence, provisioning new streams,
+revoking old publication credentials and updating consumers.
+
+Provisioning, publication, emergency withdrawal and workload readers use
+separate credentials and reply namespaces. Every credential that can write
+the authority streams is a trusted control-plane credential. NATS subject
+permissions constrain its scope, but cannot validate snapshot bodies or make
+that credential cryptographically denial-only. The trusted service verifies
+approvals and enforces the withdrawal command. Protect its code, controller,
+approval-key custody and broker credentials independently.
+
+See the [administrative runner reference](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/platform/trogon-workload-registration/README.md)
+for required configuration, bounded signed framing, command roles and terminal
+failure categories. Local broker tests establish these code paths; independent
+recovery governance and deployed HA/restore acceptance remain required.
+These time bounds also require the deployment's clock-integrity controls;
+restored state and clocks cannot substitute for an independently advanced fence.
+
+## Egress readiness
+
+`Server::readiness()` checks the running workload profile, current approved
+material and governed registration, a current complete policy, audit admission
+capacity and a fresh durable audit acknowledgement. It checks authority again
+after that acknowledgement. Compatibility profiles and a stopped or aborted
+runtime cannot report enterprise readiness. A valid deny-all policy remains a
+usable policy; readiness does not grant a destination permit.
+
+The binary exposes `GET /readyz` on `127.0.0.1:8081` by default. Configure
+`--readiness-listen` or `TROGON_EGRESS_READINESS_LISTEN` for a restricted deployment
+probe address. Responses contain only status and a fixed body, with
+`Cache-Control: no-store`. The endpoint bounds concurrent workers, request-head
+bytes and total connection time. Its probes retain audit capacity through actual
+write completion, including when the HTTP caller disconnects or times out.
+
+This health signal establishes current consumer and enforcement usability.
+Artifact provenance, attestor correctness, signer custody, retained historical
+audit, cluster isolation, failover and restore acceptance still require the
+deployment evidence below.
 
 ## Live egress authority
 
@@ -134,11 +255,12 @@ Implementation:
   administrative endpoints, backups and a fenced recovery procedure.
 - [ ] Restrict the Workload API and its key material to the trusted supervisor or
   adapter. Enforce tenant and process/VM isolation independently of SPIFFE.
-- [ ] Gate candidate SVID/key/bundle activation on validated registration, an
-  acknowledged durable activation fact and a final live-generation check. Fence
-  generations across restore and bound the candidate queue. Collect native
-  SPIRE issuance events separately; ordinary issuer logs do not implement this
-  platform gate or prove pre-signing acknowledgement.
+- [x] Gate candidate SVID/key/bundle activation on validated registration, an
+  acknowledged durable activation fact and a final live-generation check, with
+  a bounded candidate queue and retained in-process revision floors.
+- [ ] Independently advance the protected recovery fence across restore and
+  collect native SPIRE issuance events. Ordinary issuer logs do not implement
+  the platform activation gate or prove pre-signing acknowledgement.
 
 Verification:
 
@@ -156,15 +278,15 @@ Verification:
 
 Implementation:
 
-- [ ] Consume Workload API SVID and bundle updates; rotate before expiry within
+- [x] Consume Workload API SVID and bundle updates; rotate before expiry within
   the one-hour certificate lifetime ceiling. Replace key/certificate/bundle
   state atomically and retire old trust according to a bounded overlap policy.
-- [ ] Use standard X.509 path validation plus the SVID leaf, URI and trust-domain
+- [x] Use standard X.509 path validation plus the SVID leaf, URI and trust-domain
   checks. Separate legacy mTLS pins from SPIFFE registration authority.
 - [x] Require a full certificate-authenticated handshake for each new egress
   connection. Disable stateful TLS session storage and TLS 1.3 session tickets
   so resumption cannot skip current client-certificate verification.
-- [ ] Treat Workload API updates as complete snapshots. Remove omitted
+- [x] Treat Workload API updates as complete snapshots. Remove omitted
   identities/bundles and handle `PermissionDenied` without waiting for audit;
   never merge withdrawn authority into the next snapshot or switch identities
   because a default entry changed.
@@ -203,6 +325,9 @@ Implementation:
   production reader and retain the evaluated generation through permit audit.
 - [x] Bound egress connection workers before spawning, including unauthenticated
   handshakes, and retain capacity until the connection ends.
+- [x] Bound detached egress audit workers and retain each slot until its actual
+  write finishes, even when the requesting connection is cancelled. Refuse
+  excess writes immediately and close admission before draining on shutdown.
 - [ ] Keep workload federation separate from delegated user consent; intersect
   relevant policy and delegation before granting on-behalf-of authority.
 - [x] Bound AAuth output validity by the agent and any bound subagent/upstream
