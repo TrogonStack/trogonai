@@ -1,5 +1,5 @@
-use trogon_audit::{AuditName, WriterId};
-use trogon_nats::{NatsConfig, NatsToken};
+use trogon_audit::WriterIdentity;
+use trogon_nats::NatsConfig;
 
 /// Where decisions are recorded and under whose name (ADR#0085 Decision 5).
 ///
@@ -14,9 +14,9 @@ pub struct AuditConfig {
     /// The connection the audit stream is reached over. TLS is required unless
     /// `NATS_TLS_DISABLED` says otherwise, as for every NATS client here.
     pub nats: NatsConfig,
-    pub tenant: AuditName,
-    pub project: NatsToken,
-    /// Names this process as the writer of its records. Derived from the
-    /// instance name, so the same instance is the same writer after a restart.
-    pub writer: WriterId,
+    /// The writer this process is to its chain, and the tenant and project its
+    /// records are scoped to. The writer id is derived from the instance name,
+    /// so the same instance is the same writer after a restart, and each process
+    /// opens a fresh chain under it.
+    pub identity: WriterIdentity,
 }

@@ -9,6 +9,7 @@ fn names_every_reason() {
         (FailureReason::Degraded, "degraded"),
         (FailureReason::QueueFull, "queue_full"),
         (FailureReason::BufferFull, "buffer_full"),
+        (FailureReason::TooLarge, "too_large"),
     ];
     for (reason, name) in expected {
         assert_eq!(reason.as_str(), name);

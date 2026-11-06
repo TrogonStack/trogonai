@@ -13,8 +13,9 @@ use trogonai_proto::platform::audit::v1::audit_actor::{
 };
 use trogonai_proto::platform::audit::v1::audit_record::Detail;
 use trogonai_proto::platform::audit::v1::{
-    ActChainEntry, Attribution, AuditActor, AuditDecision, AuditRecord, Change, ChangeKind, CredentialUse,
-    CredentialUseKind, EnforcementMode, GatewayDecision, GatewaySurface, LayerVerdict, TlsMode as ProtoTlsMode,
+    ActChainEntry, Attribution, AuditActor, AuditDecision, AuditRecord, ChainResetReason, Change, ChangeKind,
+    CredentialUse, CredentialUseKind, EnforcementMode, GatewayDecision, GatewaySurface, LayerVerdict,
+    TlsMode as ProtoTlsMode, WriterLifecycle, WriterLifecycleKind,
 };
 use trogonai_proto::projects::projects::v1alpha1::ProjectId;
 use trogonai_proto::session::sessions::v1alpha1::SessionId;
@@ -28,6 +29,7 @@ use crate::credential_terminal::CredentialTerminal;
 use crate::decision_facts::DecisionFacts;
 use crate::decision_outcome::DecisionOutcome;
 use crate::enforcement::Enforcement;
+use crate::integrity_terminal::IntegrityTerminal;
 use crate::layer_facts::LayerFacts;
 use crate::obligation::Obligation;
 use crate::record_id::RecordId;
@@ -36,6 +38,7 @@ use crate::record_scope::RecordScope;
 use crate::stamp::Stamp;
 use crate::surface::Surface;
 use crate::tls_mode::TlsMode;
+use crate::writer_identity::WriterIdentity;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Record {
@@ -69,6 +72,25 @@ impl Record {
         let subject = AuditSubject::change(scope.project.clone(), facts.kind);
         let detail = Detail::from(change(&facts));
         Self::assemble(scope, stamp, RecordKind::Change, subject, MessageField::none(), detail)
+    }
+
+    /// The record that opens a writer's chain. A writer starts a new chain every
+    /// time it starts and does not resume the last one, so its first record says
+    /// so. Only the writer builds it.
+    pub(crate) fn chain_reset(identity: &WriterIdentity, stamp: Stamp) -> Self {
+        let subject = AuditSubject::integrity(identity.component().clone(), IntegrityTerminal::ChainReset);
+        let detail = Detail::from(WriterLifecycle {
+            kind: EnumValue::from(WriterLifecycleKind::ChainReset),
+            reset_reason: Some(EnumValue::from(ChainResetReason::ProcessStartWithoutResume)),
+        });
+        Self::assemble(
+            identity.scope(),
+            stamp,
+            RecordKind::Integrity,
+            subject,
+            MessageField::none(),
+            detail,
+        )
     }
 
     fn assemble(

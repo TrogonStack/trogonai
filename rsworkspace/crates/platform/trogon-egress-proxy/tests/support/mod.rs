@@ -23,7 +23,7 @@ use tokio::task::JoinHandle;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 use tokio_util::sync::CancellationToken;
-use trogon_audit::{AuditName, WriterId};
+use trogon_audit::{AuditName, WriterId, WriterIdentity};
 use trogon_egress_proxy::audit::{AuditEvent, AuditSink, Decision};
 use trogon_egress_proxy::audit_config::AuditConfig;
 use trogon_egress_proxy::audit_error::AuditError;
@@ -123,9 +123,12 @@ impl Pki {
 pub fn audit_config() -> AuditConfig {
     AuditConfig {
         nats: NatsConfig::from_url("nats://127.0.0.1:1"),
-        tenant: AuditName::new("acme").expect("tenant"),
-        project: NatsToken::new("payments").expect("project"),
-        writer: WriterId::new("egress-proxy:test").expect("writer"),
+        identity: WriterIdentity::new(
+            WriterId::new("egress-proxy:test").expect("writer"),
+            NatsToken::new("egress_proxy").expect("component"),
+            AuditName::new("acme").expect("tenant"),
+            NatsToken::new("payments").expect("project"),
+        ),
     }
 }
 

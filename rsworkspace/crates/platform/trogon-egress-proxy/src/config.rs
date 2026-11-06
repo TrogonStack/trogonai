@@ -12,12 +12,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
-use trogon_audit::{AuditName, AuditNameError, WriterId};
+use trogon_audit::{AuditName, AuditNameError, WriterId, WriterIdentity};
 use trogon_nats::{NatsConfig, NatsToken, SubjectTokenViolationError};
 use trogon_std::env::{ReadEnv, SystemEnv};
 
 use crate::audit_config::AuditConfig;
-use crate::constants::{MIN_HEAD_BYTES, WRITER_ID_PREFIX};
+use crate::constants::{AUDIT_COMPONENT, MIN_HEAD_BYTES, WRITER_ID_PREFIX};
 use crate::limits::Limits;
 use crate::mtls::TlsFiles;
 use crate::trust_domain::{TrustDomain, TrustDomainError};
@@ -108,6 +108,8 @@ pub enum ConfigError {
     Project(#[source] SubjectTokenViolationError),
     #[error("invalid instance name")]
     Instance(#[source] AuditNameError),
+    #[error("the audit component is not a subject token")]
+    Component(#[source] SubjectTokenViolationError),
     #[error("--nats-url / NATS_URL must list at least one server")]
     NoNatsServers,
     #[error("a non-TLS port must be between 1 and 65535")]
@@ -174,11 +176,13 @@ fn audit_config<E: ReadEnv>(args: &Args, env: &E) -> Result<AuditConfig, ConfigE
     if nats.servers.is_empty() {
         return Err(ConfigError::NoNatsServers);
     }
+    let tenant = AuditName::new(&args.tenant).map_err(ConfigError::Tenant)?;
+    let project = NatsToken::new(&args.project).map_err(ConfigError::Project)?;
+    let writer = WriterId::new(format!("{WRITER_ID_PREFIX}{}", args.instance)).map_err(ConfigError::Instance)?;
+    let component = NatsToken::new(AUDIT_COMPONENT).map_err(ConfigError::Component)?;
     Ok(AuditConfig {
         nats,
-        tenant: AuditName::new(&args.tenant).map_err(ConfigError::Tenant)?,
-        project: NatsToken::new(&args.project).map_err(ConfigError::Project)?,
-        writer: WriterId::new(format!("{WRITER_ID_PREFIX}{}", args.instance)).map_err(ConfigError::Instance)?,
+        identity: WriterIdentity::new(writer, component, tenant, project),
     })
 }
 
