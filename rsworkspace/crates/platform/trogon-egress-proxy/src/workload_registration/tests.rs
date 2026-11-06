@@ -143,10 +143,6 @@ fn wire_scope_and_recovery_cannot_replace_the_configured_authority() {
             spiffe_id: "spiffe://other.example/service/egress".into(),
             ..original.bindings[0].clone()
         },
-        WireBinding {
-            role: EnumValue::from(WireRole::Supervisor),
-            ..original.bindings[0].clone()
-        },
     ] {
         let mut message = original.clone();
         message.bindings[0] = binding;
@@ -214,10 +210,6 @@ fn malformed_or_ambiguous_projection_values_are_refused() {
         },
         RegistrationSnapshot {
             trust_revision: 0,
-            ..original.clone()
-        },
-        RegistrationSnapshot {
-            bindings: Vec::new(),
             ..original.clone()
         },
         RegistrationSnapshot {

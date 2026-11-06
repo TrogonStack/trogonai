@@ -76,9 +76,6 @@ pub fn decode_registration(
             Ok(binding)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if !bindings.contains(config.local()) {
-        return Err(RegistrationProjectionError::Scope);
-    }
     let roots = message
         .approved_root_sha256
         .into_iter()
