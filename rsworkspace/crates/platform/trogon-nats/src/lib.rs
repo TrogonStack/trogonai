@@ -66,7 +66,10 @@ pub mod mocks;
 pub use async_nats::subject::ToSubject;
 pub use auth::{NatsAuth, NatsConfig};
 pub use client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
-pub use connect::{ConnectError, connect, connect_once, connect_once_with_inbox_prefix, connect_once_with_reconnect_quarantine, connect_with_inbox_prefix};
+pub use connect::{
+    ConnectError, connect, connect_once, connect_once_with_inbox_prefix, connect_once_with_reconnect_quarantine,
+    connect_with_inbox_prefix,
+};
 pub use constants::{MAX_SUBJECT_BYTES, MAX_SUBJECT_TOKENS, REQ_ID_HEADER};
 pub use credential_value::{CredentialValue, Location, NKeySeed, SettingError};
 pub use lease::{

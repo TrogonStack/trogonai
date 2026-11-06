@@ -8,9 +8,9 @@ use async_nats::jetstream::{
     stream::{Info, Stream},
 };
 use bytes::Bytes;
-use trogon_nats::{NatsAuth, NatsConfig, NatsTls, connect_once_with_inbox_prefix};
+use trogon_nats::{NatsAuth, NatsConfig, NatsTls, connect_once_with_reconnect_quarantine};
 
-use crate::constants::OPERATION_TIMEOUT;
+use crate::constants::{OPERATION_TIMEOUT, RECONNECT_QUARANTINE};
 use crate::registration_connection::RegistrationConnection;
 use crate::registration_plane::RegistrationPlane;
 use crate::{RegistrationError, RegistrationRole, StreamProfile};
@@ -57,10 +57,15 @@ pub(crate) async fn connect(
     if !authenticated {
         return Err(RegistrationError::Transport);
     }
-    let client =
-        connect_once_with_inbox_prefix(nats, nats.auth.clone(), OPERATION_TIMEOUT, &profile.inbox_prefix(role)?)
-            .await
-            .map_err(RegistrationError::Connection)?;
+    let client = connect_once_with_reconnect_quarantine(
+        nats,
+        nats.auth.clone(),
+        OPERATION_TIMEOUT,
+        &profile.inbox_prefix(role)?,
+        RECONNECT_QUARANTINE,
+    )
+    .await
+    .map_err(RegistrationError::Connection)?;
     Ok(async_nats::jetstream::new(client))
 }
 

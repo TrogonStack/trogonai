@@ -44,7 +44,7 @@ fn approval(config: &ProducerConfig, revision: u64, issued: SystemTime) -> Appro
 }
 
 #[tokio::test]
-async fn actual_reconnect_during_required_audit_permanently_fences_the_retained_writer() {
+async fn actual_disconnect_during_required_audit_permanently_fences_the_retained_writer() {
     let key = SigningKey::from_bytes(&[7; 32]);
     let config = ProducerConfig::new(
         "acme",
@@ -110,17 +110,19 @@ async fn actual_reconnect_during_required_audit_permanently_fences_the_retained_
         client.force_reconnect().await.expect("inject actual broker reconnect");
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                let after = client.server_info();
-                if client.connection_state() == async_nats::connection::State::Connected
-                    && (after.server_id != before.server_id || after.client_id != before.client_id)
-                {
+                if client.connection_state() != async_nats::connection::State::Connected {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
         .await
-        .expect("actual native connection identity changes");
+        .expect("actual native session disconnects");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_ne!(client.connection_state(), async_nats::connection::State::Connected);
+        let after = client.server_info();
+        assert_eq!(after.server_id, before.server_id);
+        assert_eq!(after.client_id, before.client_id);
         sink.release();
         tokio::time::timeout(Duration::from_secs(5), &mut update)
             .await
@@ -128,12 +130,16 @@ async fn actual_reconnect_during_required_audit_permanently_fences_the_retained_
     };
     assert!(result.is_err(), "reconnected ownership cannot publish an old grant");
     assert_eq!(producer.status(), ProducerStatus::Poisoned);
-    let latest = producer
-        .broker
-        .live
+    let reader = trogon_nats::connect_once(&admin, admin.auth.clone(), Duration::from_secs(5))
+        .await
+        .expect("fresh verified reader");
+    let latest = async_nats::jetstream::new(reader)
+        .get_stream(profile.live_config().name)
+        .await
+        .expect("live stream")
         .get_last_raw_message_by_subject(&profile.live_subject())
         .await
-        .expect("live state");
+        .expect("independent live state");
     assert_eq!(
         RegistrationSnapshot::decode_from_slice(&latest.payload)
             .expect("snapshot")

@@ -9,3 +9,5 @@ pub(crate) const ED25519_MULTICODEC: [u8; 2] = [0xed, 0x01];
 pub(crate) const OPERATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 pub(crate) const MAX_STREAM_BYTES: i64 = 1024 * 1024;
 pub(crate) const STREAM_DUPLICATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
+pub(crate) const RECONNECT_QUARANTINE: std::time::Duration =
+    trogon_workload_identity::constants::MAX_REGISTRATION_LIFETIME.saturating_add(OPERATION_TIMEOUT);
