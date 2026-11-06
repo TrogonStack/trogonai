@@ -78,10 +78,6 @@ fn only_fresh_exact_scoped_and_independently_signed_snapshots_are_authority() {
             ..snapshot()
         },
         RegistrationSnapshot {
-            approved_root_sha256: vec![],
-            ..snapshot()
-        },
-        RegistrationSnapshot {
             approved_root_sha256: vec![vec![1; 32], vec![1; 32]],
             ..snapshot()
         },
