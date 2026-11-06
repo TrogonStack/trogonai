@@ -482,8 +482,9 @@ fn tier1_principal_from_caller_resolves_to_a_spicedb_subject() {
 
 #[test]
 fn owner_emit_error_from_status_keeps_the_status_message() {
-    let error = OwnerEmitError::from(Status::unavailable("outage"));
-    assert!(error.to_string().contains("outage"));
+    let status = Status::unavailable("outage");
+    let expected = OwnerEmitError::new(status.to_string());
+    assert_eq!(OwnerEmitError::from(status), expected);
 }
 
 #[test]
