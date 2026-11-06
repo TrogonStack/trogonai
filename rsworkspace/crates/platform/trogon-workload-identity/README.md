@@ -49,15 +49,18 @@ SubjectPublicKeyInfo DER, and the concatenation of sorted root DER SHA-256 hashe
 The fixed-width root hashes make the bundle fingerprint independent of source
 ordering. Audit facts contain public identifiers and fingerprints, never keys.
 
-The supported SDK limits decoded gRPC messages to 4 MiB. The platform additionally
-bounds credential and bundle bytes to 1 MiB, SVID entries to 32, bundle entries to
+The client limits decoded gRPC responses to 1 MiB before SDK domain parsing. The
+platform additionally bounds credential and bundle bytes to 1 MiB, SVID entries
+to 32, bundle entries to
 16, roots per bundle to 16, and registration bindings to 256. Duplicate SPIFFE IDs
 and root fingerprints are refused. No implicit trust-domain federation is enabled.
 
-The SDK's parsed X.509 context does not preserve Workload API CRLs. This integration
-uses governed identity and root withdrawal with bounded credential validity; it
-does not establish CRL enforcement. A deployment requiring CRLs needs that
-verification boundary before enablement.
+The SDK's parsed X.509 context does not preserve Workload API CRLs. The client
+therefore decodes the official wire response before SDK SVID and bundle parsing.
+Any supplied CRL withdraws authority and prevents activation. This profile uses
+governed identity and root withdrawal with bounded credential validity. A
+deployment requiring CRLs needs complete CRL verification before enablement.
+Owned wire private-key buffers are redacted in debug output and zeroized on drop.
 
 Issuance, node and workload attestation, constrained SPIRE registration, signing-key
 custody, socket isolation, HA and recovery belong to the deployment. The real Unix

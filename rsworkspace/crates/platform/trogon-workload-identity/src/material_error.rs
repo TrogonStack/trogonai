@@ -2,6 +2,8 @@
 pub enum MaterialError {
     #[error("workload material exceeds resource bounds")]
     Bounds,
+    #[error("Workload API CRL material requires an unsupported verification profile")]
+    RevocationUnsupported,
     #[error("the exact workload identity is absent or ambiguous")]
     Identity,
     #[error("workload certificate profile or validity is invalid")]

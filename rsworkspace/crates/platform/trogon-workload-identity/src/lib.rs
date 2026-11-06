@@ -23,8 +23,13 @@ mod tls;
 mod tls_guards;
 mod unix_endpoint;
 mod workload_id;
+mod workload_identity_wire;
 mod workload_project;
+mod workload_request_wire;
+mod workload_response_wire;
 mod workload_role;
+mod workload_source_error;
+mod workload_stream;
 mod workload_tenant;
 
 #[cfg(any(test, feature = "test-support"))]

@@ -1,5 +1,4 @@
 use futures::StreamExt;
-use spiffe::WorkloadApiClient;
 use tokio_util::sync::CancellationToken;
 
 use crate::IdentityDriver;
@@ -33,19 +32,19 @@ impl IdentityDriver {
     }
 
     async fn read_connection(&self, shutdown: CancellationToken) {
-        let Ok(Ok(client)) = tokio::time::timeout(
+        let Ok(Ok(mut stream)) = tokio::time::timeout(
             CONNECT_TIMEOUT,
-            WorkloadApiClient::connect(self.store.config().endpoint().endpoint()),
+            crate::workload_stream::connect(self.store.config().endpoint()),
         )
         .await
         else {
             return;
         };
-        let Ok(Ok(mut stream)) = tokio::time::timeout(CONNECT_TIMEOUT, client.stream_x509_contexts()).await else {
-            return;
-        };
         let first = tokio::time::timeout(CONNECT_TIMEOUT, stream.next()).await;
         let Ok(Some(Ok(context))) = first else {
+            return;
+        };
+        let Ok(context) = context.into_context() else {
             return;
         };
         let Ok(candidate) = Candidate::parse(context, self.store.config().local().spiffe_id()) else {
@@ -58,6 +57,9 @@ impl IdentityDriver {
                 update = stream.next() => update,
             };
             let Some(Ok(context)) = context else {
+                return;
+            };
+            let Ok(context) = context.into_context() else {
                 return;
             };
             let Ok(candidate) = Candidate::parse(context, self.store.config().local().spiffe_id()) else {
