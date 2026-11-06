@@ -21,6 +21,7 @@ pub(crate) const PEER_ID: &str = "spiffe://example.org/runtime/workload-1";
 mod bundle_snapshot_tests;
 mod crl_tests;
 mod lifecycle_tests;
+mod trust_revocation_tests;
 mod validation_tests;
 mod wire_identity_tests;
 
