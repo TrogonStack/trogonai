@@ -118,6 +118,16 @@ interception set. The binding model, the placeholder format, and response
 scrubbing are the subject of a later ADR; this one fixes the contract with the
 secrets service.
 
+[ADR#0096](./0096-connection-use-by-agents.md) defines a credential-injecting
+HTTP proxy for an agent's use of a third-party connection. It checks the
+connection permit and the Session's live egress policy, which is this record's
+allowlist, and it resolves credentials from custody under its own authority.
+Forwarding traffic gives an egress process no resolve privilege, and an egress
+permit or a binding in the policy snapshot does not stand in for the connection
+permit. Whether that proxy role reuses this process or is isolated from it is a
+deployment and identity decision that neither record makes. The binding model
+that a later ADR owns here must be reconciled with it.
+
 The proxy resolves a credential by NATS core request/reply to the secrets
 service, never from JetStream, with the tenant derived from the authenticated
 NATS connection and not from the request ([ADR#0023](./0023-secret-management-and-key-custody-direction.md)
@@ -361,5 +371,6 @@ trusts.
 - [ADR#0081: Every NATS Connection Uses TLS Unless Explicitly Disabled, and Clients Enter Operator-Mode Accounts Only Through Platform Credentials or the Auth Callout](./0081-nats-tls-by-default-and-operator-mode-admission.md)
 - [ADR#0082: Inside the Bus the Principal Is Derived from the Subject, and Proof of Possession Is Enforced Only at the External Edge](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
 - [ADR#0084: Every Policy Enforcement Point Enforces by Default and Refuses to Start Unenforced](./0084-policy-enforcement-posture.md)
+- [ADR#0096: An Agent Uses a Connection Through an Authorized HTTP Proxy That Injects Credentials Held by Custody](./0096-connection-use-by-agents.md)
 - [HTTP Semantics, CONNECT method (RFC 9110, section 9.3.6)](https://www.rfc-editor.org/rfc/rfc9110#section-9.3.6)
 - [SPIFFE ID specification](https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE-ID.md)
