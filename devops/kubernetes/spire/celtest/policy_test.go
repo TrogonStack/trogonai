@@ -105,13 +105,82 @@ func TestSocketAdmissionBoundary(t *testing.T) {
 			t.Fatalf("generated issuer/agent pod refused: %v", err)
 		}
 	}
+	for _, pod := range issuerPods {
+		if asMap(asList(asMap(pod["spec"])["containers"])[0])["name"] != "agent" {
+			continue
+		}
+		mutations := map[string]func(map[string]any){
+			"privileged_agent": func(p map[string]any) {
+				asMap(asMap(asList(asMap(p["spec"])["containers"])[0])["securityContext"])["privileged"] = true
+			},
+			"additional_host_mount": func(p map[string]any) {
+				spec := asMap(p["spec"])
+				spec["volumes"] = append(asList(spec["volumes"]), map[string]any{"name": "host-config", "hostPath": map[string]any{"path": "/etc/kubernetes", "type": "Directory"}})
+			},
+			"extra_capability": func(p map[string]any) {
+				asMap(asMap(asMap(asList(asMap(p["spec"])["containers"])[0])["securityContext"])["capabilities"])["add"] = []any{"SYS_PTRACE", "SYS_ADMIN"}
+			},
+			"changed_entrypoint": func(p map[string]any) {
+				asMap(asList(asMap(p["spec"])["containers"])[0])["command"] = []any{"/unexpected-entrypoint"}
+			},
+		}
+		for name, mutate := range mutations {
+			t.Run("agent/"+name, func(t *testing.T) {
+				candidate := clone(pod)
+				mutate(candidate)
+				allowed, err := admitted(policy, candidate)
+				if err != nil {
+					t.Fatalf("policy evaluation error: %v", err)
+				}
+				if allowed {
+					t.Fatal("unapproved node-agent privilege admitted")
+				}
+			})
+		}
+	}
 	patch := fixture.Patches[0]
 	base := map[string]any{"metadata": map[string]any{"namespace": patch["namespace"]}, "spec": patch["pod_spec_patch"]}
 	allowed, err := admitted(policy, base)
 	if err != nil || !allowed {
 		t.Fatalf("admitted supervisor refused: %v", err)
 	}
+	ordinary := clone(base)
+	asMap(ordinary["metadata"])["namespace"] = "untrusted-workloads"
+	ordinarySpec := asMap(ordinary["spec"])
+	ordinarySpec["serviceAccountName"] = "untrusted"
+	delete(ordinarySpec, "volumes")
+	delete(asMap(asList(ordinarySpec["containers"])[0]), "volumeMounts")
+	allowed, err = admitted(policy, ordinary)
+	if err != nil || !allowed {
+		t.Fatalf("ordinary isolated workload refused: %v", err)
+	}
 	mutations := map[string]func(map[string]any){
+		"var_run_alias_outside_supervisor_namespace": func(p map[string]any) {
+			asMap(p["metadata"])["namespace"] = "untrusted-workloads"
+			spec := asMap(p["spec"])
+			spec["serviceAccountName"] = "untrusted"
+			asMap(asMap(asList(spec["volumes"])[0])["hostPath"])["path"] = "/var/run/platform-spire/sockets"
+		},
+		"proc_alias_with_host_pid_outside_supervisor_namespace": func(p map[string]any) {
+			asMap(p["metadata"])["namespace"] = "untrusted-workloads"
+			spec := asMap(p["spec"])
+			spec["serviceAccountName"] = "untrusted"
+			spec["hostPID"] = true
+			asMap(asMap(asList(spec["volumes"])[0])["hostPath"])["path"] = "/proc"
+			security := asMap(asMap(asList(spec["containers"])[0])["securityContext"])
+			security["runAsUser"] = 0
+			security["runAsNonRoot"] = false
+			security["privileged"] = true
+		},
+		"privileged_outside_supervisor_namespace": func(p map[string]any) {
+			asMap(p["metadata"])["namespace"] = "untrusted-workloads"
+			spec := asMap(p["spec"])
+			spec["serviceAccountName"] = "untrusted"
+			delete(spec, "volumes")
+			container := asMap(asList(spec["containers"])[0])
+			delete(container, "volumeMounts")
+			asMap(container["securityContext"])["privileged"] = true
+		},
 		"wrong_namespace":       func(p map[string]any) { asMap(p["metadata"])["namespace"] = "another-tenant" },
 		"wrong_service_account": func(p map[string]any) { asMap(p["spec"])["serviceAccountName"] = "untrusted" },
 		"wrong_image":           func(p map[string]any) { asMap(asList(asMap(p["spec"])["containers"])[0])["image"] = "untrusted:latest" },
