@@ -21,5 +21,10 @@ pub mod audit_record {
                 super::super::super::super::__buffa::view::ChangeView<'a>,
             >,
         ),
+        WriterLifecycle(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::WriterLifecycleView<'a>,
+            >,
+        ),
     }
 }

@@ -9,6 +9,7 @@ use crate::classify_publish_error::ClassifyPublishError;
 use crate::constants::{DEFAULT_ACK_TIMEOUT, DEFAULT_MAX_PUBLISH_ATTEMPTS, LOG_TARGET};
 use crate::sealed_record::SealedRecord;
 use crate::sink_error::SinkError;
+use crate::stored_ack::StoredAck;
 
 /// Publishes sealed records to JetStream and waits for the `PubAck`.
 ///
@@ -47,7 +48,7 @@ where
     P: JetStreamPublisher,
     P::PublishError: ClassifyPublishError,
 {
-    async fn publish(&self, record: &SealedRecord) -> Result<(), SinkError> {
+    async fn publish(&self, record: &SealedRecord) -> Result<StoredAck, SinkError> {
         for attempt in 1..=self.max_attempts.get() {
             let outcome = publish_event(
                 &self.publisher,
@@ -57,8 +58,9 @@ where
                 self.ack_timeout,
             )
             .await;
-            let Some(error) = failure_of(outcome) else {
-                return Ok(());
+            let error = match stored(outcome) {
+                Ok(ack) => return Ok(ack),
+                Err(error) => error,
             };
             warn!(
                 target: LOG_TARGET,
@@ -75,15 +77,15 @@ where
     }
 }
 
-fn failure_of<E>(outcome: PublishOutcome<E>) -> Option<SinkError>
+fn stored<E>(outcome: PublishOutcome<E>) -> Result<StoredAck, SinkError>
 where
     E: ClassifyPublishError + std::fmt::Display,
 {
     match outcome {
-        PublishOutcome::Published => None,
-        PublishOutcome::PublishFailed(error) | PublishOutcome::AckFailed(error) => Some(error.classify()),
-        PublishOutcome::AckTimedOut(_) => Some(SinkError::Timeout),
-        PublishOutcome::StoreFailed(_) => Some(SinkError::Unreachable),
+        PublishOutcome::Published(ack) => Ok(StoredAck::from(ack)),
+        PublishOutcome::PublishFailed(error) | PublishOutcome::AckFailed(error) => Err(error.classify()),
+        PublishOutcome::AckTimedOut(_) => Err(SinkError::Timeout),
+        PublishOutcome::StoreFailed(_) => Err(SinkError::Unreachable),
     }
 }
 

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::*;
-use trogon_audit::{AuditName, WriterId};
+use trogon_audit::{AuditName, WriterId, WriterIdentity};
 use trogon_nats::{NatsConfig, NatsToken};
 use trogon_std::env::InMemoryEnv;
 
@@ -22,9 +22,12 @@ fn config(policy_file: &Path) -> Config {
         trust_domain: TrustDomain::new("trogon.example").expect("trust domain"),
         audit: AuditConfig {
             nats: NatsConfig::from_url("nats://127.0.0.1:1"),
-            tenant: AuditName::new("acme").expect("tenant"),
-            project: NatsToken::new("payments").expect("project"),
-            writer: WriterId::new("egress-proxy:test").expect("writer"),
+            identity: WriterIdentity::new(
+                WriterId::new("egress-proxy:test").expect("writer"),
+                NatsToken::new("egress_proxy").expect("component"),
+                AuditName::new("acme").expect("tenant"),
+                NatsToken::new("payments").expect("project"),
+            ),
         },
         non_tls_ports: Vec::new(),
         limits: Limits::default(),

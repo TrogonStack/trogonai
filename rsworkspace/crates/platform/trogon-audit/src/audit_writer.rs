@@ -1,31 +1,46 @@
 //! The writer that stands between an enforcing point and its audit stream
-//! (ADR#0086 Decision 4).
+//! (ADR#0086 Decisions 4 and 6).
 //!
 //! One entry point, [`AuditWriter::write`], and the record decides the rest. A
 //! must-audit record of an act not yet done is acknowledged before the effect or
 //! the act is refused. A refusal stands, so its record goes to a bounded retry
 //! buffer when the stream will not take it. A best-effort record goes to a bounded
 //! queue and is published asynchronously. The caller picks none of this.
+//!
+//! Every record the writer stores is a link of one hash chain. A writer opens a
+//! fresh chain with a chain reset record at sequence 1, and numbers a record only
+//! when it is the next to publish and nothing numbered is still unacknowledged.
+//! A record is dropped only before it is numbered, and a numbered record is
+//! retried with the same bytes until it is stored, so the stored chain has no gap.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use buffa::Message;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
+use trogon_std::NowV7;
+use trogon_std::time::EpochClock;
 use trogonai_proto::platform::audit::v1::AuditClass;
 
 use crate::audit_sink::AuditSink;
 use crate::audit_unavailable_error::AuditUnavailableError;
-use crate::constants::LOG_TARGET;
+use crate::chain_head::ChainHead;
+use crate::chain_id::ChainId;
+use crate::chain_tip::ChainTip;
+use crate::constants::{GENESIS_SEQUENCE, LOG_TARGET, MAX_RECORD_BYTES};
 use crate::disposition::Disposition;
 use crate::failure_reason::FailureReason;
 use crate::obligation::Obligation;
 use crate::record::Record;
+use crate::record_id::RecordId;
 use crate::sealed_record::SealedRecord;
+use crate::stamper::Stamper;
+use crate::stored_ack::StoredAck;
 use crate::writer_config::WriterConfig;
-use crate::writer_id::WriterId;
+use crate::writer_identity::WriterIdentity;
 use crate::writer_state::WriterState;
 use crate::writer_stats::WriterStats;
 
@@ -37,13 +52,15 @@ pub struct AuditWriter<S> {
 #[derive(Debug)]
 struct Inner<S> {
     sink: S,
-    writer: WriterId,
+    identity: WriterIdentity,
+    chain: ChainId,
     config: WriterConfig,
-    sequence: AtomicU64,
+    /// The chain gate. Numbering and publishing a record happen under it, so the
+    /// stream receives the chain in order and one record at a time. Waiters take
+    /// it in arrival order.
+    tip: tokio::sync::Mutex<ChainTip>,
     state: Mutex<WriterState>,
     wake: Notify,
-    drain_gate: tokio::sync::Mutex<()>,
-    refusal_gate: tokio::sync::Mutex<()>,
 }
 
 impl<S> Clone for AuditWriter<S> {
@@ -55,56 +72,94 @@ impl<S> Clone for AuditWriter<S> {
 }
 
 impl<S: AuditSink> AuditWriter<S> {
-    pub fn new(sink: S, writer: WriterId, config: WriterConfig) -> Self {
-        Self {
+    /// A writer that opens a fresh chain under `identity`, its chain id and its
+    /// chain reset record taken from `stamper`. Every must-audit record waits for
+    /// the chain reset to be stored, and the drain task stores it as soon as it
+    /// runs.
+    pub fn new<C: EpochClock, G: NowV7>(
+        sink: S,
+        identity: WriterIdentity,
+        config: WriterConfig,
+        stamper: &Stamper<C, G>,
+    ) -> Self {
+        let chain = stamper.chain_id();
+        let reset = Record::chain_reset(&identity, stamper.stamp());
+        let genesis = SealedRecord::seal(reset, identity.writer(), chain, GENESIS_SEQUENCE, None);
+        let writer = Self {
             inner: Arc::new(Inner {
                 sink,
-                writer,
+                identity,
+                chain,
                 config,
-                sequence: AtomicU64::new(0),
+                tip: tokio::sync::Mutex::new(ChainTip::opened_by(genesis)),
                 state: Mutex::new(WriterState::default()),
                 wake: Notify::new(),
-                drain_gate: tokio::sync::Mutex::new(()),
-                refusal_gate: tokio::sync::Mutex::new(()),
             }),
-        }
+        };
+        writer.inner.wake.notify_one();
+        writer
     }
 
     /// Accepts a record. `Err` is returned only for a must-audit record of an act
     /// that has not happened yet, and means the act must be refused as an
-    /// operational fault. The record is treated as not stored, though an
-    /// acknowledgement lost after the stream took it can leave a record of a
-    /// decision whose act was refused, a limit ADR#0086 states. A refusal's
+    /// operational fault. A record refused after it was numbered stays the head of
+    /// the chain and is stored by a later retry, so the stream can hold the record
+    /// of a decision whose act was refused, a limit ADR#0086 states. A refusal's
     /// record and a best-effort record never fail the caller.
     pub async fn write(&self, record: Record) -> Result<Disposition, AuditUnavailableError> {
+        if !fits_a_message(&record) {
+            return self.too_large(&record);
+        }
         match record.obligation() {
-            Obligation::BeforeEffect => self.write_before_effect(self.seal(record)).await,
+            Obligation::BeforeEffect => self.write_before_effect(record).await,
             Obligation::Stands => Ok(self.write_standing_refusal(record).await),
-            Obligation::BestEffort => Ok(self.enqueue_best_effort(self.seal(record))),
+            Obligation::BestEffort => Ok(self.enqueue_best_effort(record)),
         }
     }
 
-    /// True while the retry buffer has been full and has not yet drained. A degraded
+    /// True while the chain's head waits to be stored after a failed publish, or
+    /// while the retry buffer has been full and has not yet emptied. A degraded
     /// writer refuses every action that needs a must-audit record before an effect
     /// and keeps denying what it denies.
     pub fn is_degraded(&self) -> bool {
-        self.state().degraded
+        self.state().degraded()
     }
 
     pub fn stats(&self) -> WriterStats {
         self.state().stats()
     }
 
-    /// Retries the buffers once: the retry buffer first and in order, then the
-    /// best-effort queue. A refusal's record leaves the buffer only when it is
-    /// acknowledged, and the writer leaves audit-degraded when the buffer is
-    /// empty. Either drain stops at the first failure, so a stream that is down
-    /// costs one publish per pass and never holds the next pass of the retry
-    /// buffer behind a whole queue of best-effort records.
+    /// The last record the stream acknowledged, or `None` until the chain reset is
+    /// stored.
+    pub fn head(&self) -> Option<ChainHead> {
+        self.state().head.clone()
+    }
+
+    /// The chain this writer instance appends to.
+    pub fn chain(&self) -> ChainId {
+        self.inner.chain
+    }
+
+    /// Stores the chain's head if it is waiting, then numbers and stores the
+    /// buffers one record at a time: the retry buffer first and in order, then the
+    /// best-effort queue. The drain stops at the first failure and leaves that
+    /// record at the head, so a stream that is down costs one publish per pass.
+    /// The writer leaves audit-degraded once the head is stored and the retry
+    /// buffer is empty.
     pub async fn drain_once(&self) {
-        let _serialized = self.inner.drain_gate.lock().await;
-        self.drain_retry_buffer().await;
-        self.drain_best_effort_queue().await;
+        loop {
+            let mut tip = self.inner.tip.lock().await;
+            if self.settle(&mut tip).await.is_err() {
+                return;
+            }
+            let Some((record, retried)) = self.next_buffered() else {
+                return;
+            };
+            if let Err(record) = self.append(&mut tip, record) {
+                self.put_back(*record, retried);
+                return;
+            }
+        }
     }
 
     /// Drains on every best-effort enqueue and every `drain_interval` until
@@ -130,27 +185,49 @@ impl<S: AuditSink> AuditWriter<S> {
         self.inner.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn seal(&self, record: Record) -> SealedRecord {
-        let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed).saturating_add(1);
-        SealedRecord::seal(record, &self.inner.writer, sequence)
+    fn too_large(&self, record: &Record) -> Result<Disposition, AuditUnavailableError> {
+        let class = record.kind().audit_class();
+        if record.obligation() == Obligation::BeforeEffect {
+            return Err(self.refuse(record.id(), class, FailureReason::TooLarge));
+        }
+        self.state().count_drop(class, FailureReason::TooLarge);
+        error!(
+            target: LOG_TARGET,
+            record_id = %record.id(),
+            ?class,
+            reason = %FailureReason::TooLarge,
+            "an audit record is larger than the stream takes and was dropped"
+        );
+        Ok(Disposition::Dropped)
     }
 
-    async fn write_before_effect(&self, record: SealedRecord) -> Result<Disposition, AuditUnavailableError> {
+    async fn write_before_effect(&self, record: Record) -> Result<Disposition, AuditUnavailableError> {
+        let (id, class) = (record.id(), record.kind().audit_class());
         if self.is_degraded() {
-            return Err(self.refuse(&record, FailureReason::Degraded));
+            return Err(self.refuse(id, class, FailureReason::Degraded));
         }
-        match self.inner.sink.publish(&record).await {
+        let mut tip = self.inner.tip.lock().await;
+        if self.is_degraded() {
+            return Err(self.refuse(id, class, FailureReason::Degraded));
+        }
+        if let Err(reason) = self.settle(&mut tip).await {
+            return Err(self.refuse(id, class, reason));
+        }
+        if self.append(&mut tip, record).is_err() {
+            return Err(self.refuse(id, class, FailureReason::Degraded));
+        }
+        match self.settle(&mut tip).await {
             Ok(()) => Ok(Disposition::Stored),
-            Err(error) => Err(self.refuse(&record, error.reason())),
+            Err(reason) => Err(self.refuse(id, class, reason)),
         }
     }
 
-    fn refuse(&self, record: &SealedRecord, reason: FailureReason) -> AuditUnavailableError {
+    fn refuse(&self, id: RecordId, class: AuditClass, reason: FailureReason) -> AuditUnavailableError {
         self.state().count_refusal(reason);
         warn!(
             target: LOG_TARGET,
-            record_id = %record.id(),
-            class = ?record.class(),
+            record_id = %id,
+            ?class,
             %reason,
             "audit unavailable, refusing the action"
         );
@@ -158,31 +235,43 @@ impl<S: AuditSink> AuditWriter<S> {
     }
 
     /// A refusal takes effect whether or not its record is written. The record is
-    /// published inline only when nothing is waiting ahead of it, so a refusal does
-    /// not wait on a stream that is already failing. Refusals are sealed and
-    /// published one at a time, because the retry buffer only grows here: a
-    /// concurrent refusal that saw an empty buffer could otherwise be stored ahead
-    /// of an earlier one still on its way into the buffer.
+    /// published inline only when nothing waits ahead of it and the writer is not
+    /// degraded, so a refusal does not wait on a stream that is already failing
+    /// and is never stored ahead of a refusal still in the buffer. Once its own
+    /// publish has started it is the chain's head and is retried from there.
     async fn write_standing_refusal(&self, record: Record) -> Disposition {
-        let _in_order = self.inner.refusal_gate.lock().await;
-        let record = self.seal(record);
-        let nothing_ahead = self.state().retry.is_empty();
-        if nothing_ahead && self.inner.sink.publish(&record).await.is_ok() {
-            return Disposition::Stored;
+        if self.must_buffer() {
+            return self.buffer_refusal(record);
         }
-        self.buffer_refusal(record)
+        let mut tip = self.inner.tip.lock().await;
+        if self.must_buffer() || self.settle(&mut tip).await.is_err() {
+            return self.buffer_refusal(record);
+        }
+        if let Err(record) = self.append(&mut tip, record) {
+            return self.buffer_refusal(*record);
+        }
+        match self.settle(&mut tip).await {
+            Ok(()) => Disposition::Stored,
+            Err(_) => Disposition::Retrying,
+        }
     }
 
-    fn buffer_refusal(&self, record: SealedRecord) -> Disposition {
+    fn must_buffer(&self) -> bool {
+        let state = self.state();
+        state.degraded() || !state.retry.is_empty()
+    }
+
+    fn buffer_refusal(&self, record: Record) -> Disposition {
         let capacity = self.inner.config.retry_capacity.max(1);
         let mut state = self.state();
         if state.retry.len() >= capacity {
-            state.degraded = true;
-            state.count_drop(record.class(), FailureReason::BufferFull);
+            let class = record.kind().audit_class();
+            state.overflowed = true;
+            state.count_drop(class, FailureReason::BufferFull);
             error!(
                 target: LOG_TARGET,
                 record_id = %record.id(),
-                class = ?record.class(),
+                ?class,
                 reason = %FailureReason::BufferFull,
                 "audit retry buffer is full, a must-audit record was dropped"
             );
@@ -190,17 +279,23 @@ impl<S: AuditSink> AuditWriter<S> {
         }
         state.retry.push_back(record);
         if state.retry.len() >= capacity {
-            state.degraded = true;
+            state.overflowed = true;
             warn!(target: LOG_TARGET, "audit retry buffer is full, the writer is audit-degraded");
         }
         Disposition::Retrying
     }
 
-    fn enqueue_best_effort(&self, record: SealedRecord) -> Disposition {
+    fn enqueue_best_effort(&self, record: Record) -> Disposition {
         let capacity = self.inner.config.best_effort_capacity.max(1);
         let mut state = self.state();
         if state.queue.len() >= capacity {
             state.count_drop(AuditClass::BestEffort, FailureReason::QueueFull);
+            warn!(
+                target: LOG_TARGET,
+                record_id = %record.id(),
+                reason = %FailureReason::QueueFull,
+                "a best-effort audit record was dropped"
+            );
             return Disposition::Dropped;
         }
         state.queue.push_back(record);
@@ -209,45 +304,101 @@ impl<S: AuditSink> AuditWriter<S> {
         Disposition::Queued
     }
 
-    async fn drain_retry_buffer(&self) {
-        loop {
-            let Some(record) = self.state().retry.front().cloned() else {
-                return;
-            };
-            if let Err(error) = self.inner.sink.publish(&record).await {
-                warn!(
+    /// The next record to number, and whether it came from the retry buffer. The
+    /// retry buffer empties here, which ends the overflow it may have raised.
+    fn next_buffered(&self) -> Option<(Record, bool)> {
+        let mut state = self.state();
+        if let Some(record) = state.retry.pop_front() {
+            if state.retry.is_empty() {
+                state.overflowed = false;
+            }
+            return Some((record, true));
+        }
+        state.queue.pop_front().map(|record| (record, false))
+    }
+
+    fn put_back(&self, record: Record, retried: bool) {
+        let mut state = self.state();
+        if retried {
+            state.retry.push_front(record);
+        } else {
+            state.queue.push_front(record);
+        }
+    }
+
+    /// Numbers `record` as the chain's next link and parks it as the head before
+    /// anything awaits its publish, so a caller that stops waiting leaves it for
+    /// the next holder of the gate or the drain. A chain out of sequences blocks.
+    fn append(&self, tip: &mut ChainTip, record: Record) -> Result<(), Box<Record>> {
+        tip.append(record, self.inner.identity.writer(), self.inner.chain)
+            .inspect_err(|record| {
+                self.state().blocked = true;
+                error!(
                     target: LOG_TARGET,
                     record_id = %record.id(),
-                    reason = %error.reason(),
-                    "audit retry buffer could not be drained"
+                    "the audit chain has no sequence left, the writer is audit-degraded"
                 );
-                return;
+            })
+    }
+
+    /// Publishes the chain's head if one waits. On success the head becomes the
+    /// acknowledged position; on failure it stays, blocking the chain, and is
+    /// retried with the same bytes and message id.
+    async fn settle(&self, tip: &mut ChainTip) -> Result<(), FailureReason> {
+        let Some(pending) = tip.pending.as_mut() else {
+            return Ok(());
+        };
+        let first_attempt = *pending.first_attempt.get_or_insert_with(Instant::now);
+        match self.inner.sink.publish(&pending.record).await {
+            Ok(ack) => {
+                self.stored(&pending.record, first_attempt, &ack);
+                tip.pending = None;
+                Ok(())
             }
-            let mut state = self.state();
-            state.retry.pop_front();
-            if state.retry.is_empty() {
-                state.degraded = false;
+            Err(error) => {
+                let reason = error.reason();
+                self.state().blocked = true;
+                warn!(
+                    target: LOG_TARGET,
+                    record_id = %pending.record.id(),
+                    sequence = pending.record.sequence(),
+                    %reason,
+                    "the audit chain head could not be stored"
+                );
+                Err(reason)
             }
         }
     }
 
-    async fn drain_best_effort_queue(&self) {
-        loop {
-            let Some(record) = self.state().queue.pop_front() else {
-                return;
-            };
-            if let Err(error) = self.inner.sink.publish(&record).await {
-                self.state().count_drop(AuditClass::BestEffort, error.reason());
-                warn!(
-                    target: LOG_TARGET,
-                    record_id = %record.id(),
-                    reason = %error.reason(),
-                    "a best-effort audit record was dropped"
-                );
-                return;
-            }
+    fn stored(&self, record: &SealedRecord, first_attempt: Instant, ack: &StoredAck) {
+        let mut state = self.state();
+        state.blocked = false;
+        state.head = Some(ChainHead::new(
+            record.sequence(),
+            record.hash(),
+            ack.stream(),
+            ack.stream_sequence(),
+        ));
+        if !ack.duplicate() && first_attempt.elapsed() > self.inner.config.duplicate_window {
+            state.possible_duplicates += 1;
+            warn!(
+                target: LOG_TARGET,
+                record_id = %record.id(),
+                sequence = record.sequence(),
+                "an audit record was stored by a retry after the duplicate window, the stream may hold it twice"
+            );
         }
     }
+}
+
+/// Whether the record, once sealed, fits in one message the stream takes.
+fn fits_a_message(record: &Record) -> bool {
+    record
+        .message()
+        .try_encoded_len()
+        .ok()
+        .and_then(|len| usize::try_from(len).ok())
+        .is_some_and(|len| len <= MAX_RECORD_BYTES)
 }
 
 #[cfg(test)]

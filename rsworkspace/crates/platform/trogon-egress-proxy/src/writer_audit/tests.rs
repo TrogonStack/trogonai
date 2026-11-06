@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio::sync::Notify;
-use trogon_audit::{MemorySink, ReasonCode, SealedRecord, SinkError, WriterConfig, WriterId};
+use tokio::sync::watch;
+use trogon_audit::{
+    ChainAnchor, MemorySink, ReasonCode, SealedRecord, SinkError, StoredAck, WriterConfig, WriterId, WriterIdentity,
+    verify_chain_range,
+};
 use trogon_std::log_capture::{CapturedEvent, CapturedEvents, CapturedLogs, LevelFilter, LogLevel};
 
 use super::*;
@@ -10,19 +13,41 @@ use crate::agent_id::AgentId;
 use crate::destination::Destination;
 use crate::policy_source::PolicySource;
 
-fn audit() -> (WriterAudit<MemorySink>, MemorySink) {
-    let sink = MemorySink::new();
-    let writer = AuditWriter::new(
-        sink.clone(),
-        WriterId::new("egress-proxy:test").expect("writer"),
-        WriterConfig::default(),
-    );
-    let audit = WriterAudit::new(
-        writer,
+fn writer() -> WriterId {
+    WriterId::new("egress-proxy:test").expect("writer")
+}
+
+fn audit_over<S: Sink>(sink: S) -> WriterAudit<S> {
+    let identity = WriterIdentity::new(
+        writer(),
+        NatsToken::new("egress_proxy").expect("component"),
         AuditName::new("acme").expect("tenant"),
         NatsToken::new("payments").expect("project"),
     );
-    (audit, sink)
+    let stamper = Stamper::new(SystemClock, UuidV7Generator);
+    let writer = AuditWriter::new(sink, identity.clone(), WriterConfig::default(), &stamper);
+    WriterAudit::new(writer, identity.tenant().clone(), identity.project().clone())
+}
+
+fn audit() -> (WriterAudit<MemorySink>, MemorySink) {
+    let sink = MemorySink::new();
+    (audit_over(sink.clone()), sink)
+}
+
+/// The decision records stored, once everything stored is checked to be one
+/// gap-free chain opened by the writer's chain reset.
+fn decisions(sink: &MemorySink) -> Vec<SealedRecord> {
+    let stored = sink.stored();
+    let Some(genesis) = stored.first() else {
+        return Vec::new();
+    };
+    let anchor = ChainAnchor::Genesis {
+        writer: writer(),
+        chain: genesis.chain(),
+    };
+    let verified = verify_chain_range(anchor, sink.stored_records()).expect("one gap-free chain");
+    assert_eq!(verified.records(), stored.len());
+    stored.into_iter().skip(1).collect()
 }
 
 fn source() -> PolicySource {
@@ -74,7 +99,7 @@ async fn a_permit_is_stored_and_logged_with_its_address() {
     let (audit, sink) = audit();
     let (outcome, line) = recorded(&audit, Some("api.example.com:443"), Decision::Permitted).await;
     assert_eq!(outcome, Ok(()));
-    assert_eq!(sink.stored().len(), 1);
+    assert_eq!(decisions(&sink).len(), 1);
     assert_eq!(line.message(), Some("egress decision"));
     assert_eq!(line.field("agent"), Some("agent-1"));
     assert_eq!(line.field("destination"), Some("api.example.com:443"));
@@ -92,7 +117,7 @@ async fn a_permit_that_cannot_be_stored_fails_and_is_logged_as_the_refusal_it_be
     sink.fail_all(SinkError::Unreachable);
     let (outcome, line) = recorded(&audit, Some("api.example.com:443"), Decision::Permitted).await;
     assert!(matches!(outcome, Err(AuditError::Unavailable(_))));
-    assert!(sink.stored().is_empty());
+    assert!(decisions(&sink).is_empty());
     assert_eq!(line.field("decision"), Some("refused"));
     assert_eq!(line.field("fault"), Some("AUDIT_UNAVAILABLE"));
     assert_eq!(line.field("audit"), Some("unavailable"));
@@ -108,11 +133,11 @@ async fn a_refusal_stands_when_the_stream_is_down_and_is_stored_once_it_returns(
     assert_eq!(line.field("decision"), Some("refused"));
     assert_eq!(line.field("fault"), Some("NO_PERMIT"));
     assert_eq!(line.field("audit"), Some("retrying"));
-    assert!(sink.stored().is_empty());
+    assert!(decisions(&sink).is_empty());
 
     sink.recover();
     audit.writer.drain_once().await;
-    assert_eq!(sink.stored().len(), 1);
+    assert_eq!(decisions(&sink).len(), 1);
 }
 
 #[tokio::test]
@@ -120,7 +145,7 @@ async fn a_request_that_never_named_a_destination_is_still_recorded_and_logged()
     let (audit, sink) = audit();
     let (outcome, line) = recorded(&audit, None, Decision::Refused(Fault::BadRequest)).await;
     assert_eq!(outcome, Ok(()));
-    assert_eq!(sink.stored().len(), 1);
+    assert_eq!(decisions(&sink).len(), 1);
     assert_eq!(line.field("destination"), Some("-"));
     assert_eq!(line.field("resolved_address"), Some("-"));
     assert_eq!(line.field("fault"), Some("BAD_REQUEST"));
@@ -137,7 +162,7 @@ async fn run_flushes_what_was_buffered_when_the_server_stops() {
     let shutdown = CancellationToken::new();
     shutdown.cancel();
     audit.run(shutdown).await;
-    assert_eq!(sink.stored().len(), 1);
+    assert_eq!(decisions(&sink).len(), 1);
 }
 
 #[test]
@@ -204,18 +229,17 @@ async fn the_decision_reaches_the_log_facade_when_no_subscriber_is_installed() {
     }
 }
 
-/// Holds every publish until released, and says when one has started.
+/// Counts the publishes that have begun, so a test can act while one waits on
+/// a held [`MemorySink`].
 #[derive(Clone)]
-struct HeldSink {
+struct CountedSink {
     inner: MemorySink,
-    started: Arc<Notify>,
-    release: Arc<Notify>,
+    begun: Arc<watch::Sender<usize>>,
 }
 
-impl trogon_audit::AuditSink for HeldSink {
-    async fn publish(&self, record: &SealedRecord) -> Result<(), SinkError> {
-        self.started.notify_one();
-        self.release.notified().await;
+impl trogon_audit::AuditSink for CountedSink {
+    async fn publish(&self, record: &SealedRecord) -> Result<StoredAck, SinkError> {
+        self.begun.send_modify(|begun| *begun += 1);
         self.inner.publish(record).await
     }
 }
@@ -223,21 +247,13 @@ impl trogon_audit::AuditSink for HeldSink {
 #[tokio::test]
 async fn a_refusal_whose_connection_is_aborted_mid_write_is_still_stored() {
     let sink = MemorySink::new();
-    let held = HeldSink {
+    let (begun, mut publishes) = watch::channel(0);
+    let audit = Arc::new(audit_over(CountedSink {
         inner: sink.clone(),
-        started: Arc::default(),
-        release: Arc::default(),
-    };
-    let writer = AuditWriter::new(
-        held.clone(),
-        WriterId::new("egress-proxy:test").expect("writer"),
-        WriterConfig::default(),
-    );
-    let audit = Arc::new(WriterAudit::new(
-        writer,
-        AuditName::new("acme").expect("tenant"),
-        NatsToken::new("payments").expect("project"),
-    ));
+        begun: Arc::new(begun),
+    }));
+    audit.writer.drain_once().await;
+    sink.hold();
 
     let connection = tokio::spawn({
         let audit = Arc::clone(&audit);
@@ -255,7 +271,10 @@ async fn a_refusal_whose_connection_is_aborted_mid_write_is_still_stored() {
                 .await;
         }
     });
-    held.started.notified().await;
+    publishes
+        .wait_for(|begun| *begun == 2)
+        .await
+        .expect("the refusal's publish began after the chain reset's");
     connection.abort();
     assert!(connection.await.expect_err("aborted").is_cancelled());
 
@@ -265,8 +284,8 @@ async fn a_refusal_whose_connection_is_aborted_mid_write_is_still_stored() {
         let audit = Arc::clone(&audit);
         async move { audit.run(shutdown).await }
     });
-    held.release.notify_one();
+    sink.release();
     run.await.expect("run");
 
-    assert_eq!(sink.stored().len(), 1);
+    assert_eq!(decisions(&sink).len(), 1);
 }

@@ -5,6 +5,7 @@ include!("trogonai.platform.audit.v1.audit_decision.rs");
 include!("trogonai.platform.audit.v1.enforcement_mode.rs");
 include!("trogonai.platform.audit.v1.attribution.rs");
 include!("trogonai.platform.audit.v1.audit_actor.rs");
+include!("trogonai.platform.audit.v1.audit_checkpoint.rs");
 include!("trogonai.platform.audit.v1.audit_class.rs");
 include!("trogonai.platform.audit.v1.change_kind.rs");
 include!("trogonai.platform.audit.v1.change.rs");
@@ -15,7 +16,11 @@ include!("trogonai.platform.audit.v1.layer_verdict.rs");
 include!("trogonai.platform.audit.v1.tls_mode.rs");
 include!("trogonai.platform.audit.v1.gateway_decision.rs");
 include!("trogonai.platform.audit.v1.integrity.rs");
+include!("trogonai.platform.audit.v1.chain_reset_reason.rs");
+include!("trogonai.platform.audit.v1.writer_lifecycle_kind.rs");
+include!("trogonai.platform.audit.v1.writer_lifecycle.rs");
 include!("trogonai.platform.audit.v1.audit_record.rs");
+include!("trogonai.platform.audit.v1.checkpoint_statement.rs");
 #[allow(
     non_camel_case_types,
     dead_code,
@@ -36,12 +41,15 @@ pub mod __buffa {
         include!("trogonai.platform.audit.v1.act_chain_entry.__view.rs");
         include!("trogonai.platform.audit.v1.attribution.__view.rs");
         include!("trogonai.platform.audit.v1.audit_actor.__view.rs");
+        include!("trogonai.platform.audit.v1.audit_checkpoint.__view.rs");
         include!("trogonai.platform.audit.v1.change.__view.rs");
         include!("trogonai.platform.audit.v1.credential_use.__view.rs");
         include!("trogonai.platform.audit.v1.layer_verdict.__view.rs");
         include!("trogonai.platform.audit.v1.gateway_decision.__view.rs");
         include!("trogonai.platform.audit.v1.integrity.__view.rs");
+        include!("trogonai.platform.audit.v1.writer_lifecycle.__view.rs");
         include!("trogonai.platform.audit.v1.audit_record.__view.rs");
+        include!("trogonai.platform.audit.v1.checkpoint_statement.__view.rs");
         pub mod oneof {
             #[allow(unused_imports)]
             use super::*;
@@ -65,12 +73,15 @@ pub mod __buffa {
         reg.register_json_any(super::audit_actor::__HUMAN_SESSION_ACTOR_JSON_ANY);
         reg.register_json_any(super::audit_actor::__BREAK_GLASS_ACTOR_JSON_ANY);
         reg.register_json_any(super::audit_actor::__AGENT_ACTOR_JSON_ANY);
+        reg.register_json_any(super::__AUDIT_CHECKPOINT_JSON_ANY);
         reg.register_json_any(super::__CHANGE_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_USE_JSON_ANY);
         reg.register_json_any(super::__LAYER_VERDICT_JSON_ANY);
         reg.register_json_any(super::__GATEWAY_DECISION_JSON_ANY);
         reg.register_json_any(super::__INTEGRITY_JSON_ANY);
+        reg.register_json_any(super::__WRITER_LIFECYCLE_JSON_ANY);
         reg.register_json_any(super::__AUDIT_RECORD_JSON_ANY);
+        reg.register_json_any(super::__CHECKPOINT_STATEMENT_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -85,6 +96,10 @@ pub use self::__buffa::view::AttributionOwnedView;
 pub use self::__buffa::view::AuditActorView;
 #[doc(inline)]
 pub use self::__buffa::view::AuditActorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::AuditCheckpointView;
+#[doc(inline)]
+pub use self::__buffa::view::AuditCheckpointOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ChangeView;
 #[doc(inline)]
@@ -106,8 +121,16 @@ pub use self::__buffa::view::IntegrityView;
 #[doc(inline)]
 pub use self::__buffa::view::IntegrityOwnedView;
 #[doc(inline)]
+pub use self::__buffa::view::WriterLifecycleView;
+#[doc(inline)]
+pub use self::__buffa::view::WriterLifecycleOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::AuditRecordView;
 #[doc(inline)]
 pub use self::__buffa::view::AuditRecordOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CheckpointStatementView;
+#[doc(inline)]
+pub use self::__buffa::view::CheckpointStatementOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;

@@ -13,6 +13,7 @@ import "trogonai/platform/audit/v1/change.proto";
 import "trogonai/platform/audit/v1/credential_use.proto";
 import "trogonai/platform/audit/v1/gateway_decision.proto";
 import "trogonai/platform/audit/v1/integrity.proto";
+import "trogonai/platform/audit/v1/writer_lifecycle.proto";
 import "trogonai/projects/projects/v1alpha1/identity.proto";
 
 // AuditRecord is the one envelope every platform audit record shares.
@@ -29,7 +30,7 @@ message AuditRecord {
   option (buf.validate.message).cel = {
     id: "audit_record.attribution_on_decisions_and_credentials"
     message: "a decision or credential record carries its attribution"
-    expression: "has(this.change) || has(this.attribution)"
+    expression: "has(this.change) || has(this.writer_lifecycle) || has(this.attribution)"
   };
 
   // A UUIDv7. It is also the decision identifier and the Nats-Msg-Id the sink
@@ -77,5 +78,6 @@ message AuditRecord {
     GatewayDecision gateway_decision = 13;
     CredentialUse credential_use = 14;
     Change change = 15;
+    WriterLifecycle writer_lifecycle = 16;
   }
 }

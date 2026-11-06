@@ -51,6 +51,9 @@ pub enum RuntimeError {
     #[error("gateway config: {0}")]
     Config(#[from] ConfigError),
 
+    #[error("policy stack: {0}")]
+    PolicyStack(#[from] crate::runtime::policy_stack::PolicyStackError),
+
     #[cfg(feature = "spicedb")]
     #[error("NATS connect: {0}")]
     NatsConnect(#[from] trogon_nats::ConnectError),
@@ -96,7 +99,7 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     let connect_timeout = a2a_nats::nats_connect_timeout(env);
     let client = trogon_nats::connect(&nats_config, connect_timeout).await?;
 
-    let policy_stack = crate::runtime::policy_stack::gateway_policy_stack_from_env(env);
+    let policy_stack = crate::runtime::policy_stack::gateway_policy_stack_from_env(env)?;
     let caller_jwt = ForwardedCallerJwtVerifier::new(
         signing_key_source_from_env(env)?,
         gateway_jwt_audience(env, config.a2a_prefix.as_str()),

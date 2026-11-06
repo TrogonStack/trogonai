@@ -307,6 +307,20 @@ fn from_env_loads_bundle_from_valid_directory() {
 }
 
 #[test]
+fn from_env_missing_bundle_dir_path_is_typed_boot_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("does-not-exist");
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(ENV_TIER1_DECLARATIVE_ENABLED, "true");
+    env.set(ENV_TIER1_BUNDLE_DIR, missing.to_str().expect("path utf8"));
+    let err = Tier1DeclarativeConfig::from_env(&env).expect_err("missing dir rejected");
+    assert!(matches!(
+        err,
+        Tier1DeclarativeBuildError::Load(Tier1DeclarativeLoadError::BundleDirMissing { ref path }) if *path == missing
+    ));
+}
+
+#[test]
 fn rule_id_display_round_trips_through_string() {
     let id = rid("rule-1");
     assert_eq!(format!("{id}"), "rule-1");
