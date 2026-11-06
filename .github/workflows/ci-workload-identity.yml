@@ -1,0 +1,56 @@
+name: CI Workload Identity
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'devops/kubernetes/spire/**'
+      - 'goworkspace/internal/spirepolicy/**'
+      - 'goworkspace/go.mod'
+      - 'goworkspace/go.sum'
+      - '.mise.toml'
+      - '.github/workflows/ci-workload-identity.yml'
+
+concurrency:
+  group: ci-workload-identity-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deployment:
+    name: Validate workload identity deployment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GOTOOLCHAIN: local
+      GOFLAGS: -mod=readonly
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned validation tools
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          version: 2026.10.21
+          sha256: ccfe12d7a62c6fb9def2a20db1f210f13a51de881f21fd8c85db4b6312405d07
+          install_args: python@3.14.5 go@1.27.3 kubeconform@0.8.0
+          cache: false
+          github_token: ''
+          env: false
+          export_path: false
+          add_shims_to_path: false
+
+      - name: Test deployment security and release refusal
+        run: mise exec python@3.14.5 -- python3 -m unittest discover -s devops/kubernetes/spire -p 'test_*.py'
+
+      - name: Test generated admission expressions without cached results
+        run: mise exec go@1.27.3 python@3.14.5 -- python3 devops/kubernetes/spire/check_policies.py
+
+      - name: Validate every generated Kubernetes resource
+        run: mise exec python@3.14.5 kubeconform@0.8.0 -- python3 devops/kubernetes/spire/check_schemas.py
