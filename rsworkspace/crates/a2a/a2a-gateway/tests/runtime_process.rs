@@ -1,5 +1,3 @@
-#![cfg(feature = "spicedb")]
-
 use std::io;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::Duration;
@@ -38,7 +36,7 @@ impl Drop for GatewayProcess {
 async fn gateway_subscribes_dispatches_and_stops_for_both_subscription_modes() -> Result<(), FixtureError> {
     let server = CoreTestServer::start().await;
     let client = async_nats::connect(server.address()).await?;
-    let signing_key = nkeys::KeyPair::new_account().seed()?;
+    let issuer_key = nkeys::KeyPair::new_account().public_key();
     for queue in [None, Some("runtime-workers")] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_a2a-gateway"));
         command
@@ -49,7 +47,7 @@ async fn gateway_subscribes_dispatches_and_stops_for_both_subscription_modes() -
                     Some("LLVM_PROFILE_FILE" | "LD_LIBRARY_PATH" | "DYLD_FALLBACK_LIBRARY_PATH")
                 )
             }))
-            .env("AUTH_CALLOUT_SIGNING_SECRET", &signing_key)
+            .env("A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS", &issuer_key)
             .env("NATS_TLS_DISABLED", "true")
             .args(["--nats-url", server.address(), "--prefix", "a2a"])
             .stdout(Stdio::piped())

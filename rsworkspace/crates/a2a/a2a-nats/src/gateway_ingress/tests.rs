@@ -118,3 +118,20 @@ fn deadline_exceeded_emits_code_minus_32800() {
     let encoded = ingress_error_response_wire(&headers, b"{}", -32_800, "timeout", None);
     assert_eq!(parse_error_code(&encoded), -32_800);
 }
+
+#[test]
+fn audit_unavailable_emits_code_minus_32804_with_its_reason_code() {
+    let headers = HeaderMap::new();
+    let body = ingress_gateway_audit_unavailable_response_bytes(&headers, b"{}", "audit is unavailable");
+    let encoded = ingress_error_response_wire(
+        &headers,
+        b"{}",
+        -32_804,
+        "audit is unavailable",
+        Some(serde_json::json!({ "reason": "audit_unavailable" })),
+    );
+    assert_eq!(body, encoded.body);
+    assert_eq!(parse_error_code(&encoded), -32_804);
+    let value = to_json_value(&decode(Direction::Response, None, &encoded.headers, &encoded.body).unwrap());
+    assert_eq!(value["error"]["data"]["reason"], "audit_unavailable");
+}

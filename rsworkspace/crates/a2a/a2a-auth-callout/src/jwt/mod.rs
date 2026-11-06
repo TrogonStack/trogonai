@@ -20,7 +20,7 @@ pub use user_jwt_subject::UserJwtSubject;
 use crate::credentials::oidc::OidcIssuerUrl;
 use crate::error::AuthCalloutError;
 use crate::permissions::IssuedPermissions;
-use crate::signing_key_source::{KeyVersion, MintingMaterial, SigningKeyHandle, SigningKeySource};
+use crate::signing_key_source::{KeyVersion, MintingMaterial, SigningKeyHandle, VerifyingKeySource};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AccountName(String);
@@ -375,7 +375,7 @@ impl UserJwtClaims {
         nats_user_jwt::mint_nats_user_jwt(self, material, user_subject, issued_at, ttl)
     }
 
-    pub fn verify_with_source(token: &str, source: &dyn SigningKeySource) -> Result<Self, JwtError> {
+    pub fn verify_with_source(token: &str, source: &(impl VerifyingKeySource + ?Sized)) -> Result<Self, JwtError> {
         nats_user_jwt::verify_nats_user_jwt_with_source(token, source)
     }
 
@@ -385,7 +385,7 @@ impl UserJwtClaims {
 
     pub fn verify_minted_user_jwt(
         token: &str,
-        source: &dyn SigningKeySource,
+        source: &(impl VerifyingKeySource + ?Sized),
         expected_aud: &AccountName,
     ) -> Result<Self, JwtError> {
         let claims = Self::verify_with_source(token, source)?;
