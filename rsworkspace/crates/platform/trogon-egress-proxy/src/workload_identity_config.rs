@@ -6,12 +6,14 @@ use trogon_workload_identity::{
 
 use crate::audit_config::AuditConfig;
 use crate::constants::LIVE_POLICY_MAX_BUCKET_BYTES;
+use crate::scoped_key::scoped_key;
 use crate::trust_domain::TrustDomain;
 
 #[derive(Debug, Clone)]
 pub struct WorkloadIdentityConfig {
     pub(crate) identity: IdentityConfig,
     pub(crate) registration_bucket: String,
+    pub(crate) registration_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -58,6 +60,7 @@ impl WorkloadIdentityConfig {
         Ok(Self {
             identity: IdentityConfig::new(endpoint, local, recovery_fence),
             registration_bucket: registration_bucket.to_owned(),
+            registration_key: scoped_key(audit.identity.tenant(), audit.identity.project()),
         })
     }
 
@@ -67,5 +70,9 @@ impl WorkloadIdentityConfig {
 
     pub fn registration_bucket(&self) -> &str {
         &self.registration_bucket
+    }
+
+    pub fn registration_key(&self) -> &str {
+        &self.registration_key
     }
 }

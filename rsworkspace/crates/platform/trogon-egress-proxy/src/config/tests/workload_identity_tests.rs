@@ -50,6 +50,7 @@ fn workload_profile_preserves_exact_registration_scope_and_recovery_fence() {
     assert_eq!(local.project(), "payments");
     assert_eq!(workload.identity().recovery_fence().get(), 1);
     assert_eq!(workload.registration_bucket(), "WORKLOAD_REGISTRATIONS");
+    assert_eq!(workload.registration_key(), "t61636d65.p7061796d656e7473");
 }
 
 #[test]

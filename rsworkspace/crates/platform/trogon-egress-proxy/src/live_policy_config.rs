@@ -1,10 +1,10 @@
-use std::fmt::Write as _;
 use std::num::NonZeroU64;
 
 use trogon_audit::AuditName;
 use trogon_nats::{NatsAuth, NatsConfig, NatsTls, NatsToken, TlsMisconfiguration};
 
 use crate::constants::LIVE_POLICY_MAX_BUCKET_BYTES;
+use crate::scoped_key::scoped_key;
 
 #[derive(Debug, Clone)]
 pub struct KvPolicyConfig {
@@ -59,7 +59,7 @@ impl KvPolicyConfig {
         {
             return Err(PolicyConfigError::Bucket);
         }
-        let key = format!("t{}.p{}", encoded(tenant.as_str()), encoded(project.as_str()));
+        let key = scoped_key(&tenant, &project);
         Ok(Self {
             bucket: bucket.to_owned(),
             tenant,
@@ -79,12 +79,4 @@ impl KvPolicyConfig {
     pub fn key(&self) -> &str {
         &self.key
     }
-}
-
-fn encoded(value: &str) -> String {
-    let mut result = String::with_capacity(value.len() * 2);
-    for byte in value.bytes() {
-        let _ = write!(result, "{byte:02x}");
-    }
-    result
 }

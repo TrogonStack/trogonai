@@ -56,3 +56,179 @@ fn binary_registration_projection_preserves_exact_governed_authority() {
     assert_eq!(registration.approved_roots(), &[[1; 32]]);
     assert_eq!(registration.bindings(), &[config().local().clone()]);
 }
+
+#[test]
+fn application_identity_comes_from_registration_instead_of_the_spiffe_path() {
+    let now = SystemTime::now();
+    let mut message = snapshot(now);
+    message.bindings.push(WireBinding {
+        spiffe_id: "spiffe://trogon.example/runtime/opaque-selector".into(),
+        tenant: "acme".into(),
+        project: "payments".into(),
+        role: EnumValue::from(WireRole::Agent),
+        application_id: Some("agent-1".into()),
+    });
+    let registration = decode_registration(&message.encode_to_vec(), &config(), now).expect("projection");
+    let agent = registration
+        .bindings()
+        .iter()
+        .find(|binding| binding.role() == WorkloadRole::Agent)
+        .expect("agent");
+    assert_eq!(agent.application_id().expect("application").as_str(), "agent-1");
+    assert_eq!(
+        agent.spiffe_id().to_string(),
+        "spiffe://trogon.example/runtime/opaque-selector"
+    );
+}
+
+#[test]
+fn wire_scope_and_recovery_cannot_replace_the_configured_authority() {
+    let now = SystemTime::now();
+    let original = snapshot(now);
+    for message in [
+        RegistrationSnapshot {
+            tenant: "other".into(),
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            project: "other".into(),
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            recovery_fence: 2,
+            ..original.clone()
+        },
+    ] {
+        assert!(matches!(
+            decode_registration(&message.encode_to_vec(), &config(), now),
+            Err(RegistrationProjectionError::Scope)
+        ));
+    }
+    for binding in [
+        WireBinding {
+            tenant: "other".into(),
+            ..original.bindings[0].clone()
+        },
+        WireBinding {
+            spiffe_id: "spiffe://other.example/service/egress".into(),
+            ..original.bindings[0].clone()
+        },
+        WireBinding {
+            role: EnumValue::from(WireRole::Supervisor),
+            ..original.bindings[0].clone()
+        },
+    ] {
+        let mut message = original.clone();
+        message.bindings[0] = binding;
+        assert!(decode_registration(&message.encode_to_vec(), &config(), now).is_err());
+    }
+}
+
+#[test]
+fn inert_timestamp_annotations_cannot_grant_a_future_or_extended_lease() {
+    let now = SystemTime::now();
+    let original = snapshot(now);
+    for message in [
+        RegistrationSnapshot {
+            issued_at: MessageField::none(),
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            expires_at: MessageField::none(),
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            issued_at: MessageField::some(Timestamp::from(now + Duration::from_nanos(1))),
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            expires_at: MessageField::some(Timestamp::from(now)),
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            expires_at: MessageField::some(Timestamp::from(now + Duration::from_secs(331))),
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            issued_at: MessageField::some(Timestamp {
+                seconds: 1,
+                nanos: -1,
+                ..Default::default()
+            }),
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            expires_at: MessageField::some(Timestamp {
+                seconds: i64::MAX,
+                nanos: 0,
+                ..Default::default()
+            }),
+            ..original.clone()
+        },
+    ] {
+        assert!(matches!(
+            decode_registration(&message.encode_to_vec(), &config(), now),
+            Err(RegistrationProjectionError::Validity)
+        ));
+    }
+}
+
+#[test]
+fn malformed_or_ambiguous_projection_values_are_refused() {
+    let now = SystemTime::now();
+    let original = snapshot(now);
+    for message in [
+        RegistrationSnapshot {
+            registration_revision: 0,
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            trust_revision: 0,
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            bindings: Vec::new(),
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            bindings: vec![original.bindings[0].clone(); 2],
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            approved_root_sha256: Vec::new(),
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            approved_root_sha256: vec![vec![1; 31]],
+            ..original.clone()
+        },
+        RegistrationSnapshot {
+            approved_root_sha256: vec![vec![1; 32]; 2],
+            ..original.clone()
+        },
+    ] {
+        assert!(decode_registration(&message.encode_to_vec(), &config(), now).is_err());
+    }
+    let mut unknown_role = original.clone();
+    unknown_role.bindings[0].role = EnumValue::from(999);
+    assert!(decode_registration(&unknown_role.encode_to_vec(), &config(), now).is_err());
+    let mut missing_application = original;
+    missing_application.bindings[0].role = EnumValue::from(WireRole::Agent);
+    assert!(decode_registration(&missing_application.encode_to_vec(), &config(), now).is_err());
+    assert!(matches!(
+        decode_registration(&[0xff], &config(), now),
+        Err(RegistrationProjectionError::Malformed(_))
+    ));
+}
+
+#[test]
+fn projection_bytes_are_bounded_before_protobuf_decoding() {
+    assert!(matches!(
+        decode_registration(
+            &vec![0; crate::constants::REGISTRATION_MAX_BYTES + 1],
+            &config(),
+            SystemTime::now()
+        ),
+        Err(RegistrationProjectionError::TooLarge)
+    ));
+}

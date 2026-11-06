@@ -49,6 +49,7 @@ pub mod server;
 pub mod static_snapshot;
 pub mod trust_domain;
 pub mod writer_audit;
+mod scoped_key;
 pub mod workload_identity_config;
 pub mod workload_registration;
 
