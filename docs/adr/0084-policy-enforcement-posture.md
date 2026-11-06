@@ -81,12 +81,18 @@ it proceeds, by reading a policy: each tier of the A2A gateway, the authorizer
 of the decider host, and the egress and MCP boundaries when they exist. Each
 has one or more layers, and each layer has a mode (Decision 4).
 
-A point starts only if at least one of its layers is in Enforce. Otherwise
-startup fails with a typed error in the manner of
+A point starts only if at least one of its admission layers is in Enforce. An
+admission layer is one whose verdict decides whether a request proceeds:
+`TIER1_SPICEDB`, `TIER1_DECLARATIVE` and `TIER2_CEL` at the A2A gateway, and
+the authorizer at the decider host. A layer that authenticates the caller
+(`AAUTH`) or rewrites the payload (`TIER3_REDACTION`) has a mode under Decision
+4 but does not count toward this check, because a gateway that knows who called
+and redacts what it forwards still admits every request when no admission layer
+enforces. Otherwise startup fails with a typed error in the manner of
 `RuntimeError::NoPolicyConfigured`, whose message names the environment
-variables that would enable a layer. The process exit code is 1. No code path
-falls back to a Noop or allow-all layer to satisfy the check, and a layer
-that has no configuration is `off`, which the check does not count.
+variables that would enable an admission layer. The process exit code is 1. No
+code path falls back to a Noop or allow-all layer to satisfy the check, and a
+layer that has no configuration is `off`, which the check does not count.
 
 ### 2. A layer the operator enabled either loads or the process refuses to start
 
@@ -146,17 +152,18 @@ defaults to it, with the one dated exception of Decision 8. The process logs a
 startup warning for every layer that is in DryRun.
 
 For the check in Decision 1, a layer in DryRun is not an enforcing layer. A
-point whose layers are all in DryRun, such as an operator measuring a first
-policy, starts only when `A2A_GATEWAY_ALLOW_DRY_RUN_ONLY` is set, and logs a
-warning that names it. This is the one place the check accepts a non-enforcing
-layer without the escape hatch of Decision 5.
+point whose admission layers are all in DryRun, such as an operator measuring a
+first policy, starts only when `A2A_GATEWAY_ALLOW_DRY_RUN_ONLY` is set, and
+logs a warning that names it. This is the one place the check accepts a
+non-enforcing layer without the escape hatch of Decision 5.
 
 ### 5. One escape hatch, for local development
 
-`A2A_GATEWAY_ALLOW_ALL_UNSAFE` lets a gateway with no enforcing layer start.
-Other points follow the pattern `<POINT>_ALLOW_ALL_UNSAFE`. With it set, the
-point logs an `error` line once at startup and a `warn` line for every request
-it admits, and each audit record carries the rule `gateway.unsafe.allow_all`.
+`A2A_GATEWAY_ALLOW_ALL_UNSAFE` lets a gateway with no enforcing admission layer
+start. Other points follow the pattern `<POINT>_ALLOW_ALL_UNSAFE`. With it set,
+the point logs an `error` line once at startup and a `warn` line for every
+request it admits, and each audit record carries the rule
+`gateway.unsafe.allow_all`.
 It does not weaken Decision 2: a layer the operator enabled that fails to load
 still stops the process.
 
@@ -267,10 +274,10 @@ no policy at all is the same misconfiguration.
 
 ### Make DryRun count as enforcing for the startup check
 
-Rejected as the default. A point in which every layer is in DryRun forwards
-every request, so the check would pass for a process that enforces nothing.
-Measurement stays possible through `A2A_GATEWAY_ALLOW_DRY_RUN_ONLY`, which
-names what the operator is doing.
+Rejected as the default. A point in which every admission layer is in DryRun
+forwards every request, so the check would pass for a process that enforces
+nothing. Measurement stays possible through `A2A_GATEWAY_ALLOW_DRY_RUN_ONLY`,
+which names what the operator is doing.
 
 ### A per-bundle `default_effect` field with `allow` as a valid value
 
@@ -287,11 +294,12 @@ had evaluated is not.
 
 ## Consequences
 
-- A gateway with no layer set stops with `NoPolicyConfigured` where it serves
-  today. Every environment that starts one, the dev compose stack included,
-  sets at least one layer to `enforce` or sets `A2A_GATEWAY_ALLOW_ALL_UNSAFE`
-  under the development flag, and tests that start a gateway do the same in
-  their fixture.
+- A gateway with no admission layer in `enforce` stops with
+  `NoPolicyConfigured` where it serves today, whatever its `AAUTH` and
+  `TIER3_REDACTION` modes. Every environment that starts one, the dev compose
+  stack included, sets at least one admission layer to `enforce` or sets
+  `A2A_GATEWAY_ALLOW_ALL_UNSAFE` under the development flag, and tests that
+  start a gateway do the same in their fixture.
 - Tier-1 declarative bundles that rely on the allow default must add a
   catch-all allow rule before they load as intended. The shipped bundles under
   `a2a-pack/policies/` and their README are reviewed against Decision 3, and
