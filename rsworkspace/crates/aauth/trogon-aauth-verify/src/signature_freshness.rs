@@ -1,7 +1,16 @@
 use crate::clock_tolerance::ClockTolerance;
-use crate::freshness::FreshnessError;
 use crate::signature_validity::SignatureValidity;
 use crate::signature_window::SignatureWindow;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum FreshnessError {
+    #[error("signature window does not end after it starts, or outlives the accepted validity")]
+    InvalidWindow,
+    #[error("signature is created further ahead than the tolerated clock skew")]
+    NotYetValid,
+    #[error("signature expired beyond the tolerated clock skew")]
+    Expired,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SignatureFreshness {

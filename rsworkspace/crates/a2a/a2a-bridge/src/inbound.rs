@@ -193,22 +193,13 @@ enum CallerConnectError {
     #[error(transparent)]
     EmptyToken(#[from] EmptySecretError),
     #[error(transparent)]
-    Refused(async_nats::ConnectError),
-    #[error(transparent)]
-    Unusable(trogon_nats::ConnectError),
+    Failed(#[from] trogon_nats::ConnectError),
+    #[error("Failed to connect to NATS within {0:?}")]
+    TimedOut(Duration),
 }
 
-impl From<trogon_nats::ConnectError> for CallerConnectError {
-    fn from(error: trogon_nats::ConnectError) -> Self {
-        match error {
-            // The server list stays out of the message because it reaches HTTP callers.
-            trogon_nats::ConnectError::ConnectionFailed { error, .. } => Self::Refused(error),
-            other => Self::Unusable(other),
-        }
-    }
-}
-
-/// How long a per-request caller connection may take to come up. A distinct type
+/// How long a per-request caller connection may take to come up, across every
+/// configured server rather than per server. A distinct type
 /// from [`GatewayRpcTimeout`] so a reply budget cannot be passed where a connect
 /// budget belongs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,7 +239,15 @@ async fn connect_as_caller(
     timeout: CallerConnectTimeout,
 ) -> Result<async_nats::Client, CallerConnectError> {
     let token = CredentialValue::Literal(SecretString::new(caller_jwt.as_str())?);
-    Ok(trogon_nats::connect_once(nats, NatsAuth::Token(token), timeout.get()).await?)
+    // connect_once applies its timeout to each server in turn, so a list of
+    // stalled servers would otherwise hold the caller for a multiple of it.
+    tokio::time::timeout(
+        timeout.get(),
+        trogon_nats::connect_once(nats, NatsAuth::Token(token), timeout.get()),
+    )
+    .await
+    .map_err(|_| CallerConnectError::TimedOut(timeout.get()))?
+    .map_err(CallerConnectError::from)
 }
 
 #[derive(Clone)]

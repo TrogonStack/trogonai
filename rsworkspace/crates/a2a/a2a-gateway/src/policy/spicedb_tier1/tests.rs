@@ -482,8 +482,9 @@ fn tier1_principal_from_caller_resolves_to_a_spicedb_subject() {
 
 #[test]
 fn owner_emit_error_from_status_keeps_the_status_message() {
-    let error = OwnerEmitError::from(Status::unavailable("outage"));
-    assert!(error.to_string().contains("outage"));
+    let status = Status::unavailable("outage");
+    let expected = OwnerEmitError::new(status.to_string());
+    assert_eq!(OwnerEmitError::from(status), expected);
 }
 
 #[test]
@@ -496,4 +497,11 @@ fn spicedb_import_gate_build_error_lifts_into_tier1_error() {
     assert!(matches!(from, Tier1SpiceDbBuildError::InvalidZedTokenTtl(_)));
     let from = Tier1SpiceDbBuildError::from(SpiceDbImportGateBuildError::Connect("bad".into()));
     assert!(matches!(from, Tier1SpiceDbBuildError::Connect(_)));
+}
+
+#[test]
+fn live_gate_debug_does_not_expose_its_client() {
+    let client = Arc::new(FakeBulkClient::new(vec![]));
+    let gate = LiveSpiceDbTier1Gate::new(client, SpiceDbTier1SessionCache::new(ZedTokenTtl::from_secs(60)));
+    assert_eq!(format!("{gate:?}"), "LiveSpiceDbTier1Gate { .. }");
 }

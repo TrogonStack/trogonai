@@ -324,9 +324,11 @@ constructed.
   but immediately source-breaking for exhaustive matches on those enums
   whether or not a caller ever configures an authorizer, consistent with how
   every other execution phase already gets its own variant.
-- Enforcement is opt-in per call site. This ADR does not retroactively close
-  the "anyone can submit any command" gap the audit identified; it closes it
-  only where a caller adopts an authorizer.
+- The decider host derives a `CommandPrincipal` from the subject tokens and
+  runs every execution through an authorizer. Outside the host, enforcement
+  is opt-in per call site: this ADR does not retroactively close the "anyone
+  can submit any command" gap the audit identified on those paths; it closes
+  it only where a caller adopts an authorizer.
 - Authorization becomes a distinguishable phase in logging and metrics,
   separate from a domain rejection (`Decide`) or an infrastructure failure
   (`Append`), matching this crate's existing philosophy of phase-tagged

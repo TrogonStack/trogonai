@@ -7,8 +7,10 @@ use crate::server_info::wait_for_server_info;
 use crate::test_support::CoreTestServer;
 use crate::tls::ClientCertificate;
 use tracing::subscriber::DefaultGuard;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use trogon_std::env::InMemoryEnv;
-use trogon_std::log_capture::{CapturedEvents, CapturedLogs, LevelFilter, LogLevel};
+use trogon_std::log_capture::{CapturedEvent, CapturedEvents, CapturedLogs, LevelFilter, LogLevel};
 use trogon_std::secret_string::SecretString;
 
 const TLS_DISABLED_WARNING: &str = "NATS TLS is disabled, which is only for tests and local debugging";
@@ -417,6 +419,37 @@ fn connect_error_display_connection_failed_names_no_server() {
     assert_eq!(err.to_string(), "Failed to connect to NATS: timed out");
 }
 
+#[test]
+fn connection_failures_name_only_the_kind_of_failure_and_log_the_detail() {
+    let _registered = keep_another_subscriber_registered(LevelFilter::WARN);
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
+    let config = NatsConfig::from_url("nats://nats.internal.example:4222");
+    let detail = "certificate not valid for name \"nats.internal.example\"";
+
+    let err = connected(
+        &config,
+        Err(async_nats::ConnectError::with_source(
+            ConnectErrorKind::Tls,
+            std::io::Error::other(detail),
+        )),
+    )
+    .unwrap_err();
+
+    assert_eq!(err.to_string(), "Failed to connect to NATS: TLS error");
+    let failure = events
+        .events()
+        .into_iter()
+        .find(|event| event.message() == Some(CONNECT_FAILURE_WARNING))
+        .expect("the failure is logged where the connection was made");
+    assert!(
+        failure
+            .field("error")
+            .is_some_and(|error| error.contains("nats.internal.example")),
+        "{failure:?}"
+    );
+}
+
 /// While a single subscriber is registered, `tracing` settles a callsite's interest from whichever
 /// thread reaches it first, so a concurrent test that captures nothing would switch the callsite off
 /// for the test that does. A second registered subscriber keeps that from happening.
@@ -450,7 +483,7 @@ async fn connect_once_logs_the_servers_it_could_not_reach_instead_of_naming_them
         panic!("expected a connection failure, got {err:?}");
     };
     assert_eq!(*servers, config.servers);
-    assert_eq!(err.to_string(), format!("Failed to connect to NATS: {error}"));
+    assert_eq!(err.to_string(), format!("Failed to connect to NATS: {}", error.kind()));
     let failure = events
         .events()
         .into_iter()
@@ -775,7 +808,6 @@ async fn connect_does_not_warn_when_tls_is_on() {
 
     assert_eq!(tls_disabled_warnings(&events), 0);
 }
-
 /// Every field this crate records on its spans and events, so a test can prove
 /// that a value never reaches any of them, not just the one event it expects.
 #[derive(Clone, Default)]
@@ -791,9 +823,6 @@ impl tracing::field::Visit for FieldText<'_> {
 
 impl RecordedFields {
     fn install(&self) -> DefaultGuard {
-        use tracing_subscriber::layer::SubscriberExt;
-        use tracing_subscriber::util::SubscriberInitExt;
-
         tracing_subscriber::registry()
             .with(LevelFilter::TRACE)
             .with(self.clone())
@@ -855,4 +884,50 @@ async fn connect_once_keeps_server_userinfo_out_of_every_span_and_event() {
             .all(|field| !field.contains("test-user") && !field.contains("redaction-test-secret")),
         "{fields:?}"
     );
+}
+
+fn logged<'a>(events: &'a [CapturedEvent], message: &str) -> &'a CapturedEvent {
+    events
+        .iter()
+        .find(|event| event.message() == Some(message))
+        .unwrap_or_else(|| panic!("no `{message}` event in {events:?}"))
+}
+
+#[tokio::test]
+async fn connect_once_logs_the_auth_and_tls_it_connects_with_but_never_the_token() {
+    let server = CoreTestServer::start_requiring_token(SERVER_TOKEN).await;
+    let config = token_server_config(&server, NatsAuth::None);
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::INFO);
+
+    let client = connect_once(&config, token(SERVER_TOKEN), PLAINTEXT_CONNECT_TIMEOUT)
+        .await
+        .unwrap();
+    client.flush().await.unwrap();
+
+    let events = events.events();
+    let connecting = logged(&events, "Connecting to NATS");
+    assert_eq!(connecting.field("auth"), Some("token"));
+    assert_eq!(connecting.field("tls"), Some("disabled"));
+    assert_eq!(logged(&events, "Connected to NATS").field("auth"), Some("token"));
+    assert!(!format!("{events:?}").contains(SERVER_TOKEN), "{events:?}");
+}
+
+#[tokio::test]
+async fn connect_once_logs_the_auth_it_failed_with_but_never_the_token() {
+    let server = CoreTestServer::start_requiring_token(SERVER_TOKEN).await;
+    let config = token_server_config(&server, NatsAuth::None);
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
+
+    connect_once(&config, token(OTHER_TOKEN), PLAINTEXT_CONNECT_TIMEOUT)
+        .await
+        .unwrap_err();
+
+    let events = events.events();
+    assert_eq!(
+        logged(&events, "Failed to connect to NATS").field("auth"),
+        Some("token")
+    );
+    assert!(!format!("{events:?}").contains(OTHER_TOKEN), "{events:?}");
 }

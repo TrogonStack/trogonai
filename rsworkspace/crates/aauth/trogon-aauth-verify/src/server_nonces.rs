@@ -26,7 +26,27 @@ use crate::challenge_kid::ChallengeKid;
 use crate::constants::{MAX_SERVER_NONCE_TTL_SECS, TYP_SERVER_NONCE};
 use crate::freshness::ClockTolerance;
 use crate::nonce_ttl::NonceTtl;
-use crate::server_nonce::ServerNonce;
+
+/// A nonce as it travels on the wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerNonce(String);
+
+impl ServerNonce {
+    pub(crate) fn new(value: String) -> Self {
+        Self(value)
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ServerNonce {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 /// The P-256 key a resource signs its nonces with and verifies them against.
 pub struct ChallengeKey {

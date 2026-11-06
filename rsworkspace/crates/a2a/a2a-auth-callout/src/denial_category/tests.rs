@@ -8,6 +8,12 @@ fn each_auth_callout_error_variant_maps_to_category() {
         DenialCategory::ServiceUnavailable
     );
     assert_eq!(
+        DenialCategory::from_auth_callout_error(&AuthCalloutError::Flush(async_nats::client::FlushError::new(
+            async_nats::client::FlushErrorKind::FlushError,
+        ))),
+        DenialCategory::ServiceUnavailable
+    );
+    assert_eq!(
         DenialCategory::from_auth_callout_error(&AuthCalloutError::Subscribe(async_nats::SubscribeError::new(
             async_nats::SubscribeErrorKind::InvalidSubject,
         ))),

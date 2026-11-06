@@ -1,0 +1,58 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+// Why a Connection's health changed. Custody and the connections service are
+// the only writers of health facts; the trusted executors report observations
+// through ReportConnectionHealth (ADR#0092 Decision 4, ADR#0096 Decision 4).
+// ReconnectRequired is reserved for unusable credentials. Each value names the
+// state it implies. Unspecified and unknown values are invalid.
+enum ConnectionHealthReason {
+  CONNECTION_HEALTH_REASON_UNSPECIFIED = 0;
+  // Active. The grant lacks only optional scopes, at exchange or after a
+  // refresh that reported a narrower grant, and the reduced authority is
+  // recorded. Not a Degraded trigger (ADR#0094 Decision 12, ADR#0095
+  // Decision 3).
+  CONNECTION_HEALTH_REASON_SCOPES_REDUCED = 1;
+  // Active. A 403 with insufficient_scope; the challenged scopes are recorded,
+  // only operations that need them fail, and a step-up reconnect clears it
+  // (ADR#0094 Decisions 6 and 11).
+  CONNECTION_HEALTH_REASON_SCOPE_STEP_UP = 2;
+  // Degraded. Repeated transient failure reported by custody (ADR#0092
+  // Decision 4).
+  CONNECTION_HEALTH_REASON_REPEATED_TRANSIENT_FAILURE = 3;
+  // ReconnectRequired. Refresh returned invalid_grant on the current refresh
+  // token, or on the forced refresh after a 401 (ADR#0094 Decision 11,
+  // ADR#0095 Decision 3).
+  CONNECTION_HEALTH_REASON_INVALID_GRANT = 4;
+  // ReconnectRequired. A refresh outcome could not be settled and the provider
+  // may have rotated the refresh token away (ADR#0095 Decision 3).
+  CONNECTION_HEALTH_REASON_REFRESH_OUTCOME_LOST = 5;
+  // ReconnectRequired. The provider uninstalled the app; the connection keeps
+  // its id (ADR#0092 Decision 4, ADR#0094 Decision 6).
+  CONNECTION_HEALTH_REASON_PROVIDER_UNINSTALLED = 6;
+  // ReconnectRequired. The provider answered 401 again after one forced
+  // refresh (ADR#0094 Decision 11, ADR#0096 Decision 4).
+  CONNECTION_HEALTH_REASON_PROVIDER_AUTHENTICATION_REJECTED = 7;
+  // ReconnectRequired. After a custody restore the bundle generation is behind
+  // the last committed one, or a refresh was left dispatched (ADR#0095
+  // Decision 10).
+  CONNECTION_HEALTH_REASON_CUSTODY_RESTORED = 8;
+  // ReconnectRequired. The tenant key sealing the token set was destroyed,
+  // irreversibly (ADR#0095 Decision 4).
+  CONNECTION_HEALTH_REASON_CUSTODY_KEY_DESTROYED = 9;
+  // ReconnectRequired. The custody seal key or a tenant key was declared lost
+  // (ADR#0095 Decision 10).
+  CONNECTION_HEALTH_REASON_CUSTODY_KEY_LOST = 10;
+  // ReconnectRequired. The refresh token lapsed while refresh was paused by a
+  // key outage or a project archive (ADR#0093 Decision 10, ADR#0095
+  // Decisions 4 and 8).
+  CONNECTION_HEALTH_REASON_REFRESH_TOKEN_LAPSED = 11;
+  // ReconnectRequired. UpgradeConnector moved to a release that needs scopes
+  // beyond the grant (ADR#0092 Decision 10).
+  CONNECTION_HEALTH_REASON_SCOPES_BEYOND_GRANT = 12;
+  // ReconnectRequired. A refresh returned authority outside the committed
+  // granted set. The candidate is never promoted or resolved; the current
+  // family is quarantined because rotation may already have happened.
+  CONNECTION_HEALTH_REASON_AUTHORITY_WIDENED = 13;
+}

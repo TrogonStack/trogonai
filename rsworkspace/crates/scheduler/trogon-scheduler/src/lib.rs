@@ -37,7 +37,8 @@ pub use constants::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
 pub use error::{ScheduleSpecError, SchedulerError};
 #[cfg(feature = "postgres")]
 pub use projections::{
-    PostgresSchedulesProjection, PostgresTls, PostgresTlsError, PostgresUrl, PostgresUrlError, SchedulesProjector,
+    PostgresRootCert, PostgresSchedulesProjection, PostgresTls, PostgresTlsError, PostgresUrl, PostgresUrlError,
+    SchedulesProjector, UnverifiedSslMode,
 };
 
 /// Query entry points for the Postgres projection.

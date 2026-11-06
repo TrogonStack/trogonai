@@ -325,6 +325,20 @@ pub struct HttpPopVerifier<R: JwksResolver, C: TimeSource, S: ReplayStore> {
     pub nonces: Option<ServerNonces>,
 }
 
+enum ServerNonceDisposition {
+    Admit,
+    Refuse(HttpPopError),
+}
+
+impl ServerNonceDisposition {
+    fn into_result(self) -> Result<(), HttpPopError> {
+        match self {
+            Self::Admit => Ok(()),
+            Self::Refuse(error) => Err(error),
+        }
+    }
+}
+
 impl<R: JwksResolver + Clone, C: TimeSource + Clone, S: ReplayStore> HttpPopVerifier<R, C, S> {
     /// A verifier with the default [`SignatureFreshness`], whose clock
     /// tolerance also bounds the presenting token's expiry leeway.
@@ -422,42 +436,55 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
 
         let bound = bind(&presenter).map_err(HttpPopBindingError::Binding)?;
 
+        let replay_key = replay_key(&jkt, input.jti());
+        if self.nonces.is_some() && self.replay.contains(&replay_key).await.map_err(HttpPopError::Backend)? {
+            return Err(HttpPopError::Replay.into());
+        }
+
+        let nonce_disposition = self.server_nonce_disposition(req, &jkt).await?;
+
         let fresh = self
             .replay
-            .check_and_insert(&replay_key(&jkt, input.jti()), self.freshness.record_ttl_secs())
+            .check_and_insert(&replay_key, self.freshness.record_ttl_secs())
             .await
             .map_err(HttpPopError::Backend)?;
         if !fresh {
             return Err(HttpPopError::Replay.into());
         }
 
-        self.verify_server_nonce(req, &jkt).await?;
+        nonce_disposition.into_result()?;
 
         Ok(bound)
     }
 
-    async fn verify_server_nonce(&self, req: &HttpRequest, jkt: &str) -> Result<(), HttpPopError> {
+    async fn server_nonce_disposition(
+        &self,
+        req: &HttpRequest,
+        jkt: &str,
+    ) -> Result<ServerNonceDisposition, HttpPopError> {
         let presented = req.header(SERVER_NONCE_HEADER);
         let Some(nonces) = &self.nonces else {
-            return match presented {
-                Some(_) => Err(HttpPopError::InvalidNonce(NonceError::NotIssued)),
-                None => Ok(()),
-            };
+            return Ok(match presented {
+                Some(_) => ServerNonceDisposition::Refuse(HttpPopError::InvalidNonce(NonceError::NotIssued)),
+                None => ServerNonceDisposition::Admit,
+            });
         };
         let refused = match presented {
             Some(raw) => match self.nonce_refusal(nonces, raw.trim(), jkt).await? {
-                None => return Ok(()),
+                None => return Ok(ServerNonceDisposition::Admit),
                 refusal => refusal,
             },
             None => None,
         };
-        match nonces.requirement() {
+        Ok(match nonces.requirement() {
             NonceRequirement::Required => {
                 let nonce = self.issue_nonce(nonces, jkt).await?;
-                Err(HttpPopError::NonceRequired(NonceChallenge::new(nonce, refused)))
+                ServerNonceDisposition::Refuse(HttpPopError::NonceRequired(NonceChallenge::new(nonce, refused)))
             }
-            NonceRequirement::Optional => refused.map_or(Ok(()), |err| Err(HttpPopError::InvalidNonce(err))),
-        }
+            NonceRequirement::Optional => refused.map_or(ServerNonceDisposition::Admit, |err| {
+                ServerNonceDisposition::Refuse(HttpPopError::InvalidNonce(err))
+            }),
+        })
     }
 
     /// Why `raw` is not a usable nonce this resource issued to the key with

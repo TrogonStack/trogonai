@@ -10,21 +10,35 @@ workspace = true
 
 [features]
 default = []
+# Every feature that compiles the generated tree needs buffa-descriptor: the policy and
+# model_access packages import buf.validate (ADR 0064), and include_imports emits it
+# into the shared tree. The annotations stay documentation; nothing enforces them.
 chrono = ["dep:buffa-types", "dep:chrono"]
-gateway = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", "dep:trogon-decider-runtime"]
-schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", "chrono"]
+gateway = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:serde", "dep:trogon-decider", "dep:trogon-decider-runtime"]
+schedules = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:serde", "dep:trogon-decider", "chrono"]
 # Generated types for the grpc-nats-micro binding (ADR 0016): google.rpc.Status/Code,
 # the trogon.nats.micro.v1alpha1 options, and the echo conformance fixture. Deliberately
 # excludes the decider/scheduler domain deps so the binding does not couple to them.
-grpc-nats-micro = ["dep:buffa", "dep:buffa-types", "dep:serde"]
+grpc-nats-micro = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:serde"]
 runtime-snapshot = ["schedules", "dep:trogon-decider-runtime"]
 runtime-host = ["schedules", "dep:trogon-decider-runtime"]
-decider = ["dep:buffa", "dep:buffa-types", "dep:serde", "chrono"]
+decider = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:serde", "chrono"]
+# Generated types for the policy packages (egress, delegation, holds, model ceilings,
+# budgets, rate limits, verdict authorities, and the shared subjects). Types only: no
+# decider runtime, so a gateway can read policy without linking the runtime.
+policy = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:serde"]
+# Generated types for the model_access provider connections. Types only, like `policy`.
+model-access = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:serde"]
+# Generated types for the platform audit record (trogonai.platform.audit.v1). Types only,
+# like `policy`. A record names policy by `PolicyRuleRef`, so it enables `policy` for a
+# writer to name that type and the agent, tenant and project identifiers.
+audit = ["policy"]
 
 [dependencies]
 thiserror = { workspace = true }
 buffa = { workspace = true, optional = true }
 buffa-types = { workspace = true, optional = true }
+buffa-descriptor = { workspace = true, optional = true }
 chrono = { version = "0.4", optional = true, default-features = false, features = ["std"] }
 serde = { workspace = true, optional = true }
 trogon-decider = { version = "0.1.0", path = "../../decider/trogon-decider", optional = true }

@@ -9,6 +9,7 @@ import { SourcesClientProvider } from './features/gateway-sources/context';
 import { HierarchyClientProvider } from './features/hierarchy/context';
 import { ProjectsClientProvider } from './features/projects/context';
 import { ProviderConnectionsClientProvider } from './features/provider-connections/context';
+import { SchedulesClientProvider } from './features/schedules/context';
 import { SecretsClientProvider } from './features/secrets/context';
 import { getRouter } from './router';
 
@@ -28,9 +29,11 @@ if (!rootElement.innerHTML) {
             <EnvironmentsClientProvider clients={backend.environments}>
               <SecretsClientProvider clients={backend.secrets}>
                 <SourcesClientProvider clients={backend.gatewaySources}>
-                  <TenantCustodyClientProvider client={backend.keyCustody}>
-                    <RouterProvider router={router} />
-                  </TenantCustodyClientProvider>
+                  <SchedulesClientProvider clients={backend.schedules}>
+                    <TenantCustodyClientProvider client={backend.keyCustody}>
+                      <RouterProvider router={router} />
+                    </TenantCustodyClientProvider>
+                  </SchedulesClientProvider>
                 </SourcesClientProvider>
               </SecretsClientProvider>
             </EnvironmentsClientProvider>
