@@ -196,6 +196,109 @@
       "violations": [
         "authenticated workload peer registration must name an agent"
       ]
+    },
+    {
+      "name": "workload peer static compatibility remains absent",
+      "template": "record",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/gatewayDecision/workloadPeer"
+        },
+        {
+          "op": "replace",
+          "path": "/class",
+          "value": 2
+        }
+      ]
+    },
+    {
+      "name": "workload peer can distinguish another runtime of the same application",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/gatewayDecision/workloadPeer/peerBinding/spiffeId",
+          "value": "spiffe://example.test/workload/two"
+        },
+        {
+          "op": "replace",
+          "path": "/gatewayDecision/workloadPeer/peerLeafSha256",
+          "value": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI="
+        }
+      ]
+    },
+    {
+      "name": "workload peer cannot select dry run",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attribution/enforcementMode",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "authenticated workload evidence requires an enforced must-audit egress decision under its exact registered actor and scope"
+      ]
+    },
+    {
+      "name": "workload peer cannot invent an unattributed application actor",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/actor",
+          "value": {
+            "unattributed": {}
+          }
+        }
+      ],
+      "violations": [
+        "authenticated workload evidence requires an enforced must-audit egress decision under its exact registered actor and scope"
+      ]
+    },
+    {
+      "name": "workload peer cannot cross project",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/project/value",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "authenticated workload evidence requires an enforced must-audit egress decision under its exact registered actor and scope"
+      ]
+    },
+    {
+      "name": "workload peer requires supported path expiry",
+      "template": "peer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/peerPathExpiresAt",
+          "value": "1970-01-01T00:00:00Z"
+        }
+      ],
+      "violations": [
+        "peer_path_expires_at"
+      ]
+    },
+    {
+      "name": "workload peer requires exact verifier trust fingerprint",
+      "template": "peer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/verifierBundleSha256",
+          "value": "AA=="
+        }
+      ],
+      "violations": [
+        "must be 32 bytes"
+      ]
     }
   ]
 }
