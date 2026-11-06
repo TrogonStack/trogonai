@@ -319,3 +319,6 @@ pub async fn production_emergency_withdrawal(
     let audit = production_writer(context.clone(), config, RegistrationRole::Revoker)?;
     emergency_connected(context, config, denial, &audit).await
 }
+
+#[cfg(test)]
+mod tests;

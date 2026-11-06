@@ -176,3 +176,21 @@ fn a_signing_key_does_not_remove_scope_configuration_constraints() {
     let weak = ed25519_dalek::VerifyingKey::from_bytes(&identity_point).expect("encoded identity point");
     assert!(ProducerConfig::new("acme", "payments", "identity.example.org", NonZeroU64::MIN, weak).is_err());
 }
+
+#[test]
+fn empty_withdrawal_approval_cannot_cross_configured_trust_domains() {
+    let key = SigningKey::from_bytes(&[7; 32]);
+    let source = config(&key);
+    let other_domain = ProducerConfig::new(
+        "acme", "payments", "other.example.org", NonZeroU64::MIN, key.verifying_key(),
+    ).expect("independent configured trust domain");
+    let mut withdrawal = snapshot();
+    withdrawal.bindings.clear();
+    let payload = withdrawal.encode_to_vec();
+    let approved = signature(&key, &payload);
+    assert!(ApprovedRegistration::verify(&source, &payload, &approved).is_ok());
+    assert!(
+        ApprovedRegistration::verify(&other_domain, &payload, &approved).is_err(),
+        "an empty denial still belongs to the independently configured trust domain"
+    );
+}
