@@ -68,6 +68,14 @@ impl PeerIdentity {
         certificates: &[CertificateDer<'_>],
         lease: MaterialLease,
     ) -> Result<Self, WorkloadPeerIdentityError> {
+        Self::from_workload_certificates_with_clock(certificates, lease, || SystemClock.system_time())
+    }
+
+    fn from_workload_certificates_with_clock(
+        certificates: &[CertificateDer<'_>],
+        lease: MaterialLease,
+        read_wall: impl FnOnce() -> SystemTime,
+    ) -> Result<Self, WorkloadPeerIdentityError> {
         let peer = lease
             .peer_evidence_from_certificates(certificates)
             .map_err(WorkloadPeerIdentityError::Material)?;
@@ -97,12 +105,8 @@ impl PeerIdentity {
             verifier_bundle_sha256: fact.bundle_sha256().to_vec(),
         })
         .map_err(WorkloadPeerIdentityError::Evidence)?;
-        let mut identity = Self::with_clock(
-            agent,
-            peer.expires_at().min(lease.expires_at()),
-            || SystemClock.system_time(),
-        )
-        .map_err(WorkloadPeerIdentityError::Validity)?;
+        let mut identity = Self::with_clock(agent, peer.expires_at().min(lease.expires_at()), read_wall)
+            .map_err(WorkloadPeerIdentityError::Validity)?;
         identity.deadline = identity.deadline.min(lease.deadline());
         if !lease.is_current() {
             return Err(WorkloadPeerIdentityError::Material(MaterialError::Unavailable));
@@ -134,11 +138,9 @@ impl PeerIdentity {
                 .ok_or(PeerIdentityError::Validity)?;
             expires_at = Some(expires_at.map_or(expiry, |current: SystemTime| current.min(expiry)));
         }
-        Self::with_clock(
-            agent,
-            expires_at.ok_or(PeerIdentityError::Validity)?,
-            || SystemClock.system_time(),
-        )
+        Self::with_clock(agent, expires_at.ok_or(PeerIdentityError::Validity)?, || {
+            SystemClock.system_time()
+        })
     }
 
     fn with_clock(
