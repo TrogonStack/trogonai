@@ -6,11 +6,11 @@ runtime acceptance evidence.
 
 ## Workload identity
 
-The proposed [enterprise workload identity profile](./reference/enterprise-workload-identity.md)
+The proposed [workload identity profile](./reference/workload-identity.md)
 defines attested bootstrap, issuer isolation, rotating credentials, independent
 authorization and provider token protection. Its implementation and verification
 checklists distinguish runtime foundations from deployment acceptance. The
-governing [ADR#0098](./adr/0098-attested-enterprise-workload-identity.md) remains draft.
+governing [ADR#0098](./adr/0098-attested-workload-identity.md) remains draft.
 
 ## Third-party connections
 

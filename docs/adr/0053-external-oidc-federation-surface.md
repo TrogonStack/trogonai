@@ -194,8 +194,8 @@ Two things this decision deliberately does not settle:
   [ADR#0036](./0036-agent-self-certifying-identity.md), and this surface
   inherits that limitation rather than fixing it.
 
-Draft [ADR#0098](./0098-attested-enterprise-workload-identity.md) defines the
-stronger enterprise deployment profile: attestation and constrained registration
+Draft [ADR#0098](./0098-attested-workload-identity.md) defines the
+workload identity deployment profile: attestation and constrained registration
 precede production workload issuance, with rotating X.509 credentials and
 independent authorization. Its acceptance gates do not make this deferred
 infrastructure implemented or change this ADR's status. Assertion-cache,

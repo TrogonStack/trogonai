@@ -1,11 +1,11 @@
 ---
 number: "0098"
-slug: attested-enterprise-workload-identity
+slug: attested-workload-identity
 status: draft
 date: 2026-11-06
 ---
 
-# ADR#0098: Enterprise Workload Identity Requires Attested Issuance, Rotating X.509 Credentials and Independent Authorization
+# ADR#0098: Workload Identity Requires Attested Issuance, Rotating X.509 Credentials and Independent Authorization
 
 ## Context
 
@@ -29,13 +29,13 @@ fence and operational revocation acceptance remain separate requirements.
 Its provisional SPIFFE-shaped alias does not supply attestation or automatic
 rotation. The NATS callout's existing
 mTLS identity is a certificate DN or fingerprint, not a SPIFFE identity.
-These foundations must not be advertised as the enterprise profile below.
+These foundations must not be advertised as the workload identity profile below.
 
 ## Decision
 
-### Mature attestation and issuance precede the enterprise claim
+### Attestation and issuance precede production acceptance
 
-The enterprise profile uses SPIRE's node and workload attestation, registration
+The workload identity profile uses SPIRE's node and workload attestation, registration
 and Workload API rather than a new platform CA built from agent-signed CSRs.
 Application identity remains the AgentId of ADR0036. An authorized, versioned
 registration maps an attested transport identity to its exact tenant, project,
@@ -174,7 +174,7 @@ Before minting a tenant's broker credential, account admission must check an
 authoritative binding between the authenticated caller and that tenant. A
 configured signing key only proves the callout can sign for the account; a
 tenant-scoped caller hash prevents identity collisions but proves no membership.
-An enterprise admission path without that binding refuses the mint. Unknown
+A production admission path without that binding refuses the mint. Unknown
 callers cannot obtain account access merely by naming an existing account.
 
 Federation under ADR0053 authenticates a workload client. It does not establish
@@ -183,7 +183,7 @@ applicable policy and consent bounds for that resource; record both the actor
 and delegating principal. Orthogonal downstream resources do not share a scope
 namespace, so call chaining does not impose a string-set intersection between
 unrelated providers' scopes.
-An allow-all policy or a valid upstream token alone is not enterprise consent.
+An allow-all policy or a valid upstream token alone does not establish user consent.
 The AAuth Access Server is not an OAuth authorization server or an RFC8693 token
 exchange endpoint.
 
@@ -216,7 +216,7 @@ compatibility profile. Its token remains replayable if stolen; TLS, short local
 cache validity, protected custody and restricted egress reduce exposure without
 claiming sender constraint or changing the provider's actual token lifetime.
 JWT-SVIDs likewise remain bearer credentials unless a separately specified
-protocol constrains their use. They are not the internal enterprise default.
+protocol constrains their use. They are not the internal default.
 
 ### Cache only the authorized resource token, never the exchange assertion
 
@@ -244,7 +244,7 @@ and termination on applicable expiry, revocation or stale policy. Certificate
 expiry at handshake alone cannot close an already established TLS connection.
 
 [ADR#0049](./0049-revocation-latency-target.md)'s five-second p99 remains a normal
-operation target, not a hard guarantee. The enterprise implementation must also
+operation target, not a hard guarantee. The workload identity implementation must also
 prove its configured hard staleness bound, no greater than that ADR's 330-second
 backstop. Lost invalidations, unhealthy projections and offline hosts cannot
 extend authority indefinitely. External tokens already issued retain their own
@@ -253,7 +253,7 @@ the provider.
 
 ### Enablement requires evidence for the complete boundary
 
-The [enterprise workload identity reference](../reference/enterprise-workload-identity.md)
+The [workload identity reference](../reference/workload-identity.md)
 defines implementation and acceptance checklists per capability. A deployment
 must not enable or advertise this profile while a required capability is absent.
 It fails closed rather than inheriting compatibility defaults. Tests of URI
@@ -283,11 +283,11 @@ retention follow their own governed contracts.
   remain distinct authorities. This decision does not invent an OAuth protocol
   binding or remove provider secrets unilaterally.
 - The existing static egress slice remains useful but does not satisfy the
-  enterprise lifecycle profile. The optional live KV reader adds policy
+  workload identity lifecycle profile. The optional live KV reader adds policy
   lifecycle controls; it does not supply rotating SVIDs, a governed publisher or
   deployment acceptance. These remain required before claiming that profile.
 - This ADR remains draft under [ADR#0000](./0000-adr-process.md). It refines the
-  target enterprise profile without marking deferred infrastructure implemented
+  target workload identity profile without marking deferred infrastructure implemented
   or changing another ADR's approval status.
 
 ## References

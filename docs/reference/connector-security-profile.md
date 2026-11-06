@@ -39,9 +39,9 @@ and live grant, as required by
 Successful mTLS or a `spiffe://` URI alone also does not prove that the runtime
 holding the key was attested.
 
-The proposed production enterprise default is the
-[attested workload identity profile](./enterprise-workload-identity.md), governed
-by draft [ADR#0098](../adr/0098-attested-enterprise-workload-identity.md). It
+The proposed production default is the
+[attested workload identity profile](./workload-identity.md), governed
+by draft [ADR#0098](../adr/0098-attested-workload-identity.md). It
 prefers SPIRE and X.509-SVIDs with automatic credential and trust-bundle rotation.
 It must remain disabled until its implementation and deployment gates pass.
 
@@ -56,7 +56,7 @@ Workload attestation remains deferred in
 [ADR#0053](../adr/0053-external-oidc-federation-surface.md);
 [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)'s
 self-hosted bootstrap baseline remains a distinct compatibility option without
-implying attestation or satisfying the enterprise gate.
+implying attestation or satisfying the workload identity gate.
 
 Provider authentication follows an explicit reviewed protection profile. Prefer
 supported workload federation or asymmetric client authentication and supported
@@ -72,7 +72,7 @@ authorization/credential generations and holder key where applicable. Check live
 grant and policy authority on every use. Federation assertions are minted for
 one exchange audience and are never cached, persisted or exposed to agent code.
 Trust-material caches remain separate. The
-[enterprise reference](./enterprise-workload-identity.md) defines the corresponding
+[workload identity reference](./workload-identity.md) defines the corresponding
 rotation, cache, revocation and existing-session acceptance gates.
 
 ## OAuth edge and discovery

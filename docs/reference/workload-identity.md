@@ -1,13 +1,13 @@
-# Enterprise Workload Identity
+# Workload Identity
 
 This reference defines the proposed deployment profile and its acceptance gates
-under draft [ADR#0098](../adr/0098-attested-enterprise-workload-identity.md).
+under draft [ADR#0098](../adr/0098-attested-workload-identity.md).
 The checklists identify work that must be implemented and verified; they are not
 a claim that a production SPIRE integration exists in this repository.
 
 ## Runtime foundation and limits
 
-| Boundary | Foundation | Enterprise gate |
+| Boundary | Foundation | Enablement gate |
 | --- | --- | --- |
 | Egress workload identity | TLS certificate validation, provisional agent URI mapping and finite certificate-bound sessions | Workload API integration, authorized identity mapping and credential/bundle rotation |
 | Egress authorization | Exact-destination admission, optional authenticated live KV authority, generation-bound audit and finite sessions | Governed producer, independent recovery fencing and end-to-end revocation acceptance |

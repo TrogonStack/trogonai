@@ -63,7 +63,7 @@ caller-role registration, a different tenant, mismatched binding or audience,
 and an absent, expired or revoked grant. These are independent authorization
 checks under [ADR#0095](../adr/0095-connection-credential-custody-and-refresh.md).
 
-The proposed production [enterprise profile](./enterprise-workload-identity.md)
+The proposed production [workload identity profile](./workload-identity.md)
 requires the following gate before enablement. Exercise the actual attestor and
 issuer at bootstrap, issuance and renewal:
 
@@ -75,7 +75,7 @@ issuer at bootstrap, issuance and renewal:
 
 A URI, certificate fixture or proof-of-possession test does not establish these
 properties. A compatibility bootstrap does not satisfy this gate. The
-[enterprise checklists](./enterprise-workload-identity.md) additionally cover
+[workload identity checklists](./workload-identity.md) additionally cover
 issuer isolation, key/bundle rotation, deferred issuance, token cache identity,
 sender constraints and established-session revocation. Specifying these gates
 does not implement or close the attestation work deferred by
