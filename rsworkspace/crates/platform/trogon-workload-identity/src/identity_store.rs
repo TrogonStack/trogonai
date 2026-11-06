@@ -130,7 +130,6 @@ impl IdentityStore {
         }
         let local = &self.config().local;
         if registration.recovery_fence() != self.config().recovery_fence
-            || !registration.bindings().contains(local)
             || registration.bindings().iter().any(|binding| {
                 binding.tenant() != local.tenant()
                     || binding.project() != local.project()
@@ -140,6 +139,7 @@ impl IdentityStore {
             self.withdraw_registration();
             return Err(RegistrationError::Scope);
         }
+        let grants_local = registration.bindings().contains(local);
         let mut state = self.inner.state.lock().map_err(|_| RegistrationError::Unavailable)?;
         if state.exhausted {
             return Err(RegistrationError::Unavailable);
@@ -149,7 +149,7 @@ impl IdentityStore {
             let invalid = registration.registration_revision() < previous.registration_revision()
                 || registration.trust_revision() < previous.trust_revision()
                 || (registration.registration_revision() == previous.registration_revision()
-                    && (!same || state.registration.is_none()))
+                    && (!same || (grants_local && state.registration.is_none())))
                 || (registration.approved_roots() != previous.approved_roots()
                     && registration.trust_revision() <= previous.trust_revision());
             if invalid {
@@ -163,7 +163,7 @@ impl IdentityStore {
             }
         }
         state.high_watermark = Some(registration.clone());
-        state.registration = Some(RegistrationLease {
+        state.registration = grants_local.then_some(RegistrationLease {
             registration,
             deadline: Instant::now() + remaining,
         });

@@ -109,8 +109,7 @@ impl RegistrationSet {
         mut bindings: Vec<RegistrationBinding>,
         mut approved_roots: Vec<[u8; 32]>,
     ) -> Result<Self, RegistrationError> {
-        if bindings.is_empty()
-            || bindings.len() > MAX_BINDINGS
+        if bindings.len() > MAX_BINDINGS
             || approved_roots.is_empty()
             || approved_roots.len() > MAX_ROOTS
         {
