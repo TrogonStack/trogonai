@@ -1,5 +1,9 @@
 #![allow(clippy::expect_used)]
 
+#[cfg(unix)]
+#[path = "runner/input_boundary_tests.rs"]
+mod input_boundary_tests;
+
 #[test]
 fn administrative_startup_requires_explicit_scope_fence_and_approval_key() {
     for args in [
