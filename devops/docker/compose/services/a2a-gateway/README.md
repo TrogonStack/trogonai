@@ -37,7 +37,8 @@ service sets the shared `NATS_URL`, `NATS_CREDS`, `NATS_CA`, `NATS_CERT` and
 | `A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS` | `gateway.env`, written by `nats-bootstrap`. The public key of the seed the callout signs tenant `DEV` users with, which is how the gateway checks a forwarded caller JWT. |
 | `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED` | `true` in `compose.yml` |
 | `A2A_GATEWAY_TIER1_BUNDLE_DIR` | `/etc/a2a-gateway/policy`, this directory's `policy/` mounted read-only |
-| `A2A_PREFIX`, `A2A_GATEWAY_QUEUE_GROUP`, `A2A_GATEWAY_JWT_AUDIENCE` | Optional, unset by default |
+| `A2A_GATEWAY_JWT_AUDIENCE` | `gateway.env`, written by `nats-bootstrap`. The `DEV` account public key, which the callout puts in the `aud` of every caller JWT it mints for that tenant. |
+| `A2A_PREFIX`, `A2A_GATEWAY_QUEUE_GROUP` | Optional, unset by default |
 | `RUST_LOG` | Defaults to `info` |
 
 The gateway holds only public keys, so it can check a caller JWT but never

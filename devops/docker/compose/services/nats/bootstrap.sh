@@ -219,7 +219,12 @@ if ! tenant_dev_public=$(nk -inkey "$CALLOUT_KEYS_DIR/tenant-dev.nk" -pubout); t
   echo "nats-bootstrap: the callout holds no tenant-dev seed to derive the caller JWT issuer key from" >&2
   exit 1
 fi
-printf 'A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS=%s\n' "$tenant_dev_public" > "$GATEWAY_DIR/gateway.env"
+# The callout mints a caller JWT with `aud` set to the tenant account it admits
+# the caller into, so the gateway expects the DEV account public key there.
+cat > "$GATEWAY_DIR/gateway.env" <<GATEWAY
+A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS=$tenant_dev_public
+A2A_GATEWAY_JWT_AUDIENCE=$(account_key DEV)
+GATEWAY
 install_env_file "$GATEWAY_DIR/gateway.env"
 
 printf 'AUTH_CALLOUT_XKEY_PUBLIC=%s\n' "$xkey" > "$CLIENTS_DIR/a2a-bridge/bridge.env"
