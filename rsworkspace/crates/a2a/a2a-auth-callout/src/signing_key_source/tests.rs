@@ -290,7 +290,10 @@ fn issuer_public_keys_reject_seeds_and_non_account_keys() {
             source: AccountPublicKeyError::NotAPublicKey,
         }
     );
-    assert!(!seed.to_string().contains(&account.seed().expect("seed")));
+    assert_eq!(
+        seed.to_string(),
+        "entry 2 is not an account public key: it is not an NKey public key"
+    );
 
     let user = IssuerPublicKeys::parse(&KeyPair::new_user().public_key()).unwrap_err();
     assert_eq!(

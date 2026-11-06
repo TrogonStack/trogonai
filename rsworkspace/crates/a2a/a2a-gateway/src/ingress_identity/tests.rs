@@ -340,7 +340,10 @@ fn a_seed_or_a_user_key_is_not_an_issuer_key() {
         rejected,
         CallerJwtIssuerKeysError::Invalid(IssuerPublicKeysError::Invalid { position: 1, .. })
     ));
-    assert!(!rejected.to_string().contains(&seed));
+    assert_eq!(
+        rejected.to_string(),
+        "A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS entry 1 is not an account public key: it is not an NKey public key"
+    );
 
     let user = KeyPair::new_user().public_key();
     assert!(matches!(
