@@ -97,10 +97,10 @@ impl PeerIdentity {
             verifier_bundle_sha256: fact.bundle_sha256().to_vec(),
         })
         .map_err(WorkloadPeerIdentityError::Evidence)?;
-        let mut identity = Self::at(
+        let mut identity = Self::with_clock(
             agent,
             peer.expires_at().min(lease.expires_at()),
-            SystemClock.system_time(),
+            || SystemClock.system_time(),
         )
         .map_err(WorkloadPeerIdentityError::Validity)?;
         identity.deadline = identity.deadline.min(lease.deadline());
@@ -134,11 +134,19 @@ impl PeerIdentity {
                 .ok_or(PeerIdentityError::Validity)?;
             expires_at = Some(expires_at.map_or(expiry, |current: SystemTime| current.min(expiry)));
         }
-        Self::at(
+        Self::with_clock(
             agent,
             expires_at.ok_or(PeerIdentityError::Validity)?,
-            SystemClock.system_time(),
+            || SystemClock.system_time(),
         )
+    }
+
+    fn with_clock(
+        agent: AgentId,
+        expires_at: SystemTime,
+        read_wall: impl FnOnce() -> SystemTime,
+    ) -> Result<Self, PeerIdentityError> {
+        Self::at(agent, expires_at, read_wall())
     }
 
     fn at(agent: AgentId, expires_at: SystemTime, now: SystemTime) -> Result<Self, PeerIdentityError> {

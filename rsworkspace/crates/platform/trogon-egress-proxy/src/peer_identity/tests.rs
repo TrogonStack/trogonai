@@ -2,6 +2,23 @@ use rcgen::{CertificateParams, KeyPair, SanType, string::Ia5String};
 
 use super::*;
 
+#[test]
+fn a_delayed_wall_clock_read_consumes_the_peer_path_lifetime() {
+    let began = std::cell::Cell::new(None);
+    let wall = SystemTime::now();
+    let lifetime = Duration::from_secs(60);
+    let peer = PeerIdentity::with_clock(AgentId::new("agent-1").expect("agent"), wall + lifetime, || {
+        began.set(Some(Instant::now()));
+        std::thread::sleep(Duration::from_millis(20));
+        wall
+    })
+    .expect("identity");
+    assert!(
+        peer.deadline() <= began.get().expect("clock sampled") + lifetime,
+        "the monotonic deadline must include clock-read delay"
+    );
+}
+
 fn certificate(lifetime: Duration) -> CertificateDer<'static> {
     let mut params = CertificateParams::default();
     params.subject_alt_names = vec![SanType::URI(
