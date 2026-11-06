@@ -14,7 +14,9 @@
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use trogon_audit::{AuditName, AuditSink as Sink, AuditWriter, Disposition, Stamper};
+use trogon_audit::{
+    ActivationRecorder, Actor, AuditName, AuditSink as Sink, AuditWriter, Disposition, RecordScope, Stamper,
+};
 use trogon_nats::NatsToken;
 use trogon_std::time::SystemClock;
 use trogon_std::uuid::UuidV7Generator;
@@ -34,6 +36,13 @@ pub struct WriterAudit<S> {
 }
 
 impl<S: Sink> WriterAudit<S> {
+    pub(crate) fn activation_recorder(&self) -> ActivationRecorder<S> {
+        ActivationRecorder::new(
+            self.writer.clone(),
+            RecordScope::new(self.tenant.clone(), self.project.clone(), Actor::Unattributed),
+        )
+    }
+
     pub fn new(writer: AuditWriter<S>, tenant: AuditName, project: NatsToken) -> Self {
         Self {
             writer,
@@ -87,9 +96,9 @@ fn log(event: &AuditEvent<'_>, outcome: &Result<Disposition, AuditError>) {
     let (audit, failure) = match outcome {
         Ok(disposition) => (disposition_name(*disposition), "-"),
         Err(AuditError::Unavailable(error)) => ("unavailable", error.reason().as_str()),
-        Err(AuditError::Name(_) | AuditError::Reason(_) | AuditError::PolicyEvidence) => {
-            ("unavailable", "unrecordable")
-        }
+        Err(
+            AuditError::Name(_) | AuditError::Reason(_) | AuditError::PolicyEvidence | AuditError::WorkloadEvidence(_),
+        ) => ("unavailable", "unrecordable"),
     };
     tracing::info!(
         target: AUDIT_LOG_TARGET,

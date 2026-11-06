@@ -16,4 +16,6 @@ pub enum AuditError {
     Reason(#[from] ReasonCodeError),
     #[error("policy provenance does not match the decision")]
     PolicyEvidence,
+    #[error("authenticated workload evidence does not match the decision")]
+    WorkloadEvidence(#[from] trogon_audit::WorkloadPeerScopeError),
 }

@@ -45,13 +45,16 @@ pub mod policy_snapshot;
 pub mod policy_source;
 pub mod resolver;
 pub mod runtime;
+mod scoped_key;
+mod scoped_stream;
 pub mod server;
 pub mod static_snapshot;
 pub mod trust_domain;
-pub mod writer_audit;
-mod scoped_key;
+pub mod workload_activation_audit;
 pub mod workload_identity_config;
 pub mod workload_registration;
+pub mod workload_registration_driver;
+pub mod writer_audit;
 
 pub use agent_id::AgentId;
 pub use config::{Args, Config};

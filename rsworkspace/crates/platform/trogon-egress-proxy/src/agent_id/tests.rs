@@ -2,7 +2,13 @@ use super::*;
 
 #[test]
 fn accepts_url_safe_identifiers() {
-    for raw in ["agent-1", "a", "A_b.c-9", "0123456789abcdef", "did:key:z6MkhaXgBZDvotDkL5257faiztiGi2sfKfzvuU5TVndZqquw"] {
+    for raw in [
+        "agent-1",
+        "a",
+        "A_b.c-9",
+        "0123456789abcdef",
+        "did:key:z6MkhaXgBZDvotDkL5257faiztiGi2sfKfzvuU5TVndZqquw",
+    ] {
         assert_eq!(AgentId::new(raw).expect("valid id").as_str(), raw);
     }
 }

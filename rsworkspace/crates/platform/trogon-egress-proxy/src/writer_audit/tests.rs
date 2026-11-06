@@ -66,6 +66,7 @@ fn event<'a>(
 ) -> AuditEvent<'a> {
     AuditEvent {
         agent,
+        workload_peer: None,
         destination,
         resolved_address: destination.map(|_| "93.184.216.34".parse().expect("ip")),
         decision,

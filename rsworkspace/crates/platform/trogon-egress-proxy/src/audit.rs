@@ -46,6 +46,7 @@ impl Decision {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditEvent<'a> {
     pub agent: &'a AgentId,
+    pub workload_peer: Option<&'a trogon_audit::WorkloadPeerEvidenceFacts>,
     /// Absent when the request never produced a valid destination.
     pub destination: Option<&'a Destination>,
     pub resolved_address: Option<IpAddr>,

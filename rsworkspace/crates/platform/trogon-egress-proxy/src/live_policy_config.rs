@@ -5,6 +5,7 @@ use trogon_nats::{NatsAuth, NatsConfig, NatsTls, NatsToken, TlsMisconfiguration}
 
 use crate::constants::LIVE_POLICY_MAX_BUCKET_BYTES;
 use crate::scoped_key::scoped_key;
+use crate::scoped_stream::is_exclusive_snapshot;
 
 #[derive(Debug, Clone)]
 pub struct KvPolicyConfig {
@@ -13,6 +14,13 @@ pub struct KvPolicyConfig {
     pub(crate) project: NatsToken,
     pub(crate) incarnation: NonZeroU64,
     key: String,
+    isolation: ScopeIsolation,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ScopeIsolation {
+    ConfiguredKey,
+    ExclusiveStream,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -66,6 +74,7 @@ impl KvPolicyConfig {
             project,
             incarnation,
             key,
+            isolation: ScopeIsolation::ConfiguredKey,
         })
     }
 
@@ -78,5 +87,20 @@ impl KvPolicyConfig {
     }
     pub fn key(&self) -> &str {
         &self.key
+    }
+
+    pub(crate) fn for_workload_identity(&self) -> Self {
+        let mut config = self.clone();
+        config.isolation = ScopeIsolation::ExclusiveStream;
+        config
+    }
+
+    pub(crate) fn stream_matches_scope(&self, info: &async_nats::jetstream::stream::Info) -> bool {
+        match self.isolation {
+            ScopeIsolation::ConfiguredKey => true,
+            ScopeIsolation::ExclusiveStream => {
+                is_exclusive_snapshot(info, &format!("$KV.{}.{}", self.bucket, self.key))
+            }
+        }
     }
 }
