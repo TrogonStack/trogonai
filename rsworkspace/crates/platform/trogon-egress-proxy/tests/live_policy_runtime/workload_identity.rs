@@ -42,7 +42,7 @@ struct WorkloadHarness {
     policy_key: String,
     workload_api: WorkloadApiFixture,
     client_api: WorkloadApiFixture,
-    _client_identity: IdentityStore,
+    client_identity: IdentityStore,
     connector: TlsConnector,
     address: SocketAddr,
     shutdown: CancellationToken,
@@ -230,7 +230,7 @@ impl WorkloadHarness {
             policy_key: policy.key().into(),
             workload_api,
             client_api,
-            _client_identity: client_identity,
+            client_identity: client_identity,
             connector,
             address,
             shutdown,
@@ -435,5 +435,74 @@ async fn production_audit_outage_refuses_a_new_workload_tunnel_before_forwarding
     tokio::time::timeout(WAIT, client.read_to_end(&mut reply)).await??;
     assert_eq!(reply, Fault::AuditUnavailable.response());
     assert_eq!(upstream.received(), recorded_bytes);
+    harness.stop().await
+}
+
+#[tokio::test]
+async fn production_registration_stream_scope_widening_withdraws_workload_authority() -> TestResult<()> {
+    let harness = WorkloadHarness::start("").await?;
+    let mut idle = harness.connect().await?;
+    let mut stream = harness.registry.stream.get_info().await?.config;
+    stream
+        .subjects
+        .push(format!("$KV.{}.another_scope", harness.registry.name));
+    harness.context.update_stream(stream).await?;
+    closed(&mut idle).await?;
+    assert!(harness.method_request().await.is_err());
+    harness.stop().await
+}
+
+#[tokio::test]
+async fn production_trust_replacement_retires_old_sessions_and_accepts_only_new_material() -> TestResult<()> {
+    let mut harness = WorkloadHarness::start("").await?;
+    let mut old_session = harness.connect().await?;
+    let old_connector = harness.connector.clone();
+    let new_ca = TestCa::new();
+    let local = new_ca.issue(LOCAL_WORKLOAD, Duration::from_secs(120));
+    let peer = new_ca.issue(PEER_WORKLOAD, Duration::from_secs(120));
+    let mut registration = harness.snapshot().await?;
+    registration.registration_revision = 2;
+    registration.trust_revision = 2;
+    registration.approved_root_sha256 = vec![new_ca.root_sha256().to_vec()];
+    harness.publish_registration(registration.clone()).await?;
+    closed(&mut old_session).await?;
+    harness.client_identity.replace_registration(decode_registration(
+        &registration.encode_to_vec(),
+        harness.client_identity.config(),
+        SystemTime::now(),
+    )?)?;
+    harness.workload_api.replace(vec![local]);
+    harness.client_api.replace(vec![peer]);
+    let new_material = tokio::time::timeout(WAIT, async {
+        loop {
+            if let Some(material) = harness.client_identity.material()
+                && material.fact().registration_revision().get() == 2
+            {
+                return material;
+            }
+            tokio::time::sleep(TICK).await;
+        }
+    })
+    .await?;
+    let expected = RuntimeBinding::new(LOCAL_WORKLOAD, "acme", "payments", RuntimeRole::EgressProxy, None)?;
+    harness.connector = TlsConnector::from(new_material.client_config(expected.spiffe_id())?);
+    let mut new_session = harness.connect().await?;
+    new_session.write_all(b"GET / HTTP/1.1\r\n\r\n").await?;
+    let mut reply = Vec::new();
+    tokio::time::timeout(WAIT, new_session.read_to_end(&mut reply)).await??;
+    assert_eq!(reply, Fault::MethodNotAllowed.response());
+    let old = old_connector
+        .connect(
+            ServerName::try_from("localhost")?,
+            TcpStream::connect(harness.address).await?,
+        )
+        .await;
+    assert!(old.is_err(), "a cached TLS config must lose its retired authority");
+    let decision = harness.decision("deny").await?;
+    let Some(Detail::GatewayDecision(decision)) = decision.detail else {
+        panic!("missing decision");
+    };
+    assert_eq!(decision.workload_peer.registration_revision, 2);
+    assert_eq!(decision.workload_peer.trust_revision, 2);
     harness.stop().await
 }
