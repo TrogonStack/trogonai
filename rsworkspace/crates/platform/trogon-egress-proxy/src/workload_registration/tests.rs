@@ -58,6 +58,36 @@ fn binary_registration_projection_preserves_exact_governed_authority() {
 }
 
 #[test]
+fn scoped_revocation_projection_preserves_its_revision_without_a_local_grant() {
+    let now = SystemTime::now();
+    let mut message = snapshot(now);
+    message.registration_revision = 100;
+    message.bindings = vec![WireBinding {
+        spiffe_id: "spiffe://trogon.example/runtime/peer".into(),
+        tenant: "acme".into(),
+        project: "payments".into(),
+        role: EnumValue::from(WireRole::Agent),
+        application_id: Some("agent-1".into()),
+    }];
+    let registration = decode_registration(&message.encode_to_vec(), &config(), now)
+        .expect("a valid revocation must reach the generation fence");
+    assert_eq!(registration.registration_revision().get(), 100);
+    assert!(!registration.bindings().contains(config().local()));
+}
+
+#[test]
+fn scoped_empty_revocation_projection_preserves_its_revision() {
+    let now = SystemTime::now();
+    let mut message = snapshot(now);
+    message.registration_revision = 100;
+    message.bindings.clear();
+    let registration = decode_registration(&message.encode_to_vec(), &config(), now)
+        .expect("an empty governed snapshot revokes every local grant");
+    assert_eq!(registration.registration_revision().get(), 100);
+    assert!(registration.bindings().is_empty());
+}
+
+#[test]
 fn application_identity_comes_from_registration_instead_of_the_spiffe_path() {
     let now = SystemTime::now();
     let mut message = snapshot(now);
