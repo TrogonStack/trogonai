@@ -10,9 +10,16 @@ pub struct TimeBounds {
     latest: SystemTime,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("checkpoint time bounds must start no later than they end")]
+pub struct TimeBoundsError;
+
 impl TimeBounds {
-    pub fn new(earliest: SystemTime, latest: SystemTime) -> Self {
-        Self { earliest, latest }
+    pub fn new(earliest: SystemTime, latest: SystemTime) -> Result<Self, TimeBoundsError> {
+        if earliest > latest {
+            return Err(TimeBoundsError);
+        }
+        Ok(Self { earliest, latest })
     }
 
     pub fn earliest(&self) -> SystemTime {

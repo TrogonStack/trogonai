@@ -1,7 +1,11 @@
 use std::num::NonZeroU64;
-use std::time::Duration;
 
-use crate::constants::{DEFAULT_CHECKPOINT_EVERY_RECORDS, DEFAULT_CHECKPOINT_INTERVAL};
+use trogon_std::NonZeroDuration;
+
+use crate::constants::{
+    DEFAULT_CHECKPOINT_EVERY_RECORDS, DEFAULT_CHECKPOINT_INTERVAL, DEFAULT_CHECKPOINT_PUBLISH_TIMEOUT,
+    DEFAULT_CHECKPOINT_SIGN_TIMEOUT,
+};
 
 /// When a writer's head is checkpointed: after `every_records` more records, or
 /// once `interval` passes without a checkpoint, whichever comes first
@@ -12,14 +16,18 @@ use crate::constants::{DEFAULT_CHECKPOINT_EVERY_RECORDS, DEFAULT_CHECKPOINT_INTE
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CheckpointConfig {
     pub every_records: NonZeroU64,
-    pub interval: Duration,
+    pub interval: NonZeroDuration,
+    pub sign_timeout: NonZeroDuration,
+    pub publish_timeout: NonZeroDuration,
 }
 
 impl Default for CheckpointConfig {
     fn default() -> Self {
         Self {
             every_records: NonZeroU64::new(DEFAULT_CHECKPOINT_EVERY_RECORDS).unwrap_or(NonZeroU64::MIN),
-            interval: DEFAULT_CHECKPOINT_INTERVAL,
+            interval: NonZeroDuration::from_secs_const(DEFAULT_CHECKPOINT_INTERVAL.as_secs()),
+            sign_timeout: DEFAULT_CHECKPOINT_SIGN_TIMEOUT,
+            publish_timeout: DEFAULT_CHECKPOINT_PUBLISH_TIMEOUT,
         }
     }
 }

@@ -3,6 +3,7 @@ use super::*;
 #[test]
 fn names_every_reason() {
     let expected = [
+        (FailureReason::Closed, "closed"),
         (FailureReason::Unreachable, "unreachable"),
         (FailureReason::Timeout, "timeout"),
         (FailureReason::StreamFull, "stream_full"),

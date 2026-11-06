@@ -196,7 +196,7 @@ async fn a_checkpoint_stored_beside_the_chain_reads_back_and_verifies_against_it
     let last = checkpoint_stream.get_info().await.unwrap().state.last_sequence;
     let message = checkpoint_stream.get_raw_message(last).await.unwrap();
     let trusted = TrustedKeys::new([KeyId::from_verifying_key(signing_key(1).verifying_key())]);
-    let bounds = TimeBounds::new(now(), now());
+    let bounds = TimeBounds::new(now(), now()).unwrap();
 
     let verified = verify_checkpoint(&message.payload, &head, &trusted, &bounds).unwrap();
     assert_eq!(verified.head().sequence(), 3);

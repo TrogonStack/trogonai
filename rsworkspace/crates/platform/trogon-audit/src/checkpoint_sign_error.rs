@@ -2,6 +2,8 @@
 /// goes on storing records, and the next checkpoint covers the head it reaches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CheckpointSignError {
+    #[error("checkpoint signer did not finish in time")]
+    Timeout,
     #[error("checkpoint signer is unavailable")]
     Unavailable,
     #[error("checkpoint signer refused to sign")]
@@ -15,6 +17,7 @@ pub enum CheckpointSignError {
 impl CheckpointSignError {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Timeout => "timeout",
             Self::Unavailable => "unavailable",
             Self::Refused => "refused",
             Self::InvalidSignature => "invalid_signature",

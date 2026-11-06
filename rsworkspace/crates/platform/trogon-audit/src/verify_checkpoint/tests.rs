@@ -43,7 +43,7 @@ fn trusted() -> TrustedKeys {
 }
 
 fn bounds() -> TimeBounds {
-    TimeBounds::new(now() - MINUTE, now() + MINUTE)
+    TimeBounds::new(now() - MINUTE, now() + MINUTE).unwrap()
 }
 
 fn verify(payload: &[u8]) -> Result<VerifiedCheckpoint, CheckpointVerificationError> {

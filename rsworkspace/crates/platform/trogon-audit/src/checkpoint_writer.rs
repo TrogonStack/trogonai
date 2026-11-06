@@ -22,12 +22,14 @@ use crate::audit_writer::AuditWriter;
 use crate::chain_head::ChainHead;
 use crate::checkpoint_config::CheckpointConfig;
 use crate::checkpoint_draft::CheckpointDraft;
+use crate::checkpoint_sign_error::CheckpointSignError;
 use crate::checkpoint_signer::CheckpointSigner;
 use crate::checkpoint_sink::CheckpointSink;
 use crate::checkpoint_stats::CheckpointStats;
 use crate::constants::LOG_TARGET;
 use crate::head_watch::HeadWatch;
 use crate::signed_checkpoint::SignedCheckpoint;
+use crate::sink_error::SinkError;
 use crate::stamper::Stamper;
 
 #[derive(Debug)]
@@ -92,12 +94,14 @@ where
     ///
     /// Runs until the writer's drain task has made its final drain, or until the
     /// writer is dropped, and then checkpoints the head it was left at.
+    /// Signing and publication each have a configured timeout, including that
+    /// final attempt, so a pending adapter cannot keep the task alive forever.
     pub async fn run(&self) {
         let watch = &self.inner.watch;
         let mut heads = watch.heads.clone();
         heads.mark_changed();
         let mut checkpointed: Option<u64> = None;
-        let mut deadline = Instant::now() + self.inner.config.interval;
+        let mut deadline = Instant::now() + self.inner.config.interval.into();
         loop {
             let head = tokio::select! {
                 biased;
@@ -109,14 +113,14 @@ where
                     heads.borrow_and_update().clone().filter(|head| self.due(checkpointed, head))
                 }
                 () = tokio::time::sleep_until(deadline) => {
-                    deadline = Instant::now() + self.inner.config.interval;
+                    deadline = Instant::now() + self.inner.config.interval.into();
                     heads.borrow_and_update().clone()
                 }
             };
             if let Some(head) = head {
                 checkpointed = Some(head.sequence());
                 self.checkpoint(head).await;
-                deadline = Instant::now() + self.inner.config.interval;
+                deadline = Instant::now() + self.inner.config.interval.into();
             }
         }
         let last = heads.borrow().clone();
@@ -146,7 +150,10 @@ where
             head,
             self.inner.stamper.now(),
         );
-        let signed = match self.inner.signer.sign(&draft).await {
+        let signature = tokio::time::timeout(self.inner.config.sign_timeout.into(), self.inner.signer.sign(&draft))
+            .await
+            .unwrap_or(Err(CheckpointSignError::Timeout));
+        let signed = match signature {
             Ok(signature) => SignedCheckpoint::assemble(&draft, &signature),
             Err(error) => Err(error),
         };
@@ -164,7 +171,13 @@ where
                 return;
             }
         };
-        match self.inner.sink.publish_checkpoint(&checkpoint).await {
+        let published = tokio::time::timeout(
+            self.inner.config.publish_timeout.into(),
+            self.inner.sink.publish_checkpoint(&checkpoint),
+        )
+        .await
+        .unwrap_or(Err(SinkError::Timeout));
+        match published {
             Ok(_) => self.stats_mut().written += 1,
             Err(error) => {
                 self.stats_mut().publish_failures += 1;

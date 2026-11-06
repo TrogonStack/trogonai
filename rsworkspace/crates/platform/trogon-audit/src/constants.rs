@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use trogon_std::NonZeroDuration;
+
 /// The fixed leading subject token of the audit family (ADR#0086 Decision 2).
 ///
 /// The family spans the A2A gateway, the egress proxy and the secrets service, so
@@ -122,6 +124,10 @@ pub const DEFAULT_CHECKPOINT_EVERY_RECORDS: u64 = 1_000;
 /// at this pace with its head unchanged, as a heartbeat that shows the writer is
 /// alive and its chain has not been cut.
 pub const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(60);
+pub const DEFAULT_CHECKPOINT_SIGN_TIMEOUT: NonZeroDuration =
+    NonZeroDuration::from_secs_const(DEFAULT_ACK_TIMEOUT.as_secs());
+pub const DEFAULT_CHECKPOINT_PUBLISH_TIMEOUT: NonZeroDuration =
+    NonZeroDuration::from_secs_const(DEFAULT_ACK_TIMEOUT.as_secs() * DEFAULT_MAX_PUBLISH_ATTEMPTS as u64);
 
 /// The JWS `typ` of a checkpoint signature. It keeps a checkpoint signature from
 /// being taken as any other JWS signed with the same key, and the reverse.

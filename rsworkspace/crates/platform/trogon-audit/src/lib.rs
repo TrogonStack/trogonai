@@ -196,7 +196,7 @@ pub use stamper::Stamper;
 pub use stored_ack::StoredAck;
 pub use stored_audit_record::StoredAuditRecord;
 pub use surface::Surface;
-pub use time_bounds::TimeBounds;
+pub use time_bounds::{TimeBounds, TimeBoundsError};
 pub use tls_mode::TlsMode;
 pub use trace_id::{TraceId, TraceIdError};
 pub use trusted_keys::TrustedKeys;
