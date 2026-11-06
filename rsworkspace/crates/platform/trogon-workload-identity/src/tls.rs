@@ -108,7 +108,7 @@ impl ClientCertVerifier for RegisteredClientVerifier {
         let chain: Vec<_> = std::iter::once(leaf.clone())
             .chain(intermediates.iter().cloned())
             .collect();
-        verify_chain(&chain, &self.roots, now, false).map_err(refused)?;
+        verify_chain(&chain, &self.roots, now, crate::certificate_use::CertificateUse::Client).map_err(refused)?;
         let verified = self.inner.verify_client_cert(
             leaf,
             intermediates,
@@ -181,7 +181,7 @@ impl ServerCertVerifier for RegisteredServerVerifier {
         let chain: Vec<_> = std::iter::once(leaf.clone())
             .chain(intermediates.iter().cloned())
             .collect();
-        verify_chain(&chain, &self.roots, now, true).map_err(refused)?;
+        verify_chain(&chain, &self.roots, now, crate::certificate_use::CertificateUse::Server).map_err(refused)?;
         self.authority.require_current()?;
         Ok(ServerCertVerified::assertion())
     }

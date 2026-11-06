@@ -9,9 +9,9 @@ use spiffe::{SpiffeId, X509Context};
 use tokio::time::Instant;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
+use crate::certificate_validation::{leaf_profile, verify_chain};
 use crate::constants::{MAX_CONTEXT_BYTES, MAX_IDENTITIES, MAX_ROOTS};
 use crate::material_error::MaterialError;
-use crate::certificate_validation::{leaf_profile, verify_chain};
 
 pub(crate) struct Candidate {
     pub certified_key: Arc<CertifiedKey>,
@@ -88,7 +88,9 @@ impl Candidate {
         let now = observation.wall();
         let leaf = chain.first().ok_or(MaterialError::Identity)?;
         let (_, not_before, _) = leaf_profile(leaf, now)?;
-        let expires_at = verify_chain(&chain, &roots, now, false)?.min(verify_chain(&chain, &roots, now, true)?);
+        let expires_at = verify_chain(&chain, &roots, now, crate::certificate_use::CertificateUse::Client)?.min(
+            verify_chain(&chain, &roots, now, crate::certificate_use::CertificateUse::Server)?,
+        );
         let (_, parsed) = X509Certificate::from_der(leaf).map_err(|_| MaterialError::Profile)?;
         let public_key_sha256 = Sha256::digest(parsed.public_key().raw).into();
         let leaf_sha256 = Sha256::digest(leaf).into();
@@ -115,4 +117,3 @@ impl Candidate {
         self.not_before <= now && self.expires_at > now && self.deadline > Instant::now()
     }
 }
-

@@ -4,15 +4,15 @@ use std::time::SystemTime;
 
 use rustls::pki_types::CertificateDer;
 use rustls::{ClientConfig, ServerConfig};
+use sha2::{Digest, Sha256};
 use spiffe::SpiffeId;
 use tokio::sync::watch;
 use tokio::time::Instant;
-use sha2::{Digest, Sha256};
 
 use crate::candidate::Candidate;
 use crate::certificate_validation::leaf_profile;
-use crate::material_authority::{MaterialAuthority, MaterialStatus};
 use crate::constants::MAX_REGISTRATION_LIFETIME;
+use crate::material_authority::{MaterialAuthority, MaterialStatus};
 use crate::{
     ActivationAudit, ActivationFact, ApplicationId, IdentityConfig, MaterialError, RegistrationError, RegistrationSet,
 };
@@ -68,7 +68,9 @@ struct WeakMaterialStatus {
 
 impl std::fmt::Debug for WeakMaterialStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WeakMaterialStatus").field("activation_revision", &self.activation_revision).finish()
+        f.debug_struct("WeakMaterialStatus")
+            .field("activation_revision", &self.activation_revision)
+            .finish()
     }
 }
 
@@ -76,7 +78,9 @@ impl MaterialStatus for WeakMaterialStatus {
     fn is_current(&self) -> bool {
         self.inner.upgrade().is_some_and(|inner| {
             let store = IdentityStore { inner };
-            store.material().is_some_and(|lease| lease.fact().activation_revision() == self.activation_revision)
+            store
+                .material()
+                .is_some_and(|lease| lease.fact().activation_revision() == self.activation_revision)
         })
     }
 }
@@ -163,12 +167,11 @@ impl IdentityStore {
                 return Ok(());
             }
         }
-        let deadline = observation.deadline(registration.expires_at()).map_err(|_| RegistrationError::Freshness)?;
+        let deadline = observation
+            .deadline(registration.expires_at())
+            .map_err(|_| RegistrationError::Freshness)?;
         state.high_watermark = Some(registration.clone());
-        state.registration = grants_local.then_some(RegistrationLease {
-            registration,
-            deadline,
-        });
+        state.registration = grants_local.then_some(RegistrationLease { registration, deadline });
         state.active = None;
         self.signal(&mut state);
         Ok(())
@@ -242,7 +245,10 @@ impl IdentityStore {
     }
 
     fn authority(&self, activation_revision: NonZeroU64) -> MaterialAuthority {
-        MaterialAuthority::new(Arc::new(WeakMaterialStatus { inner: Arc::downgrade(&self.inner), activation_revision }))
+        MaterialAuthority::new(Arc::new(WeakMaterialStatus {
+            inner: Arc::downgrade(&self.inner),
+            activation_revision,
+        }))
     }
 
     pub(crate) fn prepare(&self) -> Option<PendingActivation> {
@@ -369,13 +375,26 @@ impl RegistrationLease {
 
 impl MaterialLease {
     /// The TLS handshake must have authenticated this exact certificate chain.
-    pub fn peer_evidence_from_certificates(&self, certificates: &[CertificateDer<'_>]) -> Result<crate::PeerEvidence, MaterialError> {
+    pub fn peer_evidence_from_certificates(
+        &self,
+        certificates: &[CertificateDer<'_>],
+    ) -> Result<crate::PeerEvidence, MaterialError> {
         let leaf = certificates.first().ok_or(MaterialError::Identity)?;
         let now = SystemTime::now();
         let (id, _, _) = leaf_profile(leaf, now)?;
-        let expires_at = crate::certificate_validation::verify_chain(certificates, &self.material.candidate.roots, now, false)?;
+        let expires_at = crate::certificate_validation::verify_chain(
+            certificates,
+            &self.material.candidate.roots,
+            now,
+            crate::certificate_use::CertificateUse::Client,
+        )?;
         let application_id = self.application_for_peer(&id).ok_or(MaterialError::Unavailable)?;
-        Ok(crate::PeerEvidence { application_id, expires_at, spiffe_id: id, leaf_sha256: Sha256::digest(leaf).into() })
+        Ok(crate::PeerEvidence {
+            application_id,
+            expires_at,
+            spiffe_id: id,
+            leaf_sha256: Sha256::digest(leaf).into(),
+        })
     }
     pub fn server_config(&self) -> Arc<ServerConfig> {
         Arc::clone(&self.material.tls)
@@ -438,7 +457,10 @@ impl MaterialLease {
         &self,
         certificates: &[CertificateDer<'_>],
     ) -> Result<ApplicationId, MaterialError> {
-        Ok(self.peer_evidence_from_certificates(certificates)?.application_id().clone())
+        Ok(self
+            .peer_evidence_from_certificates(certificates)?
+            .application_id()
+            .clone())
     }
 }
 

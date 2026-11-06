@@ -4,8 +4,9 @@ use rustls::pki_types::{CertificateDer, UnixTime};
 use spiffe::SpiffeId;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
-use crate::constants::MAX_SVID_LIFETIME;
 use crate::MaterialError;
+use crate::certificate_use::CertificateUse;
+use crate::constants::MAX_SVID_LIFETIME;
 
 pub(crate) fn timestamp(value: i64) -> Result<SystemTime, MaterialError> {
     SystemTime::UNIX_EPOCH
@@ -60,7 +61,7 @@ pub(crate) fn verify_chain(
     chain: &[CertificateDer<'_>],
     roots: &[CertificateDer<'_>],
     now: SystemTime,
-    server: bool,
+    purpose: CertificateUse,
 ) -> Result<SystemTime, MaterialError> {
     let leaf = chain.first().ok_or(MaterialError::Certificate)?;
     let (_, _, leaf_expiry) = leaf_profile(leaf, now)?;
@@ -100,10 +101,9 @@ pub(crate) fn verify_chain(
             .map_err(|_| MaterialError::Profile)?,
     );
     let provider = rustls::crypto::aws_lc_rs::default_provider();
-    let usage = if server {
-        webpki::KeyUsage::server_auth()
-    } else {
-        webpki::KeyUsage::client_auth()
+    let usage = match purpose {
+        CertificateUse::Server => webpki::KeyUsage::server_auth(),
+        CertificateUse::Client => webpki::KeyUsage::client_auth(),
     };
     let path = end_entity
         .verify_for_usage(
@@ -130,4 +130,3 @@ pub(crate) fn verify_chain(
         .ok_or(MaterialError::Certificate)?;
     Ok(expiry.min(root_expiry))
 }
-

@@ -16,5 +16,8 @@ fn delayed_wall_clock_read_does_not_restart_a_finite_source_lifetime() {
     });
     let lifetime = Duration::from_secs(60);
     let deadline = observation.deadline(sample.get().unwrap() + lifetime).unwrap();
-    assert!(deadline <= began.get().unwrap() + lifetime, "clock-read delay must consume authority instead of restarting it");
+    assert!(
+        deadline <= began.get().unwrap() + lifetime,
+        "clock-read delay must consume authority instead of restarting it"
+    );
 }
