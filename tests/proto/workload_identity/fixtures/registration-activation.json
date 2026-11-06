@@ -168,7 +168,7 @@
       ]
     },
     {
-      "name": "registration requires approved roots",
+      "name": "empty trust withdrawal retains its scoped revisions",
       "template": "snapshot",
       "patch": [
         {
@@ -177,9 +177,7 @@
           "value": []
         }
       ],
-      "violations": [
-        "must contain at least 1 item(s)"
-      ]
+      "violations": []
     },
     {
       "name": "activation audit is must before effect",
@@ -222,6 +220,42 @@
           "path": "/bindings/0/spiffeId",
           "value": "spiffe://example.test"
         }
+      ]
+    },
+    {
+      "name": "empty trust withdrawal can also remove every binding",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvedRootSha256",
+          "value": []
+        },
+        {
+          "op": "replace",
+          "path": "/bindings",
+          "value": []
+        }
+      ],
+      "violations": []
+    },
+    {
+      "name": "empty trust withdrawal cannot lose its trust revision",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvedRootSha256",
+          "value": []
+        },
+        {
+          "op": "replace",
+          "path": "/trustRevision",
+          "value": "0"
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
       ]
     }
   ]
