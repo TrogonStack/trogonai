@@ -8,6 +8,8 @@ use trogon_audit::{AuditNameError, AuditUnavailableError, ReasonCodeError};
 /// boundary rather than describe a case the proxy expects to meet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum AuditError {
+    #[error("audit write capacity is exhausted")]
+    Overloaded,
     #[error("audit could not take the record")]
     Unavailable(#[from] AuditUnavailableError),
     #[error("a fact of the decision is not a name an audit record may carry")]

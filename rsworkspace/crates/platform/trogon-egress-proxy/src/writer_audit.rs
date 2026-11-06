@@ -23,6 +23,7 @@ use trogon_std::uuid::UuidV7Generator;
 
 use crate::audit::{AuditEvent, AuditSink, Decision};
 use crate::audit_error::AuditError;
+use crate::connection_limit::ConnectionLimit;
 use crate::constants::AUDIT_LOG_TARGET;
 use crate::decision_record::decision_record;
 use crate::fault::Fault;
@@ -36,6 +37,10 @@ pub struct WriterAudit<S> {
 }
 
 impl<S: Sink> WriterAudit<S> {
+    pub fn with_limit(writer: AuditWriter<S>, tenant: AuditName, project: NatsToken, _limit: ConnectionLimit) -> Self {
+        Self::new(writer, tenant, project)
+    }
+
     pub(crate) fn activation_recorder(&self) -> ActivationRecorder<S> {
         ActivationRecorder::new(
             self.writer.clone(),
@@ -96,6 +101,7 @@ fn log(event: &AuditEvent<'_>, outcome: &Result<Disposition, AuditError>) {
     let (audit, failure) = match outcome {
         Ok(disposition) => (disposition_name(*disposition), "-"),
         Err(AuditError::Unavailable(error)) => ("unavailable", error.reason().as_str()),
+        Err(AuditError::Overloaded) => ("unavailable", "overloaded"),
         Err(
             AuditError::Name(_) | AuditError::Reason(_) | AuditError::PolicyEvidence | AuditError::WorkloadEvidence(_),
         ) => ("unavailable", "unrecordable"),
