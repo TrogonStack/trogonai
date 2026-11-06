@@ -37,6 +37,10 @@ pub const DEFAULT_FETCH_HEARTBEAT_SECS: u64 = 5;
 pub const DEFAULT_INACTIVE_THRESHOLD_SECS: u64 = 300;
 pub const DEFAULT_MAX_INFLIGHT_PER_CALLER: usize = 32;
 
+#[cfg(feature = "spicedb")]
+/// How long shutdown waits for the platform audit sink's last flush before it
+/// abandons it, so a stream that hangs mid-publish cannot keep the process up.
+pub(crate) const AUDIT_SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 pub(crate) const MAX_BACKOFF: Duration = Duration::from_secs(30);
 pub(crate) const FETCH_EXPIRES: Duration = Duration::from_secs(30);

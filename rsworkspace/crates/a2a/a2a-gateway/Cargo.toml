@@ -44,7 +44,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true, optional = true }
 thiserror = { workspace = true }
 time = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 toml = { workspace = true }
 tracing = { workspace = true }
@@ -62,7 +62,7 @@ serde_json = { workspace = true }
 filetime = { workspace = true }
 sha2 = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true, features = ["net", "test-util"] }
 trogon-audit = { workspace = true, features = ["test-support"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

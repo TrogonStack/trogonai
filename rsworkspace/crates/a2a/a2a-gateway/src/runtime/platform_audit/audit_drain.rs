@@ -5,6 +5,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use super::DecisionAudit;
+use crate::constants::AUDIT_SETTLE_TIMEOUT;
 
 /// The audit sink's background work for as long as the gateway serves.
 ///
@@ -30,13 +31,24 @@ impl AuditDrain {
     }
 
     /// Tells the sink no more decisions are coming and waits for its last
-    /// flush. Call it only after the ingress loop has returned.
+    /// flush, for at most [`AUDIT_SETTLE_TIMEOUT`]. Call it only after the
+    /// ingress loop has returned. A flush that does not finish in time is
+    /// abandoned: what it still holds is lost, as it would be on any exit.
     pub async fn settle(self) {
         self.ingress_stopped.cancel();
-        if let Some(task) = self.task
-            && let Err(error) = task.await
-        {
-            warn!(%error, "gateway audit drain task ended abnormally");
+        let Some(mut task) = self.task else {
+            return;
+        };
+        match tokio::time::timeout(AUDIT_SETTLE_TIMEOUT, &mut task).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => warn!(%error, "gateway audit drain task ended abnormally"),
+            Err(_) => {
+                task.abort();
+                warn!(
+                    timeout_secs = AUDIT_SETTLE_TIMEOUT.as_secs(),
+                    "gateway audit drain did not settle in time and was abandoned"
+                );
+            }
         }
     }
 }

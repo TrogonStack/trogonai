@@ -35,6 +35,20 @@ impl DecisionAudit for FlushesOnStop {
     }
 }
 
+/// A sink whose last flush never finishes, as when the stream hangs mid-publish.
+struct Hangs;
+
+#[async_trait]
+impl DecisionAudit for Hangs {
+    async fn record(&self, _event: &DecisionEvent<'_>) -> Result<(), AuditError> {
+        Ok(())
+    }
+
+    async fn run(&self, _stop: CancellationToken) {
+        std::future::pending::<()>().await;
+    }
+}
+
 struct Panics;
 
 #[async_trait]
@@ -98,4 +112,18 @@ async fn a_drain_that_panics_is_logged_and_shutdown_still_completes() {
         lines[0].field("error").is_some_and(|error| error.contains("panicked")),
         "{lines:?}"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_flush_that_hangs_is_abandoned_so_shutdown_still_completes() {
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
+    AuditDrain::start(Some(Arc::new(Hangs))).settle().await;
+    let lines = events.events();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(
+        lines[0].message(),
+        Some("gateway audit drain did not settle in time and was abandoned")
+    );
+    assert_eq!(lines[0].field("timeout_secs"), Some("10"));
 }
