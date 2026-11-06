@@ -319,4 +319,8 @@ fn issuer_public_keys_reject_empty_and_duplicate_lists() {
         duplicate,
         IssuerPublicKeysError::Duplicate(IssuerPublicKey::parse(&account).expect("account key"))
     );
+    assert_eq!(
+        duplicate.to_string(),
+        format!("lists issuer public key {account} more than once")
+    );
 }

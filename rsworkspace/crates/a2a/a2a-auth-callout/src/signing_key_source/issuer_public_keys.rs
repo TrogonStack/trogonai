@@ -54,10 +54,6 @@ impl IssuerPublicKeys {
         }
         Self::new(keys)
     }
-
-    pub fn keys(&self) -> &[IssuerPublicKey] {
-        &self.0
-    }
 }
 
 impl VerifyingKeySource for IssuerPublicKeys {
