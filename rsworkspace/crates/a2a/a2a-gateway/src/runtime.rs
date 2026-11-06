@@ -22,10 +22,12 @@ use crate::ingress_identity::{
 };
 use crate::policy::Tier1SpiceDbConfig;
 use crate::policy::tier1_declarative::Tier1DeclarativeConfig;
+use crate::runtime::platform_audit::AuditDrain;
 
 pub mod audit_publish;
 pub mod dispatch;
 pub mod env;
+pub mod platform_audit;
 pub mod policy_stack;
 pub mod reply;
 pub mod streaming;
@@ -54,6 +56,9 @@ pub enum RuntimeError {
 
     #[error("gateway caller JWT issuer keys: {0}")]
     CallerJwtIssuerKeys(#[from] CallerJwtIssuerKeysError),
+
+    #[error("gateway platform audit config: {0}")]
+    PlatformAudit(#[from] crate::runtime::platform_audit::PlatformAuditConfigError),
 }
 
 /// Resolve config from `args` + `env` and run the gateway.
@@ -73,6 +78,7 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     );
     let tier1_layer = Tier1SpiceDbConfig::from_env(env).await?;
     let tier1_declarative_layer = Tier1DeclarativeConfig::from_env(env)?;
+    let platform_audit = crate::runtime::platform_audit::jetstream_audit_from_env(env, &client)?;
 
     let gateway_subject_string = config.gateway_subscribe_subject().to_string();
     let gateway_subject = async_nats::Subject::from(gateway_subject_string.as_str());
@@ -101,6 +107,8 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
     let streaming_ingress_enabled = gateway_streaming_ingress_enabled(env);
     let streaming_ingress_gate = StreamingIngressGate::new(streaming_ingress_config);
 
+    let audit_drain = AuditDrain::start(platform_audit.clone());
+
     receive_ingress(ingress, &config.a2a_prefix, shutdown.clone(), |msg| {
         crate::runtime::dispatch::dispatch_gateway_ingress(
             &client,
@@ -113,12 +121,16 @@ pub async fn run_with_config<E: ReadEnv>(config: Config, nats_config: NatsConfig
             streaming_ingress_enabled,
             streaming_ingress_config,
             &streaming_ingress_gate,
+            platform_audit.as_deref(),
             shutdown.clone(),
             env,
             msg,
         )
     })
     .await;
+
+    shutdown.cancel();
+    audit_drain.settle().await;
 
     info!(prefix = %config.a2a_prefix, "A2A gateway shutdown complete");
     Ok(())

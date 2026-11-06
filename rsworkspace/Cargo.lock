@@ -89,6 +89,7 @@ dependencies = [
  "a2a-redaction",
  "async-nats",
  "async-trait",
+ "buffa",
  "bytes",
  "cel-interpreter",
  "clap",
@@ -108,9 +109,11 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "trogon-audit",
  "trogon-identity-types",
  "trogon-nats",
  "trogon-std",
+ "trogonai-proto",
  "uuid",
 ]
 

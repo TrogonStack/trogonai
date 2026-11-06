@@ -44,6 +44,29 @@ service sets the shared `NATS_URL`, `NATS_CREDS`, `NATS_CA`, `NATS_CERT` and
 The gateway holds only public keys, so it can check a caller JWT but never
 mint one.
 
+## Audit publishing
+
+The compose service leaves `A2A_GATEWAY_AUDIT_PUBLISH` unset, so the gateway
+records no decisions. Setting it to `true` also requires:
+
+| Variable | Meaning |
+|---|---|
+| `A2A_GATEWAY_AUDIT_TENANT` | The tenant every record names |
+| `A2A_GATEWAY_AUDIT_PROJECT` | The project every record names, and the project token of its subject |
+| `A2A_GATEWAY_AUDIT_INSTANCE` | Names this replica; it becomes the audit writer id |
+
+The boot fails when any of them is missing. The gateway writes records under
+`platform.v1.audit.>` but does not create a stream for them, so provision one
+first, for example:
+
+```bash
+nats stream add AUDIT --subjects 'platform.v1.audit.>' --defaults
+```
+
+Without that stream the gateway still boots and serves methods declared
+read-only, but refuses every other allowed request with JSON-RPC `-32804`,
+because an action it cannot record does not run.
+
 ## Changing the policy bundle
 
 Edit or add `*.tier1.toml` files under `services/a2a-gateway/policy/`. Each

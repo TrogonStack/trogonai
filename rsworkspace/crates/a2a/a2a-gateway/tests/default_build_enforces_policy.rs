@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use a2a_gateway::Args;
 use a2a_gateway::runtime::run_with_args;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use tokio::task::JoinHandle;
-use trogon_nats::test_support::CoreTestServer;
+use trogon_nats::test_support::JetStreamTestServer;
 use trogon_std::env::InMemoryEnv;
 
 const ALLOWED_INGRESS: &str = "a2a.v1.gateway.planner.person.alice.message.send";
@@ -23,6 +23,8 @@ const UNROUTABLE_INGRESS: &str = "a2a.v1.gateway.planner.person.alice.unknown";
 const FORWARDED_SUBJECT: &str = "a2a.v1.agents.planner.person.alice.message.send";
 const AGENT_WILDCARD: &str = "a2a.v1.agents.planner.>";
 const AUDIT_ERR: &str = "a2a.v1.audit.planner.err";
+const AUDIT_STREAM: &str = "AUDIT";
+const AUDIT_STREAM_SUBJECTS: &str = "platform.v1.audit.>";
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Allow `message/send`; the catch-all denies every other method.
@@ -56,6 +58,10 @@ enum FixtureError {
     Connect(#[from] async_nats::ConnectError),
     #[error(transparent)]
     Subscribe(#[from] async_nats::SubscribeError),
+    #[error(transparent)]
+    CreateStream(#[from] async_nats::jetstream::context::CreateStreamError),
+    #[error(transparent)]
+    StreamInfo(#[from] async_nats::jetstream::context::RequestError),
     #[error(transparent)]
     Flush(#[from] async_nats::client::FlushError),
     #[error(transparent)]
@@ -95,6 +101,9 @@ fn gateway_env(bundle_dir: &Path) -> Result<InMemoryEnv, FixtureError> {
     env.set("A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED", "true");
     env.set("A2A_GATEWAY_TIER1_BUNDLE_DIR", bundle_dir.to_string_lossy());
     env.set("A2A_GATEWAY_AUDIT_PUBLISH", "true");
+    env.set("A2A_GATEWAY_AUDIT_TENANT", "acme");
+    env.set("A2A_GATEWAY_AUDIT_PROJECT", "payments");
+    env.set("A2A_GATEWAY_AUDIT_INSTANCE", "gw-1");
     Ok(env)
 }
 
@@ -139,8 +148,20 @@ async fn the_default_build_forwards_allowed_requests_and_refuses_denied_ones() -
 }
 
 async fn enforce_policy_end_to_end() -> Result<(), FixtureError> {
-    let server = CoreTestServer::start().await;
+    let server = JetStreamTestServer::start().await;
     let client = async_nats::connect(server.address()).await?;
+
+    // Audit publishing writes every allow that acts ahead of the forward, so
+    // the platform audit stream must exist before the gateway serves.
+    let audit_stream = server
+        .jetstream()
+        .await
+        .create_stream(async_nats::jetstream::stream::Config {
+            name: AUDIT_STREAM.into(),
+            subjects: vec![AUDIT_STREAM_SUBJECTS.into()],
+            ..Default::default()
+        })
+        .await?;
 
     // The fake downstream agent and the audit listener subscribe before the
     // gateway starts, so nothing the gateway publishes can be missed.
@@ -242,6 +263,22 @@ async fn enforce_policy_end_to_end() -> Result<(), FixtureError> {
             .await
             .is_err(),
         "the allowed requests must not produce an error audit event"
+    );
+
+    // Both allows were written ahead of their forward, the deny was recorded,
+    // and the writer opened its chain with a reset marker at startup.
+    let recorded: std::collections::BTreeMap<String, usize> = audit_stream
+        .info_with_subjects(AUDIT_STREAM_SUBJECTS)
+        .await?
+        .try_collect()
+        .await?;
+    assert_eq!(
+        recorded,
+        std::collections::BTreeMap::from([
+            ("platform.v1.audit.decision.payments.allow".to_owned(), 2),
+            ("platform.v1.audit.decision.payments.deny".to_owned(), 1),
+            ("platform.v1.audit.integrity.a2a_gateway.chain_reset".to_owned(), 1),
+        ])
     );
     Ok(())
 }

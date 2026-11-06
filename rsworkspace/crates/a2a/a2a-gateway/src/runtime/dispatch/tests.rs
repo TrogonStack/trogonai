@@ -1,4 +1,5 @@
 mod fixture;
+mod platform_audit_tests;
 mod pressure_tests;
 mod streaming_tests;
 

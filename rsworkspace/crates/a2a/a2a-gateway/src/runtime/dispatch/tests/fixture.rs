@@ -15,12 +15,19 @@ use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
+use trogon_audit::{AuditName, AuditWriter, MemorySink, Stamper, WriterConfig, WriterId, WriterIdentity};
 use trogon_identity_types::PrincipalKind;
+use trogon_nats::NatsToken;
 use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer};
 use trogon_std::env::InMemoryEnv;
+use trogon_std::time::SystemClock;
+use trogon_std::uuid::UuidV7Generator;
 
 use crate::config::{Args, Config, config_from_args};
-use crate::constants::ENV_GATEWAY_AUDIT_PUBLISH;
+use crate::constants::{
+    AUDIT_COMPONENT, AUDIT_WRITER_ID_PREFIX, ENV_GATEWAY_AUDIT_INSTANCE, ENV_GATEWAY_AUDIT_PROJECT,
+    ENV_GATEWAY_AUDIT_PUBLISH, ENV_GATEWAY_AUDIT_TENANT,
+};
 use crate::gw_ingress_stream::{
     GatewayStreamingIngressConfig, StreamingIngressGate, StreamingMaxAckPending, StreamingMaxInflightPerCaller,
 };
@@ -31,7 +38,24 @@ use crate::policy::tier1_gate::{
     Tier1SessionKey,
 };
 use crate::runtime::dispatch::dispatch_gateway_ingress;
+use crate::runtime::platform_audit::{DecisionAudit, WriterAudit, jetstream_audit_from_env};
 use crate::runtime::policy_stack::GatewayPolicyStack;
+
+pub const AUDIT_PROJECT: &str = "payments";
+const AUDIT_TENANT: &str = "acme";
+const AUDIT_INSTANCE: &str = "test";
+
+pub fn audit_writer_id() -> WriterId {
+    WriterId::new(format!("{AUDIT_WRITER_ID_PREFIX}{AUDIT_INSTANCE}")).expect("writer id")
+}
+
+fn audit_tenant() -> AuditName {
+    AuditName::new(AUDIT_TENANT).expect("tenant")
+}
+
+fn audit_project() -> NatsToken {
+    NatsToken::new(AUDIT_PROJECT).expect("project")
+}
 
 pub type TestResult<T = ()> = Result<T, FixtureError>;
 
@@ -93,6 +117,8 @@ pub struct DispatchFixture<S = CoreTestServer> {
     pub owner: Option<Arc<dyn OwnerTupleEmitter>>,
     pub declarative: Arc<dyn Tier1DeclarativeGate>,
     pub policy: GatewayPolicyStack,
+    /// The platform audit path; `None` until a test turns one on.
+    pub platform_audit: Option<Arc<dyn DecisionAudit>>,
     signing: Arc<StaticSigningKeySource>,
     caller_jwt: ForwardedCallerJwtVerifier,
     pub shutdown: CancellationToken,
@@ -162,6 +188,7 @@ impl<S> DispatchFixture<S> {
             owner: None,
             declarative: Arc::new(NoopTier1DeclarativeGate),
             policy: GatewayPolicyStack::noop(),
+            platform_audit: None,
             signing,
             caller_jwt,
             shutdown: CancellationToken::new(),
@@ -169,6 +196,35 @@ impl<S> DispatchFixture<S> {
             streaming_config,
             streaming_gate: StreamingIngressGate::new(streaming_config),
         })
+    }
+
+    /// Routes the platform audit records into memory, where a test can make the
+    /// sink fail and recover, and returns the sink with the writer to drain.
+    pub fn enable_memory_audit(&mut self) -> (MemorySink, AuditWriter<MemorySink>) {
+        let sink = MemorySink::new();
+        let identity = WriterIdentity::new(
+            audit_writer_id(),
+            NatsToken::new(AUDIT_COMPONENT).expect("component"),
+            audit_tenant(),
+            audit_project(),
+        );
+        let stamper = Stamper::new(SystemClock, UuidV7Generator);
+        let writer = AuditWriter::new(sink.clone(), identity, WriterConfig::default(), &stamper);
+        self.platform_audit = Some(Arc::new(WriterAudit::new(
+            writer.clone(),
+            audit_tenant(),
+            audit_project(),
+        )));
+        (sink, writer)
+    }
+
+    /// Builds the platform audit writer the way the gateway does at start, over
+    /// the stream this fixture's connection reaches.
+    pub fn enable_jetstream_audit(&mut self) {
+        self.env.set(ENV_GATEWAY_AUDIT_TENANT, AUDIT_TENANT);
+        self.env.set(ENV_GATEWAY_AUDIT_PROJECT, AUDIT_PROJECT);
+        self.env.set(ENV_GATEWAY_AUDIT_INSTANCE, AUDIT_INSTANCE);
+        self.platform_audit = jetstream_audit_from_env(&self.env, &self.client).expect("platform audit settings");
     }
 
     pub async fn dispatch(&self, message: Message) {
@@ -183,6 +239,7 @@ impl<S> DispatchFixture<S> {
             self.streaming_enabled,
             self.streaming_config,
             &self.streaming_gate,
+            self.platform_audit.as_deref(),
             self.shutdown.clone(),
             &self.env,
             message,

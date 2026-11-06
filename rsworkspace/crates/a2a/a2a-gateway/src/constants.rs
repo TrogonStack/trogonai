@@ -37,6 +37,9 @@ pub const DEFAULT_FETCH_HEARTBEAT_SECS: u64 = 5;
 pub const DEFAULT_INACTIVE_THRESHOLD_SECS: u64 = 300;
 pub const DEFAULT_MAX_INFLIGHT_PER_CALLER: usize = 32;
 
+/// How long shutdown waits for the platform audit sink's last flush before it
+/// abandons it, so a stream that hangs mid-publish cannot keep the process up.
+pub(crate) const AUDIT_SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 pub(crate) const MAX_BACKOFF: Duration = Duration::from_secs(30);
 pub(crate) const FETCH_EXPIRES: Duration = Duration::from_secs(30);
@@ -78,6 +81,7 @@ pub(crate) const ROUTING_TIER3_REFUSED: &str = "tier3_refused";
 pub(crate) const ROUTING_TIER3_ENGINE_ERROR: &str = "tier3_engine_error";
 pub(crate) const ROUTING_FORWARDED: &str = "forwarded";
 pub(crate) const ROUTING_FORWARD_FAILED: &str = "forward_failed";
+pub(crate) const ROUTING_AUDIT_UNAVAILABLE: &str = "audit_unavailable";
 pub(crate) const ROUTING_DEADLINE_EXCEEDED: &str = "deadline_exceeded";
 pub(crate) const ROUTING_INGRESS_ERROR: &str = "ingress_error";
 pub(crate) const ROUTING_CALLER_JWT_REJECTED: &str = "caller_jwt_rejected";
@@ -88,6 +92,27 @@ pub const ENV_GATEWAY_TIER2_CEL_ENABLED: &str = "A2A_GATEWAY_TIER2_CEL_ENABLED";
 pub const ENV_GATEWAY_TIER3_SIGNING_PUBKEY: &str = "A2A_GATEWAY_TIER3_SIGNING_PUBKEY";
 pub const ENV_GATEWAY_AUDIT_PUBLISH: &str = "A2A_GATEWAY_AUDIT_PUBLISH";
 pub const ENV_GATEWAY_UNARY_DEADLINE_SECS: &str = "A2A_GATEWAY_UNARY_DEADLINE_SECS";
+
+// --- runtime/platform_audit ---
+
+/// The tenant every platform audit record names. The gateway serves one tenant per
+/// process until a verified credential carries it.
+pub const ENV_GATEWAY_AUDIT_TENANT: &str = "A2A_GATEWAY_AUDIT_TENANT";
+/// The project every platform audit record names, and the project token of its subject.
+pub const ENV_GATEWAY_AUDIT_PROJECT: &str = "A2A_GATEWAY_AUDIT_PROJECT";
+/// Names this replica. It becomes the audit writer id, so records say which process
+/// wrote them and a restarted replica is the same writer.
+pub const ENV_GATEWAY_AUDIT_INSTANCE: &str = "A2A_GATEWAY_AUDIT_INSTANCE";
+pub(crate) const AUDIT_WRITER_ID_PREFIX: &str = "a2a-gateway:";
+/// The component token the gateway's own integrity records, such as the chain
+/// reset that opens every chain, are published under.
+pub(crate) const AUDIT_COMPONENT: &str = "a2a_gateway";
+pub(crate) const AUDIT_LOG_TARGET: &str = "a2a_gateway_audit";
+/// Names of the layers an allow record says evaluated the request.
+pub(crate) const AUDIT_LAYER_TIER1_SPICEDB: &str = "tier1_spicedb";
+pub(crate) const AUDIT_LAYER_TIER3: &str = "tier3";
+/// Prefix of the name that stands in for an identifier an audit name cannot spell.
+pub(crate) const AUDIT_DIGEST_NAME_PREFIX: &str = "sha256:";
 
 /// Method-dots string for the unary `message/send`. Shared by
 /// `runtime::env` (unary deadline lookup) and `runtime::dispatch`.
