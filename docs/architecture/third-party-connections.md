@@ -114,6 +114,7 @@ separately; an absent provider lifetime is never replaced with a made-up expiry.
 - [Agent use through an HTTP proxy](../adr/0096-connection-use-by-agents.md)
 - [Secret management](./secret-management.md)
 - [Provider credential custody](./provider-credential-custody.md)
+- [Enterprise workload identity](../reference/enterprise-workload-identity.md)
 
 
 ## Security and integration references

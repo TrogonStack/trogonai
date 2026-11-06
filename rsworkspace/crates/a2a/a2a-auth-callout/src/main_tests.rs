@@ -157,6 +157,6 @@ async fn mtls_factory_loads_the_configured_anchor_for_verification() -> Result<(
             &AudienceAccount::new("fixture-account"),
         )
         .await?;
-    assert_eq!(claims.aud.as_str(), "fixture-account");
+    assert_eq!(claims.claims().aud.as_str(), "fixture-account");
     Ok(())
 }

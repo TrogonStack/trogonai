@@ -10,6 +10,16 @@ use crate::jwt::JwtError;
 /// substring-matching the error message.
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialError {
+    #[error("OIDC critical protected headers are unsupported")]
+    UnsupportedCriticalHeader,
+    #[error("OIDC protected header encoding is invalid")]
+    ProtectedHeaderEncoding(#[source] base64::DecodeError),
+    #[error("OIDC protected header JSON is invalid")]
+    ProtectedHeaderJson(#[source] serde_json::Error),
+    #[error("OIDC not-before claim must be an integer timestamp")]
+    InvalidNotBefore,
+    #[error("credential validity does not permit broker admission")]
+    Validity(#[source] crate::CredentialExpiryError),
     /// The caller requested an account that isn't in the allowlist (or
     /// otherwise doesn't resolve).
     #[error("requested account {0:?} not allowlisted")]
@@ -24,6 +34,8 @@ pub enum CredentialError {
     /// The verifier ran and refused the credential material itself.
     #[error("credential verification failed: {0}")]
     InvalidCredentials(String),
+    #[error("client certificate verification failed")]
+    MtlsCertificate(#[source] crate::credentials::mtls::CertificateVerificationError),
     /// The caller verified, but the principal document minted for them could
     /// not be encoded. Kept apart from [`Self::InvalidCredentials`] because the
     /// credential was good: the failure is this side's, and it carries the

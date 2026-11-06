@@ -21,10 +21,11 @@ an agent identity is presented to a party that is not this platform and does
 not speak AAuth.
 
 That gap is now load-bearing, because the shape of the answer is not the one
-the deferred layer implies. Every cloud identity provider that accepts an
-external workload assertion, Microsoft Entra's workload identity federation
-being the concrete case examined here, consumes exactly one thing: an OIDC
-discovery document plus a JWKS, over HTTPS, at a stable issuer URL. It does
+the deferred layer implies. The OIDC-consuming provider profile examined here,
+Microsoft Entra's workload identity federation, needs an OIDC discovery document
+plus a JWKS, over HTTPS, at a stable issuer URL. This is a specific integration
+profile, not a claim that all cloud federation uses OIDC or the same algorithms.
+That verifier does
 not resolve DIDs, read transparency logs, or fetch AAuth well-known
 documents. The pragmatic substrate for
 [ADR#0036](./0036-agent-self-certifying-identity.md)'s deferred layer is the
@@ -84,15 +85,21 @@ them separate also keeps the blast radius separate: the federation issuer is
 internet-facing and consumed by parties outside our control, while the AAuth
 documents serve the mesh.
 
-### 2. RS256 only on that surface, under the conditional profile
+### 2. RS256 for the reviewed external compatibility profile
 
-Assertions minted for external federation are signed RS256 over RSA-2048
-keys, adopted as the conditional profile
+Assertions minted for this Entra-compatible federation profile are signed RS256
+over RSA-2048 keys, adopted as the conditional profile
 [ADR#0038](./0038-agent-identity-crypto-suite.md) Decision 4 records. This
 profile exists for this purpose and no other. It is never an agent's root
 anchor, never enters the `did:key` identifier, and never widens
 `trogon-aauth-verify`'s inbound allowlist: this platform *signs* RS256 here
 and continues to refuse to *verify* it on the mesh.
+
+Another provider needs a reviewed profile for its accepted algorithms and trust
+discovery. It cannot silently inherit this compatibility requirement or widen
+its issuer's key set. ADR0038's conditional trigger remains authoritative;
+provider-specific interoperability evidence, not a generic federation label,
+justifies an exception to the default suite.
 
 ### 3. The binding is a first-class resource with exact-match semantics
 
@@ -186,6 +193,13 @@ Two things this decision deliberately does not settle:
   the deferred operational-key tier of
   [ADR#0036](./0036-agent-self-certifying-identity.md), and this surface
   inherits that limitation rather than fixing it.
+
+Draft [ADR#0098](./0098-attested-enterprise-workload-identity.md) defines the
+stronger enterprise deployment profile: attestation and constrained registration
+precede production workload issuance, with rotating X.509 credentials and
+independent authorization. Its acceptance gates do not make this deferred
+infrastructure implemented or change this ADR's status. Assertion-cache,
+delegation and external-token revocation rules above still apply.
 
 ## Consequences
 

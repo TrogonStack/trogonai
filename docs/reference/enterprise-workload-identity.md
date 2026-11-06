@@ -1,0 +1,195 @@
+# Enterprise Workload Identity
+
+This reference defines the proposed deployment profile and its acceptance gates
+under draft [ADR#0098](../adr/0098-attested-enterprise-workload-identity.md).
+The checklists identify work that must be implemented and verified; they are not
+a claim that a production SPIRE integration exists in this repository.
+
+## Runtime foundation and limits
+
+| Boundary | Foundation | Enterprise gate |
+| --- | --- | --- |
+| Egress workload identity | TLS certificate validation and provisional agent URI mapping | Workload API integration, authorized identity mapping and credential/bundle rotation |
+| Egress authorization | Separate exact-destination admission using a static snapshot | Live policy and status with bounded staleness and established-tunnel termination |
+| NATS admission | Operator accounts, platform credentials and credential-verifying auth callout | Authoritative caller-to-tenant admission binding and explicit SPIFFE profile if selected; legacy DN-based mTLS is not that profile |
+| AAuth issuance | Person and Access Server libraries with injected policies | Bounded token lifetimes, deferred-request revalidation, real consent/policy and durable bounded operation |
+| External federation | Draft ADR0053 exact-match issuer/subject/audience design | Attested assertion issuer, provider registration and real exchange acceptance |
+| Provider access | Draft connector custody, grant, relay and recovery contracts | Implemented custody/relay plus provider and isolation acceptance |
+
+## Attestation and registration
+
+Implementation:
+
+- [ ] Integrate a pinned SPIRE release and supported node/workload attestors for
+  each admitted runtime. Configure exact registration selectors and parent
+  constraints; resolve transport identity to tenant, role and application identity
+  from governed state.
+- [ ] Keep registration administration separate from workload callers. Require
+  audit and independent approval for trust/selector widening and signing-authority
+  changes. Emergency denial is immediate and reviewed afterward.
+- [ ] Bind bootstrap and renewal to verified runtime identity and key possession,
+  with freshness and replay protections appropriate to the chosen attestor.
+  Do not use shared join tokens or signing-key possession as attestation.
+
+Verification:
+
+- [ ] A copied application key, caller-chosen SPIFFE ID, another tenant's runtime,
+  broad selector, forged evidence or wrong key cannot obtain the identity.
+- [ ] Expired/replayed evidence and unavailable attestors refuse issuance or
+  renewal without a static-credential fallback.
+- [ ] Registration revocation, redeployment and restore cannot reactivate a
+  previous runtime or transfer a Connection without new authorization.
+
+## Issuer bootstrap, custody and isolation
+
+Implementation:
+
+- [ ] Configure production signing through a supported HSM-backed key manager
+  and deployment IAM. Keep platform bootstrap, SPIRE administration and tenant
+  credential custody distinct; no direct workload OpenBao access is implied.
+- [ ] Deploy redundant servers with a durable datastore, authenticated restricted
+  administrative endpoints, backups and a fenced recovery procedure.
+- [ ] Restrict the Workload API and its key material to the trusted supervisor or
+  adapter. Enforce tenant and process/VM isolation independently of SPIFFE.
+- [ ] Gate candidate SVID/key/bundle activation on validated registration, an
+  acknowledged durable activation fact and a final live-generation check. Fence
+  generations across restore and bound the candidate queue. Collect native
+  SPIRE issuance events separately; ordinary issuer logs do not implement this
+  platform gate or prove pre-signing acknowledgement.
+
+Verification:
+
+- [ ] Another tenant, guest process or untrusted agent cannot call the privileged
+  identity endpoint, read keys or administer registrations.
+- [ ] Signer/IAM loss, datastore loss, failed audit and restored stale state do
+  not activate unauthorized identities or silently select another signer.
+- [ ] Audit outage, revocation during an audit append, duplicate/reordered update
+  and restored acknowledgement cannot activate a stale candidate or extend the
+  old credential, even while the Workload API stream remains healthy.
+- [ ] Demonstrate issuer failover and key-compromise recovery without widening
+  trust; validate any hardware or compliance claim against the actual deployment.
+
+## Certificate and trust lifecycle
+
+Implementation:
+
+- [ ] Consume Workload API SVID and bundle updates; rotate before expiry within
+  the one-hour certificate lifetime ceiling. Replace key/certificate/bundle
+  state atomically and retire old trust according to a bounded overlap policy.
+- [ ] Use standard X.509 path validation plus the SVID leaf, URI and trust-domain
+  checks. Separate legacy mTLS pins from SPIFFE registration authority.
+- [ ] Treat Workload API updates as complete snapshots. Remove omitted
+  identities/bundles and handle `PermissionDenied` without waiting for audit;
+  never merge withdrawn authority into the next snapshot or switch identities
+  because a default entry changed.
+
+Verification:
+
+- [ ] Reject non-CA intermediates, invalid CA key usage, exceeded path lengths,
+  unknown critical extensions, invalid leaf purpose, expired chains, multiple
+  URI identities and unexpected trust domains.
+- [ ] Verify rotation with old and new connections, missed update/reconnect,
+  wrong-domain bundles, compromised-root removal and failed renewal.
+- [ ] Verify identity/bundle redaction and `PermissionDenied`, including while
+  audit is unavailable. Explicit removal and compromise override rotation
+  overlap, and a reconnect cannot restore a removed generation.
+- [ ] No credential, cached bundle or established connection survives beyond its
+  applicable expiry or configured authority-staleness bound.
+
+## Authorization, delegation and deferred issuance
+
+Implementation:
+
+- [ ] Independently check operation, tenant, destination, caller role, binding,
+  audience and live grant after authentication. Reevaluate policy on a deferred
+  request and recheck time-dependent input authority immediately before minting.
+- [ ] Require authoritative caller-to-tenant account admission before minting a
+  broker credential. Signing-key availability and a tenant-scoped identity hash
+  do not establish membership; absent admission authority refuses the mint.
+- [ ] Keep workload federation separate from delegated user consent; intersect
+  relevant policy and delegation before granting on-behalf-of authority.
+- [ ] Bound AAuth output validity by the agent and any bound subagent/upstream
+  delegation, independently of a resource challenge's exchange deadline.
+- [ ] Bound derived broker user JWTs by verified OIDC/certificate-path expiry
+  as well as configured admission TTL, and recheck expiry immediately before
+  minting. Preserve finite evidence separately from serialized identity claims.
+- [ ] Bound pending state, retention, replay protection and concurrency in the
+  real service; an in-memory library store is not HA acceptance.
+
+Verification:
+
+- [ ] A valid certificate without the requested permit still fails. Tenant,
+  role, binding, audience, grant generation and holder-key substitutions fail.
+- [ ] A valid OIDC or mTLS caller without membership cannot obtain a configured
+  tenant account's broker credential by naming that account. Test identity
+  namespacing and account admission as distinct boundaries.
+- [ ] Advance the clock while a request awaits claims, interaction or approval;
+  expired inputs cannot produce a fresh grant. A slow policy cannot mint past
+  the authority it evaluated.
+- [ ] Auth token expiry never exceeds the applicable agent/delegation validity;
+  a short resource challenge alone does not unnecessarily shorten the grant.
+- [ ] A source expiring during credential verification or dispatcher work cannot
+  mint a fresh broker JWT. A shorter selected intermediate/root expiry also
+  bounds admission, while a shorter configured TTL remains effective.
+- [ ] Reject future not-before dates under the selected clock policy, malformed
+  present date claims and unsupported critical JOSE extensions. Cover dates
+  within a decoder's default leeway, exact activation/expiry and numeric limits;
+  optional absent claims remain compatible with the reviewed protocol profile.
+- [ ] Missing, revoked or narrowed user consent cannot be recovered from an
+  earlier workload-authentication success or cached policy decision.
+
+## Provider exchange and token protection
+
+Implementation:
+
+- [ ] Register the actual provider's exact issuer/subject/audience and allowed
+  role/resource mapping. Prefer supported federation or asymmetric client
+  authentication; preserve provider-required credential custody.
+- [ ] Implement only reviewed sender constraints that both parties support.
+  Keep RFC8705 certificate binding, DPoP and AAuth proofs distinct. A bearer-only
+  provider needs a reviewed compatibility profile with its residual risk stated.
+
+Verification:
+
+- [ ] Exercise the real provider or an exact protocol test double for wrong
+  issuer, audience, binding, scope and provider-account substitutions.
+- [ ] Replay a sender-constrained token using another holder key: it fails at
+  the relevant recipient. Successful client mTLS alone cannot pass this gate.
+- [ ] Unsupported proof methods or lost binding keys cannot downgrade to bearer.
+  JWT-SVIDs and bearer-only providers are never labeled sender-constrained.
+
+## Cache, revocation and established sessions
+
+Implementation:
+
+- [ ] Never cache exchange assertions. Separate resource-token caches from JWKS
+  and trust bundles; include tenant, credential source/account, generations,
+  scope, audience and holder identity in resource-token cache isolation.
+- [ ] Recheck live authority on every use. End local usability at the earliest
+  applicable credential, grant, key and revocation bound.
+- [ ] Apply live invalidations and bounded reevaluation to existing tunnels and
+  sessions. Prove both ADR0049's normal-operation target and a hard staleness
+  bound no greater than its 330-second backstop.
+
+Verification:
+
+- [ ] Identical AgentId/audience/scope on different tenants, Connections,
+  accounts, apps, issuers or generations never shares an eligible credential.
+- [ ] Lost invalidations, stopped projections, clock boundaries, key retirement,
+  disconnection and restore cannot resurrect authorization or extend a tunnel.
+- [ ] Offboarding distinguishes immediate local denial from already-issued
+  external tokens, whose provider-controlled expiry/revocation remains visible.
+
+## Deployment acceptance
+
+Record pinned software/artifact identities, attestor configuration, trust domains,
+signer/IAM evidence, registration and network policy, completed failure tests,
+issuer failover, retention and recovery receipts. Exclude raw keys, attestation
+assertions and tokens. A missing required capability blocks this profile;
+compatibility mode cannot satisfy the gate by changing its label.
+Verify artifact signatures and provenance against configured release trust;
+a digest obtained without authenticated provenance is not sufficient evidence.
+
+The [connector conformance gate](./connector-conformance.md) remains necessary
+for provider integrations. No certificate fixture, local library test or draft
+ADR substitutes for these deployment and provider checks.

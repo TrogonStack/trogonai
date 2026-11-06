@@ -15,6 +15,8 @@ use crate::interaction::NoopInteractionChannel;
 use crate::store::InMemoryStore;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod lifetime;
+
 fn now_unix() -> i64 {
     SystemTimeSource.now()
 }
@@ -186,7 +188,10 @@ async fn grant_path_mints_auth_token() {
     match outcome {
         TokenEndpointOutcome::Grant { response } => {
             assert!(!response.auth_token.is_empty());
-            assert_eq!(response.expires_in, 3600);
+            assert_eq!(
+                lifetime::expires_at(&response.auth_token),
+                lifetime::expires_at(&agent_jwt)
+            );
         }
         other => panic!("expected Grant, got {other:?}"),
     }
@@ -373,7 +378,12 @@ async fn re_authorization_after_grant_creates_new_pending_since_prior_is_termina
     let req2 = TokenRequest::new(new_resource_jwt);
     let second = server.evaluate_token_request(&agent_jwt, &req2).await.unwrap();
     match second {
-        TokenEndpointOutcome::Grant { response } => assert_eq!(response.expires_in, 3600),
+        TokenEndpointOutcome::Grant { response } => {
+            assert_eq!(
+                lifetime::expires_at(&response.auth_token),
+                lifetime::expires_at(&agent_jwt)
+            );
+        }
         other => panic!("expected Grant on re-authorization, got {other:?}"),
     }
 }

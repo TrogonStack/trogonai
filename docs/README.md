@@ -4,6 +4,14 @@ Browse the [documentation home](./index.md) for the full project navigation.
 Documents distinguish proposed architecture, normative contract reference and
 runtime acceptance evidence.
 
+## Workload identity
+
+The proposed [enterprise workload identity profile](./reference/enterprise-workload-identity.md)
+defines attested bootstrap, issuer isolation, rotating credentials, independent
+authorization and provider token protection. Its implementation and verification
+checklists distinguish runtime foundations from deployment acceptance. The
+governing [ADR#0098](./adr/0098-attested-enterprise-workload-identity.md) remains draft.
+
 ## Third-party connections
 
 - Understand the [architecture](./architecture/third-party-connections.md).

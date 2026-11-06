@@ -10,6 +10,8 @@ use crate::trust::{PsIssuer, TrustBasisRecord, TrustedIssuer};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
+mod lifetime;
+
 const AS_ISS: &str = "https://as.example";
 const PS_ISS: &str = "https://ps.example";
 const AP_ISS: &str = "https://ap.example";

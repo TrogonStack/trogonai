@@ -110,8 +110,8 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> (Arc<CalloutDispatc
             &self,
             _token: &BearerToken,
             account: &AudienceAccount,
-        ) -> Result<UserJwtClaims, a2a_auth_callout::AuthCalloutError> {
-            Ok(UserJwtClaims {
+        ) -> Result<a2a_auth_callout::VerifiedCredential, a2a_auth_callout::AuthCalloutError> {
+            let claims = UserJwtClaims {
                 kid: KeyVersion::new("pending").expect("fixture kid"),
                 sub: ExternalSubject::new("harness-sub").expect("fixture sub"),
                 aud: account.clone(),
@@ -119,7 +119,15 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> (Arc<CalloutDispatc
                 nats_permissions: IssuedPermissions::default_for_caller(&self.caller_id),
                 caller_id: self.caller_id.clone(),
                 principal_kind: trogon_identity_types::PrincipalKind::Person,
-            })
+            };
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("fixture epoch");
+            let expires_at = a2a_auth_callout::CredentialExpiry::from_unix_seconds(
+                i64::try_from(now.as_secs()).expect("fixture timestamp") + 3600,
+            )
+            .expect("fixture expiry");
+            Ok(a2a_auth_callout::VerifiedCredential::new(claims, expires_at))
         }
     }
 

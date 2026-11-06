@@ -27,5 +27,27 @@ replicas share the load. A mint request must carry a sealed credential. A
 request that is malformed, unsealed or refused gets a reply naming only a
 refusal category, never a JWT.
 
-This crate is being landed in slices on `main`; see
-`.trogonai/todos/a2a-auth-callout-pr-plan.internal.trogonai.md`.
+## Certificate verification and admission lifetime
+
+CA trust uses standard certificate-path validation with explicit signing-key
+usage checks. A configured end-entity pin trusts exactly that certificate's DER,
+not another certificate with the same subject or public key. Pins still enforce
+leaf validity, purpose and critical-extension checks. Legacy certificates may
+omit key/extended-key usage; a present incompatible usage is refused.
+
+Present a leaf-first certificate chain containing the required intermediates.
+The callout preserves one ordered chain and never combines alternate verified
+paths. Presented and verified alternatives must name the same leaf identity.
+
+Derived NATS credentials are bounded by verified OIDC or selected certificate-path
+expiry as well as the configured broker TTL. Expiry is checked again immediately
+before minting. OIDC not-before dates are enforced without early-activation
+leeway; malformed dates and unsupported critical JOSE extensions are refused.
+This profile requires representable integer Unix-second dates.
+Finite verification evidence is separate from serialized identity
+claims. Deprecated API-key admission remains an explicit compatibility branch,
+not a fallback after another verifier refuses a credential.
+
+DN-based mTLS identity is separate from the proposed
+[enterprise workload identity profile](../../../../docs/reference/enterprise-workload-identity.md).
+These verification rules do not implement SPIRE attestation or credential rotation.

@@ -106,10 +106,13 @@ async fn verify_happy_path_rs256() {
         .verify_internal(&BearerToken::new(token), &account)
         .await
         .unwrap();
-    assert_eq!(user.sub.as_str(), "user-42");
-    assert_eq!(user.aud.as_str(), "nats-acct-1");
-    assert!(!user.caller_id.as_str().contains('.'));
-    assert_eq!(user.principal_kind, trogon_identity_types::PrincipalKind::Person);
+    assert_eq!(user.claims().sub.as_str(), "user-42");
+    assert_eq!(user.claims().aud.as_str(), "nats-acct-1");
+    assert!(!user.claims().caller_id.as_str().contains('.'));
+    assert_eq!(
+        user.claims().principal_kind,
+        trogon_identity_types::PrincipalKind::Person
+    );
     let issuer = nkeys::KeyPair::new_account();
     let issuer_seed = issuer.seed().expect("issuer seed");
     let subject_kp = nkeys::KeyPair::new_user();
@@ -117,7 +120,7 @@ async fn verify_happy_path_rs256() {
         KeyVersion::new("test").unwrap(),
         SigningKey::from_seed(&issuer_seed).unwrap(),
     );
-    let mut user = user;
+    let mut user = user.claims().clone();
     user.kid = handle.version().clone();
     let subject =
         crate::jwt::UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(subject_kp.public_key()).unwrap());
@@ -474,7 +477,7 @@ async fn oidc_verifier_trait_delegates_to_verify_internal() {
         .verify(&BearerToken::new(token), &AudienceAccount::new("nats-acct"))
         .await
         .expect("verify via trait");
-    assert_eq!(claims.sub.as_str(), "user-1");
+    assert_eq!(claims.claims().sub.as_str(), "user-1");
 }
 
 /// Signs `claims` as an RS256 token naming `test-kid`, the shape every guard
@@ -632,7 +635,7 @@ async fn verify_accepts_a_jwk_that_declares_the_asserted_algorithm() {
         .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
         .await
         .expect("declared alg matches the asserted one");
-    assert_eq!(claims.sub.as_str(), "user-guard");
+    assert_eq!(claims.claims().sub.as_str(), "user-guard");
 }
 
 #[tokio::test]
@@ -652,7 +655,7 @@ async fn verify_accepts_a_jwk_that_declares_no_purpose_at_all() {
         .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
         .await
         .expect("absent RFC 7517 members stay permissive");
-    assert_eq!(claims.sub.as_str(), "user-guard");
+    assert_eq!(claims.claims().sub.as_str(), "user-guard");
 }
 
 #[test]

@@ -45,6 +45,10 @@ impl DenialCategory {
 
     fn from_credential_error(e: &CredentialError) -> Self {
         match e {
+            CredentialError::Validity(
+                crate::CredentialExpiryError::Expired | crate::CredentialExpiryError::InvalidTimestamp,
+            ) => Self::InvalidCredentials,
+            CredentialError::Validity(_) => Self::InternalError,
             CredentialError::UnknownAccount(_) => Self::UnknownAccount,
             CredentialError::VerifierUnavailable { .. } => Self::VerifierUnavailable,
             CredentialError::InvalidRequest(_) => Self::InvalidRequest,
@@ -54,6 +58,11 @@ impl DenialCategory {
             // exist so this side can count them apart, not so a caller can
             // learn which check refused it.
             CredentialError::InvalidCredentials(_)
+            | CredentialError::UnsupportedCriticalHeader
+            | CredentialError::ProtectedHeaderEncoding(_)
+            | CredentialError::ProtectedHeaderJson(_)
+            | CredentialError::InvalidNotBefore
+            | CredentialError::MtlsCertificate(_)
             | CredentialError::UnsupportedTokenAlgorithm { .. }
             | CredentialError::JwkNotPublishedForVerification { .. }
             | CredentialError::UnplaceablePrincipal(_) => Self::InvalidCredentials,

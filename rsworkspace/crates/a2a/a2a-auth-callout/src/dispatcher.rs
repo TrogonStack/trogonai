@@ -1,7 +1,8 @@
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use a2a_nats::A2aPrefix;
+use trogon_std::{EpochClock, SystemClock};
 
 use crate::account_resolver::{AccountResolverError, RequestedAccount};
 use crate::admission_keys::{AccountSigningKey, TenantAccount, TenantSigningKeys};
@@ -15,6 +16,29 @@ use crate::jwt::{AccountName, MintedUserJwt, UserJwtClaims, UserJwtSubject};
 use crate::permissions::CallerGrant;
 use crate::signing_key_source::MintingMaterial;
 use crate::wire::ServerAuthRequestClaims;
+use crate::{CredentialExpiry, VerifiedCredential};
+
+enum AdmissionCredential {
+    TimeBound(VerifiedCredential),
+    LegacyApiKey(UserJwtClaims),
+}
+
+impl AdmissionCredential {
+    fn into_parts(self) -> (UserJwtClaims, AdmissionValidity) {
+        match self {
+            Self::TimeBound(verified) => {
+                let (claims, expiry) = verified.into_parts();
+                (claims, AdmissionValidity::Source(expiry))
+            }
+            Self::LegacyApiKey(claims) => (claims, AdmissionValidity::LegacyApiKey),
+        }
+    }
+}
+
+enum AdmissionValidity {
+    Source(CredentialExpiry),
+    LegacyApiKey,
+}
 
 /// Trait that the subscriber loop delegates auth decisions to.
 #[async_trait::async_trait]
@@ -39,13 +63,26 @@ pub struct CalloutDispatcherConfig {
     pub api_key: Option<Arc<dyn ApiKeyVerifier>>,
 }
 
-pub struct CalloutDispatcher {
+pub struct CalloutDispatcher<C = SystemClock> {
     config: CalloutDispatcherConfig,
+    clock: C,
 }
 
-impl CalloutDispatcher {
+impl CalloutDispatcher<SystemClock> {
     pub fn new(config: CalloutDispatcherConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            clock: SystemClock,
+        }
+    }
+}
+
+impl<C: EpochClock> CalloutDispatcher<C> {
+    pub fn with_clock<D: EpochClock>(self, clock: D) -> CalloutDispatcher<D> {
+        CalloutDispatcher {
+            config: self.config,
+            clock,
+        }
     }
 
     fn tenant(
@@ -64,20 +101,20 @@ impl CalloutDispatcher {
 }
 
 #[async_trait::async_trait]
-impl AuthDispatcher for CalloutDispatcher {
+impl<C: EpochClock> AuthDispatcher for CalloutDispatcher<C> {
     async fn dispatch(&self, request: ServerAuthRequestClaims) -> Result<MintedUserJwt, AuthCalloutError> {
         let requested = request.requested_account()?;
         let (tenant, signing_key) = self.tenant(&requested)?;
         let account = AccountName::new(tenant.as_str());
 
-        let claims = match request.presented_credential()? {
+        let verified = match request.presented_credential()? {
             PresentedCredential::BearerToken(token) => {
                 let verifier = self
                     .config
                     .oidc
                     .as_ref()
                     .ok_or(CredentialError::VerifierUnavailable { scheme: "OIDC" })?;
-                verifier.verify(&token, &account).await?
+                AdmissionCredential::TimeBound(verifier.verify(&token, &account).await?)
             }
             PresentedCredential::ClientCertificate(pem) => {
                 let verifier = self
@@ -85,7 +122,7 @@ impl AuthDispatcher for CalloutDispatcher {
                     .mtls
                     .as_ref()
                     .ok_or(CredentialError::VerifierUnavailable { scheme: "mTLS" })?;
-                verifier.verify(&pem, &account).await?
+                AdmissionCredential::TimeBound(verifier.verify(&pem, &account).await?)
             }
             PresentedCredential::ApiKey(key) => {
                 #[allow(deprecated)]
@@ -95,9 +132,10 @@ impl AuthDispatcher for CalloutDispatcher {
                     .as_ref()
                     .ok_or(CredentialError::VerifierUnavailable { scheme: "API-key" })?;
                 #[allow(deprecated)]
-                verifier.verify(key.as_str(), &account).await?
+                AdmissionCredential::LegacyApiKey(verifier.verify(key.as_str(), &account).await?)
             }
         };
+        let (claims, validity) = verified.into_parts();
         let principal = claims
             .subject_principal()
             .map_err(CredentialError::UnplaceablePrincipal)?;
@@ -110,8 +148,15 @@ impl AuthDispatcher for CalloutDispatcher {
         let user_nkey = request.user_nkey()?;
         let user_subject = UserJwtSubject::from_user_nkey(user_nkey);
         let material = MintingMaterial::on_behalf_of(signing_key, tenant);
+        let issued_at = self.clock.system_time();
+        let ttl = match validity {
+            AdmissionValidity::Source(expiry) => expiry
+                .bounded_ttl(issued_at, self.config.user_jwt_ttl)
+                .map_err(CredentialError::Validity)?,
+            AdmissionValidity::LegacyApiKey => self.config.user_jwt_ttl,
+        };
         claims
-            .mint(&material, &user_subject, SystemTime::now(), self.config.user_jwt_ttl)
+            .mint(&material, &user_subject, issued_at, ttl)
             .map_err(AuthCalloutError::from)
     }
 }

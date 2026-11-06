@@ -15,6 +15,8 @@ use nkeys::KeyPair;
 use serde_json::json;
 use trogon_identity_types::{PrincipalId, PrincipalKind, SubjectPrincipal};
 
+mod lifetime;
+
 const FIXTURE_CLIENT_CERT: &str = "-----BEGIN CERT-----\n-----END CERT-----";
 
 fn encode_fixture_request(
@@ -88,8 +90,12 @@ struct StubOidcVerifier {
 
 #[async_trait::async_trait]
 impl OidcVerifier for StubOidcVerifier {
-    async fn verify(&self, _token: &BearerToken, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError> {
-        Ok(UserJwtClaims {
+    async fn verify(
+        &self,
+        _token: &BearerToken,
+        account: &AudienceAccount,
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
+        Ok(crate::test_support::verified_test_credential(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: ExternalSubject::new(self.sub).unwrap(),
             aud: account.clone(),
@@ -97,7 +103,7 @@ impl OidcVerifier for StubOidcVerifier {
             nats_permissions: IssuedPermissions::default_for_caller(&self.caller),
             caller_id: self.caller.clone(),
             principal_kind: PrincipalKind::Person,
-        })
+        }))
     }
 }
 
@@ -109,9 +115,9 @@ impl MTlsVerifier for StubMtlsVerifier {
         &self,
         _cert: &ClientCertPem,
         account: &AudienceAccount,
-    ) -> Result<UserJwtClaims, AuthCalloutError> {
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         let caller_id = CallerId::new("mtlsstub").unwrap();
-        Ok(UserJwtClaims {
+        Ok(crate::test_support::verified_test_credential(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: ExternalSubject::new("CN=svc").unwrap(),
             aud: account.clone(),
@@ -119,7 +125,7 @@ impl MTlsVerifier for StubMtlsVerifier {
             nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
             caller_id,
             principal_kind: PrincipalKind::Service,
-        })
+        }))
     }
 }
 

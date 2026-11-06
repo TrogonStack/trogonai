@@ -4,6 +4,8 @@ use crate::test_support::{ed25519_fixture, jwks_with_key, p256_fixture, p384_fix
 use crate::time_source::SystemTimeSource;
 use std::sync::Arc;
 
+mod registered_dates;
+
 fn freshness_clock(value: Arc<std::sync::atomic::AtomicI64>) -> impl TimeSource {
     struct C(Arc<std::sync::atomic::AtomicI64>);
     impl TimeSource for C {
@@ -194,13 +196,16 @@ async fn assert_freshness_uses_supplied_clock() {
     let now = Arc::new(std::sync::atomic::AtomicI64::new(1000));
     let v = TokenVerifier::new(StaticJwks::new(), freshness_clock(now.clone())).with_leeway(0);
 
-    v.assert_freshness(900, 1100).expect("freshness inside window");
+    v.assert_freshness(900, 1100, None).expect("freshness inside window");
 
     now.store(1201, std::sync::atomic::Ordering::SeqCst);
-    assert!(matches!(v.assert_freshness(900, 1100), Err(TokenError::Expired)));
+    assert!(matches!(v.assert_freshness(900, 1100, None), Err(TokenError::Expired)));
 
     now.store(500, std::sync::atomic::Ordering::SeqCst);
-    assert!(matches!(v.assert_freshness(900, 1100), Err(TokenError::NotYetValid)));
+    assert!(matches!(
+        v.assert_freshness(900, 1100, None),
+        Err(TokenError::NotYetValid)
+    ));
 
     let _system: TokenVerifier<StaticJwks, SystemTimeSource> = TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
 }
@@ -211,18 +216,9 @@ async fn verify_resource_distinguishes_audience_mismatch_from_signature() {
     // error type as bad signatures. The verifier must surface it as the
     // typed AudienceMismatch variant so operators can tell the two
     // failure modes apart.
-    let pem = b"-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2\nOF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r\n1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G\n-----END PRIVATE KEY-----\n";
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(pem).expect("signing key");
-    let jwk: jsonwebtoken::jwk::Jwk = serde_json::from_value(serde_json::json!({
-        "kty": "EC",
-        "crv": "P-256",
-        "kid": "k1",
-        "alg": "ES256",
-        "use": "sig",
-        "x": "EVs_o5-uQbTjL3chynL4wXgUg2R9q9UU8I5mEovUf84",
-        "y": "kGe5DgSIycKp8w9aJmoHhB1sB3QTugfnRWm5nU_TzsY"
-    }))
-    .expect("jwk");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
+    let jwk = fixture.jwk;
     let jwks = StaticJwks::new().with("iss.example", jsonwebtoken::jwk::JwkSet { keys: vec![jwk] });
 
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
@@ -248,24 +244,20 @@ async fn verify_resource_distinguishes_audience_mismatch_from_signature() {
     );
 }
 
-const P256_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2\nOF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r\n1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G\n-----END PRIVATE KEY-----\n";
-
-fn p256_jwk_for_test() -> jsonwebtoken::jwk::Jwk {
-    serde_json::from_value(serde_json::json!({
-        "kty": "EC", "crv": "P-256", "kid": "k1", "alg": "ES256", "use": "sig",
-        "x": "EVs_o5-uQbTjL3chynL4wXgUg2R9q9UU8I5mEovUf84",
-        "y": "kGe5DgSIycKp8w9aJmoHhB1sB3QTugfnRWm5nU_TzsY"
-    }))
-    .unwrap()
+fn p256_for_test() -> crate::test_support::EcFixture {
+    let mut fixture = p256_fixture("k1");
+    fixture.jwk.common.key_algorithm = Some(jsonwebtoken::jwk::KeyAlgorithm::ES256);
+    fixture
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn verify_auth_happy_path() {
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
     let jwks = StaticJwks::new().with(
         "iss.example",
         jsonwebtoken::jwk::JwkSet {
-            keys: vec![p256_jwk_for_test()],
+            keys: vec![fixture.jwk],
         },
     );
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
@@ -289,11 +281,12 @@ async fn verify_auth_happy_path() {
 }
 
 async fn verify_auth_with_cnf_jwk(cnf_jwk: serde_json::Value) -> Result<VerifiedAuth, TokenError> {
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
     let jwks = StaticJwks::new().with(
         "iss.example",
         jsonwebtoken::jwk::JwkSet {
-            keys: vec![p256_jwk_for_test()],
+            keys: vec![fixture.jwk],
         },
     );
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
@@ -352,11 +345,12 @@ async fn verify_auth_accepts_valid_public_ec_okp_and_rsa_confirmation_keys() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn verify_resource_happy_path() {
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
     let jwks = StaticJwks::new().with(
         "iss.example",
         jsonwebtoken::jwk::JwkSet {
-            keys: vec![p256_jwk_for_test()],
+            keys: vec![fixture.jwk],
         },
     );
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
@@ -381,7 +375,8 @@ async fn verify_resource_happy_path() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn parse_typ_rejects_wrong_typ() {
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
     header.typ = Some("aa-other+jwt".into());
     header.kid = Some("k1".into());
@@ -420,11 +415,12 @@ async fn iss_of_rejects_malformed_jwt() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn verify_agent_happy_path() {
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
     let jwks = StaticJwks::new().with(
         "iss.example",
         jsonwebtoken::jwk::JwkSet {
-            keys: vec![p256_jwk_for_test()],
+            keys: vec![fixture.jwk],
         },
     );
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
@@ -451,11 +447,12 @@ async fn verify_agent_happy_path() {
 }
 
 async fn verify_agent_with_cnf_jwk(cnf_jwk: serde_json::Value) -> TokenError {
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
     let jwks = StaticJwks::new().with(
         "iss.example",
         jsonwebtoken::jwk::JwkSet {
-            keys: vec![p256_jwk_for_test()],
+            keys: vec![fixture.jwk],
         },
     );
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
@@ -492,11 +489,12 @@ async fn verify_agent_maps_unsupported_kty_to_invalid_claim() {
 async fn verify_agent_maps_missing_cnf_to_invalid_claim() {
     // Drives the JktError mapping arms in verify_agent: a present-but-malformed
     // cnf.jwk (missing kty) returns InvalidClaim, not MissingClaim.
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
     let jwks = StaticJwks::new().with(
         "iss.example",
         jsonwebtoken::jwk::JwkSet {
-            keys: vec![p256_jwk_for_test()],
+            keys: vec![fixture.jwk],
         },
     );
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
@@ -544,11 +542,12 @@ async fn verify_agent_rejects_peer_cnf_naming_a_symmetric_key() {
 }
 
 async fn verify_agent_accepts_cnf_jwk(cnf_jwk: serde_json::Value) -> VerifiedAgent {
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
     let jwks = StaticJwks::new().with(
         "iss.example",
         jsonwebtoken::jwk::JwkSet {
-            keys: vec![p256_jwk_for_test()],
+            keys: vec![fixture.jwk],
         },
     );
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
@@ -588,11 +587,12 @@ async fn verify_agent_accepts_valid_public_ec_okp_and_rsa_confirmation_keys() {
 async fn pick_jwk_falls_back_to_sole_compatible_key_when_kid_absent() {
     // Drives the single-key fallback in pick_jwk: JWT header carries no kid
     // and the JwkSet has exactly one compatible key.
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
     let jwks = StaticJwks::new().with(
         "iss.example",
         jsonwebtoken::jwk::JwkSet {
-            keys: vec![p256_jwk_for_test()],
+            keys: vec![fixture.jwk],
         },
     );
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
@@ -620,11 +620,12 @@ async fn pick_jwk_falls_back_to_sole_compatible_key_when_kid_absent() {
 async fn verify_resource_signature_path_when_jwt_corrupted() {
     // Crafted JWT with a valid header + payload but a garbage signature drives
     // the non-InvalidAudience Signature arm in decode_with_jwks.
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
     let jwks = StaticJwks::new().with(
         "iss.example",
         jsonwebtoken::jwk::JwkSet {
-            keys: vec![p256_jwk_for_test()],
+            keys: vec![fixture.jwk],
         },
     );
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
@@ -684,8 +685,7 @@ async fn verify_agent_returns_no_compatible_jwk_when_set_is_empty() {
     // A typed Err variant per failure mode lets the gateway distinguish
     // "issuer is known but doesn't publish a matching key" (operator
     // misconfig / pending key rotation) from a generic signature failure.
-    let pem = b"-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2\nOF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r\n1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G\n-----END PRIVATE KEY-----\n";
-    let key = jsonwebtoken::EncodingKey::from_ec_pem(pem).expect("test key");
+    let key = p256_for_test().signing;
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
     header.typ = Some(TYP_AGENT.into());
     header.kid = Some("missing-kid".into());
@@ -935,11 +935,12 @@ fn request_context_error_display_messages_are_distinct() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn verified_agent_debug_redacts_raw_jwt() {
-    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let fixture = p256_for_test();
+    let signing = fixture.signing;
     let jwks = StaticJwks::new().with(
         "iss.example",
         jsonwebtoken::jwk::JwkSet {
-            keys: vec![p256_jwk_for_test()],
+            keys: vec![fixture.jwk],
         },
     );
     let mut header = jsonwebtoken::Header::new(Algorithm::ES256);

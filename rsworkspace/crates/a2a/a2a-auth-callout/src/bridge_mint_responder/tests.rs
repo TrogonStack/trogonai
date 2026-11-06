@@ -8,6 +8,7 @@ use trogon_identity_types::PrincipalKind;
 use trogon_std::env::InMemoryEnv;
 
 use super::*;
+use crate::VerifiedCredential;
 use crate::admission_keys::{AccountSigningKey, TenantAccount, TenantSigningKeys};
 use crate::bridge_mint::{BridgeClientInfo, BridgeCredential, SealedBridgeCredential};
 use crate::credentials::mtls::{ClientCertPem, MTlsVerifier};
@@ -24,12 +25,16 @@ struct TokenVerifier;
 
 #[async_trait::async_trait]
 impl OidcVerifier for TokenVerifier {
-    async fn verify(&self, token: &BearerToken, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError> {
+    async fn verify(
+        &self,
+        token: &BearerToken,
+        account: &AudienceAccount,
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         if token.as_str() != GOOD_TOKEN {
             return Err(CredentialError::InvalidCredentials("verifier diagnostic detail".into()).into());
         }
         let caller = CallerId::new("alice").unwrap();
-        Ok(UserJwtClaims {
+        Ok(crate::test_support::verified_test_credential(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: ExternalSubject::new("alice-sub").unwrap(),
             aud: account.clone(),
@@ -37,7 +42,7 @@ impl OidcVerifier for TokenVerifier {
             nats_permissions: IssuedPermissions::default_for_caller(&caller),
             caller_id: caller,
             principal_kind: PrincipalKind::Person,
-        })
+        }))
     }
 }
 
@@ -51,9 +56,9 @@ impl MTlsVerifier for AcceptingMtlsVerifier {
         &self,
         _cert: &ClientCertPem,
         account: &AudienceAccount,
-    ) -> Result<UserJwtClaims, AuthCalloutError> {
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         let caller = CallerId::new("svc").unwrap();
-        Ok(UserJwtClaims {
+        Ok(crate::test_support::verified_test_credential(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: ExternalSubject::new("CN=svc").unwrap(),
             aud: account.clone(),
@@ -61,7 +66,7 @@ impl MTlsVerifier for AcceptingMtlsVerifier {
             nats_permissions: IssuedPermissions::default_for_caller(&caller),
             caller_id: caller,
             principal_kind: PrincipalKind::Service,
-        })
+        }))
     }
 }
 

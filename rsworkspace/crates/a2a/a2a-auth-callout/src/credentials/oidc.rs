@@ -1,6 +1,8 @@
 use std::fmt;
 use std::sync::Arc;
 
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
 use crate::constants::OIDC_ALLOWED_ALGORITHMS;
 use crate::error::{AuthCalloutError, CredentialError};
 use crate::jwt::{
@@ -8,6 +10,7 @@ use crate::jwt::{
     spicedb_principal_from_oidc_claims,
 };
 use crate::permissions::IssuedPermissions;
+use crate::{CredentialExpiry, CredentialExpiryError, VerifiedCredential};
 use jsonwebtoken::jwk::{AlgorithmParameters, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 
@@ -272,7 +275,7 @@ impl JwksOidcVerifier {
         &self,
         token: &BearerToken,
         account: &AudienceAccount,
-    ) -> Result<UserJwtClaims, AuthCalloutError> {
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         if self.expected_id_token_audiences.is_empty() {
             return Err(AuthCalloutError::CredentialVerification(
                 CredentialError::InvalidCredentials("no expected OIDC token audiences configured".into()),
@@ -302,11 +305,35 @@ impl JwksOidcVerifier {
         // Built from the header only after the allowlist above has vetted it,
         // so the token cannot nominate its own algorithm.
         let mut validation = Validation::new(header.alg);
+        validation.leeway = 0;
+        validation.validate_nbf = true;
         validation.set_issuer(&[self.issuer.as_str()]);
         validation.set_audience(&auds);
         let decoding_key = Self::decoding_key_for_jwk(jwk)?;
         let token_data = decode::<serde_json::Value>(token.as_str(), &decoding_key, &validation)
             .map_err(|e| CredentialError::InvalidCredentials(format!("OIDC token validation failed: {e}")))?;
+        // Header::crit maps explicit null to None, so preserve signed member presence.
+        let protected_header = URL_SAFE_NO_PAD
+            .decode(token.as_str().split('.').next().unwrap_or_default())
+            .map_err(CredentialError::ProtectedHeaderEncoding)?;
+        let protected_header: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_slice(&protected_header).map_err(CredentialError::ProtectedHeaderJson)?;
+        if protected_header.get("crit").is_some() {
+            return Err(CredentialError::UnsupportedCriticalHeader.into());
+        }
+        if token_data
+            .claims
+            .get("nbf")
+            .is_some_and(|value| value.as_i64().is_none())
+        {
+            return Err(CredentialError::InvalidNotBefore.into());
+        }
+        let expires_at = token_data
+            .claims
+            .get("exp")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or(CredentialError::Validity(CredentialExpiryError::InvalidTimestamp))?;
+        let expires_at = CredentialExpiry::from_unix_seconds(expires_at).map_err(CredentialError::Validity)?;
         let sub_str = token_data
             .claims
             .get("sub")
@@ -318,26 +345,37 @@ impl JwksOidcVerifier {
         let namespace = CallerNamespace::Oidc { issuer: &self.issuer };
         let caller_id = derive_caller_id(namespace, sub_str, account)
             .map_err(|e| CredentialError::InvalidCredentials(format!("caller_id derivation failed: {e}")))?;
-        Ok(UserJwtClaims {
-            kid: crate::signing_key_source::unminted_placeholder(),
-            sub,
-            aud: account.clone(),
-            data,
-            caller_id,
-            principal_kind: namespace.principal_kind(),
-            nats_permissions: IssuedPermissions::none(),
-        })
+        Ok(VerifiedCredential::new(
+            UserJwtClaims {
+                kid: crate::signing_key_source::unminted_placeholder(),
+                sub,
+                aud: account.clone(),
+                data,
+                caller_id,
+                principal_kind: namespace.principal_kind(),
+                nats_permissions: IssuedPermissions::none(),
+            },
+            expires_at,
+        ))
     }
 }
 
 #[async_trait::async_trait]
 pub trait OidcVerifier: Send + Sync + 'static {
-    async fn verify(&self, token: &BearerToken, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError>;
+    async fn verify(
+        &self,
+        token: &BearerToken,
+        account: &AudienceAccount,
+    ) -> Result<VerifiedCredential, AuthCalloutError>;
 }
 
 #[async_trait::async_trait]
 impl OidcVerifier for JwksOidcVerifier {
-    async fn verify(&self, token: &BearerToken, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError> {
+    async fn verify(
+        &self,
+        token: &BearerToken,
+        account: &AudienceAccount,
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         self.verify_internal(token, account).await
     }
 }

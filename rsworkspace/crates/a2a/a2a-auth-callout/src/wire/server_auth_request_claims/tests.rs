@@ -1,10 +1,14 @@
 use nats_jwt_rs::Claims;
 use nats_jwt_rs::authorization::AuthRequest;
 use nkeys::KeyPair;
+use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair as CertificateKeyPair};
+use time::OffsetDateTime;
 
 use super::*;
 use crate::bridge_mint::{BridgeClientInfo, BridgeMintRequest};
+use crate::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier};
 use crate::error::CredentialError;
+use crate::jwt::AudienceAccount;
 use crate::wire::test_encode::{FixtureServer, verified_client_tls};
 
 fn decode_request(server: &FixtureServer, patch: impl FnMut(&mut Claims<AuthRequest>)) -> ServerAuthRequestClaims {
@@ -129,7 +133,7 @@ fn the_client_certificate_is_presented_when_no_secret_is() {
     });
     assert!(matches!(
         req.presented_credential(),
-        Ok(PresentedCredential::ClientCertificate(pem)) if pem.as_str() == "cert-a"
+        Ok(PresentedCredential::ClientCertificate(pem)) if pem.as_str() == "cert-a\nissuer-b"
     ));
 }
 
@@ -185,4 +189,128 @@ fn a_request_from_nats_server_admits_the_callers_own_connection() {
         decode_request(&server, |_| {}).admission_route(),
         AdmissionRoute::Direct
     );
+}
+
+fn request_with_tls(certs: &[String], verified_chains: &[Vec<String>]) -> ServerAuthRequestClaims {
+    FixtureServer::generate().request(&KeyPair::new_user(), |claims| {
+        claims.nats.connect_opts.auth_token = None;
+        claims.nats.connect_opts.pass = None;
+        claims.nats.client_tls = Some(
+            serde_json::from_value(serde_json::json!({
+                "version": "1.3",
+                "cipher": "TLS_AES_128_GCM_SHA256",
+                "certs": certs,
+                "verified_chains": verified_chains,
+            }))
+            .unwrap(),
+        );
+    })
+}
+
+fn client_chain() -> (String, String, String) {
+    let root_key = CertificateKeyPair::generate().unwrap();
+    let mut root_params = CertificateParams::default();
+    root_params.distinguished_name.push(DnType::CommonName, "root");
+    root_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let root = root_params.self_signed(&root_key).unwrap();
+    let issuer_key = CertificateKeyPair::generate().unwrap();
+    let mut issuer_params = CertificateParams::default();
+    issuer_params
+        .distinguished_name
+        .push(DnType::CommonName, "intermediate");
+    issuer_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+    let issuer = issuer_params
+        .signed_by(&issuer_key, &Issuer::from_params(&root_params, &root_key))
+        .unwrap();
+    let leaf_key = CertificateKeyPair::generate().unwrap();
+    let mut leaf_params = CertificateParams::default();
+    leaf_params.distinguished_name.push(DnType::CommonName, "client");
+    let leaf = leaf_params
+        .signed_by(&leaf_key, &Issuer::from_params(&issuer_params, &issuer_key))
+        .unwrap();
+    (leaf.pem(), issuer.pem(), root.pem())
+}
+
+fn assert_request_certificate_verifies(request: &ServerAuthRequestClaims, root: &str) {
+    let chain = request.primary_client_cert().expect("presented certificate chain");
+    let claims = X509MtlsVerifier::new(TrustAnchorPem::new(root))
+        .verify_sync(&chain, &AudienceAccount::new("tenant"), OffsetDateTime::now_utc())
+        .expect("the request must preserve the intermediate for verification");
+    assert!(claims.claims().sub.as_str().contains("client"));
+}
+
+#[test]
+fn presented_chain_survives_signed_request_and_verifier_roundtrip() {
+    let (leaf, issuer, root) = client_chain();
+    let request = request_with_tls(&[leaf, issuer], &[]);
+    assert_request_certificate_verifies(&request, &root);
+}
+
+#[test]
+fn verified_chain_survives_signed_request_and_verifier_roundtrip() {
+    let (leaf, issuer, root) = client_chain();
+    let request = request_with_tls(&[], &[vec![leaf, issuer]]);
+    assert_request_certificate_verifies(&request, &root);
+}
+
+#[test]
+fn alternate_verified_chains_are_not_flattened_together() {
+    let request = request_with_tls(
+        &[],
+        &[
+            vec!["same-leaf".into(), "first-issuer".into()],
+            vec!["same-leaf".into(), "alternate-issuer".into()],
+        ],
+    );
+    let chain = request.client_tls_pem_certs();
+    assert_eq!(chain.len(), 2);
+    assert_eq!(chain[0].as_str(), "same-leaf");
+    assert_eq!(chain[1].as_str(), "first-issuer");
+}
+
+#[test]
+fn conflicting_verified_leaf_identities_are_refused() {
+    let request = request_with_tls(
+        &[],
+        &[
+            vec!["first-leaf".into(), "first-issuer".into()],
+            vec!["other-leaf".into(), "other-issuer".into()],
+        ],
+    );
+    assert!(request.presented_credential().is_err());
+}
+
+#[test]
+fn conflicting_presented_and_verified_leaf_identities_are_refused() {
+    let request = request_with_tls(&["presented-leaf".into()], &[vec!["different-verified-leaf".into()]]);
+    assert!(request.presented_credential().is_err());
+}
+
+#[test]
+fn a_presented_chain_never_borrows_verified_intermediates() {
+    let request = request_with_tls(
+        &["same-leaf".into(), "presented-issuer".into()],
+        &[vec!["same-leaf".into(), "verified-issuer".into()]],
+    );
+    assert_eq!(
+        request.primary_client_cert().unwrap().as_str(),
+        "same-leaf\npresented-issuer"
+    );
+}
+
+#[test]
+fn the_same_leaf_with_different_pem_whitespace_is_not_a_conflict() {
+    let (leaf, issuer, root) = client_chain();
+    let presented_leaf = leaf.trim().to_owned();
+    let request = request_with_tls(&[presented_leaf, issuer.clone()], &[vec![leaf, issuer]]);
+    assert_request_certificate_verifies(&request, &root);
+}
+
+#[test]
+fn a_legacy_single_pem_chain_keeps_its_exact_shape() {
+    let (leaf, issuer, root) = client_chain();
+    let pem = leaf + &issuer;
+    let request = request_with_tls(std::slice::from_ref(&pem), &[]);
+    assert_eq!(request.primary_client_cert().unwrap().as_str(), pem);
+    assert_request_certificate_verifies(&request, &root);
 }

@@ -73,6 +73,15 @@ fn credential_invalid_credentials_keeps_category_opaque() {
 }
 
 #[test]
+fn certificate_path_failure_keeps_category_opaque() {
+    let err = AuthCalloutError::CredentialVerification(CredentialError::MtlsCertificate(
+        crate::credentials::mtls::CertificateVerificationError::Path(webpki::Error::UnknownIssuer),
+    ));
+    let category = DenialCategory::from_auth_callout_error(&err);
+    assert_eq!(category.as_str(), "invalid_credentials");
+}
+
+#[test]
 fn as_str_covers_every_variant() {
     assert_eq!(DenialCategory::InvalidCredentials.as_str(), "invalid_credentials");
     assert_eq!(DenialCategory::UnknownAccount.as_str(), "unknown_account");

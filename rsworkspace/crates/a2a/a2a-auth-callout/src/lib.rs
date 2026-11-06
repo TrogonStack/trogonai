@@ -18,6 +18,7 @@ pub mod bridge_mint_responder;
 pub mod bridge_mint_subscriber;
 pub mod caller_jwt_header;
 pub mod constants;
+mod credential_expiry;
 pub mod credentials;
 pub mod denial_category;
 pub mod denial_claims;
@@ -28,6 +29,7 @@ pub mod jwt;
 pub mod permissions;
 pub mod signing_key_source;
 pub mod subscriber;
+mod verified_credential;
 pub mod wire;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -47,6 +49,7 @@ pub use bridge_mint_responder::{BridgeMintResponder, bridge_mint_subject, dispat
 pub use bridge_mint_subscriber::BridgeMintSubscriber;
 pub use caller_jwt_header::CallerJwtHeaderValue;
 pub use constants::CALLER_JWT_HEADER_NAME;
+pub use credential_expiry::{CredentialExpiry, CredentialExpiryError};
 pub use denial_category::DenialCategory;
 pub use denial_reason::DenialReason;
 pub use error::AuthCalloutError;
@@ -65,5 +68,6 @@ pub use signing_key_source::{
     VerifyingKeySource, signing_key_source_from_env,
 };
 pub use subscriber::{DenialPublisherConfig, Subscriber};
+pub use verified_credential::VerifiedCredential;
 pub use wire::AuthCalloutWireCodec;
 pub use wire::{NkeyPublic, XkeyPublic};
