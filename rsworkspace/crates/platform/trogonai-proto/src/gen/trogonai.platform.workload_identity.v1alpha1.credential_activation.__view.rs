@@ -20,10 +20,17 @@ pub struct CredentialActivationView<'a> {
     pub source_revision: u64,
     /// Field 6: `activation_revision`
     pub activation_revision: u64,
+    /// SHA-256 of the complete leaf certificate DER.
+    ///
     /// Field 7: `leaf_sha256`
     pub leaf_sha256: &'a [u8],
+    /// SHA-256 of the leaf SubjectPublicKeyInfo DER.
+    ///
     /// Field 8: `public_key_sha256`
     pub public_key_sha256: &'a [u8],
+    /// SHA-256 of concatenated, sorted, unique root DER SHA-256 fingerprints.
+    /// Each fingerprint has a fixed width, so concatenation is unambiguous.
+    ///
     /// Field 9: `bundle_sha256`
     pub bundle_sha256: &'a [u8],
     /// Field 10: `not_before`
@@ -651,16 +658,23 @@ impl CredentialActivationOwnedView {
     pub fn activation_revision(&self) -> u64 {
         self.0.reborrow().activation_revision
     }
+    /// SHA-256 of the complete leaf certificate DER.
+    ///
     /// Field 7: `leaf_sha256`
     #[must_use]
     pub fn leaf_sha256(&self) -> &'_ [u8] {
         self.0.reborrow().leaf_sha256
     }
+    /// SHA-256 of the leaf SubjectPublicKeyInfo DER.
+    ///
     /// Field 8: `public_key_sha256`
     #[must_use]
     pub fn public_key_sha256(&self) -> &'_ [u8] {
         self.0.reborrow().public_key_sha256
     }
+    /// SHA-256 of concatenated, sorted, unique root DER SHA-256 fingerprints.
+    /// Each fingerprint has a fixed width, so concatenation is unambiguous.
+    ///
     /// Field 9: `bundle_sha256`
     #[must_use]
     pub fn bundle_sha256(&self) -> &'_ [u8] {

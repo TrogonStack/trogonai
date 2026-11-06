@@ -2,7 +2,6 @@ use crate::audit_sink::AuditSink;
 use crate::audit_unavailable_error::AuditUnavailableError;
 use crate::audit_writer::AuditWriter;
 use crate::credential_activation_facts::{ActivationScopeError, CredentialActivationFacts};
-use crate::disposition::Disposition;
 use crate::record::Record;
 use crate::record_id::RecordId;
 use crate::record_scope::RecordScope;
@@ -23,8 +22,6 @@ pub enum ActivationRecorderError {
     Scope(#[from] ActivationScopeError),
     #[error("activation audit is unavailable")]
     Unavailable(#[from] AuditUnavailableError),
-    #[error("activation audit was not stored")]
-    NotStored,
 }
 
 impl<S: AuditSink> ActivationRecorder<S> {
@@ -39,12 +36,8 @@ impl<S: AuditSink> ActivationRecorder<S> {
     pub async fn record(&self, facts: CredentialActivationFacts) -> Result<RecordId, ActivationRecorderError> {
         let record = Record::credential_activation(self.scope.clone(), facts, self.stamper.stamp())?;
         let id = record.id();
-        match self.writer.write(record).await? {
-            Disposition::Stored => Ok(id),
-            Disposition::Retrying | Disposition::Queued | Disposition::Dropped => {
-                Err(ActivationRecorderError::NotStored)
-            }
-        }
+        self.writer.write(record).await?;
+        Ok(id)
     }
 }
 

@@ -4,10 +4,11 @@ use trogonai_proto::platform::audit::v1::AuditClass;
 use trogonai_proto::platform::audit::v1::audit_record::Detail;
 use trogonai_proto::platform::workload_identity::v1alpha1::{CredentialActivation, RegistrationBinding, WorkloadRole};
 
-use crate::fixtures::{identity, scope, stamper};
+use crate::fixtures::{body, identity, name, resealed, scope, stamper, token};
 use crate::{
-    ActivationFactsError, ActivationRecorder, AuditWriter, CredentialActivationFacts, MemorySink, Obligation, Record,
-    WriterConfig,
+    ActivationFactsError, ActivationRecorder, ActivationRecorderError, Actor, AuditWriter, ChainAnchor,
+    ChainVerificationError, CredentialActivationFacts, MemorySink, Obligation, Record, RecordScope, SinkError,
+    WriterConfig, verify_chain_range,
 };
 
 fn activation() -> CredentialActivation {
@@ -235,4 +236,104 @@ async fn activation_recorder_waits_for_a_durable_acknowledgement() {
     sink.release();
     record.await.unwrap();
     assert_eq!(sink.stored().len(), 2);
+}
+
+#[test]
+fn activation_records_preserve_registered_application_identity_independently_of_transport_path() {
+    let mut message = activation();
+    message.binding.as_option_mut().unwrap().role = EnumValue::from(WorkloadRole::Agent);
+    message.binding.as_option_mut().unwrap().spiffe_id = "spiffe://example.test/opaque/deployment/7".into();
+    message.binding.as_option_mut().unwrap().application_id = Some("did:key:zExample".into());
+    let facts = CredentialActivationFacts::try_from(message.clone()).unwrap();
+    let record = Record::credential_activation(scope(), facts, stamper().stamp()).unwrap();
+    let Some(Detail::CredentialActivation(actual)) = record.message().detail.as_ref() else {
+        panic!("activation detail");
+    };
+    assert_eq!(actual.binding.application_id.as_deref(), Some("did:key:zExample"));
+    message.binding.as_option_mut().unwrap().spiffe_id = "spiffe://example.test".into();
+    assert!(CredentialActivationFacts::try_from(message).is_ok());
+}
+
+#[tokio::test]
+async fn an_unrecorded_activation_never_returns_a_receipt() {
+    let sink = MemorySink::new();
+    sink.fail_all(SinkError::Timeout);
+    let writer = AuditWriter::new(sink.clone(), identity(), WriterConfig::default(), &stamper());
+    let recorder = ActivationRecorder::new(writer.clone(), scope());
+    let facts = CredentialActivationFacts::try_from(activation()).unwrap();
+    assert!(matches!(
+        recorder.record(facts.clone()).await,
+        Err(ActivationRecorderError::Unavailable(_))
+    ));
+    assert!(sink.stored().is_empty());
+    sink.recover();
+    writer.drain_once().await;
+    recorder.record(facts).await.unwrap();
+    let verified = verify_chain_range(
+        ChainAnchor::Genesis {
+            writer: identity().writer().clone(),
+            chain: writer.chain(),
+        },
+        sink.stored_records(),
+    )
+    .unwrap();
+    assert_eq!(verified.head().sequence(), 2);
+}
+
+#[tokio::test]
+async fn activation_scope_mismatch_is_refused_before_any_audit_write() {
+    let sink = MemorySink::new();
+    let writer = AuditWriter::new(sink.clone(), identity(), WriterConfig::default(), &stamper());
+    let other_scope = RecordScope::new(name("tenant_2"), token("project_1"), Actor::Unattributed);
+    let recorder = ActivationRecorder::new(writer, other_scope);
+    let facts = CredentialActivationFacts::try_from(activation()).unwrap();
+    assert!(matches!(
+        recorder.record(facts).await,
+        Err(ActivationRecorderError::Scope(_))
+    ));
+    assert_eq!(sink.attempts(), 0);
+}
+
+#[tokio::test]
+async fn offline_verification_refuses_resealed_activation_authority_confusion() {
+    let sink = MemorySink::new();
+    let writer = AuditWriter::new(sink.clone(), identity(), WriterConfig::default(), &stamper());
+    let recorder = ActivationRecorder::new(writer.clone(), scope());
+    recorder
+        .record(CredentialActivationFacts::try_from(activation()).unwrap())
+        .await
+        .unwrap();
+    let anchor = ChainAnchor::Genesis {
+        writer: identity().writer().clone(),
+        chain: writer.chain(),
+    };
+    let records = sink.stored_records();
+    assert!(verify_chain_range(anchor.clone(), records.clone()).is_ok());
+    let original = body(&records[1]);
+    let mut tampered = Vec::new();
+    let mut message = original.clone();
+    message.tenant.as_option_mut().unwrap().value = "tenant_2".into();
+    tampered.push(message);
+    let mut message = original.clone();
+    message.class = EnumValue::from(AuditClass::BestEffort);
+    tampered.push(message);
+    let mut message = original.clone();
+    message.attribution.as_option_mut().unwrap().would_deny = true;
+    tampered.push(message);
+    let mut message = original.clone();
+    message.attribution = MessageField::none();
+    tampered.push(message);
+    let mut message = original.clone();
+    let Some(Detail::CredentialActivation(activation)) = message.detail.as_mut() else {
+        panic!("activation detail");
+    };
+    activation.bundle_sha256.pop();
+    tampered.push(message);
+    for message in tampered {
+        let rewritten = resealed(&records[1], &message);
+        assert_eq!(
+            verify_chain_range(anchor.clone(), vec![records[0].clone(), rewritten]),
+            Err(ChainVerificationError::SubjectMismatch { stream_sequence: 2 })
+        );
+    }
 }

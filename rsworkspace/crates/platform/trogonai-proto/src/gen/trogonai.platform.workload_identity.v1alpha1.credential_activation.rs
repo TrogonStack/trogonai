@@ -49,6 +49,8 @@ pub struct CredentialActivation {
         with = "::buffa::json_helpers::uint64"
     )]
     pub activation_revision: u64,
+    /// SHA-256 of the complete leaf certificate DER.
+    ///
     /// Field 7: `leaf_sha256`
     #[serde(
         rename = "leafSha256",
@@ -56,6 +58,8 @@ pub struct CredentialActivation {
         with = "::buffa::json_helpers::bytes"
     )]
     pub leaf_sha256: ::buffa::alloc::vec::Vec<u8>,
+    /// SHA-256 of the leaf SubjectPublicKeyInfo DER.
+    ///
     /// Field 8: `public_key_sha256`
     #[serde(
         rename = "publicKeySha256",
@@ -63,6 +67,9 @@ pub struct CredentialActivation {
         with = "::buffa::json_helpers::bytes"
     )]
     pub public_key_sha256: ::buffa::alloc::vec::Vec<u8>,
+    /// SHA-256 of concatenated, sorted, unique root DER SHA-256 fingerprints.
+    /// Each fingerprint has a fixed width, so concatenation is unambiguous.
+    ///
     /// Field 9: `bundle_sha256`
     #[serde(
         rename = "bundleSha256",
