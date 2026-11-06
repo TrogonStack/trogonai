@@ -17,13 +17,15 @@ use crate::limits::Limits;
 use crate::live_policy::{KvPolicyConfig, KvSnapshot};
 use crate::peer_identity::PeerIdentity;
 use crate::policy_revision::PolicyRevision;
-use crate::policy_snapshot::{PolicySnapshot, SnapshotVerdict};
+use crate::policy_snapshot::{PolicySnapshot, PolicyStatistics, SnapshotVerdict};
 use crate::resolver::SystemResolver;
 use async_nats::jetstream::kv;
 use tokio_util::sync::CancellationToken;
 use trogon_audit::AuditName;
 use trogon_nats::NatsToken;
 use trogon_nats::test_support::JetStreamTestServer;
+use trogon_std::env::InMemoryEnv;
+use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 use crate::constants::{LIVE_POLICY_TEST_POLL as POLL, LIVE_POLICY_TEST_WAIT as WAIT, LIVE_POLICY_TUNNEL_TEST_WAIT};
 
@@ -92,7 +94,7 @@ fn config() -> KvPolicyConfig {
 }
 
 struct Fixture {
-    _server: JetStreamTestServer,
+    _server: Option<JetStreamTestServer>,
     client: async_nats::Client,
     store: kv::Store,
     snapshot: std::sync::Arc<KvSnapshot>,
@@ -117,7 +119,7 @@ impl Fixture {
         let shutdown = CancellationToken::new();
         let task = tokio::spawn(driver.run(shutdown.clone()));
         Self {
-            _server: server,
+            _server: Some(server),
             client,
             store,
             snapshot,
@@ -318,7 +320,7 @@ async fn a_duplicate_cannot_extend_the_monotonic_producer_deadline() {
 #[tokio::test]
 async fn a_recreated_stream_is_not_automatically_adopted() {
     let fixture = Fixture::start().await;
-    let context = async_nats::jetstream::new(fixture._server.client().await);
+    let context = async_nats::jetstream::new(fixture._server.as_ref().unwrap().client().await);
     context.delete_key_value(config().bucket()).await.unwrap();
     let store = context.create_key_value(bucket_config()).await.unwrap();
     store.put(config().key(), envelope(2, "agent-1").into()).await.unwrap();
@@ -472,12 +474,9 @@ async fn opening_live_authority_refuses_wrong_scope_invalid_time_and_unbounded_c
                     )
                     | (crate::live_policy::LivePolicyError::Inactive, ExpectedError::Inactive)
                     | (crate::live_policy::LivePolicyError::Lease, ExpectedError::Lease)
-                    | (
-                        crate::live_policy::LivePolicyError::Envelope(_),
-                        ExpectedError::Envelope
-                    )
+                    | (crate::live_policy::LivePolicyError::Envelope, ExpectedError::Envelope)
                     | (crate::live_policy::LivePolicyError::Bounds, ExpectedError::Bounds)
-                    | (crate::live_policy::LivePolicyError::Policy(_), ExpectedError::Policy)
+                    | (crate::live_policy::LivePolicyError::Policy, ExpectedError::Policy)
             ),
             "case {index}: {}",
             error.reason()
@@ -719,15 +718,9 @@ async fn malformed_live_documents_cannot_escape_through_the_startup_error_chain(
         let error = KvSnapshot::open(client.clone(), config()).await.err().unwrap();
         assert!(matches!(
             error,
-            crate::live_policy::LivePolicyError::Envelope(_) | crate::live_policy::LivePolicyError::Policy(_)
+            crate::live_policy::LivePolicyError::Envelope | crate::live_policy::LivePolicyError::Policy
         ));
-        let mut source = std::error::Error::source(&error);
-        while let Some(cause) = source {
-            assert!(cause.downcast_ref::<serde_json::Error>().is_none());
-            assert!(cause.downcast_ref::<crate::static_snapshot::SnapshotError>().is_none());
-            assert!(cause.downcast_ref::<toml::de::Error>().is_none());
-            source = cause.source();
-        }
+        assert!(std::error::Error::source(&error).is_none());
     }
 }
 
@@ -809,5 +802,230 @@ async fn initial_connection_synchronization_has_a_finite_deadline() {
     assert!(matches!(
         opened.err().unwrap(),
         crate::live_policy::LivePolicyError::Timeout | crate::live_policy::LivePolicyError::Disconnected
+    ));
+}
+
+async fn warning(events: &CapturedEvents, after: usize, expected: &str) {
+    tokio::time::timeout(WAIT, async {
+        loop {
+            if events.events().iter().skip(after).any(|event| {
+                event.message() == Some("live egress policy unavailable") && event.field("reason") == Some(expected)
+            }) {
+                break;
+            }
+            tokio::time::sleep(POLL).await;
+        }
+    })
+    .await
+    .expect("the closed operational failure reason must be emitted");
+}
+
+#[derive(Clone, Copy)]
+enum RejectedUpdate {
+    Scope,
+    Incarnation,
+    Envelope,
+    Syntax,
+    Agent,
+    Destination,
+    Bounds,
+    Expired,
+    Lease,
+    Replay,
+}
+
+#[tokio::test]
+async fn rejected_live_updates_report_closed_operational_reasons_and_recover_only_with_new_authority() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let fixture = Fixture::start().await;
+    let mut generation = 2;
+    for scenario in [
+        RejectedUpdate::Scope,
+        RejectedUpdate::Incarnation,
+        RejectedUpdate::Envelope,
+        RejectedUpdate::Syntax,
+        RejectedUpdate::Agent,
+        RejectedUpdate::Destination,
+        RejectedUpdate::Bounds,
+        RejectedUpdate::Expired,
+        RejectedUpdate::Lease,
+        RejectedUpdate::Replay,
+    ] {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let base = envelope(generation, "agent-1");
+        let (invalid, reason) = match scenario {
+            RejectedUpdate::Scope => (altered(base, "tenant", serde_json::json!("other")), "scope"),
+            RejectedUpdate::Incarnation => (
+                altered(base, "incarnation", serde_json::json!(2)),
+                "authority_incarnation",
+            ),
+            RejectedUpdate::Envelope => (altered(base, "issued_at", serde_json::json!(0.5)), "invalid_document"),
+            RejectedUpdate::Syntax => (
+                altered(base, "policy", serde_json::json!("[agents.agent-1")),
+                "invalid_document",
+            ),
+            RejectedUpdate::Agent => (
+                altered(base, "policy", serde_json::json!("[agents.\"\"]\nallow=[]\n")),
+                "invalid_document",
+            ),
+            RejectedUpdate::Destination => (
+                altered(
+                    base,
+                    "policy",
+                    serde_json::json!("[agents.agent-1]\nallow=[\"*.example.com:443\"]\n"),
+                ),
+                "invalid_document",
+            ),
+            RejectedUpdate::Bounds => (
+                altered(
+                    base,
+                    "policy",
+                    serde_json::json!(
+                        (0..1025)
+                            .map(|i| format!("[agents.a{i}]\nallow=[]\n"))
+                            .collect::<String>()
+                    ),
+                ),
+                "resource_bounds",
+            ),
+            RejectedUpdate::Expired => (
+                altered(
+                    altered(base, "issued_at", serde_json::json!(now - 30)),
+                    "valid_until",
+                    serde_json::json!(now),
+                ),
+                "inactive",
+            ),
+            RejectedUpdate::Lease => (altered(base, "valid_until", serde_json::json!(now + 326)), "lease"),
+            RejectedUpdate::Replay => (envelope(1, "agent-1"), "regression"),
+        };
+        let before = events.events().len();
+        let observed = fixture.snapshot.observe(
+            &AgentId::new("agent-1").unwrap(),
+            &"api.example.com:443".parse().unwrap(),
+            SystemTime::now(),
+        );
+        fixture.put(invalid).await;
+        fixture.verdict(SnapshotVerdict::Unavailable).await;
+        warning(&events, before, reason).await;
+        assert!(
+            !fixture
+                .snapshot
+                .revision_is_current(observed.revision, SystemTime::now())
+        );
+        assert_eq!(fixture.snapshot.statistics(), None);
+        generation += 1;
+        fixture.put(envelope(generation, "agent-1")).await;
+        fixture.verdict(SnapshotVerdict::Permitted).await;
+        assert_eq!(
+            fixture.snapshot.statistics(),
+            Some(PolicyStatistics { agents: 1, permits: 1 })
+        );
+        generation += 1;
+    }
+    fixture
+        .put(altered(
+            envelope(generation, "agent-1"),
+            "policy",
+            serde_json::json!(""),
+        ))
+        .await;
+    fixture.verdict(SnapshotVerdict::NotPermitted).await;
+    assert_eq!(
+        fixture.snapshot.statistics(),
+        Some(PolicyStatistics { agents: 0, permits: 0 })
+    );
+}
+
+#[tokio::test]
+async fn a_disconnected_broker_withdraws_policy_and_reports_its_connection_failure() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let mut fixture = Fixture::start().await;
+    let before = events.events().len();
+    drop(fixture._server.take());
+    tokio::time::timeout(WAIT, async {
+        while fixture.client.connection_state() == async_nats::connection::State::Connected {
+            tokio::time::sleep(POLL).await;
+        }
+    })
+    .await
+    .expect("the broker transport must become disconnected");
+    fixture.verdict(SnapshotVerdict::Unavailable).await;
+    warning(&events, before, "disconnected").await;
+    assert_eq!(fixture.snapshot.statistics(), None);
+}
+
+#[tokio::test]
+async fn bucket_loss_configuration_drift_and_recreation_report_distinct_failures() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let fixture = Fixture::start().await;
+    let context = fixture._server.as_ref().unwrap().jetstream().await;
+    let mut invalid = bucket_config();
+    invalid.max_bytes = 0;
+    let before = events.events().len();
+    context.update_key_value(invalid).await.unwrap();
+    fixture.verdict(SnapshotVerdict::Unavailable).await;
+    warning(&events, before, "bucket_configuration").await;
+    context.update_key_value(bucket_config()).await.unwrap();
+    fixture.put(envelope(2, "agent-1")).await;
+    fixture.verdict(SnapshotVerdict::Permitted).await;
+    let before = events.events().len();
+    context.delete_key_value(config().bucket()).await.unwrap();
+    fixture.verdict(SnapshotVerdict::Unavailable).await;
+    warning(&events, before, "transport").await;
+    let before = events.events().len();
+    let recreated = context.create_key_value(bucket_config()).await.unwrap();
+    recreated
+        .put(config().key(), envelope(3, "agent-1").into())
+        .await
+        .unwrap();
+    warning(&events, before, "stream_incarnation").await;
+    assert_eq!(current(&fixture.snapshot), SnapshotVerdict::Unavailable);
+}
+
+#[tokio::test]
+async fn malformed_kv_operations_are_refused_and_reported_before_recovery() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let fixture = Fixture::start().await;
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(crate::constants::KV_OPERATION_HEADER, "INVALID");
+    let before = events.events().len();
+    fixture
+        ._server
+        .as_ref()
+        .unwrap()
+        .jetstream()
+        .await
+        .publish_with_headers(
+            format!("$KV.{}.{}", config().bucket(), config().key()),
+            headers,
+            envelope(2, "agent-1").into(),
+        )
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+    fixture.verdict(SnapshotVerdict::Unavailable).await;
+    warning(&events, before, "removed").await;
+    fixture.put(envelope(3, "agent-1")).await;
+    fixture.verdict(SnapshotVerdict::Permitted).await;
+}
+
+#[test]
+fn a_partial_client_certificate_cannot_enable_live_authority() {
+    let env = InMemoryEnv::new();
+    env.set("NATS_CERT", "client.pem");
+    let config = trogon_nats::NatsConfig::from_env(&env);
+    assert!(matches!(
+        KvPolicyConfig::validate_transport(&config),
+        Err(crate::live_policy::PolicyTransportError::TlsInvalid(
+            trogon_nats::TlsMisconfiguration::IncompleteClientCertificate(
+                trogon_nats::tls::IncompleteClientCertificate::MissingKey
+            )
+        ))
     ));
 }

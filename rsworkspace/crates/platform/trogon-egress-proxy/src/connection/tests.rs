@@ -27,6 +27,8 @@ use crate::policy_source::PolicySource;
 use crate::static_snapshot::StaticSnapshot;
 use crate::writer_audit::WriterAudit;
 
+mod authority_join_tests;
+
 type Record = (Option<String>, Option<IpAddr>, Decision);
 
 #[derive(Default)]

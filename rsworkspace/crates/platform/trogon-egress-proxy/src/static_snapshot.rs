@@ -106,13 +106,6 @@ impl PolicySnapshot for StaticSnapshot {
         &self.source
     }
 
-    fn agent_count(&self) -> usize {
-        self.agent_count()
-    }
-    fn permit_count(&self) -> usize {
-        self.permit_count()
-    }
-
     fn lookup(&self, agent: &AgentId, destination: &Destination, _now: SystemTime) -> SnapshotVerdict {
         match self.permits.get(agent) {
             Some(destinations) if destinations.contains(destination) => SnapshotVerdict::Permitted,

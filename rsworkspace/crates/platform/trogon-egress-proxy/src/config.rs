@@ -17,6 +17,7 @@ use trogon_nats::{NatsConfig, NatsToken, SubjectTokenViolationError};
 use trogon_std::env::{ReadEnv, SystemEnv};
 
 use crate::audit_config::AuditConfig;
+use crate::connection_limit::{ConnectionLimit, ConnectionLimitError};
 use crate::constants::{AUDIT_COMPONENT, MIN_HEAD_BYTES, WRITER_ID_PREFIX};
 use crate::limits::Limits;
 use crate::live_policy::{KvPolicyConfig, PolicyConfigError, PolicyTransportError};
@@ -101,6 +102,10 @@ pub struct Args {
     #[arg(long, env = "TROGON_EGRESS_MAX_HEAD_BYTES", default_value_t = Limits::default().max_head_bytes)]
     pub max_head_bytes: usize,
 
+    /// Maximum active connections, including handshakes and established tunnels.
+    #[arg(long, env = "TROGON_EGRESS_MAX_CONNECTIONS", default_value_t = Limits::default().max_connections.get())]
+    pub max_connections: usize,
+
     /// Seconds a client has to send its first TLS record after the tunnel opens.
     #[arg(long, env = "TROGON_EGRESS_FIRST_RECORD_TIMEOUT_SECS", default_value_t = Limits::default().first_record_timeout.as_secs())]
     pub first_record_timeout_secs: u64,
@@ -149,6 +154,8 @@ pub enum ConfigError {
     HeadLimitTooSmall,
     #[error("the first record timeout must be at least one second")]
     FirstRecordTimeoutTooSmall,
+    #[error("invalid connection limit")]
+    ConnectionLimit(#[source] ConnectionLimitError),
 }
 
 impl TryFrom<Args> for Config {
@@ -203,6 +210,7 @@ impl Config {
             audit,
             non_tls_ports,
             limits: Limits {
+                max_connections: ConnectionLimit::new(args.max_connections).map_err(ConfigError::ConnectionLimit)?,
                 max_head_bytes: args.max_head_bytes,
                 first_record_timeout: Duration::from_secs(args.first_record_timeout_secs),
                 ..Limits::default()

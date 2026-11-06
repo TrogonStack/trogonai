@@ -54,6 +54,12 @@ struct EndedAuthority {
     fault: Fault,
 }
 
+struct ObservedUpstream {
+    stream: TcpStream,
+    address: SocketAddr,
+    policy_revision: Option<PolicyRevision>,
+}
+
 /// Everything a connection needs besides the connection itself.
 pub struct Proxy<C = SystemClock> {
     clock: C,
@@ -229,25 +235,26 @@ impl<Clock: EpochClock> Proxy<Clock> {
             Ok(targets) => targets,
             Err(fault) => return self.refuse(client, agent, Some(destination), None, fault).await,
         };
-        let dialled = match self.dial(peer, destination, &targets).await {
+        let dialled = match self.dial(peer, destination, &targets, selected).await {
             Ok(dialled) => dialled,
-            Err(fault) => return self.refuse(client, agent, Some(destination), None, fault).await,
+            Err(fault) => {
+                return self
+                    .refuse(client, agent, Some(destination), selected.get().copied(), fault)
+                    .await;
+            }
         };
-        let Some((mut upstream, address)) = dialled else {
+        let Some(ObservedUpstream {
+            stream: mut upstream,
+            address,
+            policy_revision,
+        }) = dialled
+        else {
             return self
                 .refuse(client, agent, Some(destination), None, Fault::UpstreamUnreachable)
                 .await;
         };
 
         let resolved = Some(address.ip());
-        let _ = selected.set(address.ip());
-        let policy_revision = match self.observe_authority(peer, destination, address) {
-            Ok(revision) => revision,
-            Err(fault) => {
-                drop(upstream);
-                return self.refuse(client, agent, Some(destination), resolved, fault).await;
-            }
-        };
         if self
             .record(agent, Some(destination), resolved, Decision::Permitted, policy_revision)
             .await
@@ -441,7 +448,8 @@ impl<Clock: EpochClock> Proxy<Clock> {
         peer: &PeerIdentity,
         destination: &Destination,
         targets: &[SocketAddr],
-    ) -> Result<Option<(TcpStream, SocketAddr)>, Fault> {
+        selected: &OnceLock<IpAddr>,
+    ) -> Result<Option<ObservedUpstream>, Fault> {
         for target in targets {
             self.check_authority(peer, destination, *target)?;
             let attempt = timeout(self.limits.connect_timeout, TcpStream::connect(target))
@@ -449,8 +457,13 @@ impl<Clock: EpochClock> Proxy<Clock> {
                 .unwrap_or_else(|_| Err(io::ErrorKind::TimedOut.into()));
             match attempt {
                 Ok(stream) => {
-                    self.check_authority(peer, destination, *target)?;
-                    return Ok(Some((stream, *target)));
+                    let _ = selected.set(target.ip());
+                    let policy_revision = self.observe_authority(peer, destination, *target)?;
+                    return Ok(Some(ObservedUpstream {
+                        stream,
+                        address: *target,
+                        policy_revision,
+                    }));
                 }
                 Err(error) => tracing::debug!(error = %error, "upstream connect failed"),
             }

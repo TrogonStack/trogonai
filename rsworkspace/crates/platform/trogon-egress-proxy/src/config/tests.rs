@@ -3,6 +3,8 @@ use trogon_std::env::InMemoryEnv;
 
 use super::*;
 
+mod connection_limit_tests;
+
 const REQUIRED: [&str; 19] = [
     "trogon-egress-proxy",
     "--policy-file",

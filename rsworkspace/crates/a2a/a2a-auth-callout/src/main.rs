@@ -10,6 +10,7 @@ use {
     a2a_auth_callout::tenant_admission::{ENV_TENANT_MEMBERSHIPS, FileTenantAdmission, TenantAdmission},
     a2a_auth_callout::{AdmissionBudget, AuthCalloutWireCodec, BridgeMintResponder, BridgeMintSubscriber, Subscriber},
     a2a_nats::{A2aPrefix, A2aPrefixError, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
+    std::future::Future,
     std::sync::Arc,
     std::time::Duration,
     tracing::{info, warn},
@@ -57,6 +58,16 @@ async fn build_tenant_admission(
 }
 
 async fn build_oidc_verifier(env: &impl ReadEnv) -> Option<Arc<dyn OidcVerifier>> {
+    build_oidc_verifier_with_discovery(env, JwksOidcVerifier::discover).await
+}
+
+async fn build_oidc_verifier_with_discovery<F>(
+    env: &impl ReadEnv,
+    discover: impl FnOnce(OidcIssuerUrl, Vec<String>) -> F,
+) -> Option<Arc<dyn OidcVerifier>>
+where
+    F: Future<Output = Result<JwksOidcVerifier, a2a_auth_callout::AuthCalloutError>>,
+{
     let issuer_raw = env.var("AUTH_CALLOUT_OIDC_ISSUER").ok()?;
     let issuer = match OidcIssuerUrl::parse(&issuer_raw) {
         Ok(i) => i,
@@ -70,7 +81,7 @@ async fn build_oidc_verifier(env: &impl ReadEnv) -> Option<Arc<dyn OidcVerifier>
         warn!("AUTH_CALLOUT_OIDC_ISSUER set but AUTH_CALLOUT_OIDC_AUDIENCES empty; OIDC disabled");
         return None;
     }
-    match JwksOidcVerifier::discover(issuer, audiences).await {
+    match discover(issuer, audiences).await {
         Ok(v) => Some(Arc::new(v)),
         Err(e) => {
             warn!(error = %e, "OIDC discovery failed; OIDC disabled");

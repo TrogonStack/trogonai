@@ -1,5 +1,3 @@
-use crate::policy_document_error::PolicyDocumentError;
-
 #[derive(Debug, thiserror::Error)]
 pub enum LivePolicyError {
     #[error("policy bucket is unavailable")]
@@ -19,7 +17,7 @@ pub enum LivePolicyError {
     #[error("policy entry is not a put for the exact scoped key")]
     Removed,
     #[error("policy envelope is invalid")]
-    Envelope(#[source] PolicyDocumentError),
+    Envelope,
     #[error("policy envelope exceeds its resource bounds")]
     Bounds,
     #[error("policy envelope names another scope")]
@@ -33,7 +31,7 @@ pub enum LivePolicyError {
     #[error("policy lease exceeds the hard freshness bound")]
     Lease,
     #[error("policy content is invalid")]
-    Policy(#[source] PolicyDocumentError),
+    Policy,
     #[error("policy state is unavailable")]
     State,
 }
@@ -47,7 +45,7 @@ impl LivePolicyError {
             Self::BucketConfiguration => "bucket_configuration",
             Self::StreamIncarnation => "stream_incarnation",
             Self::Removed => "removed",
-            Self::Envelope(_) | Self::Policy(_) => "invalid_document",
+            Self::Envelope | Self::Policy => "invalid_document",
             Self::Bounds => "resource_bounds",
             Self::Scope => "scope",
             Self::Incarnation => "authority_incarnation",

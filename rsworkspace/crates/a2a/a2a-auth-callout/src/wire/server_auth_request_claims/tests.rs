@@ -207,6 +207,31 @@ fn request_with_tls(certs: &[String], verified_chains: &[Vec<String>]) -> Server
     })
 }
 
+#[test]
+fn tls_metadata_without_a_selected_chain_cannot_supply_a_credential() {
+    let request = request_with_tls(&[], &[]);
+    assert!(request.client_tls_pem_certs().is_empty());
+    assert!(matches!(
+        request.presented_credential(),
+        Err(AuthCalloutError::CredentialVerification(
+            CredentialError::InvalidRequest(_)
+        ))
+    ));
+}
+
+#[test]
+fn an_empty_selected_verified_chain_cannot_borrow_a_later_leaf() {
+    let (leaf, issuer, _) = client_chain();
+    let request = request_with_tls(&[], &[vec![], vec![leaf, issuer]]);
+    assert!(request.primary_client_cert().is_none());
+    assert!(matches!(
+        request.presented_credential(),
+        Err(AuthCalloutError::CredentialVerification(
+            CredentialError::InvalidRequest(_)
+        ))
+    ));
+}
+
 fn client_chain() -> (String, String, String) {
     let root_key = CertificateKeyPair::generate().unwrap();
     let mut root_params = CertificateParams::default();

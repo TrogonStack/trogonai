@@ -1,4 +1,8 @@
+use std::num::NonZeroUsize;
 use std::time::Duration;
+
+pub(crate) const DEFAULT_MAX_CONNECTIONS: NonZeroUsize = NonZeroUsize::MIN.saturating_add(127);
+pub(crate) const MAX_CONNECTION_LIMIT: usize = 4096;
 
 /// Longest agent identifier accepted, in bytes. It travels inside a URI SAN.
 pub(crate) const AGENT_ID_MAX_LEN: usize = 128;

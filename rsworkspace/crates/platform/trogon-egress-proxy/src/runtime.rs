@@ -24,7 +24,7 @@ use crate::connection::Proxy;
 use crate::constants::AUDIT_CONNECT_TIMEOUT;
 use crate::live_policy::{KvPolicyConfig, KvSnapshot, LivePolicyError, PolicyTransportError};
 use crate::mtls::{TlsError, load_server_config};
-use crate::policy_snapshot::PolicySnapshot;
+use crate::policy_snapshot::{PolicySnapshot, PolicyStatistics};
 use crate::resolver::{Resolver, SystemResolver};
 use crate::server::Server;
 use crate::static_snapshot::{SnapshotError, StaticSnapshot};
@@ -98,11 +98,15 @@ pub async fn start_with(
     audit: Arc<dyn AuditSink>,
 ) -> Result<Server, StartupError> {
     validate_policy_transport(&config)?;
-    let (snapshot, policy_driver): (Arc<dyn PolicySnapshot>, _) = match &config.policy {
-        PolicyInput::StaticFile(path) => (
-            Arc::new(StaticSnapshot::load(path).map_err(StartupError::Policy)?),
-            None,
-        ),
+    let (snapshot, policy_driver, statistics): (Arc<dyn PolicySnapshot>, _, _) = match &config.policy {
+        PolicyInput::StaticFile(path) => {
+            let snapshot = StaticSnapshot::load(path).map_err(StartupError::Policy)?;
+            let statistics = PolicyStatistics {
+                agents: snapshot.agent_count(),
+                permits: snapshot.permit_count(),
+            };
+            (Arc::new(snapshot), None, Some(statistics))
+        }
         PolicyInput::NatsKv(policy) => {
             let client = trogon_nats::connect(&config.audit.nats, AUDIT_CONNECT_TIMEOUT)
                 .await
@@ -110,7 +114,8 @@ pub async fn start_with(
             let (snapshot, driver) = KvSnapshot::open(client, policy.clone())
                 .await
                 .map_err(StartupError::LivePolicy)?;
-            (snapshot, Some(driver))
+            let statistics = snapshot.statistics();
+            (snapshot, Some(driver), statistics)
         }
     };
     let tls = load_server_config(&config.tls, config.trust_domain.clone()).map_err(StartupError::Tls)?;
@@ -126,8 +131,8 @@ pub async fn start_with(
         policy_source = %snapshot.source(),
         policy_kind = snapshot.source().kind(),
         mode = mode.as_str(),
-        agents = snapshot.agent_count(),
-        permits = snapshot.permit_count(),
+        agents = statistics.map(|statistics| statistics.agents),
+        permits = statistics.map(|statistics| statistics.permits),
         listen = %config.listen,
         trust_domain = %config.trust_domain,
         "egress proxy starting"

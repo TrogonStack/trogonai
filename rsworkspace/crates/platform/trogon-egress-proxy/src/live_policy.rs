@@ -18,9 +18,8 @@ use crate::destination::Destination;
 pub use crate::live_policy_config::{KvPolicyConfig, PolicyConfigError, PolicyTransportError};
 pub use crate::live_policy_error::LivePolicyError;
 use crate::live_policy_wire::Envelope;
-pub use crate::policy_document_error::PolicyDocumentError;
 use crate::policy_revision::PolicyRevision;
-use crate::policy_snapshot::{PolicyObservation, PolicySnapshot, SnapshotVerdict};
+use crate::policy_snapshot::{PolicyObservation, PolicySnapshot, PolicyStatistics, SnapshotVerdict};
 use crate::policy_source::PolicySource;
 use crate::static_snapshot::StaticSnapshot;
 
@@ -134,6 +133,15 @@ impl KvSnapshot {
         self.state.lock().map_err(|_| LivePolicyError::State)
     }
 
+    pub fn statistics(&self) -> Option<PolicyStatistics> {
+        self.current_state(SystemTime::now()).ok().and_then(|state| {
+            state.active.as_ref().map(|active| PolicyStatistics {
+                agents: active.snapshot.agent_count(),
+                permits: active.snapshot.permit_count(),
+            })
+        })
+    }
+
     fn current_state(&self, now: SystemTime) -> Result<MutexGuard<'_, AcceptedState>, LivePolicyError> {
         let mut state = self.state()?;
         let connection = ConnectionIdentity::current(&self.client);
@@ -162,9 +170,11 @@ impl KvSnapshot {
     }
 
     fn withdraw(&self) {
-        if let Ok(mut state) = self.state()
-            && state.active.take().is_some()
-        {
+        let changed = match self.state() {
+            Ok(mut state) => state.active.take().is_some(),
+            Err(_) => true,
+        };
+        if changed {
             self.changed.send_replace(());
         }
     }
@@ -215,8 +225,7 @@ impl KvSnapshot {
         if message.payload.len() > LIVE_POLICY_MAX_BYTES {
             return Err(LivePolicyError::Bounds);
         }
-        let envelope: Envelope = serde_json::from_slice(&message.payload)
-            .map_err(|_| LivePolicyError::Envelope(PolicyDocumentError::Envelope))?;
+        let envelope: Envelope = serde_json::from_slice(&message.payload).map_err(|_| LivePolicyError::Envelope)?;
         if envelope.tenant != self.config.tenant.as_str() || envelope.project != self.config.project.as_str() {
             return Err(LivePolicyError::Scope);
         }
@@ -249,7 +258,7 @@ impl KvSnapshot {
             return Err(LivePolicyError::Regression);
         }
         let policy = StaticSnapshot::from_live_toml(self.source.clone(), &envelope.policy)
-            .map_err(|error| LivePolicyError::Policy(error.into()))?;
+            .map_err(|_| LivePolicyError::Policy)?;
         if policy.agent_count() > LIVE_POLICY_MAX_AGENTS || policy.permit_count() > LIVE_POLICY_MAX_PERMITS {
             return Err(LivePolicyError::Bounds);
         }
@@ -282,19 +291,6 @@ impl PolicySnapshot for KvSnapshot {
     fn source(&self) -> &PolicySource {
         &self.source
     }
-    fn agent_count(&self) -> usize {
-        self.current_state(SystemTime::now())
-            .ok()
-            .and_then(|state| state.active.as_ref().map(|active| active.snapshot.agent_count()))
-            .unwrap_or_default()
-    }
-    fn permit_count(&self) -> usize {
-        self.current_state(SystemTime::now())
-            .ok()
-            .and_then(|state| state.active.as_ref().map(|active| active.snapshot.permit_count()))
-            .unwrap_or_default()
-    }
-
     fn lookup(&self, agent: &AgentId, destination: &Destination, now: SystemTime) -> SnapshotVerdict {
         self.observe(agent, destination, now).verdict
     }
@@ -329,6 +325,7 @@ impl PolicySnapshot for KvSnapshot {
 impl KvPolicyDriver {
     async fn refresh(&self) -> Result<(), LivePolicyError> {
         let result = timeout(LIVE_POLICY_REQUEST_TIMEOUT, async {
+            drop(self.snapshot.current_state(SystemTime::now())?);
             let info = self
                 .store
                 .stream

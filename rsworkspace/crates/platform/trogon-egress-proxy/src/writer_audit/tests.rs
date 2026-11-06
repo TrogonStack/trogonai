@@ -1,3 +1,4 @@
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use trogon_std::log_capture::{CapturedEvent, CapturedEvents, CapturedLogs, Level
 use super::*;
 use crate::agent_id::AgentId;
 use crate::destination::Destination;
+use crate::policy_revision::PolicyRevision;
 use crate::policy_source::PolicySource;
 
 fn writer() -> WriterId {
@@ -110,6 +112,39 @@ async fn a_permit_is_stored_and_logged_with_its_address() {
     assert_eq!(line.field("snapshot_source"), Some("static_file:policy.toml"));
     assert_eq!(line.field("audit"), Some("stored"));
     assert_eq!(line.field("audit_failure"), Some("-"));
+}
+
+#[tokio::test]
+async fn incompatible_policy_provenance_is_refused_before_any_backend_append() {
+    let agent = AgentId::new("agent-1").expect("agent");
+    let destination = "api.example.com:443".parse().expect("destination");
+    let revision = PolicyRevision {
+        incarnation: NonZeroU64::new(7).expect("incarnation"),
+        generation: NonZeroU64::new(42).expect("generation"),
+    };
+    for (source, policy_revision) in [
+        (source(), Some(revision)),
+        (
+            PolicySource::NatsKv {
+                bucket: "policy".into(),
+                incarnation: NonZeroU64::new(8).expect("incarnation"),
+            },
+            Some(revision),
+        ),
+        (
+            PolicySource::NatsKv {
+                bucket: "policy".into(),
+                incarnation: revision.incarnation,
+            },
+            None,
+        ),
+    ] {
+        let (audit, sink) = audit();
+        let mut request = event(&agent, Some(&destination), &source, Decision::Permitted);
+        request.policy_revision = policy_revision;
+        assert_eq!(audit.record(&request).await, Err(AuditError::PolicyEvidence));
+        assert!(sink.stored().is_empty());
+    }
 }
 
 #[tokio::test]

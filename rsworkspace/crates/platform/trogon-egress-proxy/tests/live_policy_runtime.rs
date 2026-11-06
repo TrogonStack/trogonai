@@ -26,6 +26,7 @@ use trogon_egress_proxy::runtime::start_with;
 use trogon_nats::NatsConfig;
 use trogon_nats::test_support::TlsTestServer;
 use trogon_std::env::InMemoryEnv;
+use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 use constants::{TICK, WAIT};
 use support::{ClientIdentity, Pki, Recorder};
@@ -108,7 +109,18 @@ async fn the_production_runtime_starts_and_reloads_through_authenticated_tls_nat
         )
         .await?;
     config.policy = PolicyInput::NatsKv(policy.clone());
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::INFO);
     let server = start_with(config, Arc::new(NoExternalDns), Arc::new(Recorder::default())).await?;
+    let starting = events
+        .events()
+        .into_iter()
+        .find(|event| event.message() == Some("egress proxy starting"))
+        .ok_or_else(|| io::Error::other("missing live startup event"))?;
+    assert_eq!(starting.field("policy_source"), Some("nats_kv:egress_policy:1"));
+    assert_eq!(starting.field("policy_kind"), Some("nats_kv"));
+    assert_eq!(starting.field("agents"), Some("1"));
+    assert_eq!(starting.field("permits"), Some("1"));
     let address = server.local_addr()?;
     let shutdown = CancellationToken::new();
     let task = tokio::spawn(server.run(shutdown.clone()));

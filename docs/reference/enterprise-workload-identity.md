@@ -10,7 +10,7 @@ a claim that a production SPIRE integration exists in this repository.
 | Boundary | Foundation | Enterprise gate |
 | --- | --- | --- |
 | Egress workload identity | TLS certificate validation, provisional agent URI mapping and finite certificate-bound sessions | Workload API integration, authorized identity mapping and credential/bundle rotation |
-| Egress authorization | Separate exact-destination admission, post-wait checks and periodic session reevaluation using a static snapshot | Live policy and status with bounded staleness across connections |
+| Egress authorization | Exact-destination admission, optional authenticated live KV authority, generation-bound audit and finite sessions | Governed producer, independent recovery fencing and end-to-end revocation acceptance |
 | NATS admission | Operator accounts, verified credentials and required explicit caller-to-tenant membership authority | Governed membership operations and explicit SPIFFE profile if selected; legacy DN-based mTLS is not that profile |
 | AAuth issuance | Person and Access Server libraries with bounded validity, deferred-request revalidation and injected policies | Real consent/policy adapters and durable bounded operation |
 | External federation | Draft ADR0053 exact-match issuer/subject/audience design | Attested assertion issuer, provider registration and real exchange acceptance |
@@ -23,6 +23,13 @@ trusted configuration adapter, not a deployed HA membership control plane.
 Existing broker credentials remain subject to their own expiry and the separate
 revocation contract.
 
+The egress listener also bounds active TCP, TLS-handshake and tunnel workers.
+The default is 128, configurable from 1 through 4096 with `--max-connections`
+or `TROGON_EGRESS_MAX_CONNECTIONS`. Excess TCP connections close before a worker
+is created, without a waiter queue. A connection retains its slot through its
+handshake and authenticated lifetime; completed workers release capacity.
+These limits are resource policy, not measured throughput or availability.
+
 The callout binary shares a finite admission budget across its direct and bridge
 routes. The default permits 16 workers, acquired before dispatch and retained
 through reply publication. Excess requests receive an opaque refusal without a
@@ -31,10 +38,66 @@ capacity, broker ingress limits or durable service availability.
 
 Egress sessions end at the earlier presented-certificate expiry or a 330-second
 monotonic ceiling. Destination and selected-address policy are checked after
-waits and every five seconds while forwarding. A static snapshot remains static:
-closing a session does not make a removed permit disappear across reconnects.
-The presented-chain deadline does not track absent trust anchors or implement
-Workload API bundle withdrawal.
+waits and while forwarding. Live policy additionally supplies a finite producer
+deadline and update notifications. Explicit static-file compatibility still
+retains its startup policy across reconnects. The presented-chain deadline does
+not track absent trust anchors or implement Workload API bundle withdrawal.
+
+## Live egress authority
+
+Select `--policy-bucket` and a nonzero `--policy-incarnation` instead of
+`--policy-file`. The corresponding environment variables are
+`TROGON_EGRESS_POLICY_BUCKET` and `TROGON_EGRESS_POLICY_INCARNATION`.
+Production startup requires verified NATS TLS and client authentication under
+the standard NATS configuration. It refuses plaintext, anonymous access and
+JWT-only authentication without a holder seed or a client certificate. The
+source's tenant and project must match the configured runtime and audit scope.
+It never falls back to a static file.
+
+Provision the bucket independently. It must have history 1, maximum value size
+at most 256 KiB, aggregate storage at most 1 MiB and positive maximum age no
+greater than 325 seconds, with no mirror or source stream. Bucket names are
+limited to 64 ASCII letters, digits, underscores or hyphens. Use a separate
+bucket per tenant/project and restrict the reader to its stream-information and
+message-read APIs; leader reads grant bucket-level visibility. Keep publishing,
+stream administration and recovery permissions outside the workload reader.
+
+The exact key is `t{hex_utf8(tenant)}.p{hex_utf8(project)}` using lowercase hex,
+also available through `KvPolicyConfig::key()`. Each value is a complete JSON
+document with these fields:
+
+| Field | Contract |
+| --- | --- |
+| `tenant`, `project` | Exact configured scope |
+| `incarnation` | Nonzero integer matching independently provisioned configuration |
+| `generation` | Nonzero integer that strictly increases for each new policy or renewal |
+| `issued_at`, `valid_until` | Integer Unix seconds; `issued_at <= now < valid_until`, with positive lifetime at most 325 seconds |
+| `policy` | Exact-destination TOML policy; an empty live policy withdraws every permit |
+
+Unknown or duplicate fields and malformed policy are refused. Documents are
+limited to 256 KiB, 1024 agents and 4096 unique permits. Malformed documents
+produce closed error categories without retaining raw parser input in errors.
+
+The reader polls leader-backed APIs every second with a one-second refresh
+deadline. Missing, deleted, invalid, disconnected or unavailable authority
+withdraws the active policy. Complete updates replace earlier permits; they do
+not merge them. Duplicate delivery cannot extend the original monotonic lease
+or restore a withdrawn generation. Recovery requires a newer producer
+generation, and a recreated stream is not adopted automatically.
+
+Policy observations bind the permit, producer generation and deadline together.
+Audit records name the bucket, incarnation and applied generation; a policy
+change while an allow record awaits acknowledgement prevents that old
+acknowledgement from opening a tunnel. Update notifications wake established
+tunnels, including when a replacement shortens their deadline. The producer
+deadline also bounds DNS, connection, audit and forwarding waits.
+
+The reader does not implement the authoritative publisher or a durable external
+recovery fence. Recovery governance must advance the independently provisioned
+incarnation; local revision counters cannot identify an entire restored system.
+A publisher must not renew stale grants as fresh policy. Tests of this reader
+and its authenticated runtime path do not establish HA, production attestation
+or ADR0049's end-to-end p99 target.
 
 ## Attestation and registration
 
@@ -98,6 +161,9 @@ Implementation:
   state atomically and retire old trust according to a bounded overlap policy.
 - [ ] Use standard X.509 path validation plus the SVID leaf, URI and trust-domain
   checks. Separate legacy mTLS pins from SPIFFE registration authority.
+- [x] Require a full certificate-authenticated handshake for each new egress
+  connection. Disable stateful TLS session storage and TLS 1.3 session tickets
+  so resumption cannot skip current client-certificate verification.
 - [ ] Treat Workload API updates as complete snapshots. Remove omitted
   identities/bundles and handle `PermissionDenied` without waiting for audit;
   never merge withdrawn authority into the next snapshot or switch identities
@@ -110,6 +176,9 @@ Verification:
   URI identities and unexpected trust domains.
 - [ ] Verify rotation with old and new connections, missed update/reconnect,
   wrong-domain bundles, compromised-root removal and failed renewal.
+- [x] Exercise real TLS 1.2 and TLS 1.3 handshakes with shared client session
+  state. Subsequent egress connections require full handshakes; an explicit
+  resumption control demonstrates that the fixture can resume both protocols.
 - [ ] Verify identity/bundle redaction and `PermissionDenied`, including while
   audit is unavailable. Explicit removal and compromise override rotation
   overlap, and a reconnect cannot restore a removed generation.
@@ -129,6 +198,11 @@ Implementation:
 - [x] Bound concurrent broker admission before credential verification and
   registry reads, share the budget across direct and bridge routes, and refuse
   excess work without an unbounded waiter queue or stale admission fallback.
+- [x] Bind live egress authority to the exact runtime tenant/project and
+  independently configured incarnation. Require authenticated TLS for the
+  production reader and retain the evaluated generation through permit audit.
+- [x] Bound egress connection workers before spawning, including unauthenticated
+  handshakes, and retain capacity until the connection ends.
 - [ ] Keep workload federation separate from delegated user consent; intersect
   relevant policy and delegation before granting on-behalf-of authority.
 - [x] Bound AAuth output validity by the agent and any bound subagent/upstream
@@ -152,6 +226,13 @@ Verification:
 - [x] Hold admission workers over real broker requests, verify both routes
   promptly refuse excess work without dispatch or a JWT, then release the held
   work and verify fresh admission recovers under the same shared budget.
+- [x] Exercise production egress startup through real NATS TLS, required client
+  certificates and JetStream. Synchronize initial connection before reading
+  authority; complete removal changes subsequent authenticated admission.
+- [x] Change live policy while permit audit awaits acknowledgement. An old
+  acknowledgement cannot open a new tunnel under a different generation.
+- [x] Hold real TCP/TLS connections at the configured worker limit, refuse
+  excess connections promptly and verify capacity recovers after release.
 - [x] Advance the clock while a request awaits claims, interaction or approval;
   expired inputs cannot produce a fresh grant. A slow policy cannot mint past
   the authority it evaluated.
@@ -202,6 +283,9 @@ Implementation:
 - [ ] Apply live invalidations and bounded reevaluation to existing tunnels and
   sessions. Prove both ADR0049's normal-operation target and a hard staleness
   bound no greater than its 330-second backstop.
+- [x] Apply complete live egress snapshots, notify existing tunnels of changes
+  and enforce the exact monotonic producer deadline across waits and forwarding.
+  Keep static-file compatibility separate from this lifecycle.
 
 Verification:
 
@@ -209,6 +293,9 @@ Verification:
   accounts, apps, issuers or generations never shares an eligible credential.
 - [ ] Lost invalidations, stopped projections, clock boundaries, key retirement,
   disconnection and restore cannot resurrect authorization or extend a tunnel.
+- [x] Remove an egress permit over real KV: an established tunnel closes and a
+  new connection is refused. A shortened replacement lease wakes an existing
+  tunnel; duplicates cannot extend expiry or recover withdrawn authority.
 - [ ] Offboarding distinguishes immediate local denial from already-issued
   external tokens, whose provider-controlled expiry/revocation remains visible.
 

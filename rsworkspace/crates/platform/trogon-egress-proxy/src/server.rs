@@ -112,6 +112,11 @@ async fn accept_loop<L: Accept>(
             Some(_) = connections.join_next(), if !connections.is_empty() => {}
             accepted = listener.accept() => match accepted {
                 Ok((stream, peer)) => {
+                    while connections.try_join_next().is_some() {}
+                    if connections.len() >= proxy.limits().max_connections.get() {
+                        drop(stream);
+                        continue;
+                    }
                     connections.spawn(serve_connection(
                         acceptor.clone(),
                         Arc::clone(proxy),

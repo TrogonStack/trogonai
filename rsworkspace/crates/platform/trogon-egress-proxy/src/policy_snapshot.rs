@@ -14,6 +14,12 @@ pub struct PolicyObservation {
     pub deadline: Option<Instant>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PolicyStatistics {
+    pub agents: usize,
+    pub permits: usize,
+}
+
 /// What a snapshot can say about one `(agent, destination)` pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotVerdict {
@@ -36,13 +42,6 @@ pub trait PolicySnapshot: Send + Sync {
 
     fn subscribe(&self) -> Option<watch::Receiver<()>> {
         None
-    }
-
-    fn agent_count(&self) -> usize {
-        0
-    }
-    fn permit_count(&self) -> usize {
-        0
     }
 
     /// Whether `agent` has a permit equal to `destination`. Equality is exact:

@@ -21,9 +21,11 @@ describes external workload federation and explicitly defers runtime attestation
 The connection drafts separately govern provider consent, custody and use.
 
 The egress proxy verifies a certificate and evaluates destination policy
-separately. It loads TLS files and a static policy snapshot at startup. Finite
-certificate-bound sessions and policy reevaluation protect established tunnels,
-but this static source does not supply live policy updates across connections.
+separately. It loads TLS files at startup and supports either explicit static
+policy compatibility or an authenticated scoped NATS KV reader. The live reader
+replaces complete policy, binds permit audit to its generation and applies
+producer deadlines to existing tunnels. Its publisher, independent recovery
+fence and operational revocation acceptance remain separate requirements.
 Its provisional SPIFFE-shaped alias does not supply attestation or automatic
 rotation. The NATS callout's existing
 mTLS identity is a certificate DN or fingerprint, not a SPIFFE identity.
@@ -281,8 +283,9 @@ retention follow their own governed contracts.
   remain distinct authorities. This decision does not invent an OAuth protocol
   binding or remove provider secrets unilaterally.
 - The existing static egress slice remains useful but does not satisfy the
-  enterprise lifecycle profile. Runtime integration and deployment evidence are
-  required before claiming that profile.
+  enterprise lifecycle profile. The optional live KV reader adds policy
+  lifecycle controls; it does not supply rotating SVIDs, a governed publisher or
+  deployment acceptance. These remain required before claiming that profile.
 - This ADR remains draft under [ADR#0000](./0000-adr-process.md). It refines the
   target enterprise profile without marking deferred infrastructure implemented
   or changing another ADR's approval status.
