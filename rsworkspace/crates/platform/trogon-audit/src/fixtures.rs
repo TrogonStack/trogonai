@@ -29,10 +29,12 @@ use crate::read_only::ReadOnly;
 use crate::record::Record;
 use crate::record_scope::RecordScope;
 use crate::record_seal;
+use crate::sealed_record::SealedRecord;
 use crate::stamper::Stamper;
 use crate::stored_audit_record::StoredAuditRecord;
 use crate::surface::Surface;
 use crate::writer_id::WriterId;
+use crate::writer_identity::WriterIdentity;
 
 /// Yields distinct UUIDv7 values, one more millisecond apart each call.
 #[derive(Debug, Clone, Default)]
@@ -124,6 +126,18 @@ pub(crate) const OTHER_CHAIN: &str = "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f02";
 
 pub(crate) fn chain_id(value: &str) -> ChainId {
     ChainId::parse(value).unwrap()
+}
+
+/// The identity of the writer the unit tests write as: `gateway-1`, publishing
+/// its integrity records as `egress_proxy` in `tenant_1` and `project_1`.
+pub(crate) fn identity() -> WriterIdentity {
+    WriterIdentity::new(writer_id(), token("egress_proxy"), name("tenant_1"), token("project_1"))
+}
+
+/// `record` sealed at `sequence` of [`CHAIN`], linked to nothing, for tests of
+/// what carries a sealed record rather than of the chain.
+pub(crate) fn sealed_at(record: Record, sequence: u64) -> SealedRecord {
+    SealedRecord::seal(record, &writer_id(), chain_id(CHAIN), sequence, None)
 }
 
 pub(crate) fn chain_builder_for(writer: &str, chain: &str) -> ChainBuilder {

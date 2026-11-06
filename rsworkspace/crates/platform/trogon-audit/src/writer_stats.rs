@@ -16,6 +16,7 @@ pub struct WriterStats {
     pub(crate) degraded: bool,
     pub(crate) retry_buffered: usize,
     pub(crate) best_effort_queued: usize,
+    pub(crate) possible_duplicates: u64,
 }
 
 impl WriterStats {
@@ -40,8 +41,9 @@ impl WriterStats {
         self.refused.values().sum()
     }
 
-    /// True while the retry buffer has been full and has not yet drained. A
-    /// surface fails readiness on it.
+    /// True while the chain's head waits to be stored after a failed publish, or
+    /// while the retry buffer has been full and has not yet emptied. A surface
+    /// fails readiness on it.
     pub fn degraded(&self) -> bool {
         self.degraded
     }
@@ -52,6 +54,14 @@ impl WriterStats {
 
     pub fn best_effort_queued(&self) -> usize {
         self.best_effort_queued
+    }
+
+    /// Records stored by a retry made after the stream's duplicate window had
+    /// passed since their first publish, without the stream calling it a
+    /// duplicate. If that first publish did land, the stream now holds a second,
+    /// identical copy, which a verifier reports as a notice and not a fault.
+    pub fn possible_duplicates(&self) -> u64 {
+        self.possible_duplicates
     }
 }
 

@@ -79,9 +79,11 @@ fn every_audit_option_is_required() {
 #[test]
 fn the_audit_options_become_typed_audit_config() {
     let config = resolve(parse(&[]).expect("args")).expect("config");
-    assert_eq!(config.audit.tenant.as_str(), "acme");
-    assert_eq!(config.audit.project.as_str(), "payments");
-    assert_eq!(config.audit.writer.as_str(), "egress-proxy:egress-1");
+    let identity = &config.audit.identity;
+    assert_eq!(identity.tenant().as_str(), "acme");
+    assert_eq!(identity.project().as_str(), "payments");
+    assert_eq!(identity.writer().as_str(), "egress-proxy:egress-1");
+    assert_eq!(identity.component().as_str(), "egress_proxy");
     assert_eq!(config.audit.nats.servers, vec!["nats://audit.example:4222".to_owned()]);
 }
 
@@ -129,7 +131,7 @@ fn invalid_audit_names_are_typed_errors() {
 #[test]
 fn the_process_environment_is_the_default_source() {
     let config = Config::try_from(parse(&[]).expect("args")).expect("config");
-    assert_eq!(config.audit.tenant.as_str(), "acme");
+    assert_eq!(config.audit.identity.tenant().as_str(), "acme");
 }
 
 #[test]

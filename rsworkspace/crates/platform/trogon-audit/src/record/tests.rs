@@ -315,3 +315,37 @@ fn a_backdated_stamp_sets_the_occurrence_time() {
     assert_eq!(record.message().occurred_at.seconds, 60);
     assert_ne!(record.message().recorded_at.seconds, 60);
 }
+
+#[test]
+fn a_chain_reset_opens_a_chain_as_a_must_record_of_no_one() {
+    let identity = WriterIdentity::new(
+        crate::fixtures::writer_id(),
+        crate::fixtures::token("egress_proxy"),
+        name("tenant_1"),
+        crate::fixtures::token("project_1"),
+    );
+    let stamp = stamper().stamp();
+    let record = Record::chain_reset(&identity, stamp);
+
+    assert_eq!(record.id(), stamp.id());
+    assert_eq!(record.kind(), RecordKind::Integrity);
+    assert_eq!(record.obligation(), Obligation::BeforeEffect);
+    assert_eq!(
+        record.subject().render(),
+        "platform.v1.audit.integrity.egress_proxy.chain_reset"
+    );
+    let message = record.message();
+    assert_eq!(message.class, EnumValue::from(AuditClass::Must));
+    assert_eq!(message.tenant.value, "tenant_1");
+    assert_eq!(message.project.value, "project_1");
+    assert_eq!(message.actor, MessageField::some(audit_actor(&Actor::Unattributed)));
+    assert!(message.attribution.as_option().is_none());
+    let Some(Detail::WriterLifecycle(lifecycle)) = message.detail.as_ref() else {
+        panic!("not a lifecycle record: {:?}", message.detail);
+    };
+    assert_eq!(lifecycle.kind, EnumValue::from(WriterLifecycleKind::ChainReset));
+    assert_eq!(
+        lifecycle.reset_reason,
+        Some(EnumValue::from(ChainResetReason::ProcessStartWithoutResume))
+    );
+}

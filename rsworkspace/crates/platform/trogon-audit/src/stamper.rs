@@ -1,6 +1,7 @@
 use trogon_std::NowV7;
 use trogon_std::time::EpochClock;
 
+use crate::chain_id::ChainId;
 use crate::record_id::RecordId;
 use crate::stamp::Stamp;
 
@@ -24,6 +25,12 @@ impl<C: EpochClock, G: NowV7> Stamper<C, G> {
             occurred_at: now,
             recorded_at: now,
         }
+    }
+
+    /// A fresh chain id from the same UUIDv7 source, for a writer opening its
+    /// chain.
+    pub(crate) fn chain_id(&self) -> ChainId {
+        ChainId::generate(&self.ids)
     }
 }
 

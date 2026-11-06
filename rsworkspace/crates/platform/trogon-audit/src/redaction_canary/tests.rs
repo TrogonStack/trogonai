@@ -11,12 +11,11 @@ use crate::credential_terminal::CredentialTerminal;
 use crate::decision_facts::DecisionFacts;
 use crate::decision_outcome::DecisionOutcome;
 use crate::enforcement::Enforcement;
-use crate::fixtures::{name, scope, stamper, writer_id};
+use crate::fixtures::{identity, name, scope, sealed_at, stamper};
 use crate::layer_facts::LayerFacts;
 use crate::memory_sink::MemorySink;
 use crate::reason_code::ReasonCode;
 use crate::record::Record;
-use crate::sealed_record::SealedRecord;
 use crate::sink_error::SinkError;
 use crate::surface::Surface;
 use crate::writer_config::WriterConfig;
@@ -92,15 +91,16 @@ async fn a_canary_in_scope_never_reaches_a_record_a_debug_rendering_or_a_log_lin
     let _guard = captured.install(LevelFilter::TRACE);
     let stamper = stamper();
     let sink = MemorySink::new();
-    let writer = AuditWriter::new(sink.clone(), writer_id(), WriterConfig::default());
+    let writer = AuditWriter::new(sink.clone(), identity(), WriterConfig::default(), &stamper);
 
     let mut rendered = Vec::new();
     for record in records(&stamper) {
         rendered.push(format!("{record:?}"));
-        rendered.push(format!("{:?}", SealedRecord::seal(record.clone(), &writer_id(), 1)));
+        rendered.push(format!("{:?}", sealed_at(record.clone(), 1)));
         sink.fail_next(1, SinkError::Unreachable);
         let _ = writer.write(record).await;
     }
+    sink.recover();
     writer.drain_once().await;
     rendered.push(format!("{writer:?}"));
     rendered.push(format!("{:?}", writer.stats()));
