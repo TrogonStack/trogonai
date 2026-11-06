@@ -50,9 +50,11 @@ The controller writes complete frames in this order:
 1. The raw 64-byte Ed25519 signature.
 1. Exactly that many bytes of canonical binary `RegistrationSnapshot` protobuf.
 
-The signature covers the exported `SIGNING_CONTEXT` followed by the exact
-payload bytes. JSON, PEM, encoded signatures and alternate protobuf encodings
-are not accepted. The approver must issue fresh finite approvals with the
+Sign the exported `approval_signing_bytes(config, payload)` result. It includes
+`SIGNING_CONTEXT`, the canonical trust-domain byte length as an unsigned
+big-endian 16-bit integer, the exact trust-domain bytes and the exact payload.
+JSON, PEM, encoded signatures and alternate protobuf encodings are not accepted.
+The approver must issue fresh finite approvals with the
 required monotonic registration and trust generations. A new frame is an
 independently signed approval, not permission to replay or renew an old one.
 
@@ -72,6 +74,10 @@ The producer uses the shared native `AuditWriter` and `JetStreamSink` through
 the production wrapper. The platform enforces the durable exclusive claim,
 audited activation, live-first denial and broker conflict fencing. The runner
 keeps one producer handle and applies signed frames sequentially.
+
+Publisher and revoker NATS credentials remain trusted control-plane
+capabilities. Broker ACLs restrict subjects; they do not execute this approval
+verifier. Protect those credentials and the controller pipe independently.
 
 Use the independently constrained emergency identity for a signed whole-scope
 denial. A snapshot with no bindings or no approved roots is denial-only:

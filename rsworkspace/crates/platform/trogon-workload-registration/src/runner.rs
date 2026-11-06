@@ -6,7 +6,7 @@ mod operation;
 mod runner_config;
 mod runner_error;
 mod shutdown;
-mod signed_frame;
+mod signed_frame_wire;
 mod timeout_cause;
 mod wait_limit;
 

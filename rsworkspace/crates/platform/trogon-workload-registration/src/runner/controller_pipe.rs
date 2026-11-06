@@ -6,7 +6,7 @@ use tokio::net::unix::pipe::Receiver;
 use trogon_workload_registration::MAX_SNAPSHOT_BYTES;
 
 use super::runner_error::RunnerError;
-use super::signed_frame::SignedFrame;
+use super::signed_frame_wire::SignedFrameWire;
 use super::wait_limit::WaitLimit;
 
 pub(super) struct ControllerPipe(Receiver);
@@ -22,7 +22,7 @@ impl ControllerPipe {
             .map_err(RunnerError::Input)
     }
 
-    pub async fn next(&mut self, current: Option<Instant>) -> Result<SignedFrame, RunnerError> {
+    pub async fn next(&mut self, current: Option<Instant>) -> Result<SignedFrameWire, RunnerError> {
         let idle = match current {
             Some(deadline) => WaitLimit::authority(deadline),
             None => WaitLimit::input(None),
@@ -48,7 +48,7 @@ impl ControllerPipe {
                 self.0.read_exact(&mut signature).await.map_err(RunnerError::Input)?;
                 let mut payload = vec![0u8; length];
                 self.0.read_exact(&mut payload).await.map_err(RunnerError::Input)?;
-                Ok(SignedFrame { signature, payload })
+                Ok(SignedFrameWire { signature, payload })
             })
             .await
     }

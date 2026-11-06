@@ -35,6 +35,7 @@ fn configured(operation: &str) -> Command {
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    super::subprocess_environment::preserve_coverage(&mut command);
     command
 }
 
@@ -53,11 +54,10 @@ fn send_frame(bytes: &[u8]) -> Output {
 
 #[test]
 fn command_help_describes_the_public_required_configuration() {
-    let output = Command::new(env!("CARGO_BIN_EXE_trogon-workload-registration"))
-        .args(["serve", "--help"])
-        .env_clear()
-        .output()
-        .expect("read static command help");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_trogon-workload-registration"));
+    command.args(["serve", "--help"]).env_clear();
+    super::subprocess_environment::preserve_coverage(&mut command);
+    let output = command.output().expect("read static command help");
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).expect("UTF-8 help");
     assert!(help.contains("--approval-public-key"));
@@ -66,12 +66,13 @@ fn command_help_describes_the_public_required_configuration() {
 
 #[test]
 fn static_help_does_not_echo_a_supplied_program_name() {
-    let output = Command::new(env!("CARGO_BIN_EXE_trogon-workload-registration"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_trogon-workload-registration"));
+    command
         .arg0("canary-private-program-name")
         .args(["serve", "--help"])
-        .env_clear()
-        .output()
-        .expect("read static command help");
+        .env_clear();
+    super::subprocess_environment::preserve_coverage(&mut command);
+    let output = command.output().expect("read static command help");
     assert!(output.status.success());
     assert!(!String::from_utf8_lossy(&output.stdout).contains("canary-private-program-name"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("canary-private-program-name"));
