@@ -14,6 +14,7 @@ import "trogonai/platform/audit/v1/credential_use.proto";
 import "trogonai/platform/audit/v1/gateway_decision.proto";
 import "trogonai/platform/audit/v1/integrity.proto";
 import "trogonai/platform/audit/v1/writer_lifecycle.proto";
+import "trogonai/platform/workload_identity/v1alpha1/credential_activation.proto";
 import "trogonai/projects/projects/v1alpha1/identity.proto";
 
 // AuditRecord is the one envelope every platform audit record shares.
@@ -79,5 +80,6 @@ message AuditRecord {
     CredentialUse credential_use = 14;
     Change change = 15;
     WriterLifecycle writer_lifecycle = 16;
+    trogonai.platform.workload_identity.v1alpha1.CredentialActivation credential_activation = 17;
   }
 }

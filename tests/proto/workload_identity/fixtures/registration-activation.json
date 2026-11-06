@@ -43,6 +43,47 @@
         "notBefore": "2030-01-01T00:00:00Z",
         "expiresAt": "2030-01-01T01:00:00Z"
       }
+    },
+    "audit": {
+      "type": "trogonai.platform.audit.v1.AuditRecord",
+      "payload": {
+        "recordId": "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f01",
+        "class": 1,
+        "occurredAt": "2030-01-01T00:00:00Z",
+        "recordedAt": "2030-01-01T00:00:00Z",
+        "tenant": {
+          "value": "tenant_1"
+        },
+        "project": {
+          "value": "project_1"
+        },
+        "actor": {
+          "unattributed": {}
+        },
+        "attribution": {
+          "decision": 1,
+          "enforcementMode": 1,
+          "wouldDeny": false
+        },
+        "credentialActivation": {
+          "binding": {
+            "spiffeId": "spiffe://example.test/proxy",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 1
+          },
+          "recoveryFence": "1",
+          "registrationRevision": "2",
+          "trustRevision": "3",
+          "sourceRevision": "4",
+          "activationRevision": "4",
+          "leafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+          "publicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+          "bundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+          "notBefore": "2030-01-01T00:00:00Z",
+          "expiresAt": "2030-01-01T01:00:00Z"
+        }
+      }
     }
   },
   "cases": [
@@ -138,6 +179,38 @@
       ],
       "violations": [
         "must contain at least 1 item(s)"
+      ]
+    },
+    {
+      "name": "activation audit is must before effect",
+      "template": "audit"
+    },
+    {
+      "name": "activation audit cannot be best effort",
+      "template": "audit",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/class",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "credential activation is must-audit under its exact registered scope"
+      ]
+    },
+    {
+      "name": "activation audit cannot change tenant",
+      "template": "audit",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/tenant/value",
+          "value": "tenant_2"
+        }
+      ],
+      "violations": [
+        "credential activation is must-audit under its exact registered scope"
       ]
     }
   ]
