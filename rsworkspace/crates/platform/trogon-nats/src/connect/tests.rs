@@ -1,6 +1,7 @@
 use async_nats::connection::State;
 
 mod inbox_prefix;
+mod reconnect_quarantine;
 use async_nats::{ClientError, ConnectErrorKind, ServerError};
 
 use super::*;

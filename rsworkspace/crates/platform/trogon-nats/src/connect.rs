@@ -329,6 +329,16 @@ pub async fn connect_once_with_inbox_prefix(
     connected(&config, result)
 }
 
+pub async fn connect_once_with_reconnect_quarantine(
+    config: &NatsConfig,
+    auth: NatsAuth,
+    connection_timeout: Duration,
+    inbox_prefix: &crate::DottedNatsToken,
+    _reconnect_quarantine: Duration,
+) -> Result<Client, ConnectError> {
+    connect_once_with_inbox_prefix(config, auth, connection_timeout, inbox_prefix).await
+}
+
 /// Makes a single pass over the servers with `auth` in place of the configured
 /// authentication and fails once that pass does, for a connection that serves
 /// one request. TLS follows the same settings as [`connect`].
