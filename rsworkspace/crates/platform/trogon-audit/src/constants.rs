@@ -77,6 +77,15 @@ pub const SEAL_TRAILER_PREFIX: [u8; 4] = [
 ];
 pub const SEAL_TRAILER_BYTES: usize = SEAL_TRAILER_PREFIX.len() + RECORD_HASH_BYTES;
 
+/// The sequence of the record that opens a chain.
+pub const GENESIS_SEQUENCE: u64 = 1;
+
+/// Most records one verification walks. A verifier keeps only the previous
+/// record's position and hash, so the bound limits the work one call does on
+/// input it does not trust; a longer history is verified in ranges, each
+/// continuing from the head the previous range verified.
+pub const MAX_CHAIN_RANGE_RECORDS: usize = 10_000;
+
 /// A lost ack is retried inside the stream's duplicate window (two minutes), so
 /// three attempts of a couple of seconds stay well within it.
 pub const DEFAULT_ACK_TIMEOUT: Duration = Duration::from_secs(2);

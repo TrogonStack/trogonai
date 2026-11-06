@@ -22,8 +22,10 @@
 //! [`ConsistencyToken`], and no API takes content.
 //!
 //! The per-writer hash chain of Decision 6 has its primitives here: [`RecordHash`],
-//! [`ChainId`] and the stored form in [`record_seal`]. The writer does not chain
-//! records yet. Signed checkpoints, the integrity records, the OpenTelemetry
+//! [`ChainId`] and the stored form in [`record_seal`]. [`verify_chain_range`]
+//! checks one chain read back from the stream, offline, and [`verify_chains`]
+//! splits a range that interleaves writers into its chains. The writer does not
+//! chain records yet. Signed checkpoints, the integrity records, the OpenTelemetry
 //! counters and the surface adapters are later slices.
 
 pub mod actor;
@@ -32,7 +34,14 @@ pub mod audit_sink;
 pub mod audit_subject;
 pub mod audit_unavailable_error;
 pub mod audit_writer;
+pub mod chain_anchor;
 pub mod chain_id;
+pub mod chain_key;
+pub mod chain_notice;
+pub mod chain_outcome;
+pub mod chain_verification_error;
+pub(crate) mod chain_walk;
+pub mod chains_verification;
 pub mod change_facts;
 pub mod change_terminal;
 pub mod checkpoint_terminal;
@@ -64,14 +73,22 @@ pub mod sealed_record;
 pub mod sink_error;
 pub mod stamp;
 pub mod stamper;
+pub mod stored_audit_record;
+pub(crate) mod subject_agreement;
 pub mod surface;
 pub mod tls_mode;
 pub mod trace_id;
+pub mod verified_chain_head;
+pub mod verified_chain_range;
+pub mod verify_chain_range;
+pub mod verify_chains;
 pub mod writer_config;
 pub mod writer_id;
 pub(crate) mod writer_state;
 pub mod writer_stats;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod chain_builder;
 #[cfg(any(test, feature = "test-support"))]
 pub mod memory_sink;
 
@@ -81,7 +98,13 @@ pub use audit_sink::AuditSink;
 pub use audit_subject::AuditSubject;
 pub use audit_unavailable_error::AuditUnavailableError;
 pub use audit_writer::AuditWriter;
+pub use chain_anchor::ChainAnchor;
 pub use chain_id::{ChainId, ChainIdError};
+pub use chain_key::ChainKey;
+pub use chain_notice::ChainNotice;
+pub use chain_outcome::ChainOutcome;
+pub use chain_verification_error::ChainVerificationError;
+pub use chains_verification::ChainsVerification;
 pub use change_facts::ChangeFacts;
 pub use change_terminal::ChangeTerminal;
 pub use checkpoint_terminal::CheckpointTerminal;
@@ -111,13 +134,20 @@ pub use sealed_record::SealedRecord;
 pub use sink_error::SinkError;
 pub use stamp::Stamp;
 pub use stamper::Stamper;
+pub use stored_audit_record::StoredAuditRecord;
 pub use surface::Surface;
 pub use tls_mode::TlsMode;
 pub use trace_id::{TraceId, TraceIdError};
+pub use verified_chain_head::VerifiedChainHead;
+pub use verified_chain_range::VerifiedChainRange;
+pub use verify_chain_range::verify_chain_range;
+pub use verify_chains::verify_chains;
 pub use writer_config::WriterConfig;
 pub use writer_id::WriterId;
 pub use writer_stats::WriterStats;
 
+#[cfg(any(test, feature = "test-support"))]
+pub use chain_builder::ChainBuilder;
 #[cfg(any(test, feature = "test-support"))]
 pub use memory_sink::MemorySink;
 

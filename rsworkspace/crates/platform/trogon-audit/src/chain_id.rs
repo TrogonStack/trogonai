@@ -28,6 +28,16 @@ impl ChainId {
         Ok(Self(uuid))
     }
 
+    /// Reads the hyphenated lowercase form the writer stores, so one chain has
+    /// one spelling.
+    pub fn parse(value: &str) -> Result<Self, ChainIdError> {
+        let uuid = Uuid::try_parse(value).map_err(|_| ChainIdError::NotUuidV7)?;
+        if uuid.hyphenated().to_string() != value {
+            return Err(ChainIdError::NotUuidV7);
+        }
+        Self::from_uuid(uuid)
+    }
+
     pub fn as_uuid(self) -> Uuid {
         self.0
     }
