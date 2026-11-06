@@ -326,9 +326,17 @@ async fn real_mutual_tls_authenticates_exact_registered_spiffe_ids_without_dns_n
     rogue_store.replace_registration(snapshot).unwrap();
     let rogue_task = tokio::spawn(rogue_driver.run(shutdown.clone()));
     let rogue_lease = material(&rogue_store).await;
+    until(|| {
+        server
+            .material()
+            .is_some_and(|lease| lease.fact().source_revision() > server_lease.fact().source_revision())
+    })
+    .await;
+    let current_server = material(&server).await;
+    assert!(current_server.is_current());
     assert!(
         handshake(
-            server_lease.server_config(),
+            current_server.server_config(),
             rogue_lease.client_config(&local_id).unwrap()
         )
         .is_err()
@@ -419,9 +427,19 @@ async fn changed_registration_cancels_pending_activation_and_requires_new_audit(
 #[tokio::test]
 async fn cached_tls_configurations_cannot_authenticate_after_credential_withdrawal() {
     let ca = TestCa::new();
-    let fixture = WorkloadApiFixture::start(vec![ca.issue(LOCAL_ID, Duration::from_secs(600)), ca.issue(PEER_ID, Duration::from_secs(600))]).await;
-    let (server, server_driver) = IdentityStore::new(IdentityConfig::new(fixture.endpoint(), local(), revision(1)), Arc::new(Recorder::default()));
-    let (client, client_driver) = IdentityStore::new(IdentityConfig::new(fixture.endpoint(), peer(), revision(1)), Arc::new(Recorder::default()));
+    let fixture = WorkloadApiFixture::start(vec![
+        ca.issue(LOCAL_ID, Duration::from_secs(600)),
+        ca.issue(PEER_ID, Duration::from_secs(600)),
+    ])
+    .await;
+    let (server, server_driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), local(), revision(1)),
+        Arc::new(Recorder::default()),
+    );
+    let (client, client_driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), peer(), revision(1)),
+        Arc::new(Recorder::default()),
+    );
     server.replace_registration(registration(&ca)).unwrap();
     let original = registration(&ca);
     client.replace_registration(original.clone()).unwrap();
@@ -429,15 +447,98 @@ async fn cached_tls_configurations_cannot_authenticate_after_credential_withdraw
     let server_task = tokio::spawn(server_driver.run(shutdown.clone()));
     let client_task = tokio::spawn(client_driver.run(shutdown.clone()));
     let server_config = material(&server).await.server_config();
-    let client_config = material(&client).await.client_config(&spiffe::SpiffeId::new(LOCAL_ID).unwrap()).unwrap();
+    let client_config = material(&client)
+        .await
+        .client_config(&spiffe::SpiffeId::new(LOCAL_ID).unwrap())
+        .unwrap();
+    let resolved_key = client_config
+        .client_auth_cert_resolver
+        .resolve(&[], &[rustls::SignatureScheme::ECDSA_NISTP256_SHA256])
+        .expect("active client key");
+    let signer = resolved_key
+        .key
+        .choose_scheme(&[rustls::SignatureScheme::ECDSA_NISTP256_SHA256])
+        .expect("active signer");
     assert!(handshake(Arc::clone(&server_config), Arc::clone(&client_config)).is_ok());
     client.withdraw_registration();
-    assert!(handshake(Arc::clone(&server_config), client_config).is_err(), "cached client configuration must not reuse withdrawn private-key authority");
-    client.replace_registration(RegistrationSet::new(revision(1), revision(2), revision(1), original.expires_at(), original.bindings().to_vec(), original.approved_roots().to_vec()).unwrap()).unwrap();
-    let client_config = material(&client).await.client_config(&spiffe::SpiffeId::new(LOCAL_ID).unwrap()).unwrap();
+    assert!(signer.sign(b"withdrawn credential proof").is_err());
+    assert!(
+        handshake(Arc::clone(&server_config), client_config).is_err(),
+        "cached client configuration must not reuse withdrawn private-key authority"
+    );
+    client
+        .replace_registration(
+            RegistrationSet::new(
+                revision(1),
+                revision(2),
+                revision(1),
+                original.expires_at(),
+                original.bindings().to_vec(),
+                original.approved_roots().to_vec(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let client_config = material(&client)
+        .await
+        .client_config(&spiffe::SpiffeId::new(LOCAL_ID).unwrap())
+        .unwrap();
     assert!(handshake(Arc::clone(&server_config), Arc::clone(&client_config)).is_ok());
     server.withdraw_registration();
-    assert!(handshake(server_config, client_config).is_err(), "cached server configuration must not reuse withdrawn private-key authority");
+    assert!(
+        handshake(server_config, client_config).is_err(),
+        "cached server configuration must not reuse withdrawn private-key authority"
+    );
+    shutdown.cancel();
+    server_task.await.unwrap();
+    client_task.await.unwrap();
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn cached_server_configuration_refuses_handshakes_after_registration_lease_expiry() {
+    let ca = TestCa::new();
+    let fixture = WorkloadApiFixture::start(vec![
+        ca.issue(LOCAL_ID, Duration::from_secs(600)),
+        ca.issue(PEER_ID, Duration::from_secs(600)),
+    ])
+    .await;
+    let (server, server_driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), local(), revision(1)),
+        Arc::new(Recorder::default()),
+    );
+    let (client, client_driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), peer(), revision(1)),
+        Arc::new(Recorder::default()),
+    );
+    let original = registration(&ca);
+    server
+        .replace_registration(
+            RegistrationSet::new(
+                revision(1),
+                revision(1),
+                revision(1),
+                SystemTime::now() + Duration::from_secs(2),
+                original.bindings().to_vec(),
+                original.approved_roots().to_vec(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    client.replace_registration(original).unwrap();
+    let shutdown = CancellationToken::new();
+    let server_task = tokio::spawn(server_driver.run(shutdown.clone()));
+    let client_task = tokio::spawn(client_driver.run(shutdown.clone()));
+    let server_lease = material(&server).await;
+    let server_config = server_lease.server_config();
+    let client_config = material(&client)
+        .await
+        .client_config(&spiffe::SpiffeId::new(LOCAL_ID).unwrap())
+        .unwrap();
+    assert!(handshake(Arc::clone(&server_config), Arc::clone(&client_config)).is_ok());
+    tokio::time::sleep_until(server_lease.deadline()).await;
+    assert!(handshake(server_config, client_config).is_err());
+    assert!(!server_lease.is_current());
     shutdown.cancel();
     server_task.await.unwrap();
     client_task.await.unwrap();

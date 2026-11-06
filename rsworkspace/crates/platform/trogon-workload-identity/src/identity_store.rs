@@ -1,5 +1,5 @@
 use std::num::NonZeroU64;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::SystemTime;
 
 use rustls::pki_types::CertificateDer;
@@ -56,6 +56,44 @@ struct ApprovedMaterial {
 pub(crate) struct PendingActivation {
     observation: u64,
     material: Arc<ApprovedMaterial>,
+}
+
+#[derive(Clone)]
+pub(crate) struct MaterialAuthority {
+    inner: Weak<Inner>,
+    activation_revision: NonZeroU64,
+}
+
+impl std::fmt::Debug for MaterialAuthority {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MaterialAuthority")
+            .field("activation_revision", &self.activation_revision)
+            .finish()
+    }
+}
+
+impl MaterialAuthority {
+    fn new(store: &IdentityStore, activation_revision: NonZeroU64) -> Self {
+        Self {
+            inner: Arc::downgrade(&store.inner),
+            activation_revision,
+        }
+    }
+
+    pub fn require_current(&self) -> Result<(), rustls::Error> {
+        if self.inner.upgrade().is_some_and(|inner| {
+            let store = IdentityStore { inner };
+            store
+                .material()
+                .is_some_and(|lease| lease.fact().activation_revision() == self.activation_revision)
+        }) {
+            Ok(())
+        } else {
+            Err(rustls::Error::InvalidCertificate(
+                rustls::CertificateError::ApplicationVerificationFailure,
+            ))
+        }
+    }
 }
 
 impl PendingActivation {
@@ -239,7 +277,8 @@ impl IdentityStore {
         let activation_revision = NonZeroU64::new(next)?;
         let source_revision = NonZeroU64::new(state.source_revision)?;
         state.activation_revision = next;
-        let tls = crate::tls::server_config(&candidate, &registration.registration).ok()?;
+        let authority = MaterialAuthority::new(self, activation_revision);
+        let tls = crate::tls::server_config(&candidate, &registration.registration, authority).ok()?;
         let fact = ActivationFact {
             binding: self.config().local.clone(),
             recovery_fence: registration.registration.recovery_fence(),
@@ -341,7 +380,12 @@ impl MaterialLease {
         if !self.is_current() {
             return Err(MaterialError::Unavailable);
         }
-        crate::tls::client_config(&self.material.candidate, &self.material.registration, expected_peer)
+        crate::tls::client_config(
+            &self.material.candidate,
+            &self.material.registration,
+            expected_peer,
+            MaterialAuthority::new(&self.store, self.fact().activation_revision()),
+        )
     }
     pub fn is_current(&self) -> bool {
         self.store

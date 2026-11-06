@@ -6,12 +6,13 @@ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, Server
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::server::WebPkiClientVerifier;
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
-use rustls::sign::SingleCertAndKey;
 use rustls::{ClientConfig, DigitallySignedStruct, DistinguishedName, RootCertStore, ServerConfig, SignatureScheme};
 use spiffe::SpiffeId;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
 use crate::candidate::{Candidate, leaf_profile, timestamp};
+use crate::identity_store::MaterialAuthority;
+use crate::tls_guards::LiveResolver;
 use crate::{MaterialError, RegistrationSet};
 
 pub(crate) fn verify_chain(
@@ -92,6 +93,7 @@ pub(crate) fn verify_chain(
 pub(crate) fn server_config(
     candidate: &Candidate,
     registration: &RegistrationSet,
+    authority: MaterialAuthority,
 ) -> Result<Arc<ServerConfig>, MaterialError> {
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let mut roots = RootCertStore::empty();
@@ -105,12 +107,13 @@ pub(crate) fn server_config(
         inner,
         roots: candidate.roots.clone(),
         registration: registration.clone(),
+        authority: authority.clone(),
     };
     let mut config = ServerConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
         .map_err(|_| MaterialError::Certificate)?
         .with_client_cert_verifier(Arc::new(verifier))
-        .with_cert_resolver(Arc::new(SingleCertAndKey::from(Arc::clone(&candidate.certified_key))));
+        .with_cert_resolver(Arc::new(LiveResolver::new(&candidate.certified_key, authority)));
     config.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
     config.send_tls13_tickets = 0;
     Ok(Arc::new(config))
@@ -120,6 +123,7 @@ pub(crate) fn client_config(
     candidate: &Candidate,
     registration: &RegistrationSet,
     expected: &SpiffeId,
+    authority: MaterialAuthority,
 ) -> Result<Arc<ClientConfig>, MaterialError> {
     if !registration
         .bindings()
@@ -133,13 +137,14 @@ pub(crate) fn client_config(
         roots: candidate.roots.clone(),
         expected: expected.clone(),
         algorithms: provider.signature_verification_algorithms,
+        authority: authority.clone(),
     };
     let mut config = ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
         .map_err(|_| MaterialError::Certificate)?
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
-        .with_client_cert_resolver(Arc::new(SingleCertAndKey::from(Arc::clone(&candidate.certified_key))));
+        .with_client_cert_resolver(Arc::new(LiveResolver::new(&candidate.certified_key, authority)));
     config.resumption = rustls::client::Resumption::disabled();
     Ok(Arc::new(config))
 }
@@ -149,6 +154,7 @@ struct RegisteredClientVerifier {
     inner: Arc<dyn ClientCertVerifier>,
     roots: Vec<CertificateDer<'static>>,
     registration: RegistrationSet,
+    authority: MaterialAuthority,
 }
 
 impl ClientCertVerifier for RegisteredClientVerifier {
@@ -161,6 +167,7 @@ impl ClientCertVerifier for RegisteredClientVerifier {
         intermediates: &[CertificateDer<'_>],
         now: UnixTime,
     ) -> Result<ClientCertVerified, rustls::Error> {
+        self.authority.require_current()?;
         let now = SystemTime::UNIX_EPOCH
             .checked_add(Duration::from_secs(now.as_secs()))
             .ok_or_else(|| refused(MaterialError::Profile))?;
@@ -177,14 +184,16 @@ impl ClientCertVerifier for RegisteredClientVerifier {
             .chain(intermediates.iter().cloned())
             .collect();
         verify_chain(&chain, &self.roots, now, false).map_err(refused)?;
-        self.inner.verify_client_cert(
+        let verified = self.inner.verify_client_cert(
             leaf,
             intermediates,
             UnixTime::since_unix_epoch(
                 now.duration_since(SystemTime::UNIX_EPOCH)
                     .map_err(|_| refused(MaterialError::Profile))?,
             ),
-        )
+        )?;
+        self.authority.require_current()?;
+        Ok(verified)
     }
     fn verify_tls12_signature(
         &self,
@@ -192,7 +201,10 @@ impl ClientCertVerifier for RegisteredClientVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        self.inner.verify_tls12_signature(message, cert, dss)
+        self.authority.require_current()?;
+        let verified = self.inner.verify_tls12_signature(message, cert, dss)?;
+        self.authority.require_current()?;
+        Ok(verified)
     }
     fn verify_tls13_signature(
         &self,
@@ -200,7 +212,10 @@ impl ClientCertVerifier for RegisteredClientVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        self.inner.verify_tls13_signature(message, cert, dss)
+        self.authority.require_current()?;
+        let verified = self.inner.verify_tls13_signature(message, cert, dss)?;
+        self.authority.require_current()?;
+        Ok(verified)
     }
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
         self.inner.supported_verify_schemes()
@@ -218,6 +233,7 @@ struct RegisteredServerVerifier {
     roots: Vec<CertificateDer<'static>>,
     expected: SpiffeId,
     algorithms: rustls::crypto::WebPkiSupportedAlgorithms,
+    authority: MaterialAuthority,
 }
 
 impl ServerCertVerifier for RegisteredServerVerifier {
@@ -229,6 +245,7 @@ impl ServerCertVerifier for RegisteredServerVerifier {
         _: &[u8],
         now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
+        self.authority.require_current()?;
         let now = SystemTime::UNIX_EPOCH
             .checked_add(Duration::from_secs(now.as_secs()))
             .ok_or_else(|| refused(MaterialError::Profile))?;
@@ -240,6 +257,7 @@ impl ServerCertVerifier for RegisteredServerVerifier {
             .chain(intermediates.iter().cloned())
             .collect();
         verify_chain(&chain, &self.roots, now, true).map_err(refused)?;
+        self.authority.require_current()?;
         Ok(ServerCertVerified::assertion())
     }
     fn verify_tls12_signature(
@@ -248,7 +266,10 @@ impl ServerCertVerifier for RegisteredServerVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
+        self.authority.require_current()?;
+        let verified = rustls::crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)?;
+        self.authority.require_current()?;
+        Ok(verified)
     }
     fn verify_tls13_signature(
         &self,
@@ -256,7 +277,10 @@ impl ServerCertVerifier for RegisteredServerVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
+        self.authority.require_current()?;
+        let verified = rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)?;
+        self.authority.require_current()?;
+        Ok(verified)
     }
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
         self.algorithms.supported_schemes()

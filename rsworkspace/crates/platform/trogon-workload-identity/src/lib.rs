@@ -9,6 +9,7 @@ mod identity_store;
 mod material_error;
 mod registration;
 mod tls;
+mod tls_guards;
 mod unix_endpoint;
 
 #[cfg(any(test, feature = "test-support"))]
