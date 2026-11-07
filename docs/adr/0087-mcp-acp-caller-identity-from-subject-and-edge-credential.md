@@ -94,10 +94,13 @@ written to be consistent with it.
 [ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
 Decision 4. Each one:
 
-- admits a request only when the credential defined for its protocol in
-  Decisions 2 and 3 is present and verified. There is no anonymous path and no
-  default principal; a request that cannot be attributed is refused with 401
-  before anything is published;
+- serves MCP protected-resource metadata without credentials and never
+  publishes those discovery requests to the bus. This exception does not admit
+  requests to `/mcp`;
+- admits all other requests only when the credential defined for its protocol
+  in Decisions 2 and 3 is present and verified. There is no anonymous principal
+  and no default principal; a request that cannot be attributed is refused with
+  401 before anything is published;
 - starts in `Enforce` by default and refuses to start with admission off,
   following the
   [policy enforcement posture proposal](https://github.com/TrogonStack/trogonai/pull/745).
@@ -133,8 +136,9 @@ makes the listed server behaviors mandatory for a server that implements it.
 This repository's servers are public-facing edges and implement it, so the
 MUSTs apply. The edge therefore:
 
-- serves RFC 9728 protected resource metadata for the MCP endpoint and answers
-  an unauthenticated or invalid request with 401 and a `WWW-Authenticate:
+- serves RFC 9728 protected resource metadata for the MCP endpoint without
+  credentials and answers an unauthenticated or invalid request to `/mcp` with
+  401 and a `WWW-Authenticate:
   Bearer resource_metadata="..."` challenge. It answers 403 for a valid token
   with insufficient scope;
 - accepts a bearer access token as the credential and sends it, sealed, to the
@@ -197,9 +201,10 @@ connects with that user, one connection per HTTP session (MCP) or per ACP
 connection id. It publishes on that connection. The edge's own process
 credential holds no grant to publish on principal positions.
 
-The principal is written into the subject at a fixed position, the place
-[ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md) gives it, after the
-bounded entity token and before the role or method:
+The principal extends the routing shapes of
+[ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md) at fixed positions.
+MCP puts it after the entity id and before the method; ACP puts it after the
+session id or `global` segment and before the role:
 
 | Surface | Subject |
 | --- | --- |
@@ -229,10 +234,11 @@ over principal positions as relays and are trusted only to copy it, which is
 the trust model ADR 0082 already accepts. An edge user subscribes only to
 subjects carrying its own principal.
 
-Parsers read fixed positions. Both crates drop their marker searches: the role
-is the token after the entity id and the principal, not whatever the first
-`.server.` happens to be. This is required, not tidiness: after this change an
-id chosen by a caller sits earlier in the subject than the role.
+Parsers read fixed positions relative to the configured prefix and version.
+Both crates drop their marker searches. MCP's role immediately follows
+`{prefix}.v1`, before the entity id and principal. ACP's role follows the
+principal in both session and global subjects. An id equal to `server`,
+`client` or `agent` never changes which token the parser treats as the role.
 
 The HTTP session (MCP session, ACP connection id) is bound to the principal
 that opened it. A later request on the session that admits as a different
@@ -252,7 +258,8 @@ shape above.
 ### 5. An ACP agent binds a session to the principal that created it, and refuses commands from another principal
 
 > This Decision is new behavior for the ACP agent and the one most open to
-> revision. It is separable from Decisions 1 to 4: they stand without it.
+> revision. Decisions 1 to 4 stand without it. Ownership requires the
+> principal-bearing ACP subjects of Decision 4 and publishers that use them.
 
 When the agent handles `session.new`, it records the principal taken from the
 subject as the session's owner. Every later session-scoped command, `prompt`,
@@ -284,10 +291,37 @@ types, as `CallerGrant` does for A2A:
 - an ACP caller may publish only the command methods of its own principal
   under `acp.v1.session.*.{kind}.{id}.agent.` and
   `acp.v1.global.{kind}.{id}.agent.`, and subscribe only to the response and
-  client-direction subjects carrying its own principal. The grant lists methods
-  from the subject types the parsers use, so a caller cannot publish a
-  response or `cancelled` subject;
+  client-direction subjects carrying its own principal, plus
+  `_INBOX.{kind}.{id}.>` for transport replies. The grant lists methods from
+  the subject types the parsers use, so a caller cannot publish an agent
+  `response` or `cancelled` subject;
 - an A2A caller keeps the grant it has.
+
+ACP also needs transport authority that the command subjects alone do not
+provide:
+
+- `initialize` and `session.new` receive request/reply responses under the
+  caller's `_INBOX.{kind}.{id}` prefix. JetStream publish acknowledgements and
+  consumer deliveries use that prefix as well;
+- a client may answer a client-direction request admitted on its own principal.
+  Reply publishing is confined to the reply destination of that request and is
+  bounded in count and lifetime. Responders choose a reply destination under
+  the target caller's `_INBOX.{kind}.{id}` prefix, so this grants no publication
+  outside that principal and never publication to `_INBOX.>`;
+- durable requests need stream lookup and response-consumer creation, lookup,
+  pull, acknowledgement and cleanup. A response consumer's filter includes
+  both the session and the caller's principal. The caller cannot create or
+  reconfigure an unfiltered consumer, consume another principal's responses,
+  acknowledge its deliveries, or manage its consumers.
+
+These operations must be confined by broker-enforced permissions or performed
+by a trusted transport that binds each operation to the admitted principal.
+A filter supplied by the caller is not that confinement, and a broad
+`$JS.API.>` or `$JS.ACK.>` grant is not a substitute. The ACP stream migration
+of Decision 4 must define the consumer/control-plane layout and prove both
+successful own-principal transport and refusal of cross-principal operations
+before rollout. Until that proof exists, the ACP edge cannot ship with a
+minted grant that omits these operations or grants them without confinement.
 
 The surface is derived from the mint subject on which the callout received the
 request, with a mint subject per surface following the existing A2A one. It is
@@ -443,9 +477,10 @@ credential keeps the short lifetime.
   no behavior change.
 - The audience configuration of the callout grows a per-surface dimension. A
   token minted for one surface is refused by another.
-- The change is separable by protocol. The MCP edge, the ACP edge and the ACP
-  session ownership of Decision 5 can each ship alone, provided the shared
-  grant code lands first.
+- The change is separable by protocol. The MCP and ACP edges can ship
+  separately once the shared grant code lands. ACP session ownership of
+  Decision 5 requires the principal-bearing ACP subjects of Decision 4 and
+  publishers that use them.
 
 ## Not decided here
 
