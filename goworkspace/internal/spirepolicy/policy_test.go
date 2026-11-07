@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -83,6 +85,52 @@ func admitted(policy map[string]any, pod map[string]any) (bool, error) {
 	return true, nil
 }
 
+func TestSocketAdmissionBoundaryRequiresCompleteFixture(t *testing.T) {
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, example := range []struct {
+		name, kind, suffix, reason string
+	}{
+		{"socket_policy", "ValidatingAdmissionPolicy", "-identity-sockets", "fixture has no identity-sockets admission policy"},
+		{"agent", "DaemonSet", "", "fixture has no SPIRE agent pod template"},
+		{"supervisor_patch", "", "", "fixture has no supervisor patch"},
+	} {
+		t.Run(example.name, func(t *testing.T) {
+			fixture := loadFixture(t)
+			if example.kind == "" {
+				fixture.Patches = nil
+			} else {
+				var resources []any
+				for _, resource := range asList(fixture.Resources["items"]) {
+					item := asMap(resource)
+					if item["kind"] != example.kind || !strings.HasSuffix(asMap(item["metadata"])["name"].(string), example.suffix) {
+						resources = append(resources, resource)
+					}
+				}
+				fixture.Resources["items"] = resources
+			}
+			data, err := json.Marshal(fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "deployment.json")
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("SPIRE_POLICY_FIXTURE", path)
+			output, err := exec.Command(binary, "-test.run=^TestSocketAdmissionBoundary$").CombinedOutput()
+			if err == nil {
+				t.Fatalf("incomplete fixture passed socket admission checks: %s", output)
+			}
+			if !strings.Contains(string(output), example.reason) {
+				t.Fatalf("missing explicit fixture failure %q: %s", example.reason, output)
+			}
+		})
+	}
+}
+
 func TestSocketAdmissionBoundary(t *testing.T) {
 	fixture := loadFixture(t)
 	var policy map[string]any
@@ -100,16 +148,21 @@ func TestSocketAdmissionBoundary(t *testing.T) {
 			issuerPods = append(issuerPods, template)
 		}
 	}
+	if policy == nil {
+		t.Fatal("fixture has no identity-sockets admission policy")
+	}
 	for _, pod := range issuerPods {
 		allowed, err := admitted(policy, pod)
 		if err != nil || !allowed {
-			t.Fatalf("generated issuer/agent pod refused: %v", err)
+			t.Fatalf("generated issuer/agent pod refused (allowed=%v): %v", allowed, err)
 		}
 	}
+	agentPods := 0
 	for _, pod := range issuerPods {
 		if asMap(asList(asMap(pod["spec"])["containers"])[0])["name"] != "agent" {
 			continue
 		}
+		agentPods++
 		mutations := map[string]func(map[string]any){
 			"privileged_agent": func(p map[string]any) {
 				asMap(asMap(asList(asMap(p["spec"])["containers"])[0])["securityContext"])["privileged"] = true
@@ -145,11 +198,17 @@ func TestSocketAdmissionBoundary(t *testing.T) {
 			})
 		}
 	}
+	if agentPods == 0 {
+		t.Fatal("fixture has no SPIRE agent pod template; agent boundary cases were not exercised")
+	}
+	if len(fixture.Patches) == 0 {
+		t.Fatal("fixture has no supervisor patch")
+	}
 	patch := fixture.Patches[0]
 	base := map[string]any{"metadata": map[string]any{"namespace": patch["namespace"]}, "spec": patch["pod_spec_patch"]}
 	allowed, err := admitted(policy, base)
 	if err != nil || !allowed {
-		t.Fatalf("admitted supervisor refused: %v", err)
+		t.Fatalf("admitted supervisor refused (allowed=%v): %v", allowed, err)
 	}
 	ordinary := clone(base)
 	asMap(ordinary["metadata"])["namespace"] = "untrusted-workloads"
@@ -159,7 +218,7 @@ func TestSocketAdmissionBoundary(t *testing.T) {
 	delete(asMap(asList(ordinarySpec["containers"])[0]), "volumeMounts")
 	allowed, err = admitted(policy, ordinary)
 	if err != nil || !allowed {
-		t.Fatalf("ordinary isolated workload refused: %v", err)
+		t.Fatalf("ordinary isolated workload refused (allowed=%v): %v", allowed, err)
 	}
 	mutations := map[string]func(map[string]any){
 		"var_run_alias_outside_supervisor_namespace": func(p map[string]any) {
