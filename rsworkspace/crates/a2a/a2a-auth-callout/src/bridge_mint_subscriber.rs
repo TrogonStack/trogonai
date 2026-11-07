@@ -19,9 +19,9 @@ pub struct BridgeMintSubscriber<D> {
 }
 
 impl<D: AuthDispatcher> BridgeMintSubscriber<D> {
-    /// Installs the subscription. Call it before the server callout subscriber
-    /// flushes its own, so one flush covers both before the process reports
-    /// ready.
+    /// Queues the subscription on the client's connection. Returning, or
+    /// subsequently flushing the socket, does not acknowledge that the broker
+    /// installed it.
     pub async fn subscribe(
         client: async_nats::Client,
         responder: BridgeMintResponder<D>,
