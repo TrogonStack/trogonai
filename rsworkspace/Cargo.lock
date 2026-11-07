@@ -96,6 +96,8 @@ dependencies = [
  "filetime",
  "futures",
  "nkeys",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -112,7 +114,9 @@ dependencies = [
  "trogon-audit",
  "trogon-identity-types",
  "trogon-nats",
+ "trogon-semconv",
  "trogon-std",
+ "trogon-telemetry",
  "trogonai-proto",
  "uuid",
 ]
