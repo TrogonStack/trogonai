@@ -67,7 +67,9 @@ impl Record {
         let Actor::Agent { agent_id } = &scope.actor else {
             return Err(WorkloadPeerScopeError);
         };
-        if !peer.matches_binding(scope.tenant.as_str(), scope.project.as_str(), agent_id.as_str()) {
+        if !peer.matches_binding(scope.tenant.as_str(), scope.project.as_str(), agent_id.as_str())
+            || (!facts.outcome.is_refusal() && !peer.valid_at(&Timestamp::from(stamp.occurred_at)))
+        {
             return Err(WorkloadPeerScopeError);
         }
         Ok(Self::decision_with_peer(scope, facts, Some(peer), stamp))

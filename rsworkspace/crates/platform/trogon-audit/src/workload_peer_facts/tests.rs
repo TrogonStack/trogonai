@@ -1,8 +1,10 @@
+use std::time::{Duration, SystemTime};
+
 use buffa::{EnumValue, Message, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use trogonai_proto::platform::audit::v1::audit_actor::Unattributed;
 use trogonai_proto::platform::audit::v1::audit_record::Detail;
-use trogonai_proto::platform::audit::v1::{AuditActor, AuditClass, EnforcementMode, GatewaySurface};
+use trogonai_proto::platform::audit::v1::{AuditActor, AuditClass, AuditDecision, EnforcementMode, GatewaySurface};
 use trogonai_proto::platform::workload_identity::v1alpha1::{RegistrationBinding, WorkloadPeerEvidence, WorkloadRole};
 
 use crate::fixtures::{body, decision_facts, identity, name, resealed, scope, scope_for, stamper, token};
@@ -92,6 +94,124 @@ fn an_expiry_refusal_retains_the_previously_authenticated_peer() {
     .unwrap();
     assert_eq!(record.obligation(), Obligation::Stands);
     assert_eq!(evidence(&record), &message);
+}
+
+fn expiring_peer() -> (WorkloadPeerEvidence, SystemTime) {
+    let mut peer = peer();
+    let expires = SystemTime::UNIX_EPOCH + Duration::new(1_799_999_999, 999_999_999);
+    peer.peer_path_expires_at = MessageField::some(Timestamp::from(expires));
+    (peer, expires)
+}
+
+#[test]
+fn allowed_workload_decisions_require_a_path_valid_at_occurrence() {
+    let (message, expires) = expiring_peer();
+    let peer = WorkloadPeerEvidenceFacts::try_from(message.clone()).unwrap();
+    for (occurred, allowed) in [
+        (expires - Duration::from_nanos(1), true),
+        (expires, false),
+        (expires + Duration::from_nanos(1), false),
+    ] {
+        let result = Record::authenticated_workload_decision(
+            scope(),
+            decision_facts(DecisionOutcome::Allow(Enforcement::Enforce), ReadOnly::Undeclared),
+            peer.clone(),
+            stamper().stamp().occurring_at(occurred),
+        );
+        assert_eq!(result.is_ok(), allowed, "exclusive path expiry at {occurred:?}");
+        if let Ok(record) = result {
+            assert_eq!(evidence(&record), &message);
+            assert_eq!(
+                record.message().occurred_at,
+                MessageField::some(Timestamp::from(occurred))
+            );
+            assert_eq!(record.message().recorded_at.seconds, 1_800_000_000);
+            assert_eq!(record.obligation(), Obligation::BeforeEffect);
+        }
+        let denial = Record::authenticated_workload_decision(
+            scope(),
+            decision_facts(DecisionOutcome::Deny, ReadOnly::Undeclared),
+            peer.clone(),
+            stamper().stamp().occurring_at(occurred),
+        )
+        .unwrap();
+        assert_eq!(evidence(&denial), &message);
+        assert_eq!(denial.obligation(), Obligation::Stands);
+    }
+}
+
+#[tokio::test]
+async fn stored_workload_allows_require_a_path_valid_at_occurrence() {
+    let (message, expires) = expiring_peer();
+    let sink = MemorySink::new();
+    let writer = AuditWriter::new(sink.clone(), identity(), WriterConfig::default(), &stamper());
+    let record = Record::authenticated_workload_decision(
+        scope(),
+        decision_facts(DecisionOutcome::Allow(Enforcement::Enforce), ReadOnly::Undeclared),
+        WorkloadPeerEvidenceFacts::try_from(message).unwrap(),
+        stamper().stamp().occurring_at(expires - Duration::from_nanos(1)),
+    )
+    .unwrap();
+    writer.write(record).await.unwrap();
+    let records = sink.stored_records();
+    let anchor = ChainAnchor::Genesis {
+        writer: identity().writer().clone(),
+        chain: writer.chain(),
+    };
+    assert!(verify_chain_range(anchor.clone(), records.clone()).is_ok());
+    let original = body(&records[1]);
+    for occurred in [expires, expires + Duration::from_nanos(1)] {
+        let mut message = original.clone();
+        message.occurred_at = MessageField::some(Timestamp::from(occurred));
+        assert_eq!(
+            verify_chain_range(anchor.clone(), [records[0].clone(), resealed(&records[1], &message)]),
+            Err(ChainVerificationError::SubjectMismatch { stream_sequence: 2 })
+        );
+    }
+    let mut denial = original.clone();
+    denial.occurred_at = MessageField::some(Timestamp::from(expires + Duration::from_nanos(1)));
+    denial.attribution.as_option_mut().unwrap().decision = EnumValue::from(AuditDecision::AUDIT_DECISION_DENY);
+    let rewritten = resealed(&records[1], &denial).with_subject("platform.v1.audit.decision.project_1.deny");
+    assert!(verify_chain_range(anchor.clone(), [records[0].clone(), rewritten]).is_ok());
+    for occurred in [MessageField::none(), MessageField::some(Timestamp::default())] {
+        let mut message = original.clone();
+        message.occurred_at = occurred;
+        assert_eq!(
+            verify_chain_range(anchor.clone(), [records[0].clone(), resealed(&records[1], &message)]),
+            Err(ChainVerificationError::SubjectMismatch { stream_sequence: 2 })
+        );
+    }
+}
+
+#[test]
+fn workload_peer_timestamps_reject_malformed_and_accept_exact_supported_boundaries() {
+    for (seconds, nanos) in [
+        (1, -1),
+        (1, 1_000_000_000),
+        (-1, 0),
+        (i64::MAX, 0),
+        (crate::constants::MAX_PROTOBUF_TIMESTAMP_SECONDS + 1, 0),
+    ] {
+        let mut message = peer();
+        message.peer_path_expires_at = MessageField::some(Timestamp {
+            seconds,
+            nanos,
+            ..Default::default()
+        });
+        assert_eq!(
+            WorkloadPeerEvidenceFacts::try_from(message),
+            Err(WorkloadPeerFactsError::Validity)
+        );
+    }
+    for (seconds, nanos) in [(1, 0), (crate::constants::MAX_PROTOBUF_TIMESTAMP_SECONDS, 999_999_999)] {
+        let mut message = peer();
+        message.peer_path_expires_at = MessageField::some(Timestamp {
+            seconds,
+            nanos,
+            ..Default::default()
+        });
+        assert!(WorkloadPeerEvidenceFacts::try_from(message).is_ok());
+    }
 }
 
 #[test]
