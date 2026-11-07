@@ -72,7 +72,8 @@ impl OpenBaoSecretStore {
     }
 
     fn credential_path(&self, credential: &CredentialRef) -> Result<String, SecretStoreError> {
-        let locator = StorageLocator::openbao(credential).map_err(|error| self.backend_error(error.to_string()))?;
+        let locator = StorageLocator::openbao(credential)
+            .map_err(SecretStoreError::invalid_generated(StorageBackend::OpenBao))?;
         Ok(CredentialPath::new(credential.owner_id().clone(), locator)
             .segments()
             .map(encode_path_segment)
@@ -398,7 +399,8 @@ impl SecretStoreMetadata for OpenBaoSecretStore {
             format!("{}#{}", self.metadata_path(credential)?, credential.version().get()),
         )
         .map_err(|error| self.backend_error(error.to_string()))?;
-        let locator = StorageLocator::openbao(credential).map_err(|error| self.backend_error(error.to_string()))?;
+        let locator = StorageLocator::openbao(credential)
+            .map_err(SecretStoreError::invalid_generated(StorageBackend::OpenBao))?;
 
         Ok(CredentialMetadata::new(
             credential.clone(),

@@ -269,6 +269,20 @@ fn event_decoders_name_an_invalid_credential_ref() {
 }
 
 #[test]
+fn a_rotation_without_metadata_names_the_missing_field() {
+    assert_eq!(
+        decode_rotated(&v1::CredentialRotated {
+            previous_credential_ref: MessageField::some(credential_ref_to_proto(&default_ref())),
+            metadata: MessageField::none(),
+            storage_locator: OPENBAO_LOCATOR.to_string(),
+        }),
+        Err(CredentialProtoDecodeError::MissingField {
+            field: "metadata".into()
+        })
+    );
+}
+
+#[test]
 fn state_decoders_name_an_invalid_credential_ref() {
     let invalid = || MessageField::some(invalid_ref_proto());
 

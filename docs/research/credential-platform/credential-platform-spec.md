@@ -1255,7 +1255,7 @@ storage_locator (StorageLocator::openbao())
 
 full KV v2 HTTP path
   = "/v1/{mount}/{data|metadata|delete|destroy}/trogonai/{owner_id}/
-     credentials/{credential_id}"
+     credentials/{storage_locator}"
 ```
 
 Worked example: owner_id "tenant-1", source github, integration "primary",
@@ -1349,8 +1349,10 @@ the recovery worker reads metadata() to recover stuck activations. The
 "during cleanup" pattern has no code yet since async cleanup itself is
 unbuilt (see RUNTIME_PROJECTION).
 
-DECIDED ([ADR#0046](../../adr/0046-project-anchored-resource-hierarchy.md)): `trogonai/{owner_id}/credentials/{credential_id}` and
-its mount are ratified as-is, with owner_id understood as project id.
+DECIDED ([ADR#0046](../../adr/0046-project-anchored-resource-hierarchy.md)): `trogonai/{owner_id}/credentials/{storage_locator}` and
+its mount are ratified as-is, with owner_id understood as project id. The
+suffix is the recorded storage locator, the text the credential id was before
+[ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md) made the id opaque.
 Names anchor at the project and never embed the organization above it. See
 docs/adr/0046-project-anchored-resource-hierarchy.md.
 

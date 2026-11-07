@@ -2773,3 +2773,25 @@ async fn every_runtime_credential_error_maps_to_the_status_a_webhook_caller_sees
         assert_eq!(error.http_status(), expected, "case {case}");
     }
 }
+
+#[test]
+fn credential_event_subjects_are_told_apart_from_foreign_ones() {
+    let id = "0123456789abcdef0123456789abcdef";
+
+    assert!(is_credential_event_subject(&format!(
+        "{CREDENTIAL_EVENT_SUBJECT_PREFIX}.acme.{id}"
+    )));
+    assert!(is_credential_event_subject(&format!(
+        "{CREDENTIAL_EVENT_SUBJECT_PREFIX}.{id}"
+    )));
+    assert!(!is_credential_event_subject(&format!("other.events.v1.acme.{id}")));
+    assert!(!is_credential_event_subject(&format!(
+        "{CREDENTIAL_EVENT_SUBJECT_PREFIX}{id}"
+    )));
+    assert!(!is_credential_event_subject(&format!(
+        "{CREDENTIAL_EVENT_SUBJECT_PREFIX}..{id}"
+    )));
+    assert!(!is_credential_event_subject(&format!(
+        "{CREDENTIAL_EVENT_SUBJECT_PREFIX}.acme.not-an-id"
+    )));
+}
