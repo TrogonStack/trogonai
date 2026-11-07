@@ -1,4 +1,8 @@
+use std::num::NonZeroUsize;
 use std::time::Duration;
+
+pub(crate) const DEFAULT_MAX_CONNECTIONS: NonZeroUsize = NonZeroUsize::MIN.saturating_add(127);
+pub(crate) const MAX_CONNECTION_LIMIT: usize = 4096;
 
 /// Longest agent identifier accepted, in bytes. It travels inside a URI SAN.
 pub(crate) const AGENT_ID_MAX_LEN: usize = 128;
@@ -70,3 +74,23 @@ pub(crate) const AUDIT_COMPONENT: &str = "egress_proxy";
 /// How long the audit connection may take to be built. NATS `connect` returns
 /// before any server answers, so this bounds setup, not reachability.
 pub(crate) const AUDIT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub(crate) const POLICY_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
+pub(crate) const DENIAL_AUDIT_TIMEOUT: Duration = Duration::from_secs(1);
+pub(crate) const MAX_SESSION_LIFETIME: Duration = Duration::from_secs(330);
+pub(crate) const LIVE_POLICY_MAX_BUCKET_BYTES: usize = 64;
+pub(crate) const LIVE_POLICY_MAX_BYTES: usize = 256 * 1024;
+pub(crate) const LIVE_POLICY_MAX_STORE_BYTES: i64 = 1024 * 1024;
+pub(crate) const LIVE_POLICY_MAX_AGENTS: usize = 1024;
+pub(crate) const LIVE_POLICY_MAX_PERMITS: usize = 4096;
+pub(crate) const LIVE_POLICY_MAX_LIFETIME: Duration = Duration::from_secs(325);
+pub(crate) const LIVE_POLICY_POLL_INTERVAL: Duration = Duration::from_secs(1);
+pub(crate) const LIVE_POLICY_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+pub(crate) const KV_OPERATION_HEADER: &str = "KV-Operation";
+
+#[cfg(test)]
+pub(crate) const LIVE_POLICY_TEST_WAIT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+pub(crate) const LIVE_POLICY_TEST_POLL: Duration = Duration::from_millis(20);
+#[cfg(test)]
+pub(crate) const LIVE_POLICY_TUNNEL_TEST_WAIT: Duration = Duration::from_secs(8);

@@ -14,7 +14,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::connection::Proxy;
 use crate::constants::ACCEPT_ERROR_BACKOFF;
-use crate::mtls::peer_agent;
+use crate::live_policy::KvPolicyDriver;
+use crate::peer_identity::PeerIdentity;
 use crate::trust_domain::TrustDomain;
 
 pub struct Server {
@@ -22,6 +23,7 @@ pub struct Server {
     acceptor: TlsAcceptor,
     proxy: Arc<Proxy>,
     trust_domain: Arc<TrustDomain>,
+    policy_driver: Option<KvPolicyDriver>,
 }
 
 impl Server {
@@ -31,7 +33,13 @@ impl Server {
             acceptor: TlsAcceptor::from(tls),
             proxy: Arc::new(proxy),
             trust_domain: Arc::new(trust_domain),
+            policy_driver: None,
         }
+    }
+
+    pub(crate) fn with_policy_driver(mut self, driver: Option<KvPolicyDriver>) -> Self {
+        self.policy_driver = driver;
+        self
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -44,21 +52,33 @@ impl Server {
     /// settled, even one whose connection closed under it, and the sink has
     /// made its last flush. A record still buffered when that flush fails, as
     /// it does while the stream stays down, is lost with the process.
-    pub async fn run(self, shutdown: CancellationToken) {
+    pub async fn run(mut self, shutdown: CancellationToken) {
         let flush = CancellationToken::new();
         let audit = self.proxy.audit();
         let drain = tokio::spawn({
             let flush = flush.clone();
             async move { audit.run(flush).await }
         });
-        accept_loop(
-            &self.listener,
-            &self.acceptor,
-            &self.proxy,
-            &self.trust_domain,
-            shutdown,
-        )
-        .await;
+        let policy_shutdown = CancellationToken::new();
+        let policy = self.policy_driver.take();
+        tokio::join!(
+            async {
+                accept_loop(
+                    &self.listener,
+                    &self.acceptor,
+                    &self.proxy,
+                    &self.trust_domain,
+                    shutdown,
+                )
+                .await;
+                policy_shutdown.cancel();
+            },
+            async {
+                if let Some(policy) = policy {
+                    policy.run(policy_shutdown.clone()).await;
+                }
+            }
+        );
         flush.cancel();
         if let Err(error) = drain.await {
             tracing::warn!(error = %error, "audit drain task ended abnormally");
@@ -92,6 +112,11 @@ async fn accept_loop<L: Accept>(
             Some(_) = connections.join_next(), if !connections.is_empty() => {}
             accepted = listener.accept() => match accepted {
                 Ok((stream, peer)) => {
+                    while connections.try_join_next().is_some() {}
+                    if connections.len() >= proxy.limits().max_connections.get() {
+                        drop(stream);
+                        continue;
+                    }
                     connections.spawn(serve_connection(
                         acceptor.clone(),
                         Arc::clone(proxy),
@@ -129,14 +154,17 @@ async fn serve_connection(
             return;
         }
     };
-    let agent = match peer_agent(tls.get_ref().1.peer_certificates(), &trust_domain) {
-        Ok(agent) => agent,
+    let identity = match PeerIdentity::from_verified_certificates(
+        tls.get_ref().1.peer_certificates().unwrap_or_default(),
+        &trust_domain,
+    ) {
+        Ok(identity) => identity,
         Err(error) => {
             tracing::warn!(%peer, error = %error, "client certificate names no agent");
             return;
         }
     };
-    proxy.serve(tls, &agent).await;
+    proxy.serve(tls, &identity).await;
 }
 
 #[cfg(test)]

@@ -19,11 +19,12 @@ use trogon_std::uuid::UuidV7Generator;
 
 use crate::audit::AuditSink;
 use crate::audit_config::AuditConfig;
-use crate::config::Config;
+use crate::config::{Config, PolicyInput};
 use crate::connection::Proxy;
 use crate::constants::AUDIT_CONNECT_TIMEOUT;
+use crate::live_policy::{KvPolicyConfig, KvSnapshot, LivePolicyError, PolicyTransportError};
 use crate::mtls::{TlsError, load_server_config};
-use crate::policy_snapshot::PolicySnapshot;
+use crate::policy_snapshot::{PolicySnapshot, PolicyStatistics};
 use crate::resolver::{Resolver, SystemResolver};
 use crate::server::Server;
 use crate::static_snapshot::{SnapshotError, StaticSnapshot};
@@ -49,6 +50,12 @@ impl EnforcementMode {
 pub enum StartupError {
     #[error("no usable policy, refusing to start")]
     Policy(#[source] SnapshotError),
+    #[error("no usable live policy, refusing to start")]
+    LivePolicy(#[source] LivePolicyError),
+    #[error("live policy transport is not authenticated, refusing to start")]
+    LivePolicyTransport(#[source] PolicyTransportError),
+    #[error("live policy scope does not match this runtime")]
+    LivePolicyScope,
     #[error("TLS configuration is not usable")]
     Tls(#[source] TlsError),
     #[error("audit connection settings are not usable, refusing to start")]
@@ -63,6 +70,7 @@ pub enum StartupError {
 
 /// Starts the proxy with the system resolver and the JetStream audit writer.
 pub async fn start(config: Config) -> Result<Server, StartupError> {
+    validate_policy_transport(&config)?;
     let audit = connect_audit(&config.audit).await.map_err(StartupError::Audit)?;
     start_with(config, Arc::new(SystemResolver), Arc::new(audit)).await
 }
@@ -89,7 +97,27 @@ pub async fn start_with(
     resolver: Arc<dyn Resolver>,
     audit: Arc<dyn AuditSink>,
 ) -> Result<Server, StartupError> {
-    let snapshot = StaticSnapshot::load(&config.policy_file).map_err(StartupError::Policy)?;
+    validate_policy_transport(&config)?;
+    let (snapshot, policy_driver, statistics): (Arc<dyn PolicySnapshot>, _, _) = match &config.policy {
+        PolicyInput::StaticFile(path) => {
+            let snapshot = StaticSnapshot::load(path).map_err(StartupError::Policy)?;
+            let statistics = PolicyStatistics {
+                agents: snapshot.agent_count(),
+                permits: snapshot.permit_count(),
+            };
+            (Arc::new(snapshot), None, Some(statistics))
+        }
+        PolicyInput::NatsKv(policy) => {
+            let client = trogon_nats::connect(&config.audit.nats, AUDIT_CONNECT_TIMEOUT)
+                .await
+                .map_err(StartupError::Audit)?;
+            let (snapshot, driver) = KvSnapshot::open(client, policy.clone())
+                .await
+                .map_err(StartupError::LivePolicy)?;
+            let statistics = snapshot.statistics();
+            (snapshot, Some(driver), statistics)
+        }
+    };
     let tls = load_server_config(&config.tls, config.trust_domain.clone()).map_err(StartupError::Tls)?;
     let listener = TcpListener::bind(config.listen)
         .await
@@ -103,21 +131,31 @@ pub async fn start_with(
         policy_source = %snapshot.source(),
         policy_kind = snapshot.source().kind(),
         mode = mode.as_str(),
-        agents = snapshot.agent_count(),
-        permits = snapshot.permit_count(),
+        agents = statistics.map(|statistics| statistics.agents),
+        permits = statistics.map(|statistics| statistics.permits),
         listen = %config.listen,
         trust_domain = %config.trust_domain,
         "egress proxy starting"
     );
 
     let proxy = Proxy::new(
-        Arc::new(snapshot),
+        snapshot,
         resolver,
         audit,
         config.limits,
         config.non_tls_ports.into_iter().collect(),
     );
-    Ok(Server::new(listener, Arc::new(tls), proxy, config.trust_domain))
+    Ok(Server::new(listener, Arc::new(tls), proxy, config.trust_domain).with_policy_driver(policy_driver))
+}
+
+fn validate_policy_transport(config: &Config) -> Result<(), StartupError> {
+    if let PolicyInput::NatsKv(policy) = &config.policy {
+        if !policy.matches_scope(config.audit.identity.tenant(), config.audit.identity.project()) {
+            return Err(StartupError::LivePolicyScope);
+        }
+        KvPolicyConfig::validate_transport(&config.audit.nats).map_err(StartupError::LivePolicyTransport)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

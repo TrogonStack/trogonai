@@ -4,7 +4,10 @@ use futures::StreamExt as _;
 use tracing::{error, info, warn};
 use trogon_std::env::ReadEnv;
 
+use crate::admission_budget::AdmissionBudget;
+use crate::bridge_mint::{BridgeMintRefusal, BridgeMintReply};
 use crate::bridge_mint_responder::{BridgeMintResponder, bridge_mint_subject};
+use crate::denial_category::DenialCategory;
 use crate::dispatcher::AuthDispatcher;
 use crate::error::AuthCalloutError;
 use crate::subscriber::queue_group;
@@ -16,6 +19,7 @@ pub struct BridgeMintSubscriber<D> {
     responder: Arc<BridgeMintResponder<D>>,
     subscription: async_nats::Subscriber,
     subject: String,
+    admission_budget: AdmissionBudget,
 }
 
 impl<D: AuthDispatcher> BridgeMintSubscriber<D> {
@@ -37,7 +41,13 @@ impl<D: AuthDispatcher> BridgeMintSubscriber<D> {
             responder: Arc::new(responder),
             subscription,
             subject,
+            admission_budget: AdmissionBudget::default(),
         })
+    }
+
+    pub fn with_admission_budget(mut self, budget: AdmissionBudget) -> Self {
+        self.admission_budget = budget;
+        self
     }
 
     pub fn subject(&self) -> &str {
@@ -54,10 +64,20 @@ impl<D: AuthDispatcher> BridgeMintSubscriber<D> {
                 warn!("bridge mint request without reply subject; dropping");
                 continue;
             };
+            let Some(permit) = self.admission_budget.try_acquire() else {
+                let payload =
+                    BridgeMintReply::Refused(BridgeMintRefusal::new(DenialCategory::ServiceUnavailable.as_str()))
+                        .to_payload();
+                if let Err(error) = self.client.publish(reply, payload.into()).await {
+                    error!(error = %error, "failed to publish bridge mint overload refusal");
+                }
+                continue;
+            };
             let client = self.client.clone();
             let responder = Arc::clone(&self.responder);
 
             tokio::spawn(async move {
+                let _admission_permit = permit;
                 let payload = responder.respond(&message.payload).await.to_payload();
                 if let Err(publish_error) = client.publish(reply, payload.into()).await {
                     error!(error = %publish_error, "failed to publish bridge mint reply");
