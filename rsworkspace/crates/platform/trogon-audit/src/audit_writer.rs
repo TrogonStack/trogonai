@@ -37,6 +37,7 @@ use crate::obligation::Obligation;
 use crate::record::Record;
 use crate::record_id::RecordId;
 use crate::sealed_record::SealedRecord;
+use crate::stamp::Stamp;
 use crate::stamper::Stamper;
 use crate::stored_ack::StoredAck;
 use crate::writer_config::WriterConfig;
@@ -115,6 +116,10 @@ impl<S: AuditSink> AuditWriter<S> {
             Obligation::Stands => Ok(self.write_standing_refusal(record).await),
             Obligation::BestEffort => Ok(self.enqueue_best_effort(record)),
         }
+    }
+
+    pub async fn readiness_probe(&self, stamp: Stamp) -> Result<Disposition, AuditUnavailableError> {
+        self.write(Record::readiness_probe(&self.inner.identity, stamp)).await
     }
 
     /// True while the chain's head waits to be stored after a failed publish, or

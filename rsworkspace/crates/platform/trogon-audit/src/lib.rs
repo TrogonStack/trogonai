@@ -34,6 +34,7 @@
 //! across restarts, signed checkpoints, the remaining integrity records, the
 //! OpenTelemetry counters and the surface adapters are later slices.
 
+pub mod activation_recorder;
 pub mod actor;
 pub mod audit_name;
 pub mod audit_sink;
@@ -58,6 +59,7 @@ pub mod checkpoint_terminal;
 pub mod classify_publish_error;
 pub mod consistency_token;
 pub mod constants;
+pub mod credential_activation_facts;
 pub mod credential_facts;
 pub mod credential_terminal;
 pub mod decision_facts;
@@ -96,6 +98,7 @@ pub mod verified_chain_head;
 pub mod verified_chain_range;
 pub mod verify_chain_range;
 pub mod verify_chains;
+pub mod workload_peer_facts;
 pub mod writer_config;
 pub mod writer_id;
 pub mod writer_identity;
@@ -107,6 +110,7 @@ pub mod chain_builder;
 #[cfg(any(test, feature = "test-support"))]
 pub mod memory_sink;
 
+pub use activation_recorder::{ActivationRecorder, ActivationRecorderError};
 pub use actor::Actor;
 pub use audit_name::{AuditName, AuditNameError};
 pub use audit_sink::AuditSink;
@@ -128,6 +132,7 @@ pub use change_terminal::ChangeTerminal;
 pub use checkpoint_terminal::CheckpointTerminal;
 pub use classify_publish_error::ClassifyPublishError;
 pub use consistency_token::{ConsistencyToken, ConsistencyTokenError};
+pub use credential_activation_facts::{ActivationFactsError, ActivationScopeError, CredentialActivationFacts};
 pub use credential_facts::CredentialFacts;
 pub use credential_terminal::CredentialTerminal;
 pub use decision_facts::DecisionFacts;
@@ -163,6 +168,7 @@ pub use verified_chain_head::VerifiedChainHead;
 pub use verified_chain_range::VerifiedChainRange;
 pub use verify_chain_range::verify_chain_range;
 pub use verify_chains::verify_chains;
+pub use workload_peer_facts::{WorkloadPeerEvidenceFacts, WorkloadPeerFactsError, WorkloadPeerScopeError};
 pub use writer_config::WriterConfig;
 pub use writer_id::WriterId;
 pub use writer_identity::WriterIdentity;
