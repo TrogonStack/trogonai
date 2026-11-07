@@ -6,15 +6,17 @@ use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, ExtendedKeyUsa
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use testcontainers_modules::testcontainers::ImageExt;
-use tokio::time::{MissedTickBehavior, interval, timeout};
+use tokio::time::timeout;
 use uuid::Uuid;
 
 use super::{IssuedCertificate, SERVER_NAMES, TestServer, image};
 use crate::{ClientCertificate, Location, NatsAuth, NatsConfig, NatsTls, NatsToken, connect_once};
 
 mod constants;
+mod quorum;
 
 use constants::{ADMIN, NATS_CLUSTER_IMAGE_TAG, QUORUM_STREAM, WAIT};
+use quorum::wait_for_quorum;
 
 /// A three-node file-backed JetStream cluster. Client certificates are mapped
 /// to the supplied native NATS permission objects. Routes have a separate CA.
@@ -154,11 +156,8 @@ impl TlsJetStreamCluster {
             .expect("connect to verified TLS cluster");
         let context = async_nats::jetstream::new(client);
         timeout(WAIT, async {
-            let mut polls = interval(Duration::from_millis(50));
-            polls.set_missed_tick_behavior(MissedTickBehavior::Delay);
-            loop {
-                polls.tick().await;
-                let result = context
+            wait_for_quorum(async || {
+                let stream = context
                     .create_stream(Config {
                         name: QUORUM_STREAM.into(),
                         subjects: vec!["fixture.quorum".into()],
@@ -167,22 +166,20 @@ impl TlsJetStreamCluster {
                         max_messages: 1,
                         ..Config::default()
                     })
-                    .await;
-                if let Ok(stream) = result {
-                    let info = stream.get_info().await.expect("inspect quorum probe stream");
-                    if info.cluster.as_ref().is_some_and(|cluster| {
-                        cluster.leader.is_some()
-                            && cluster.replicas.len() == 2
-                            && cluster.replicas.iter().all(|peer| peer.current && !peer.offline)
-                    }) {
-                        context
-                            .delete_stream(QUORUM_STREAM)
-                            .await
-                            .expect("remove quorum probe stream");
-                        break;
-                    }
-                }
-            }
+                    .await
+                    .ok()?;
+                stream
+                    .get_info()
+                    .await
+                    .expect("inspect quorum probe stream")
+                    .cluster
+                    .clone()
+            })
+            .await;
+            context
+                .delete_stream(QUORUM_STREAM)
+                .await
+                .expect("remove quorum probe stream");
         })
         .await
         .expect("three verified TLS JetStream replicas become current");
