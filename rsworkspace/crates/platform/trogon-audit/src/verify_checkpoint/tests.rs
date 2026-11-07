@@ -276,6 +276,15 @@ fn refuses_a_checkpoint_of_another_head() {
 }
 
 #[test]
+fn refuses_a_signed_checkpoint_naming_another_audit_stream() {
+    for stream in ["", "OTHER_AUDIT", "AUDIT_CHECKPOINT", "audit", " AUDIT "] {
+        let payload = signed_statement(|statement| statement.audit_stream = stream.to_owned());
+
+        assert_eq!(verify(&payload), Err(CheckpointVerificationError::WrongStream));
+    }
+}
+
+#[test]
 fn refuses_a_missing_or_impossible_issue_time() {
     let missing = signed_statement(|statement| statement.issued_at = MessageField::none());
     assert_eq!(verify(&missing), Err(CheckpointVerificationError::InvalidIssuedAt));

@@ -45,6 +45,8 @@ pub enum CheckpointVerificationError {
     HeadSequenceMismatch { expected: u64, observed: u64 },
     #[error("checkpoint names a head hash other than the verified head's at sequence {sequence}")]
     HeadHashMismatch { sequence: u64 },
+    #[error("checkpoint is not for the AUDIT stream")]
+    WrongStream,
     #[error("checkpoint names stream sequence {observed}, not the verified head's stream sequence {expected}")]
     StreamSequenceMismatch { expected: u64, observed: u64 },
     #[error("checkpoint has no valid issue time")]

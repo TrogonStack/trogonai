@@ -38,6 +38,10 @@ fn faults_name_what_was_expected_and_never_bytes() {
         "checkpoint names a head hash other than the verified head's at sequence 4"
     );
     assert_eq!(
+        CheckpointVerificationError::WrongStream.to_string(),
+        "checkpoint is not for the AUDIT stream"
+    );
+    assert_eq!(
         CheckpointVerificationError::StreamSequenceMismatch {
             expected: 14,
             observed: 13,

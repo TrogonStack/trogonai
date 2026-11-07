@@ -12,7 +12,7 @@ use crate::chain_id::ChainId;
 use crate::checkpoint_id::CheckpointId;
 use crate::checkpoint_jws;
 use crate::checkpoint_verification_error::CheckpointVerificationError;
-use crate::constants::{CHECKPOINT_JWS_ALGORITHM, CHECKPOINT_JWS_TYPE};
+use crate::constants::{CHECKPOINT_JWS_ALGORITHM, CHECKPOINT_JWS_TYPE, STREAM_AUDIT};
 use crate::key_id::KeyId;
 use crate::protected_header::ProtectedHeader;
 use crate::time_bounds::TimeBounds;
@@ -25,9 +25,8 @@ use crate::verified_checkpoint::VerifiedCheckpoint;
 /// The detached JWS must carry the checkpoint type, EdDSA and a `kid` in
 /// `trusted`, and its signature must verify over the stored statement bytes
 /// exactly as they are. The statement must then name the same key, `head`'s
-/// writer, chain, sequence, hash and stream sequence, and an issue time inside
-/// `bounds`. The stream name is not compared: a verified head does not carry it,
-/// and the stream sequence already places the head.
+/// writer, chain, sequence, hash and stream sequence, the canonical `AUDIT`
+/// stream, and an issue time inside `bounds`.
 pub fn verify_checkpoint(
     payload: &[u8],
     head: &VerifiedChainHead,
@@ -107,6 +106,9 @@ fn check_head(statement: &CheckpointStatement, head: &VerifiedChainHead) -> Resu
         return Err(CheckpointVerificationError::HeadHashMismatch {
             sequence: head.sequence(),
         });
+    }
+    if statement.audit_stream != STREAM_AUDIT {
+        return Err(CheckpointVerificationError::WrongStream);
     }
     if statement.audit_stream_sequence != head.stream_sequence() {
         return Err(CheckpointVerificationError::StreamSequenceMismatch {
