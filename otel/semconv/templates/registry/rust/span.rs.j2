@@ -8,7 +8,26 @@
 
 {% for span in ctx.spans %}
 {% set name = span.id | replace("span.", "") %}
+{% set pattern = span.annotations.code_generation.span_name if span.annotations and span.annotations.code_generation else none %}
+{% if pattern %}
+{{ [span.brief] | comment }}
+///
+/// The wire name is a pattern, `{{ pattern.operation }} {{ "{" }}{{ pattern.target }}{{ "}" }}`. Build it with
+/// [`{{ name | snake_case }}_name`].
+pub const {{ name | screaming_snake_case }}_OPERATION: &str = "{{ pattern.operation }}";
+
+/// Span name for `{{ name }}`: the operation, followed by the `{{ pattern.target }}`
+/// value when it is available.
+pub fn {{ name | snake_case }}_name(target: Option<&str>) -> String {
+    match target {
+        Some(target) => format!("{} {}", {{ name | screaming_snake_case }}_OPERATION, target),
+        None => {{ name | screaming_snake_case }}_OPERATION.to_string(),
+    }
+}
+
+{% else %}
 {{ [span.brief] | comment }}
 pub const {{ name | screaming_snake_case }}: &str = "{{ name }}";
 
+{% endif %}
 {% endfor %}

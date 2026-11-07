@@ -490,6 +490,132 @@ pub fn build_gateway_credential_store_write_failures(
         .build()
 }
 
+/// GenAI client inference operation duration
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub const GEN_AI_CLIENT_INFERENCE_DURATION: &str = "gen_ai.client.inference.duration";
+
+/// GenAI client inference operation duration
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub fn build_gen_ai_client_inference_duration(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Histogram<f64> {
+    meter
+        .f64_histogram(GEN_AI_CLIENT_INFERENCE_DURATION)
+        .with_description("GenAI client inference operation duration.")
+        .with_unit("s")
+        .with_boundaries(vec![
+            0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92,
+        ])
+        .build()
+}
+
+/// The number of input (prompt) tokens used per inference operation
+///
+/// Instrument: `histogram`. Unit: `{token}`.
+pub const GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS: &str = "gen_ai.client.inference.operation.input_tokens";
+
+/// The number of input (prompt) tokens used per inference operation
+///
+/// Instrument: `histogram`. Unit: `{token}`.
+pub fn build_gen_ai_client_inference_operation_input_tokens(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Histogram<u64> {
+    meter
+        .u64_histogram(GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS)
+        .with_description("The number of input (prompt) tokens used per inference operation.")
+        .with_unit("{token}")
+        .with_boundaries(vec![
+            1.0, 4.0, 16.0, 64.0, 256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 4194304.0, 16777216.0,
+            67108864.0,
+        ])
+        .build()
+}
+
+/// The number of output (completion) tokens used per inference operation
+///
+/// Instrument: `histogram`. Unit: `{token}`.
+pub const GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS: &str = "gen_ai.client.inference.operation.output_tokens";
+
+/// The number of output (completion) tokens used per inference operation
+///
+/// Instrument: `histogram`. Unit: `{token}`.
+pub fn build_gen_ai_client_inference_operation_output_tokens(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Histogram<u64> {
+    meter
+        .u64_histogram(GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS)
+        .with_description("The number of output (completion) tokens used per inference operation.")
+        .with_unit("{token}")
+        .with_boundaries(vec![
+            1.0, 4.0, 16.0, 64.0, 256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 4194304.0, 16777216.0,
+            67108864.0,
+        ])
+        .build()
+}
+
+/// GenAI operation duration
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub const GEN_AI_CLIENT_OPERATION_DURATION: &str = "gen_ai.client.operation.duration";
+
+/// GenAI operation duration
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub fn build_gen_ai_client_operation_duration(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Histogram<f64> {
+    meter
+        .f64_histogram(GEN_AI_CLIENT_OPERATION_DURATION)
+        .with_description("GenAI operation duration.")
+        .with_unit("s")
+        .with_boundaries(vec![
+            0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92,
+        ])
+        .build()
+}
+
+/// The duration of a single tool execution
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub const GEN_AI_EXECUTE_TOOL_DURATION: &str = "gen_ai.execute_tool.duration";
+
+/// The duration of a single tool execution
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub fn build_gen_ai_execute_tool_duration(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Histogram<f64> {
+    meter
+        .f64_histogram(GEN_AI_EXECUTE_TOOL_DURATION)
+        .with_description("The duration of a single tool execution.")
+        .with_unit("s")
+        .with_boundaries(vec![
+            0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92,
+        ])
+        .build()
+}
+
+/// The end-to-end duration of a single in-process agent invocation, from the moment the invocation starts until the agent emits the last chunk of its final response or terminates with an error
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub const GEN_AI_INVOKE_AGENT_DURATION: &str = "gen_ai.invoke_agent.duration";
+
+/// The end-to-end duration of a single in-process agent invocation, from the moment the invocation starts until the agent emits the last chunk of its final response or terminates with an error
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub fn build_gen_ai_invoke_agent_duration(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Histogram<f64> {
+    meter
+        .f64_histogram(GEN_AI_INVOKE_AGENT_DURATION)
+        .with_description("The end-to-end duration of a single in-process agent invocation, from the moment the invocation starts until the agent emits the last chunk of its final response or terminates with an error.")
+        .with_unit("s")
+        .with_boundaries(vec![0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4, 12.8, 25.6, 51.2, 102.4, 204.8, 409.6])
+        .build()
+}
+
 /// Duration of HTTP server requests
 ///
 /// Instrument: `histogram`. Unit: `s`.

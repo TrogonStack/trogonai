@@ -8,8 +8,17 @@ import rego.v1
 # `input.groups` are the authored groups.
 
 # Registered OpenTelemetry root namespaces. Custom telemetry must not claim them.
-# Standard metrics retain their upstream namespace.
-standard_metrics := {"http.server.request.duration"}
+# Standard metrics retain their upstream namespace. The gen_ai metrics are the
+# vendored OpenTelemetry GenAI subset in registry/genai.yaml.
+standard_metrics := {
+	"http.server.request.duration",
+	"gen_ai.client.operation.duration",
+	"gen_ai.client.inference.duration",
+	"gen_ai.client.inference.operation.input_tokens",
+	"gen_ai.client.inference.operation.output_tokens",
+	"gen_ai.invoke_agent.duration",
+	"gen_ai.execute_tool.duration",
+}
 
 otel_reserved_roots := {
 	"http", "rpc", "messaging", "dns", "db", "system", "process", "container",
