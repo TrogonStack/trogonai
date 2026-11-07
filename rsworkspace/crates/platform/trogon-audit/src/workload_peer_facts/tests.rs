@@ -280,6 +280,26 @@ async fn stored_workload_decisions_verify_and_refuse_rehashed_identity_confusion
         .unwrap()
         .application_id = Some("agent-8".into());
     tampered.push(message);
+    let mut message = original.clone();
+    let Some(Detail::GatewayDecision(decision)) = message.detail.as_mut() else {
+        panic!("gateway detail");
+    };
+    decision
+        .workload_peer
+        .as_option_mut()
+        .unwrap()
+        .peer_binding
+        .as_option_mut()
+        .unwrap()
+        .project = "project_2".into();
+    tampered.push(message);
+    let mut message = original.clone();
+    message.attribution.as_option_mut().unwrap().would_deny = true;
+    let rewritten = resealed(&records[1], &message).with_subject("platform.v1.audit.decision.project_1.would_deny");
+    assert_eq!(
+        verify_chain_range(anchor.clone(), vec![records[0].clone(), rewritten]),
+        Err(ChainVerificationError::SubjectMismatch { stream_sequence: 2 })
+    );
     for message in tampered {
         let rewritten = resealed(&records[1], &message);
         assert_eq!(
