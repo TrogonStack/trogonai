@@ -11,7 +11,6 @@ on:
       - '.mise.toml'
       - '.config/mise/tasks/**'
       - '.github/actions/setup-rust/**'
-      - '.github/actions/coverage-report/**'
       - '.github/workflows/ci-rust.yml'
 
 concurrency:
@@ -130,13 +129,10 @@ jobs:
       - name: Run tests with coverage
         run: mise run --skip-tools github-actions:rust-coverage
 
-      - name: Verify coverage storage publication
-        run: python3 .github/actions/coverage-report/test_publish.py -v
-
       - name: Coverage report and gate
         # TODO: Add a fork-safe read-only coverage comparison path; this action writes to
         # _xml_coverage_reports, but fork PR tokens cannot push to the base repo.
-        uses: ./.github/actions/coverage-report
+        uses: TrogonStack/github-actions/actions/coverage-report@9bfbc0f221c781850bb051332e280c8d2274e8b8
         with:
           path: rsworkspace/coverage.xml
           threshold: 95
