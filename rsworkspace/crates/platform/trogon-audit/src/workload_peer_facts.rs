@@ -1,3 +1,4 @@
+use buffa_types::google::protobuf::Timestamp;
 use trogonai_proto::platform::workload_identity::v1alpha1::{WorkloadPeerEvidence, WorkloadRole};
 
 use crate::constants::WORKLOAD_PUBLIC_FINGERPRINT_BYTES;
@@ -22,7 +23,7 @@ pub enum WorkloadPeerFactsError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("workload peer evidence does not match the enforced egress actor and scope")]
+#[error("workload peer evidence does not match the enforced egress decision")]
 pub struct WorkloadPeerScopeError;
 
 impl TryFrom<WorkloadPeerEvidence> for WorkloadPeerEvidenceFacts {
@@ -74,6 +75,12 @@ impl WorkloadPeerEvidenceFacts {
         self.0.peer_binding.tenant == tenant
             && self.0.peer_binding.project == project
             && self.0.peer_binding.application_id.as_deref() == Some(application)
+    }
+
+    pub(crate) fn valid_at(&self, occurred_at: &Timestamp) -> bool {
+        timestamp_nanos(&self.0.peer_path_expires_at)
+            .zip(timestamp_nanos(occurred_at))
+            .is_some_and(|(expires, occurred)| occurred < expires)
     }
 
     pub(crate) fn into_message(self) -> WorkloadPeerEvidence {
