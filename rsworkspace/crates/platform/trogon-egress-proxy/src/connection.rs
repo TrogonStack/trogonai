@@ -30,7 +30,6 @@ use tokio::time::{MissedTickBehavior, interval, sleep_until, timeout};
 use trogon_std::{EpochClock, SystemClock};
 
 use crate::admission::{Admission, admit};
-use crate::agent_id::AgentId;
 use crate::audit::{AuditEvent, AuditSink, Decision};
 use crate::audit_error::AuditError;
 use crate::connect_request::{Request, RequestError, read_request};
@@ -119,6 +118,11 @@ impl<Clock: EpochClock> Proxy<Clock> {
         let ended = if peer.is_current(self.clock.system_time()) {
             tokio::select! {
                 biased;
+                () = peer.authority_changed() => Some(EndedAuthority {
+                    destination: None,
+                    address: None,
+                    fault: Fault::AuthorityExpired,
+                }),
                 () = sleep_until(peer.deadline()) => Some(EndedAuthority {
                     destination: None,
                     address: None,
@@ -144,7 +148,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
             let _ = timeout(
                 DENIAL_AUDIT_TIMEOUT,
                 self.record(
-                    peer.agent(),
+                    peer,
                     ended.destination.as_ref(),
                     ended.address,
                     Decision::Refused(ended.fault),
@@ -176,19 +180,19 @@ impl<Clock: EpochClock> Proxy<Clock> {
             Ok(Err(RequestError::Io(error))) => return Err(error),
             Ok(Err(error)) => {
                 tracing::debug!(%agent, error = %error, "request refused");
-                return self.refuse(client, agent, None, None, Fault::BadRequest).await;
+                return self.refuse(client, peer, None, None, Fault::BadRequest).await;
             }
             Ok(Ok(parsed)) => parsed,
         };
         let destination = match request {
             Request::Connect(destination) => destination,
             Request::OtherMethod => {
-                return self.refuse(client, agent, None, None, Fault::MethodNotAllowed).await;
+                return self.refuse(client, peer, None, None, Fault::MethodNotAllowed).await;
             }
         };
 
         if let Err(fault) = self.check_request_authority(peer, &destination) {
-            return self.refuse(client, agent, Some(&destination), None, fault).await;
+            return self.refuse(client, peer, Some(&destination), None, fault).await;
         }
 
         let selected = OnceLock::new();
@@ -218,12 +222,12 @@ impl<Clock: EpochClock> Proxy<Clock> {
             Some(candidates) => candidates,
             None => {
                 return self
-                    .refuse(client, agent, Some(destination), None, Fault::UpstreamUnreachable)
+                    .refuse(client, peer, Some(destination), None, Fault::UpstreamUnreachable)
                     .await;
             }
         };
         if let Err(fault) = self.check_request_authority(peer, destination) {
-            return self.refuse(client, agent, Some(destination), None, fault).await;
+            return self.refuse(client, peer, Some(destination), None, fault).await;
         }
         let targets = match dial_targets(
             self.snapshot.as_ref(),
@@ -233,13 +237,13 @@ impl<Clock: EpochClock> Proxy<Clock> {
             self.clock.system_time(),
         ) {
             Ok(targets) => targets,
-            Err(fault) => return self.refuse(client, agent, Some(destination), None, fault).await,
+            Err(fault) => return self.refuse(client, peer, Some(destination), None, fault).await,
         };
         let dialled = match self.dial(peer, destination, &targets, selected).await {
             Ok(dialled) => dialled,
             Err(fault) => {
                 return self
-                    .refuse(client, agent, Some(destination), selected.get().copied(), fault)
+                    .refuse(client, peer, Some(destination), selected.get().copied(), fault)
                     .await;
             }
         };
@@ -250,19 +254,19 @@ impl<Clock: EpochClock> Proxy<Clock> {
         }) = dialled
         else {
             return self
-                .refuse(client, agent, Some(destination), None, Fault::UpstreamUnreachable)
+                .refuse(client, peer, Some(destination), None, Fault::UpstreamUnreachable)
                 .await;
         };
 
         let resolved = Some(address.ip());
         if self
-            .record(agent, Some(destination), resolved, Decision::Permitted, policy_revision)
+            .record(peer, Some(destination), resolved, Decision::Permitted, policy_revision)
             .await
             .is_err()
         {
             drop(upstream);
             return self
-                .refuse(client, agent, Some(destination), resolved, Fault::AuditUnavailable)
+                .refuse(client, peer, Some(destination), resolved, Fault::AuditUnavailable)
                 .await;
         }
 
@@ -272,13 +276,13 @@ impl<Clock: EpochClock> Proxy<Clock> {
         {
             drop(upstream);
             return self
-                .refuse(client, agent, Some(destination), resolved, Fault::PolicyUnavailable)
+                .refuse(client, peer, Some(destination), resolved, Fault::PolicyUnavailable)
                 .await;
         }
 
         if let Err(fault) = self.check_authority(peer, destination, address) {
             drop(upstream);
-            return self.refuse(client, agent, Some(destination), resolved, fault).await;
+            return self.refuse(client, peer, Some(destination), resolved, fault).await;
         }
 
         let tunnel = async {
@@ -484,7 +488,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
     async fn refuse<C>(
         &self,
         client: &mut C,
-        agent: &AgentId,
+        peer: &PeerIdentity,
         destination: Option<&Destination>,
         resolved: Option<IpAddr>,
         fault: Fault,
@@ -494,7 +498,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
     {
         if fault != Fault::AuditUnavailable {
             let _ = self
-                .record(agent, destination, resolved, Decision::Refused(fault), None)
+                .record(peer, destination, resolved, Decision::Refused(fault), None)
                 .await;
         }
         client.write_all(&fault.response()).await?;
@@ -503,7 +507,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
 
     async fn record(
         &self,
-        agent: &AgentId,
+        peer: &PeerIdentity,
         destination: Option<&Destination>,
         resolved: Option<IpAddr>,
         decision: Decision,
@@ -511,7 +515,8 @@ impl<Clock: EpochClock> Proxy<Clock> {
     ) -> Result<(), AuditError> {
         self.audit
             .record(&AuditEvent {
-                agent,
+                agent: peer.agent(),
+                workload_peer: peer.workload_peer(),
                 destination,
                 resolved_address: resolved,
                 decision,

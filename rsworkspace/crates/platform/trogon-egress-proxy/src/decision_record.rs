@@ -57,7 +57,12 @@ pub(crate) fn decision_record(
     facts.policy_source = Some(AuditName::new(event.snapshot_source.audit_name())?);
     facts.projection_revision = event.policy_revision.map(|revision| revision.generation.get());
     facts.tls_mode = Some(TlsMode::Passthrough);
-    Ok(Record::decision(scope, facts, stamp))
+    match event.workload_peer {
+        Some(peer) => {
+            Record::authenticated_workload_decision(scope, facts, peer.clone(), stamp).map_err(AuditError::from)
+        }
+        None => Ok(Record::decision(scope, facts, stamp)),
+    }
 }
 
 fn outcome(decision: Decision) -> DecisionOutcome {

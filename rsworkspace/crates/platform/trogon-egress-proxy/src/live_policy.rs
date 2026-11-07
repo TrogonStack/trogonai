@@ -91,7 +91,7 @@ impl KvSnapshot {
         let connection = ConnectionIdentity::current(&client)?;
         let store = timeout(
             LIVE_POLICY_REQUEST_TIMEOUT,
-            async_nats::jetstream::new(client.clone()).get_key_value(&config.bucket),
+            async_nats::jetstream::new(client.clone()).get_key_value(config.bucket()),
         )
         .await
         .map_err(|_| LivePolicyError::Timeout)?
@@ -100,12 +100,12 @@ impl KvSnapshot {
             .await
             .map_err(|_| LivePolicyError::Timeout)?
             .map_err(LivePolicyError::Information)?;
-        validate_bucket(&info)?;
+        validate_bucket(&info, &config)?;
         let created = info.created;
         let (changed, _) = watch::channel(());
         let snapshot = Arc::new(Self {
             source: PolicySource::NatsKv {
-                bucket: config.bucket.clone(),
+                bucket: config.bucket().to_owned(),
                 incarnation: config.incarnation,
             },
             config,
@@ -332,7 +332,7 @@ impl KvPolicyDriver {
                 .get_info()
                 .await
                 .map_err(LivePolicyError::Information)?;
-            validate_bucket(&info)?;
+            validate_bucket(&info, &self.snapshot.config)?;
             if info.created != self.created {
                 return Err(LivePolicyError::StreamIncarnation);
             }
@@ -377,9 +377,10 @@ impl Drop for KvPolicyDriver {
     }
 }
 
-fn validate_bucket(info: &Info) -> Result<(), LivePolicyError> {
+fn validate_bucket(info: &Info, scope: &KvPolicyConfig) -> Result<(), LivePolicyError> {
     let config = &info.config;
-    if config.max_message_size <= 0
+    if !scope.stream_matches_scope(info)
+        || config.max_message_size <= 0
         || config.max_message_size as usize > LIVE_POLICY_MAX_BYTES
         || config.max_bytes <= 0
         || config.max_bytes > LIVE_POLICY_MAX_STORE_BYTES

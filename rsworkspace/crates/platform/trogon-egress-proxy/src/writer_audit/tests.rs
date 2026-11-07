@@ -15,6 +15,9 @@ use crate::destination::Destination;
 use crate::policy_revision::PolicyRevision;
 use crate::policy_source::PolicySource;
 
+mod budget_tests;
+mod readiness_tests;
+
 fn writer() -> WriterId {
     WriterId::new("egress-proxy:test").expect("writer")
 }
@@ -66,6 +69,7 @@ fn event<'a>(
 ) -> AuditEvent<'a> {
     AuditEvent {
         agent,
+        workload_peer: None,
         destination,
         resolved_address: destination.map(|_| "93.184.216.34".parse().expect("ip")),
         decision,
