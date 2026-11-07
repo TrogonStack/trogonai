@@ -8,9 +8,9 @@ use super::*;
 use crate::auth::callout_mint::{InProcessCalloutDispatcherMintWire, harness_callout_dispatcher, harness_callout_xkey};
 use crate::identity::CallerHttpsAuth;
 
-mod subscription_readiness;
+mod subscription_readiness_tests;
 
-use subscription_readiness::wait_for_callout_subscription;
+use subscription_readiness_tests::wait_for_callout_subscription;
 
 fn harness_client(caller_id: &str) -> AuthCalloutJsonMintClient<InProcessCalloutDispatcherMintWire> {
     let (dispatcher, tenant) = harness_callout_dispatcher(caller_id);
