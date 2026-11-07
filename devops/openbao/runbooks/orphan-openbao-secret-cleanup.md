@@ -55,6 +55,16 @@ which is opaque and never appears in the path. Find the credential whose activat
 rotation event records that `storage_locator` in the credential event stream
 for the owner.
 
+A write that has not activated yet has no event naming its locator:
+`CredentialWriteRequested` records the owner, scope and kind, not the locator.
+Before treating a locator as unmatched, split it into its owner, scope key and
+kind and look for a pending write request with those values. If one exists,
+the path is a write awaiting activation, not an orphan. Check the recovery
+state (`${GATEWAY}/-/credentials/recovery/status`) and leave it to the
+recovery worker, or follow
+[stuck-pending-secret-write.md](stuck-pending-secret-write.md) when it is
+`stuck` or the request predates the checkpoint.
+
 Three outcomes:
 
 **Active in the stream.** Not an orphan. Expected state.

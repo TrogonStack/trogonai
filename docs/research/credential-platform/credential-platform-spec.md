@@ -1271,7 +1271,12 @@ The credential id itself is opaque (thirty-two hex digits) and never appears
 in the path. The locator is the text the id was before it turned opaque
 ([ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md)
 Decision 4): the aggregate records it as adapter-private state, so paths
-written before the change keep resolving.
+written before the change keep the same shape. `OpenBaoSecretStore` still
+derives the locator from the credential ref when it builds the path rather
+than reading the recorded one, so the recorded locator is informational until
+the adapter reads it. There is no migration for streams written under the old
+ids: existing `GATEWAY_CREDENTIAL_EVENTS` and `GATEWAY_CREDENTIAL_SNAPSHOTS`
+streams are reset and their credentials recreated.
 
 Note owner_id appears twice in the full path, once as its own segment and
 once embedded inside the locator; `encode_path_segment` sanitizes each
