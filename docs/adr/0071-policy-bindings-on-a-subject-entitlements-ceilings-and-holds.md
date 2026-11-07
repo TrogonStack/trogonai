@@ -91,6 +91,17 @@ bindings of the same kind, so every refusal is explainable by naming the one
 binding that caused it: the permit that was missing, the ceiling that
 excluded, or the hold that was placed.
 
+A rule evaluated on a request only narrows. A declarative rule, a CEL
+predicate, a Wasm module, and a guardrail are all request rules. Each can
+refuse a request or narrow what the bindings permit, and none can admit
+something no permit grants. A permit binding is the only thing that widens.
+A request rule therefore sits where a ceiling or a hold sits in the
+conjunction above: it adds one more condition to an action some permit
+already covers, and a refusal it causes names that rule, as a ceiling or a
+hold would. A rule that answers allow has said only that it does not refuse.
+Absence of a matching rule is not a permit, and a request rule can never
+stand in for a missing one.
+
 ### 3. Ceilings and holds follow the delegation lineage; permits do not
 
 A Session's lineage is the chain of Agents whose Sessions dispatched one
@@ -126,11 +137,16 @@ hold never releases an owner's hold.
 
 A hold has a scope:
 
-- `NEW_WORK` refuses new Sessions of the subject and new delegations into it.
-  Running Sessions finish on their own terms.
+- `NEW_WORK` refuses new Sessions of the subject and new delegations into it,
+  meaning a delegation whose callee is the subject or sits under it, whatever
+  the dispatching Session is doing. Running Sessions finish on their own
+  terms. A running Session under the hold may still dispatch, but the Session
+  it starts has the held subject in its lineage (Decision 3), so its admission
+  is refused.
 - `ALL_PROTECTED_ACTIONS` refuses the same, and every running Session under
-  the hold fails closed at its next protected action: a model request, a tool
-  call, or a delegation dispatch. Nothing is suspended for later resumption.
+  the hold fails closed at its next protected action, evaluated within the
+  bound of Decision 7: a model request, a tool call, or a delegation
+  dispatch. Nothing is suspended for later resumption.
   A suspended Session would hold a checkout, a reservation, and a provider
   stream open for an unbounded time, and the hold would then have to record
   enough to resume safely, which is the session plane's job under
@@ -203,7 +219,7 @@ Agent. Policy may refuse a resolution but never changes which Agent it
 resolves to, because a selector that policy could steer would be a selector
 whose outcome no reviewer could predict from the declaration.
 
-### 7. Evaluation is live, Sessions record what they evaluated, and targets exist before they are named
+### 7. Evaluation is live within a stated bound, Sessions record what they evaluated, and targets exist before they are named
 
 Every binding is evaluated at session admission and again at each protected
 action. Nothing copies a policy into a Session or a plan, in keeping with the
@@ -212,6 +228,45 @@ rule that authorization never pins. What a Session records is a
 stream revision that was current, with zero meaning the history did not
 exist. A past decision is then reconstructable from the policy streams at the
 recorded revisions.
+
+Live means within the staleness bound of
+[ADR#0049](./0049-revocation-latency-target.md), not instantaneous. An
+enforcement point is a process that receives a request and decides whether it
+proceeds. It evaluates against its own projection of the bindings, built from
+the policy streams, and does not read a stream for each request. The recorded
+revision is the one its projection reflected. The rest of this Decision
+defines how stale that projection may be.
+
+- **The bound.** The projection's staleness is bounded by
+  [ADR#0049](./0049-revocation-latency-target.md): a 5 second p99 target under
+  normal operation, and a hard ceiling of 330 seconds, the 300 second cache
+  TTL plus up to 30 seconds of jitter, when the event path fails entirely.
+  Each enforcement point configures its own bound and never sets it above that
+  ceiling. A change to a binding, a released hold included, takes effect at
+  every enforcement point within it.
+- **Measured from a heartbeat.** Staleness is the time since the point last
+  saw a heartbeat from the projector, through the same watch it uses to
+  receive bindings. It is not the age of an entry. A binding nobody has
+  changed for a month has an old entry and a perfectly current projection,
+  and a quiet source looks the same whether the projector is healthy or dead,
+  so only a heartbeat tells them apart.
+- **Past the bound, refuse.** A point whose projection is past the bound fails
+  closed: it refuses new admissions and protected actions, and it does not
+  fall back to the last projection it held or to any default. What it does
+  with work already in flight is that point's own record to state.
+- **Offline and static sources.** A point may load its bindings from an
+  export of the policy streams with no live connection to them, on the same
+  terms. Such an export is a bounded-stale source whose staleness is measured
+  from when its producer last vouched for it, and an export that cannot show
+  that is past the bound. Offline operation is not an exemption from the bound.
+  A source an operator writes by hand is not a projection of the policy
+  streams at all: it carries no binding revisions, a point that uses it records
+  the source instead of a `PolicyRuleRef`, and it cannot claim the bound or
+  live revocation. Request-rule bundles follow the same split.
+
+[ADR#0049](./0049-revocation-latency-target.md) measures credential
+invalidation. This Decision borrows its numbers for policy projections and
+does not extend its histogram or its alert to them.
 
 A target kind ships only when the resource it names has a contract. Agents
 and catalog models have one; tools, tool sources, connections, and guardrails
@@ -270,6 +325,16 @@ raised against guardrail bindings.
   ceilings, and delegation permissions over the lineage rules above, and must
   record a `PolicyRuleRef` for each history consulted. Until enforcement
   lands, every binding here is a reviewable record without effect.
+- An enforcement point that cannot reach its policy source for longer than its
+  bound refuses work instead of serving from a stale projection. This is the
+  intended failure and also an outage mode: a policy-source outage longer than
+  the bound stops the work the point guards.
+- The policy projector must emit a heartbeat, and every enforcement point must
+  watch it. Without one a point cannot tell a quiet source from a dead one and
+  can only refuse.
+- A request rule never widens. A point that evaluates declarative, CEL, Wasm,
+  or guardrail rules still needs a permit binding for any action a binding
+  governs, and a rule cannot be written to supply one.
 - Model selection failures gain a cause distinct from an unavailable model:
   a ceiling excluded it. The session plane's admission failure contract must
   carry that distinction when it is written, so a reviewer never reads a
@@ -289,6 +354,7 @@ raised against guardrail bindings.
 - [ADR#0032: Model Route and Credential Binding](./0032-model-route-and-credential-binding.md)
 - [ADR#0035: Session Store as a Decider Aggregate on NATS JetStream](./0035-session-store-decider-aggregate.md)
 - [ADR#0040: Contract Field Vocabulary](./0040-contract-field-vocabulary.md)
+- [ADR#0049: Revocation Propagation Latency Target](./0049-revocation-latency-target.md)
 - [ADR#0053: External OIDC Federation Surface](./0053-external-oidc-federation-surface.md)
 - [ADR#0062: Runtime-Owned Settings and Platform Declarations](./0062-runtime-owned-settings-and-platform-declarations.md)
 - [ADR#0063: An Agent Declares the Connections It Needs](./0063-agent-connection-declarations.md)
