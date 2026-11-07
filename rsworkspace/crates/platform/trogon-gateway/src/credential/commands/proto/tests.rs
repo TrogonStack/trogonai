@@ -283,6 +283,24 @@ fn a_rotation_without_metadata_names_the_missing_field() {
 }
 
 #[test]
+fn a_rotation_with_an_invalid_storage_locator_names_the_field() {
+    assert_eq!(
+        decode_rotated(&v1::CredentialRotated {
+            previous_credential_ref: MessageField::some(credential_ref_to_proto(&default_ref())),
+            metadata: MessageField::some(credential_metadata_to_proto(&metadata(
+                CredentialStatus::Active,
+                OPENBAO_LOCATOR,
+            ))),
+            storage_locator: String::new(),
+        }),
+        Err(CredentialProtoDecodeError::InvalidField {
+            field: "storage_locator".into(),
+            reason: CredentialFieldInvalidError::StorageLocator(StorageLocatorError::Empty),
+        })
+    );
+}
+
+#[test]
 fn state_decoders_name_an_invalid_credential_ref() {
     let invalid = || MessageField::some(invalid_ref_proto());
 
