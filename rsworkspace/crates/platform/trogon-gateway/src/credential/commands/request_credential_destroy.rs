@@ -1,7 +1,7 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialDestroyReason, CredentialRef};
+use super::domain::{CredentialDestroyReason, CredentialRef, CredentialStreamId};
 use super::proto::{
     decode_cleanup_failed_state, decode_destroyed_state, decode_revoked_state, destroy_requested_to_proto,
 };
@@ -9,13 +9,18 @@ use super::state::{CredentialDecideError, CredentialEvolveError, validate_same_r
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestCredentialDestroy {
+    stream_id: CredentialStreamId,
     credential_ref: CredentialRef,
     reason: CredentialDestroyReason,
 }
 
 impl RequestCredentialDestroy {
     pub fn new(credential_ref: CredentialRef, reason: CredentialDestroyReason) -> Self {
-        Self { credential_ref, reason }
+        Self {
+            stream_id: CredentialStreamId::from(&credential_ref),
+            credential_ref,
+            reason,
+        }
     }
 
     pub fn credential_ref(&self) -> &CredentialRef {
@@ -24,7 +29,7 @@ impl RequestCredentialDestroy {
 }
 
 impl Decider for RequestCredentialDestroy {
-    type StreamId = str;
+    type StreamId = CredentialStreamId;
     type State = state_v1::CredentialStateSnapshot;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
@@ -33,7 +38,7 @@ impl Decider for RequestCredentialDestroy {
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.credential_ref.id().as_str()
+        &self.stream_id
     }
 
     fn initial_state() -> Self::State {

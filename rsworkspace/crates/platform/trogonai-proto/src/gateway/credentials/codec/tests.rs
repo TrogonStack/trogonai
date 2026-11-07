@@ -71,6 +71,7 @@ fn event_decode_dispatches_all_lifecycle_event_types() {
             status: Some(v1::CredentialStatus::Active.into()),
             fingerprint: "fingerprint".to_string(),
         }),
+        storage_locator: "openbao:tenant-1:github:webhook_secret".to_string(),
     };
     let revoked = v1::CredentialRevoked {
         credential_ref: MessageField::some(v1::CredentialRef {

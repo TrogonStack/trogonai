@@ -191,7 +191,7 @@ async fn destroy_of_unknown_ref_returns_missing() {
     let store = InMemorySecretStore::default();
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let unknown = CredentialRef::new(
-        CredentialId::new("memory:tenant-1:discord:bot_token:missing").unwrap(),
+        CredentialId::derive(&scope, CredentialKind::BotToken),
         CredentialVersion::initial(),
         &scope,
         CredentialKind::BotToken,
@@ -243,7 +243,7 @@ async fn destroying_previous_version_leaves_active_version_readable() {
 fn unknown_credential() -> CredentialRef {
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     CredentialRef::new(
-        CredentialId::new("memory:tenant-1:discord:bot_token:missing").unwrap(),
+        CredentialId::derive(&scope, CredentialKind::BotToken),
         CredentialVersion::initial(),
         &scope,
         CredentialKind::BotToken,

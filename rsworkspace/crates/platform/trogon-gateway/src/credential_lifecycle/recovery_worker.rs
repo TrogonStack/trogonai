@@ -27,12 +27,8 @@ use super::constants::{
 };
 use super::handler::{CredentialActivationRecoveryCommand, CredentialRuntimeHandler, activation_recovery_command};
 use crate::constants::METER_NAME;
-use crate::credential::commands::domain::{CredentialId, CredentialVersion};
-use crate::credential::commands::proto::{
-    CredentialProtoDecodeError, decode_credential_metadata, decode_destroy_failed, decode_destroy_requested,
-    decode_destroyed, decode_message_field, decode_revoked, decode_rotated, decode_rotation_failed,
-    decode_rotation_requested, decode_write_failed, decode_write_requested,
-};
+use crate::credential::commands::domain::{CredentialStreamId, CredentialVersion};
+use crate::credential::commands::proto::{CredentialProtoDecodeError, decode_destroyed, event_stream_id};
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::{CredentialEvolveError, evolve, initial_state};
 use crate::secret_store::{SecretStoreError, SecretStoreMetadata};
@@ -262,7 +258,7 @@ struct CredentialRecoveryPlan {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PlannedCredentialRecovery {
-    credential_id: CredentialId,
+    stream_id: CredentialStreamId,
     command: CredentialActivationRecoveryCommand,
 }
 
@@ -275,10 +271,10 @@ pub(crate) async fn run<EventStream, EventStore, Secrets, Checkpoints>(
     shutdown: impl Future<Output = ()>,
 ) where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -377,10 +373,10 @@ pub(crate) async fn recover_pending_credential_activations<EventStream, EventSto
 ) -> Result<CredentialRecoveryReport, CredentialRecoveryWorkerError>
 where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -407,10 +403,10 @@ async fn recover_pending_credential_activations_at<EventStream, EventStore, Secr
 ) -> Result<CredentialRecoveryReport, CredentialRecoveryWorkerError>
 where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -488,10 +484,10 @@ async fn recover_pending_credential_activations_from_events<EventStore, Secrets>
     handler: &CredentialRuntimeHandler<EventStore, Secrets>,
 ) -> CredentialRecoveryReport
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -507,7 +503,7 @@ where
                     Err(source) => {
                         report.failed_recoveries += 1;
                         warn!(
-                            credential_id = %planned.credential_id,
+                            stream_id = %planned.stream_id,
                             error = %source,
                             "credential write activation recovery failed"
                         );
@@ -520,7 +516,7 @@ where
                     Err(source) => {
                         report.failed_recoveries += 1;
                         warn!(
-                            credential_id = %planned.credential_id,
+                            stream_id = %planned.stream_id,
                             error = %source,
                             "credential rotation activation recovery failed"
                         );
@@ -538,17 +534,17 @@ async fn recovery_plan_from_credential_events<EventStore>(
     event_store: &EventStore,
 ) -> CredentialRecoveryPlan
 where
-    EventStore: StreamRead<str>,
+    EventStore: StreamRead<CredentialStreamId>,
 {
     let mut report = CredentialRecoveryReport::default();
-    let mut changed_credentials: BTreeSet<CredentialId> = BTreeSet::new();
+    let mut changed_credentials: BTreeSet<CredentialStreamId> = BTreeSet::new();
 
     for event in events {
         report.scanned_events += 1;
-        match stream_event_credential_id(&event) {
-            Ok(Some(credential_id)) => {
+        match stream_event_stream_id(&event) {
+            Ok(Some(stream_id)) => {
                 report.decoded_events += 1;
-                changed_credentials.insert(credential_id);
+                changed_credentials.insert(stream_id);
             }
             Ok(None) => {
                 report.skipped_events += 1;
@@ -562,13 +558,13 @@ where
     report.changed_credentials = changed_credentials.len();
 
     let mut commands = Vec::new();
-    for credential_id in changed_credentials {
-        let (state, destroyed_version) = match load_credential_state(event_store, &credential_id).await {
+    for stream_id in changed_credentials {
+        let (state, destroyed_version) = match load_credential_state(event_store, &stream_id).await {
             Ok(loaded) => loaded,
             Err(source) => {
                 report.failed_recoveries += 1;
                 warn!(
-                    credential_id = %credential_id,
+                    stream_id = %stream_id,
                     error = %source,
                     "credential recovery replay failed"
                 );
@@ -576,10 +572,10 @@ where
             }
         };
 
-        match activation_recovery_command(&credential_id, &state, destroyed_version) {
+        match activation_recovery_command(&stream_id, &state, destroyed_version) {
             Ok(Some(command)) => {
                 report.planned_recoveries += 1;
-                commands.push(PlannedCredentialRecovery { credential_id, command });
+                commands.push(PlannedCredentialRecovery { stream_id, command });
             }
             Ok(None) => {
                 report.skipped_credentials += 1;
@@ -587,7 +583,7 @@ where
             Err(source) => {
                 report.failed_recoveries += 1;
                 warn!(
-                    credential_id = %credential_id,
+                    stream_id = %stream_id,
                     error = %source,
                     "credential recovery planning failed"
                 );
@@ -606,7 +602,7 @@ fn log_invalid_event(stream_sequence: u64, source: &CredentialRecoveryEventError
     );
 }
 
-fn stream_event_credential_id(event: &StreamEvent) -> Result<Option<CredentialId>, CredentialRecoveryEventError> {
+fn stream_event_stream_id(event: &StreamEvent) -> Result<Option<CredentialStreamId>, CredentialRecoveryEventError> {
     let EventDecodeOutcome::Decoded(event) = event
         .decode::<v1::CredentialEvent>()
         .map_err(|source| CredentialRecoveryEventError::Decode { source })?
@@ -614,21 +610,21 @@ fn stream_event_credential_id(event: &StreamEvent) -> Result<Option<CredentialId
         return Ok(None);
     };
     let case = event.event.as_ref().ok_or(CredentialRecoveryEventError::MissingCase)?;
-    event_credential_id(case)
+    event_stream_id(case)
         .map(Some)
         .map_err(|source| CredentialRecoveryEventError::Invalid { source })
 }
 
 async fn load_credential_state<EventStore>(
     event_store: &EventStore,
-    credential_id: &CredentialId,
+    stream_id: &CredentialStreamId,
 ) -> Result<(state_v1::CredentialStateSnapshot, Option<CredentialVersion>), CredentialRecoveryReplayError>
 where
-    EventStore: StreamRead<str>,
+    EventStore: StreamRead<CredentialStreamId>,
 {
     let stream = event_store
         .read_stream(ReadStreamRequest {
-            stream_id: credential_id.as_str(),
+            stream_id,
             from: ReadFrom::Beginning,
         })
         .await
@@ -654,27 +650,6 @@ where
         state = evolve(state, &event).map_err(|source| CredentialRecoveryReplayError::ReplayCredential { source })?;
     }
     Ok((state, destroyed_version))
-}
-
-fn event_credential_id(event: &CredentialEventCase) -> Result<CredentialId, CredentialProtoDecodeError> {
-    match event {
-        CredentialEventCase::WriteRequested(inner) => Ok(decode_write_requested(inner)?.0),
-        CredentialEventCase::WriteFailed(inner) => Ok(decode_write_failed(inner)?.0),
-        CredentialEventCase::Activated(inner) => {
-            let metadata = decode_message_field("event.metadata", &inner.metadata)?;
-            Ok(decode_credential_metadata("event.metadata", metadata)?
-                .reference()
-                .id()
-                .clone())
-        }
-        CredentialEventCase::RotationRequested(inner) => Ok(decode_rotation_requested(inner)?.id().clone()),
-        CredentialEventCase::RotationFailed(inner) => Ok(decode_rotation_failed(inner)?.0.id().clone()),
-        CredentialEventCase::Revoked(inner) => Ok(decode_revoked(inner)?.id().clone()),
-        CredentialEventCase::Rotated(inner) => Ok(decode_rotated(inner)?.0.id().clone()),
-        CredentialEventCase::DestroyRequested(inner) => Ok(decode_destroy_requested(inner)?.0.id().clone()),
-        CredentialEventCase::Destroyed(inner) => Ok(decode_destroyed(inner)?.id().clone()),
-        CredentialEventCase::DestroyFailed(inner) => Ok(decode_destroy_failed(inner)?.0.id().clone()),
-    }
 }
 
 #[derive(Debug, thiserror::Error)]

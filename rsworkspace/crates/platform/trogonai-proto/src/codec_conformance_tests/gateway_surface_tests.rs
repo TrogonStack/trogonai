@@ -87,10 +87,10 @@ fn builder_setters_populate_explicit_presence_fields() {
     let stored = state_v1::CredentialMetadata {
         reference: reference.clone().into(),
         fingerprint: "sha256:abc".into(),
+        storage_locator: "openbao:owner-1:org/repo:webhook_secret".into(),
         ..Default::default()
     }
-    .with_status(v1::CredentialStatus::Active)
-    .with_storage_backend(state_v1::StorageBackend::Openbao);
+    .with_status(v1::CredentialStatus::Active);
     assert_eq!(serde_json::to_value(&stored).expect("state metadata"), state_metadata());
 
     let write = v1::CredentialWriteRequested::default()
@@ -238,7 +238,6 @@ fn enum_json_accepts_names_numbers_and_null_and_rejects_everything_else() {
     assert_enum_json::<v1::CredentialSource>("CREDENTIAL_SOURCE_PLAID", 15, 99);
     assert_enum_json::<v1::CredentialKind>("CREDENTIAL_KIND_WEBHOOK_SECRET", 9, 99);
     assert_enum_json::<v1::CredentialStatus>("CREDENTIAL_STATUS_PREVIOUS", 3, 99);
-    assert_enum_json::<state_v1::StorageBackend>("STORAGE_BACKEND_OPENBAO", 2, 99);
     assert_enum_json::<idempotency_v1::CredentialManagementIdempotencyStatus>(
         "CREDENTIAL_MANAGEMENT_IDEMPOTENCY_STATUS_COMPLETED",
         2,
@@ -267,10 +266,6 @@ fn enum_values_participate_in_repeated_proto_json() {
     super::assert_proto_sequence(
         vec![v1::CredentialStatus::Revoked],
         json!(["CREDENTIAL_STATUS_REVOKED"]),
-    );
-    super::assert_proto_sequence(
-        vec![state_v1::StorageBackend::InMemory],
-        json!(["STORAGE_BACKEND_IN_MEMORY"]),
     );
     super::assert_proto_sequence(
         vec![idempotency_v1::CredentialManagementIdempotencyStatus::InProgress],

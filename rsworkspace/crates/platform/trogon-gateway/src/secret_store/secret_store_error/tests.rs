@@ -1,20 +1,20 @@
 use super::*;
-use crate::credential::commands::domain::{CredentialFingerprintError, CredentialIdError};
+use crate::credential::commands::domain::{CredentialFingerprintError, StorageLocatorError};
 
 #[test]
-fn invalid_generated_keeps_the_credential_id_error_as_its_source() {
-    let error = SecretStoreError::invalid_generated(StorageBackend::InMemory)(CredentialIdError::Empty);
+fn invalid_generated_keeps_the_storage_locator_error_as_its_source() {
+    let error = SecretStoreError::invalid_generated(StorageBackend::InMemory)(StorageLocatorError::Empty);
 
     assert_eq!(
         error,
         SecretStoreError::InvalidGenerated {
             backend: StorageBackend::InMemory,
-            source: GeneratedValueError::CredentialId(CredentialIdError::Empty),
+            source: GeneratedValueError::StorageLocator(StorageLocatorError::Empty),
         }
     );
     assert_eq!(
         error.to_string(),
-        "in_memory secret store error: generated credential id is invalid: credential id must not be empty"
+        "in_memory secret store error: generated storage locator is invalid: storage locator must not be empty"
     );
 }
 

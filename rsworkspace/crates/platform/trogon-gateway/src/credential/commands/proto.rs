@@ -2,13 +2,13 @@ use std::borrow::Cow;
 use std::fmt;
 
 use buffa::{EnumValue, MessageField, ProtoBox};
-use trogonai_proto::gateway::credentials::{state_v1, v1};
+use trogonai_proto::gateway::credentials::{CredentialEventCase, state_v1, v1};
 
 use super::domain::{
     CredentialDestroyReason, CredentialDestroyReasonError, CredentialFailureReason, CredentialFailureReasonError,
     CredentialFingerprint, CredentialFingerprintError, CredentialId, CredentialIdError, CredentialKind,
     CredentialMetadata, CredentialOwnerId, CredentialOwnerIdError, CredentialRef, CredentialScope, CredentialStatus,
-    CredentialVersion, CredentialVersionError, SourceKind, StorageBackend, StorageBackendError,
+    CredentialStreamId, CredentialVersion, CredentialVersionError, SourceKind, StorageLocator, StorageLocatorError,
 };
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 
@@ -33,7 +33,7 @@ pub(crate) enum CredentialFieldInvalidError {
     #[error(transparent)]
     Fingerprint(#[from] CredentialFingerprintError),
     #[error(transparent)]
-    StorageBackend(#[from] StorageBackendError),
+    StorageLocator(#[from] StorageLocatorError),
     #[error(transparent)]
     FailureReason(#[from] CredentialFailureReasonError),
     #[error(transparent)]
@@ -60,7 +60,6 @@ pub(crate) enum UnspecifiedEnumKind {
     SourceKind,
     CredentialKind,
     CredentialStatus,
-    StorageBackend,
 }
 
 impl fmt::Display for UnspecifiedEnumKind {
@@ -69,7 +68,6 @@ impl fmt::Display for UnspecifiedEnumKind {
             Self::SourceKind => "source kind",
             Self::CredentialKind => "credential kind",
             Self::CredentialStatus => "credential status",
-            Self::StorageBackend => "storage backend",
         })
     }
 }
@@ -166,11 +164,12 @@ pub(crate) fn write_requested_to_proto(
 }
 
 pub(crate) fn write_failed_to_proto(
-    credential_id: &CredentialId,
+    stream_id: &CredentialStreamId,
     reason: &CredentialFailureReason,
 ) -> v1::CredentialWriteFailed {
     v1::CredentialWriteFailed {
-        credential_id: credential_id.as_str().to_string(),
+        credential_id: stream_id.credential_id().as_str().to_string(),
+        owner_id: stream_id.owner_id().as_str().to_string(),
         reason: reason.as_str().to_string(),
     }
 }
@@ -178,6 +177,7 @@ pub(crate) fn write_failed_to_proto(
 pub(crate) fn activated_to_proto(metadata: &CredentialMetadata) -> v1::CredentialActivated {
     v1::CredentialActivated {
         metadata: MessageField::some(credential_metadata_to_proto(metadata)),
+        storage_locator: metadata.storage_locator().as_str().to_string(),
     }
 }
 
@@ -204,6 +204,7 @@ pub(crate) fn rotated_to_proto(
     v1::CredentialRotated {
         previous_credential_ref: MessageField::some(credential_ref_to_proto(previous_credential_ref)),
         metadata: MessageField::some(credential_metadata_to_proto(metadata)),
+        storage_locator: metadata.storage_locator().as_str().to_string(),
     }
 }
 
@@ -253,6 +254,7 @@ pub(crate) fn decode_write_requested(
 pub(crate) fn decode_credential_metadata(
     field: impl Into<CredentialFieldPath>,
     value: &v1::CredentialMetadata,
+    storage_locator: (impl Into<CredentialFieldPath>, &str),
 ) -> Result<CredentialMetadata, CredentialProtoDecodeError> {
     let field: CredentialFieldPath = field.into();
     let reference_field = field.child("reference");
@@ -261,18 +263,31 @@ pub(crate) fn decode_credential_metadata(
         decode_message_field(&reference_field, &value.reference)?,
     )?;
     let status = decode_credential_status(field.child("status"), value.status.as_ref())?;
-    let storage_backend = StorageBackend::from_credential_id(reference.id())
-        .map_err(|source| invalid_field(reference_field.child("id"), source))?;
+    let (locator_field, locator) = storage_locator;
+    let storage_locator = decode_storage_locator(locator_field, locator)?;
     let fingerprint = CredentialFingerprint::new(&value.fingerprint)
         .map_err(|source| invalid_field(field.child("fingerprint"), source))?;
-    Ok(CredentialMetadata::new(reference, status, storage_backend, fingerprint))
+    Ok(CredentialMetadata::new(reference, status, storage_locator, fingerprint))
+}
+
+pub(crate) fn decode_activated(
+    event: &v1::CredentialActivated,
+) -> Result<CredentialMetadata, CredentialProtoDecodeError> {
+    decode_credential_metadata(
+        "metadata",
+        decode_message_field("metadata", &event.metadata)?,
+        ("storage_locator", &event.storage_locator),
+    )
 }
 
 pub(crate) fn decode_write_failed(
     event: &v1::CredentialWriteFailed,
-) -> Result<(CredentialId, CredentialFailureReason), CredentialProtoDecodeError> {
+) -> Result<(CredentialStreamId, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
-        decode_credential_id("credential_id", &event.credential_id)?,
+        CredentialStreamId::new(
+            decode_owner_id("owner_id", &event.owner_id)?,
+            decode_credential_id("credential_id", &event.credential_id)?,
+        ),
         CredentialFailureReason::new(&event.reason).map_err(|source| invalid_field("reason", source))?,
     ))
 }
@@ -306,7 +321,11 @@ pub(crate) fn decode_rotated(
             "previous_credential_ref",
             decode_message_field("previous_credential_ref", &event.previous_credential_ref)?,
         )?,
-        decode_credential_metadata("metadata", decode_message_field("metadata", &event.metadata)?)?,
+        decode_credential_metadata(
+            "metadata",
+            decode_message_field("metadata", &event.metadata)?,
+            ("storage_locator", &event.storage_locator),
+        )?,
     ))
 }
 
@@ -346,6 +365,29 @@ pub(crate) fn decode_destroy_failed(
         )?,
         CredentialFailureReason::new(&event.reason).map_err(|source| invalid_field("reason", source))?,
     ))
+}
+
+/// The stream an event belongs to, read off the event itself.
+pub(crate) fn event_stream_id(event: &CredentialEventCase) -> Result<CredentialStreamId, CredentialProtoDecodeError> {
+    match event {
+        CredentialEventCase::WriteRequested(inner) => {
+            let (credential_id, scope, _) = decode_write_requested(inner)?;
+            Ok(CredentialStreamId::new(scope.owner_id().clone(), credential_id))
+        }
+        CredentialEventCase::WriteFailed(inner) => Ok(decode_write_failed(inner)?.0),
+        CredentialEventCase::Activated(inner) => Ok(CredentialStreamId::from(decode_activated(inner)?.reference())),
+        CredentialEventCase::RotationRequested(inner) => {
+            Ok(CredentialStreamId::from(&decode_rotation_requested(inner)?))
+        }
+        CredentialEventCase::RotationFailed(inner) => Ok(CredentialStreamId::from(&decode_rotation_failed(inner)?.0)),
+        CredentialEventCase::Revoked(inner) => Ok(CredentialStreamId::from(&decode_revoked(inner)?)),
+        CredentialEventCase::Rotated(inner) => Ok(CredentialStreamId::from(&decode_rotated(inner)?.0)),
+        CredentialEventCase::DestroyRequested(inner) => {
+            Ok(CredentialStreamId::from(&decode_destroy_requested(inner)?.0))
+        }
+        CredentialEventCase::Destroyed(inner) => Ok(CredentialStreamId::from(&decode_destroyed(inner)?)),
+        CredentialEventCase::DestroyFailed(inner) => Ok(CredentialStreamId::from(&decode_destroy_failed(inner)?.0)),
+    }
 }
 
 fn proto_source_kind(value: SourceKind) -> v1::CredentialSource {
@@ -474,8 +516,8 @@ pub(crate) fn credential_metadata_to_proto_state(value: &CredentialMetadata) -> 
     state_v1::CredentialMetadata {
         reference: MessageField::some(credential_ref_to_proto(value.reference())),
         status: Some(proto_credential_status(value.status()).into()),
-        storage_backend: Some(proto_state_storage_backend(value.storage_backend()).into()),
         fingerprint: value.fingerprint().as_str().to_string(),
+        storage_locator: value.storage_locator().as_str().to_string(),
     }
 }
 
@@ -490,7 +532,7 @@ pub(crate) fn decode_credential_metadata_state(
             decode_message_field(field.child("reference"), &value.reference)?,
         )?,
         decode_credential_status(field.child("status"), value.status.as_ref())?,
-        decode_storage_backend_state(field.child("storage_backend"), value.storage_backend.as_ref())?,
+        decode_storage_locator(field.child("storage_locator"), &value.storage_locator)?,
         CredentialFingerprint::new(&value.fingerprint)
             .map_err(|source| invalid_field(field.child("fingerprint"), source))?,
     ))
@@ -566,9 +608,12 @@ pub(crate) fn rotation_pending_to_proto_state(
 
 pub(crate) fn decode_write_failed_state(
     state: &state_v1::FailedCredentialWriteState,
-) -> Result<(CredentialId, CredentialFailureReason), CredentialProtoDecodeError> {
+) -> Result<(CredentialStreamId, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
-        decode_credential_id("write_failed.credential_id", &state.credential_id)?,
+        CredentialStreamId::new(
+            decode_owner_id("write_failed.owner_id", &state.owner_id)?,
+            decode_credential_id("write_failed.credential_id", &state.credential_id)?,
+        ),
         CredentialFailureReason::new(&state.reason).map_err(|source| invalid_field("write_failed.reason", source))?,
     ))
 }
@@ -617,11 +662,12 @@ pub(crate) fn decode_cleanup_failed_state(
 }
 
 pub(crate) fn write_failed_to_proto_state(
-    credential_id: &CredentialId,
+    stream_id: &CredentialStreamId,
     reason: &CredentialFailureReason,
 ) -> state_v1::FailedCredentialWriteState {
     state_v1::FailedCredentialWriteState {
-        credential_id: credential_id.as_str().to_string(),
+        credential_id: stream_id.credential_id().as_str().to_string(),
+        owner_id: stream_id.owner_id().as_str().to_string(),
         reason: reason.as_str().to_string(),
     }
 }
@@ -658,30 +704,6 @@ pub(crate) fn cleanup_failed_to_proto_state(
     }
 }
 
-fn proto_state_storage_backend(value: StorageBackend) -> state_v1::StorageBackend {
-    match value {
-        StorageBackend::InMemory => state_v1::StorageBackend::STORAGE_BACKEND_IN_MEMORY,
-        StorageBackend::OpenBao => state_v1::StorageBackend::STORAGE_BACKEND_OPENBAO,
-        StorageBackend::StaticConfig => state_v1::StorageBackend::STORAGE_BACKEND_STATIC_CONFIG,
-    }
-}
-
-fn decode_storage_backend_state(
-    field: impl Into<CredentialFieldPath>,
-    value: Option<&EnumValue<state_v1::StorageBackend>>,
-) -> Result<StorageBackend, CredentialProtoDecodeError> {
-    let field: CredentialFieldPath = field.into();
-    match decode_known_enum(&field, value)? {
-        state_v1::StorageBackend::STORAGE_BACKEND_IN_MEMORY => Ok(StorageBackend::InMemory),
-        state_v1::StorageBackend::STORAGE_BACKEND_OPENBAO => Ok(StorageBackend::OpenBao),
-        state_v1::StorageBackend::STORAGE_BACKEND_STATIC_CONFIG => Ok(StorageBackend::StaticConfig),
-        state_v1::StorageBackend::STORAGE_BACKEND_UNSPECIFIED => Err(invalid_field(
-            field,
-            CredentialFieldInvalidError::UnspecifiedEnum(UnspecifiedEnumKind::StorageBackend),
-        )),
-    }
-}
-
 pub(crate) fn decode_message_field<T: Default, P: ProtoBox<T>>(
     field: impl Into<CredentialFieldPath>,
     value: &MessageField<T, P>,
@@ -698,6 +720,14 @@ pub(crate) fn decode_credential_id(
 ) -> Result<CredentialId, CredentialProtoDecodeError> {
     let field: CredentialFieldPath = field.into();
     CredentialId::new(value).map_err(|source| invalid_field(field, source))
+}
+
+pub(crate) fn decode_storage_locator(
+    field: impl Into<CredentialFieldPath>,
+    value: &str,
+) -> Result<StorageLocator, CredentialProtoDecodeError> {
+    let field: CredentialFieldPath = field.into();
+    StorageLocator::new(value).map_err(|source| invalid_field(field, source))
 }
 
 pub(crate) fn decode_owner_id(

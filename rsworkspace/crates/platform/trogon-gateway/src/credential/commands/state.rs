@@ -5,7 +5,7 @@ use super::domain::{
 };
 use super::proto::{
     CredentialProtoDecodeError, active_credential_ref, active_state_to_proto, cleanup_failed_to_proto_state,
-    decode_active_state, decode_cleanup_failed_state, decode_credential_metadata, decode_destroy_failed,
+    decode_activated, decode_active_state, decode_cleanup_failed_state, decode_destroy_failed,
     decode_destroy_requested, decode_destroy_requested_state, decode_destroyed, decode_destroyed_state,
     decode_message_field, decode_pending_write_state, decode_revoked, decode_revoked_state, decode_rotated,
     decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_failed_state,
@@ -111,11 +111,11 @@ pub fn evolve(
                 pending_write_to_proto_state(&credential_id, &scope, kind).into()
             }
             CredentialStateSnapshotCase::WriteFailed(failed) => {
-                let (failed_id, _) = decode_write_failed_state(failed)?;
+                let (failed_stream, _) = decode_write_failed_state(failed)?;
                 let (credential_id, scope, kind) = decode_write_requested(inner)?;
-                if failed_id != credential_id {
+                if failed_stream.credential_id() != &credential_id || failed_stream.owner_id() != scope.owner_id() {
                     return Err(CredentialEvolveError::CredentialRefMismatch {
-                        expected: failed_id,
+                        expected: failed_stream.credential_id().clone(),
                         actual: credential_id,
                     });
                 }
@@ -136,23 +136,22 @@ pub fn evolve(
         },
         CredentialEventCase::WriteFailed(inner) => match current {
             CredentialStateSnapshotCase::PendingWrite(pending) => {
-                let (pending_id, _, _) = decode_pending_write_state(pending)?;
-                let (event_id, reason) = decode_write_failed(inner)?;
-                if pending_id != event_id {
+                let (pending_id, pending_scope, _) = decode_pending_write_state(pending)?;
+                let (event_stream, reason) = decode_write_failed(inner)?;
+                if &pending_id != event_stream.credential_id() || pending_scope.owner_id() != event_stream.owner_id() {
                     return Err(CredentialEvolveError::CredentialRefMismatch {
                         expected: pending_id,
-                        actual: event_id,
+                        actual: event_stream.credential_id().clone(),
                     });
                 }
-                write_failed_to_proto_state(&event_id, &reason).into()
+                write_failed_to_proto_state(&event_stream, &reason).into()
             }
             _ => return Err(CredentialEvolveError::WriteFailedWithoutPendingWrite),
         },
         CredentialEventCase::Activated(inner) => match current {
             CredentialStateSnapshotCase::PendingWrite(pending) => {
                 let (pending_id, pending_scope, pending_kind) = decode_pending_write_state(pending)?;
-                let metadata =
-                    decode_credential_metadata("metadata", decode_message_field("metadata", &inner.metadata)?)?;
+                let metadata = decode_activated(inner)?;
                 validate_activation_metadata_for_evolve(&metadata)?;
                 validate_ref_matches_pending_for_evolve(
                     metadata.reference(),

@@ -115,11 +115,15 @@ starting from the checkpoint. A credential whose event predates the
 checkpoint is never reconsidered.
 
 Confirm the actual state from the event stream for that credential id, then
-check OpenBao directly:
+check OpenBao directly. The path does not contain the credential id, which is
+opaque. It ends in the storage locator, `openbao:{owner_id}:{scope_key}:{kind}`,
+built from the owner, scope and kind the write request records, where
+`scope_key` is the source name for a source-scoped credential and
+`{source}/{integration_id}` for an integration-scoped one:
 
 ```bash
 bao kv metadata get -mount=secret \
-  "trogonai/{owner_id}/credentials/{credential_id}"
+  "trogonai/{owner_id}/credentials/{storage_locator}"
 ```
 
 Two outcomes:

@@ -6,8 +6,8 @@ use trogon_std::{EmptySecretError, SecretString};
 
 use super::{SecretMaterial, fingerprint};
 use crate::credential::commands::domain::{
-    CredentialFingerprintError, CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialRef,
-    CredentialScope, CredentialStatus, CredentialVersion, StorageBackend,
+    CredentialFingerprintError, CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope,
+    CredentialStatus, CredentialVersion, StorageLocator, StorageLocatorError,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -78,7 +78,7 @@ impl StaticConfigSecretStore {
         let material = SecretString::new(raw_value)
             .map(SecretMaterial::plaintext)
             .map_err(StaticConfigSecretStoreError::EmptySecretError)?;
-        let reference = Self::credential_ref(&scope, kind)?;
+        let reference = Self::credential_ref(&scope, kind);
 
         Ok(StaticConfigSecret::new(reference, material))
     }
@@ -87,22 +87,24 @@ impl StaticConfigSecretStore {
         let fingerprint = fingerprint::digest("static-config", secret.reference())
             .map_err(StaticConfigSecretStoreError::InvalidFingerprint)?;
 
+        let locator = StorageLocator::static_config(secret.reference())
+            .map_err(StaticConfigSecretStoreError::InvalidStorageLocator)?;
+
         Ok(CredentialMetadata::new(
             secret.reference().clone(),
             CredentialStatus::Active,
-            StorageBackend::StaticConfig,
+            locator,
             fingerprint,
         ))
     }
 
-    fn credential_ref(
-        scope: &CredentialScope,
-        kind: CredentialKind,
-    ) -> Result<CredentialRef, StaticConfigSecretStoreError> {
-        let id = CredentialId::new(format!("static-config:{}:{}", scope.scope_key(), kind.as_str()))
-            .map_err(StaticConfigSecretStoreError::InvalidCredentialId)?;
-
-        Ok(CredentialRef::new(id, CredentialVersion::initial(), scope, kind))
+    fn credential_ref(scope: &CredentialScope, kind: CredentialKind) -> CredentialRef {
+        CredentialRef::new(
+            CredentialId::derive(scope, kind),
+            CredentialVersion::initial(),
+            scope,
+            kind,
+        )
     }
 }
 
@@ -118,8 +120,8 @@ pub enum StaticConfigSecretStoreError {
     EmptySecretError(#[source] EmptySecretError),
     #[error("credential is verifier-only: {credential}")]
     VerifierOnly { credential: CredentialRef },
-    #[error("invalid credential id: {0}")]
-    InvalidCredentialId(#[source] CredentialIdError),
+    #[error("invalid storage locator: {0}")]
+    InvalidStorageLocator(#[source] StorageLocatorError),
     #[error("invalid credential fingerprint: {0}")]
     InvalidFingerprint(#[source] CredentialFingerprintError),
 }

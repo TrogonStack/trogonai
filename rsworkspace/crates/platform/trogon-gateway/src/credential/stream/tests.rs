@@ -1,40 +1,79 @@
 use super::*;
+use crate::credential::commands::domain::{CredentialId, CredentialKind, CredentialScope, SourceKind};
 
-fn credential_id(raw: &str) -> CredentialId {
-    CredentialId::new(raw).unwrap()
+fn owner(raw: &str) -> CredentialOwnerId {
+    CredentialOwnerId::new(raw).unwrap()
+}
+
+fn stream_id(owner_id: &str) -> CredentialStreamId {
+    let scope = CredentialScope::source(owner(owner_id), SourceKind::GitHub);
+    CredentialStreamId::new(
+        owner(owner_id),
+        CredentialId::derive(&scope, CredentialKind::WebhookSecret),
+    )
 }
 
 #[test]
-fn key_derivation_is_deterministic_for_the_same_credential_id() {
-    let first = CredentialKey::derive(&credential_id("openbao:tenant-1:github/primary:webhook_secret"));
-    let second = CredentialKey::derive(&credential_id("openbao:tenant-1:github/primary:webhook_secret"));
-
-    assert_eq!(first, second);
-}
-
-#[test]
-fn key_derivation_keeps_nats_unsafe_ids_out_of_subject_tokens() {
-    let key = CredentialKey::derive(&credential_id("openbao:tenant-1:github/primary:webhook_secret"));
-    let subject = CredentialSubject::event(&key).unwrap();
+fn subject_sits_below_the_project_scope_with_the_opaque_id_as_the_last_token() {
+    let stream_id = stream_id("tenant-1");
+    let subject = credential_event_subject(&stream_id).unwrap();
 
     assert_eq!(
         subject.as_str(),
-        format!("{CREDENTIAL_EVENT_SUBJECT_PREFIX}.{}", key.simple())
+        format!(
+            "{CREDENTIAL_EVENT_SUBJECT_PREFIX}.tenant-1.{}",
+            stream_id.credential_id()
+        )
     );
-    assert_eq!(subject.key(), &key);
-    assert_eq!(key.simple().len(), 32);
-    assert!(key.simple().chars().all(|ch| ch.is_ascii_hexdigit()));
 }
 
 #[test]
-fn stream_id_routing_preserves_key_derivation() {
-    let raw = "openbao:tenant-1:github/primary:webhook_secret";
-    let stream_id = CredentialStreamId::from(raw);
+fn resolver_scope_is_the_project_subtree() {
+    let resolver = CredentialEventSubjectResolver::for_owner(&owner("tenant-1")).unwrap();
 
     assert_eq!(
-        CredentialKey::for_stream(&stream_id),
-        CredentialKey::derive(&credential_id(raw))
+        resolver.scope().as_prefix(),
+        format!("{CREDENTIAL_EVENT_SUBJECT_PREFIX}.tenant-1.")
     );
+    assert_eq!(resolver.subject_scope(), Some(resolver.scope()));
+}
+
+#[test]
+fn dotted_project_ids_stay_a_single_subject_token() {
+    let resolver = CredentialEventSubjectResolver::for_owner(&owner("acme.prod")).unwrap();
+
+    assert_eq!(
+        resolver.scope().as_prefix(),
+        format!("{CREDENTIAL_EVENT_SUBJECT_PREFIX}.acme~prod.")
+    );
+}
+
+#[test]
+fn a_dotted_project_cannot_reach_into_another_projects_subtree() {
+    let dotted = credential_event_subject(&stream_id("acme.prod")).unwrap();
+    let other = CredentialEventSubjectResolver::for_owner(&owner("acme")).unwrap();
+
+    assert!(!dotted.as_str().starts_with(other.scope().as_prefix()));
+}
+
+#[test]
+fn resolver_rejects_a_stream_id_from_another_project() {
+    let resolver = CredentialEventSubjectResolver::for_owner(&owner("tenant-1")).unwrap();
+
+    let error = resolver.subject_for(&stream_id("tenant-2")).unwrap_err();
+
+    assert!(matches!(
+        error,
+        CredentialEventSubjectResolverError::OutsideProject { owner_id, .. } if owner_id.as_str() == "tenant-1"
+    ));
+}
+
+#[test]
+fn the_same_slot_in_two_projects_resolves_to_two_subjects() {
+    let first = credential_event_subject(&stream_id("tenant-1")).unwrap();
+    let second = credential_event_subject(&stream_id("tenant-2")).unwrap();
+
+    assert_ne!(first.as_str(), second.as_str());
 }
 
 #[test]

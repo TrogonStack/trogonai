@@ -69,6 +69,14 @@ docker compose down
 docker volume rm trogonai_nats_data
 ```
 
+Credential ids became opaque once, in
+[ADR#0074](../../../../../docs/adr/0074-credential-platform-extraction-boundary.md)
+Decision 4, and no migration carries older streams across. A dev environment
+that holds the `GATEWAY_CREDENTIAL_EVENTS` stream or the
+`GATEWAY_CREDENTIAL_SNAPSHOTS` bucket from before that change resets them with
+the same two commands. Credentials created through the management API then
+need to be created again. Nothing deployed holds them.
+
 ## Webhook integrations
 
 Edit or replace `devops/docker/compose/services/trogon-gateway/gateway.toml` from the repository root to configure webhook
@@ -438,8 +446,11 @@ curl -sS "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/recovery/s
 The create, rotate, and revoke responses return credential refs, lifecycle
 state, and stream position. They must not echo the submitted secret value.
 
-To inspect an API-created value directly in local OpenBao, use the logical
-credential id from the response as the final path segment:
+To inspect an API-created value directly in local OpenBao, use the storage
+locator as the final path segment. It is
+`openbao:{owner}:{scope_key}:{kind}` built from the returned reference's owner,
+scope key, and kind. The opaque credential id in the response is not part of
+the path:
 
 ```bash
 docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \

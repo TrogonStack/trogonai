@@ -37,7 +37,7 @@ pub(super) fn metadata() -> Value {
 pub(super) fn state_metadata() -> Value {
     json!({
         "reference": credential_ref(), "status": "CREDENTIAL_STATUS_ACTIVE",
-        "storageBackend": "STORAGE_BACKEND_OPENBAO", "fingerprint": "sha256:abc"
+        "storageLocator": "openbao:owner-1:org/repo:webhook_secret", "fingerprint": "sha256:abc"
     })
 }
 
@@ -54,11 +54,14 @@ pub(super) fn events() -> [Value; 10] {
             "credentialId": "cred-1", "ownerId": "owner-1", "source": "CREDENTIAL_SOURCE_SLACK",
             "kind": "CREDENTIAL_KIND_BOT_TOKEN", "scopeKey": "team"
         }}),
-        json!({"writeFailed": {"credentialId": "cred-1", "reason": "vault down"}}),
-        json!({"activated": {"metadata": metadata()}}),
+        json!({"writeFailed": {"credentialId": "cred-1", "reason": "vault down", "ownerId": "owner-1"}}),
+        json!({"activated": {"metadata": metadata(), "storageLocator": "openbao:owner-1:org/repo:webhook_secret"}}),
         json!({"rotationRequested": {"credentialRef": credential_ref()}}),
         json!({"rotationFailed": {"credentialRef": credential_ref(), "reason": "conflict"}}),
-        json!({"rotated": {"previousCredentialRef": credential_ref(), "metadata": metadata()}}),
+        json!({"rotated": {
+            "previousCredentialRef": credential_ref(), "metadata": metadata(),
+            "storageLocator": "openbao:owner-1:org/repo:webhook_secret"
+        }}),
         json!({"revoked": {"credentialRef": credential_ref()}}),
         json!({"destroyRequested": {"credentialRef": credential_ref(), "reason": "expired"}}),
         json!({"destroyed": {"credentialRef": credential_ref()}}),
@@ -74,7 +77,7 @@ pub(super) fn snapshots() -> [Value; 9] {
             "kind": "CREDENTIAL_KIND_CLIENT_SECRET", "scopeKey": "acct"
         }}),
         json!({"active": active_state()}),
-        json!({"writeFailed": {"credentialId": "cred-1", "reason": "denied"}}),
+        json!({"writeFailed": {"credentialId": "cred-1", "reason": "denied", "ownerId": "owner-1"}}),
         json!({"rotationPending": {"active": active_state()}}),
         json!({"revoked": {"credentialRef": credential_ref()}}),
         json!({"destroyRequested": {"credentialRef": credential_ref(), "reason": "policy"}}),
@@ -130,17 +133,6 @@ fn every_enum_value_round_trips_through_names_numbers_and_unknown_values() {
             Some(*status)
         );
     }
-    for backend in state_v1::StorageBackend::values() {
-        let message = assert_json_codec::<state_v1::CredentialMetadata>(metadata_with(
-            json!({"storageBackend": backend.proto_name()}),
-        ));
-        assert_eq!(message.storage_backend, Some(EnumValue::from(*backend)));
-        assert_eq!(state_v1::StorageBackend::from_i32(backend.to_i32()), Some(*backend));
-        assert_eq!(
-            state_v1::StorageBackend::from_proto_name(backend.proto_name()),
-            Some(*backend)
-        );
-    }
     for status in idempotency_v1::CredentialManagementIdempotencyStatus::values() {
         let message = assert_json_codec::<idempotency_v1::CredentialManagementIdempotencyRecord>(
             json!({"fingerprint": "f", "status": status.proto_name()}),
@@ -159,7 +151,9 @@ fn every_enum_value_round_trips_through_names_numbers_and_unknown_values() {
     assert_eq!(v1::CredentialKind::from_proto_name("CREDENTIAL_KIND_FUTURE"), None);
     assert_json_codec::<v1::CredentialRef>(ref_with(json!({"id": "c", "source": 99, "kind": 99})));
     assert_json_codec::<v1::CredentialMetadata>(metadata_with(json!({"status": 99})));
-    assert_json_codec::<state_v1::CredentialMetadata>(metadata_with(json!({"status": 99, "storageBackend": 99})));
+    assert_json_codec::<state_v1::CredentialMetadata>(metadata_with(
+        json!({"status": 99, "storageLocator": "openbao:o:s:k"}),
+    ));
 }
 
 #[test]

@@ -18,7 +18,7 @@ use super::constants::CREDENTIAL_LOCK_STRIPES;
 use crate::constants::METER_NAME;
 use crate::credential::commands::domain::{
     CredentialDestroyReason, CredentialDestroyReasonError, CredentialId, CredentialKind, CredentialRef,
-    CredentialScope, CredentialVersion, SourceKind,
+    CredentialScope, CredentialStreamId, CredentialVersion, SourceKind,
 };
 use crate::credential::commands::proto::{
     CredentialProtoDecodeError, active_credential_ref, decode_destroy_requested_state, decode_destroyed_state,
@@ -46,9 +46,10 @@ type ExecutionError<SnapshotReadError, ReadError, AppendError> = CommandError<
     CredentialEventPayloadError,
     CredentialEventPayloadError,
 >;
-type SnapshotReadError<EventStore> = <EventStore as SnapshotRead<state_v1::CredentialStateSnapshot, str>>::Error;
-type ReadError<EventStore> = <EventStore as StreamRead<str>>::Error;
-type AppendError<EventStore> = <EventStore as StreamAppend<str>>::Error;
+type SnapshotReadError<EventStore> =
+    <EventStore as SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>>::Error;
+type ReadError<EventStore> = <EventStore as StreamRead<CredentialStreamId>>::Error;
+type AppendError<EventStore> = <EventStore as StreamAppend<CredentialStreamId>>::Error;
 type HandlerResult<EventStore, SecretError> = Result<
     CredentialHandlerOutcome,
     CredentialHandlerError<SecretError, SnapshotReadError<EventStore>, ReadError<EventStore>, AppendError<EventStore>>,
@@ -268,13 +269,13 @@ pub(crate) enum CredentialActivationRecoveryCommand {
 }
 
 pub(crate) fn activation_recovery_command(
-    credential_id: &CredentialId,
+    stream_id: &CredentialStreamId,
     state: &state_v1::CredentialStateSnapshot,
     destroyed_version: Option<CredentialVersion>,
 ) -> Result<Option<CredentialActivationRecoveryCommand>, CredentialActivationRecoveryPlanError> {
     match state.state.as_ref() {
         Some(CredentialStateSnapshotCase::PendingWrite(pending)) => {
-            let credential = pending_write_credential_ref(credential_id, pending, destroyed_version)?;
+            let credential = pending_write_credential_ref(stream_id, pending, destroyed_version)?;
             Ok(Some(CredentialActivationRecoveryCommand::Write(
                 RecoverCredentialWriteActivation::new(credential),
             )))
@@ -302,16 +303,17 @@ pub(crate) fn activation_recovery_command(
 }
 
 fn pending_write_credential_ref(
-    credential_id: &CredentialId,
+    stream_id: &CredentialStreamId,
     pending: &state_v1::PendingCredentialWriteState,
     destroyed_version: Option<CredentialVersion>,
 ) -> Result<CredentialRef, CredentialActivationRecoveryPlanError> {
     let (pending_id, scope, kind) =
         decode_pending_write_state(pending).map_err(CredentialActivationRecoveryPlanError::InvalidState)?;
-    if pending_id != *credential_id {
+    let pending_stream = CredentialStreamId::new(scope.owner_id().clone(), pending_id.clone());
+    if pending_stream != *stream_id {
         return Err(CredentialActivationRecoveryPlanError::PendingWriteMismatch {
-            expected: credential_id.clone(),
-            actual: pending_id,
+            expected: stream_id.clone(),
+            actual: pending_stream,
         });
     }
 
@@ -329,8 +331,8 @@ pub(crate) enum CredentialActivationRecoveryPlanError {
     InvalidState(#[source] CredentialProtoDecodeError),
     #[error("credential recovery pending write belongs to '{actual}', not stream '{expected}'")]
     PendingWriteMismatch {
-        expected: CredentialId,
-        actual: CredentialId,
+        expected: CredentialStreamId,
+        actual: CredentialStreamId,
     },
 }
 
@@ -355,10 +357,10 @@ impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets> {
 
 impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStorePut + SecretStoreMetadata<Error = <Secrets as SecretStorePut>::Error>,
@@ -379,10 +381,10 @@ where
 
 impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
@@ -403,10 +405,10 @@ where
 
 impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -440,10 +442,10 @@ where
 
 impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreRevoke,
@@ -464,10 +466,10 @@ where
 
 impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreDestroy,
@@ -526,10 +528,10 @@ where
 
 impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -546,7 +548,7 @@ where
                 let reason = failure_reason(&source);
                 let result = CommandExecution::new(
                     &self.event_store,
-                    &RecordCredentialWriteFailure::new(credential_ref.id().clone(), reason),
+                    &RecordCredentialWriteFailure::new(CredentialStreamId::from(&credential_ref), reason),
                 )
                 .with_snapshot(&self.event_store)
                 .with_task_runtime(TokioSnapshotTaskScheduler)
@@ -613,10 +615,10 @@ where
 
 impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStorePut + SecretStoreMetadata<Error = <Secrets as SecretStorePut>::Error>,
@@ -630,12 +632,13 @@ where
         self.ensure_write_requested(&request).await?;
 
         let source_kind = command.scope.source_kind();
+        let stream_id = CredentialStreamId::new(command.scope.owner_id().clone(), command.credential_id);
         let credential_ref = match self.secrets.put(command.scope, command.kind, command.value).await {
             Ok(credential_ref) => credential_ref,
             Err(source) => {
                 record_write_failure(CredentialWriteOperation::Put, source_kind);
                 let reason = failure_reason(&source);
-                self.record_write_failure(command.credential_id, reason).await?;
+                self.record_write_failure(stream_id, reason).await?;
                 return Err(CredentialHandlerError::SecretWrite { source });
             }
         };
@@ -674,7 +677,7 @@ where
         {
             Ok(_) => Ok(()),
             Err(source) => {
-                let (state, _stream_position) = load_state(&self.event_store, command.credential_id().as_str()).await?;
+                let (state, _stream_position) = load_state(&self.event_store, command.stream_id()).await?;
                 let matches = match state.state.as_ref() {
                     Some(CredentialStateSnapshotCase::PendingWrite(pending)) => pending_matches(pending, command)
                         .map_err(|source| CredentialHandlerError::InvalidState { source })?,
@@ -691,7 +694,7 @@ where
 
     async fn record_write_failure(
         &self,
-        credential_id: CredentialId,
+        stream_id: CredentialStreamId,
         reason: CredentialFailureReason,
     ) -> Result<
         (),
@@ -702,25 +705,22 @@ where
             AppendError<EventStore>,
         >,
     > {
-        CommandExecution::new(
-            &self.event_store,
-            &RecordCredentialWriteFailure::new(credential_id, reason),
-        )
-        .with_snapshot(&self.event_store)
-        .with_task_runtime(TokioSnapshotTaskScheduler)
-        .execute()
-        .await
-        .map(|_| ())
-        .map_err(|source| CredentialHandlerError::RecordWriteFailure { source })
+        CommandExecution::new(&self.event_store, &RecordCredentialWriteFailure::new(stream_id, reason))
+            .with_snapshot(&self.event_store)
+            .with_task_runtime(TokioSnapshotTaskScheduler)
+            .execute()
+            .await
+            .map(|_| ())
+            .map_err(|source| CredentialHandlerError::RecordWriteFailure { source })
     }
 }
 
 impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
@@ -791,7 +791,7 @@ where
             Ok(_) => Ok(false),
             Err(source) => {
                 let (state, _stream_position) =
-                    load_state(&self.event_store, command.credential_ref().id().as_str()).await?;
+                    load_state(&self.event_store, &CredentialStreamId::from(command.credential_ref())).await?;
                 let matches = match state.state.as_ref() {
                     Some(CredentialStateSnapshotCase::RotationPending(rotation)) => {
                         let active = decode_message_field("rotation_pending.active", &rotation.active)
@@ -839,10 +839,10 @@ where
 
 impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreRevoke,
@@ -853,7 +853,8 @@ where
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreRevoke>::Error> {
         let _write_guard = self.write_locks.acquire(command.credential_ref.id()).await;
         let revoke = RevokeCredential::new(command.credential_ref.clone());
-        let (state, stream_position) = load_state(&self.event_store, command.credential_ref.id().as_str()).await?;
+        let (state, stream_position) =
+            load_state(&self.event_store, &CredentialStreamId::from(&command.credential_ref)).await?;
         let already_revoked = is_revoked_as(&state, &command.credential_ref)?;
         if already_revoked {
             let stream_position = stream_position.ok_or(CredentialHandlerError::MissingRevokedStreamPosition)?;
@@ -882,7 +883,7 @@ where
                 Ok(result) => return Ok(CredentialHandlerOutcome::new(result.state, result.stream_position)),
                 Err(source) => {
                     let (state, fresh_position) =
-                        load_state(&self.event_store, command.credential_ref.id().as_str()).await?;
+                        load_state(&self.event_store, &CredentialStreamId::from(&command.credential_ref)).await?;
                     if is_revoked_as(&state, &command.credential_ref)? {
                         let fresh_position =
                             fresh_position.ok_or(CredentialHandlerError::MissingRevokedStreamPosition)?;
@@ -905,10 +906,10 @@ enum DestroyRequestOutcome {
 
 impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     Secrets: SecretStoreDestroy,
@@ -970,7 +971,7 @@ where
             Ok(_) => Ok(DestroyRequestOutcome::Proceed),
             Err(source) => {
                 let (state, stream_position) =
-                    load_state(&self.event_store, command.credential_ref().id().as_str()).await?;
+                    load_state(&self.event_store, &CredentialStreamId::from(command.credential_ref())).await?;
 
                 let pending_matches = match state.state.as_ref() {
                     Some(CredentialStateSnapshotCase::DestroyRequested(pending)) => {
@@ -1184,16 +1185,16 @@ fn pending_matches(
 
 async fn load_state<EventStore, SecretError>(
     event_store: &EventStore,
-    stream_id: &str,
+    stream_id: &CredentialStreamId,
 ) -> Result<
     (state_v1::CredentialStateSnapshot, Option<StreamPosition>),
     CredentialHandlerError<SecretError, SnapshotReadError<EventStore>, ReadError<EventStore>, AppendError<EventStore>>,
 >
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialStreamId>
+        + StreamAppend<CredentialStreamId>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId>
         + Clone
         + 'static,
     SecretError: Error + Send + Sync + 'static,

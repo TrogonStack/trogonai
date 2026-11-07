@@ -12,6 +12,7 @@ fn resolves_literal_to_static_reference() {
         SourceKind::GitHub,
         SourceIntegrationId::new("primary").unwrap(),
     );
+    let expected = CredentialId::derive(&scope, CredentialKind::WebhookSecret);
     let secret = StaticConfigSecretStore::resolve(
         scope,
         CredentialKind::WebhookSecret,
@@ -20,10 +21,7 @@ fn resolves_literal_to_static_reference() {
     )
     .unwrap();
 
-    assert_eq!(
-        secret.reference().to_string(),
-        "static-config:github/primary:webhook_secret@1"
-    );
+    assert_eq!(secret.reference().to_string(), format!("{expected}@1"));
     assert_eq!(secret.into_plaintext().unwrap().as_str(), "gh-secret");
 }
 
@@ -82,7 +80,7 @@ fn debug_redacts_the_material() {
 
 #[test]
 fn verifier_only_material_cannot_be_read_as_plaintext() {
-    let reference = StaticConfigSecretStore::credential_ref(&discord_scope(), CredentialKind::BotToken).unwrap();
+    let reference = StaticConfigSecretStore::credential_ref(&discord_scope(), CredentialKind::BotToken);
     let secret = StaticConfigSecret::new(
         reference.clone(),
         SecretMaterial::Verifier(SecretVerifier::new("verifier").unwrap()),

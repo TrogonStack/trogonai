@@ -39,16 +39,39 @@ records it, but a partial manual delete produces exactly this.
 ## Manual reconciliation
 
 Enumerate the managed tree with an identity holding list capability, then
-compare against the event stream. The tree is three levels below the prefix:
+compare against the event stream. The tree is three or four levels below the prefix:
 
 ```bash
 bao kv list -mount=secret trogonai/
 bao kv list -mount=secret trogonai/{owner_id}/credentials/
 ```
 
-For each path found, the credential id is the last segment, and it encodes
-`openbao:{owner}:{scope_key}:{kind}`. Look that credential id up in the
-credential event stream.
+Everything below `credentials/` is the storage locator,
+`openbao:{owner}:{scope_key}:{kind}`. It is one path segment for a
+source-scoped credential, but an integration-scoped one has a `/` in its scope
+key (`github/primary`), so `bao kv list` shows it as two levels: list the
+first level again to reach the second. The locator is not the credential id,
+which is opaque and never appears in the path. Find the credential whose activation or
+rotation event records that `storage_locator` in the credential event stream
+for the owner.
+
+A write that has not activated yet has no event naming its locator:
+`CredentialWriteRequested` records the owner, scope and kind, not the locator.
+Before treating a locator as unmatched, split it into its owner, scope key and
+kind, look for a write request with those values, and check that credential's
+current state in the stream. A request alone does not settle it:
+
+- **`pending_write`.** A write awaiting activation, not an orphan. Check the
+  recovery state (`${GATEWAY}/-/credentials/recovery/status`) and leave it to
+  the recovery worker, or follow
+  [stuck-pending-secret-write.md](stuck-pending-secret-write.md) when it is
+  `stuck` or the request predates the checkpoint.
+- **`write_failed`.** The put can land in OpenBao even though the gateway
+  recorded a failure, for example when the response was lost. The recovery
+  worker never retries this state; only a new `PUT` for the same credential
+  moves it forward. If the owner still wants the credential, have them
+  re-supply it. Otherwise the material is unaccounted for: handle it as
+  absent from the stream, below.
 
 Three outcomes:
 
@@ -87,7 +110,7 @@ this work, so it is manual, and it depends on the state the stream records:
 
   ```bash
   bao kv destroy -mount=secret -versions=1,2,3 \
-    "trogonai/{owner_id}/credentials/{credential_id}"
+    "trogonai/{owner_id}/credentials/{storage_locator}"
   ```
 
 **Absent from the stream entirely.** A true orphan. Confirm before deleting:
@@ -99,7 +122,7 @@ retention interval.
 
 ```bash
 bao kv metadata get -mount=secret \
-  "trogonai/{owner_id}/credentials/{credential_id}"
+  "trogonai/{owner_id}/credentials/{storage_locator}"
 ```
 
 Read the metadata before deciding. Creation and update times distinguish a

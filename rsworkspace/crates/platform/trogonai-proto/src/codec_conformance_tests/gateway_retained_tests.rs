@@ -102,10 +102,7 @@ fn credential_reference_and_metadata_handles_survive_source_drop() {
                 handle.status().and_then(|value| value.as_known()),
                 Some(v1::CredentialStatus::Active)
             );
-            assert_eq!(
-                handle.storage_backend().and_then(|value| value.as_known()),
-                Some(state_v1::StorageBackend::Openbao)
-            );
+            assert_eq!(handle.storage_locator(), "openbao:owner-1:org/repo:webhook_secret");
             assert_eq!(handle.fingerprint(), "sha256:abc");
         }
     );
@@ -147,6 +144,7 @@ fn event_handles_survive_source_drop() {
         |handle| {
             assert_eq!(handle.credential_id(), "cred-1");
             assert_eq!(handle.reason(), "vault down");
+            assert_eq!(handle.owner_id(), "owner-1");
         }
     );
     assert_retained!(
@@ -270,6 +268,7 @@ fn state_handles_survive_source_drop() {
         |handle| {
             assert_eq!(handle.credential_id(), "cred-1");
             assert_eq!(handle.reason(), "denied");
+            assert_eq!(handle.owner_id(), "owner-1");
         }
     );
     assert_retained!(

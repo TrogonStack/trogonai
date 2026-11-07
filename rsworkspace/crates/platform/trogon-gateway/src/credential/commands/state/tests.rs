@@ -2,8 +2,8 @@ use buffa::MessageField;
 
 use super::*;
 use crate::credential::commands::domain::{
-    CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialOwnerId, CredentialVersion,
-    SourceKind, StorageBackend,
+    CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialOwnerId, CredentialStreamId,
+    CredentialVersion, SourceKind, StorageLocator,
 };
 use crate::credential::commands::proto::{
     activated_to_proto, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto,
@@ -12,7 +12,11 @@ use crate::credential::commands::proto::{
 };
 
 fn credential_id() -> CredentialId {
-    CredentialId::new("openbao:tenant-1:webhook_secret").unwrap()
+    CredentialId::derive(&scope(), CredentialKind::WebhookSecret)
+}
+
+fn stream_id(credential_id: CredentialId) -> CredentialStreamId {
+    CredentialStreamId::new(scope().owner_id().clone(), credential_id)
 }
 
 fn scope() -> CredentialScope {
@@ -32,7 +36,7 @@ fn metadata_with(status: CredentialStatus, version: u64) -> CredentialMetadata {
     CredentialMetadata::new(
         credential_ref(version),
         status,
-        StorageBackend::OpenBao,
+        StorageLocator::new("openbao:tenant-1:github:webhook_secret").unwrap(),
         CredentialFingerprint::new("fingerprint").unwrap(),
     )
 }
@@ -82,7 +86,7 @@ fn rejected_by(state: state_v1::CredentialStateSnapshot, event: v1::CredentialEv
 }
 
 fn other_id() -> CredentialId {
-    CredentialId::new("openbao:tenant-1:other_secret").unwrap()
+    CredentialId::derive(&scope(), CredentialKind::SigningSecret)
 }
 
 fn other_ref() -> CredentialRef {
@@ -106,7 +110,7 @@ fn write_requested_is_rejected_once_the_credential_is_active() {
 #[test]
 fn write_failure_for_another_credential_is_rejected_while_a_write_is_pending() {
     let failed = event(write_failed_to_proto(
-        &other_id(),
+        &stream_id(other_id()),
         &CredentialFailureReason::new("openbao write failed").unwrap(),
     ));
 
@@ -126,7 +130,7 @@ fn events_that_need_a_precondition_are_rejected_without_it() {
     let cases = [
         (
             initial_state(),
-            event(write_failed_to_proto(&credential_id(), &reason)),
+            event(write_failed_to_proto(&stream_id(credential_id()), &reason)),
             CredentialEvolveError::WriteFailedWithoutPendingWrite,
         ),
         (
@@ -203,7 +207,7 @@ fn activation_for_another_credential_id_is_rejected_by_decide_and_evolve() {
     let other = CredentialMetadata::new(
         other_ref(),
         CredentialStatus::Active,
-        StorageBackend::OpenBao,
+        StorageLocator::new("openbao:tenant-1:github:webhook_secret").unwrap(),
         CredentialFingerprint::new("fingerprint").unwrap(),
     );
 
@@ -259,6 +263,7 @@ fn missing_message_fields_surface_as_proto_errors() {
         event: Some(
             v1::CredentialActivated {
                 metadata: MessageField::none(),
+                storage_locator: String::new(),
             }
             .into(),
         ),

@@ -1244,10 +1244,10 @@ docs/adr/0052-cloud-kms-production-seal.md.
 ### Path convention (verified in openbao_secret_store.rs)
 
 ```text
-credential_path(owner_id, credential_id)
-  = "trogonai/{owner_id}/credentials/{credential_id}"
+credential_path(owner_id, storage_locator)
+  = "trogonai/{owner_id}/credentials/{storage_locator}"
 
-credential_id (openbao_credential_id())
+storage_locator (StorageLocator::openbao())
   = "openbao:{owner_id}:{scope_key}:{kind}"
   where scope_key is either the bare source name for a source-scoped
   credential (e.g. "discord"), or "{source}/{integration_id}" for an
@@ -1255,20 +1255,31 @@ credential_id (openbao_credential_id())
 
 full KV v2 HTTP path
   = "/v1/{mount}/{data|metadata|delete|destroy}/trogonai/{owner_id}/
-     credentials/{credential_id}"
+     credentials/{storage_locator}"
 ```
 
 Worked example: owner_id "tenant-1", source github, integration "primary",
 kind webhook_secret:
 
 ```text
-credential_id = "openbao:tenant-1:github/primary:webhook_secret"
-path          = "trogonai/tenant-1/credentials/openbao:tenant-1:github/
-                 primary:webhook_secret"
+storage_locator = "openbao:tenant-1:github/primary:webhook_secret"
+path            = "trogonai/tenant-1/credentials/openbao:tenant-1:github/
+                   primary:webhook_secret"
 ```
 
+The credential id itself is opaque (thirty-two hex digits) and never appears
+in the path. The locator is the text the id was before it turned opaque
+([ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md)
+Decision 4): the aggregate records it as adapter-private state, so paths
+written before the change keep the same shape. `OpenBaoSecretStore` still
+derives the locator from the credential ref when it builds the path rather
+than reading the recorded one, so the recorded locator is informational until
+the adapter reads it. There is no migration for streams written under the old
+ids: existing `GATEWAY_CREDENTIAL_EVENTS` and `GATEWAY_CREDENTIAL_SNAPSHOTS`
+streams are reset and their credentials recreated.
+
 Note owner_id appears twice in the full path, once as its own segment and
-once embedded inside credential_id; `encode_path_segment` sanitizes each
+once embedded inside the locator; `encode_path_segment` sanitizes each
 occurrence independently, so this duplication is not a correctness problem,
 just a naming quirk worth knowing about when reading raw OpenBao paths.
 
@@ -1343,8 +1354,10 @@ the recovery worker reads metadata() to recover stuck activations. The
 "during cleanup" pattern has no code yet since async cleanup itself is
 unbuilt (see RUNTIME_PROJECTION).
 
-DECIDED ([ADR#0046](../../adr/0046-project-anchored-resource-hierarchy.md)): `trogonai/{owner_id}/credentials/{credential_id}` and
-its mount are ratified as-is, with owner_id understood as project id.
+DECIDED ([ADR#0046](../../adr/0046-project-anchored-resource-hierarchy.md)): `trogonai/{owner_id}/credentials/{storage_locator}` and
+its mount are ratified as-is, with owner_id understood as project id. The
+suffix is the recorded storage locator, the text the credential id was before
+[ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md) made the id opaque.
 Names anchor at the project and never embed the organization above it. See
 docs/adr/0046-project-anchored-resource-hierarchy.md.
 

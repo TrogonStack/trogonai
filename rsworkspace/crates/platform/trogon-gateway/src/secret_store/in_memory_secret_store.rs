@@ -10,7 +10,7 @@ use super::{
 };
 use crate::credential::commands::domain::{
     CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
-    CredentialVersion, StorageBackend,
+    CredentialVersion, StorageBackend, StorageLocator,
 };
 
 #[derive(Clone, Default)]
@@ -20,7 +20,6 @@ pub struct InMemorySecretStore {
 
 #[derive(Default)]
 struct InMemorySecretStoreState {
-    next_id: u64,
     entries: BTreeMap<CredentialRef, StoredCredential>,
 }
 
@@ -29,25 +28,6 @@ struct StoredCredential {
     material: Option<SecretMaterial>,
     metadata: CredentialMetadata,
     destroy_reason: Option<SecretDestroyReason>,
-}
-
-impl InMemorySecretStoreState {
-    fn next_credential_ref(
-        &mut self,
-        scope: CredentialScope,
-        kind: CredentialKind,
-    ) -> Result<CredentialRef, SecretStoreError> {
-        self.next_id += 1;
-        let id = CredentialId::new(format!(
-            "memory:{}:{}:{}",
-            scope.scope_key(),
-            kind.as_str(),
-            self.next_id
-        ))
-        .map_err(SecretStoreError::invalid_generated(StorageBackend::InMemory))?;
-
-        Ok(CredentialRef::new(id, CredentialVersion::initial(), &scope, kind))
-    }
 }
 
 impl SecretStorePut for InMemorySecretStore {
@@ -60,7 +40,12 @@ impl SecretStorePut for InMemorySecretStore {
         value: SecretString,
     ) -> Result<CredentialRef, Self::Error> {
         let mut state = self.state.lock().await;
-        let credential = state.next_credential_ref(scope, kind)?;
+        let credential = CredentialRef::new(
+            CredentialId::derive(&scope, kind),
+            CredentialVersion::initial(),
+            &scope,
+            kind,
+        );
         let metadata = metadata(&credential, CredentialStatus::Active)?;
         state.entries.insert(
             credential.clone(),
@@ -191,10 +176,12 @@ impl SecretStoreMetadata for InMemorySecretStore {
 fn metadata(credential: &CredentialRef, status: CredentialStatus) -> Result<CredentialMetadata, SecretStoreError> {
     let fingerprint = fingerprint::digest("memory", credential)
         .map_err(SecretStoreError::invalid_generated(StorageBackend::InMemory))?;
+    let locator =
+        StorageLocator::in_memory(credential).map_err(SecretStoreError::invalid_generated(StorageBackend::InMemory))?;
     Ok(CredentialMetadata::new(
         credential.clone(),
         status,
-        StorageBackend::InMemory,
+        locator,
         fingerprint,
     ))
 }

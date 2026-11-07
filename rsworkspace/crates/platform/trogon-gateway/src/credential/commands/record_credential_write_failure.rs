@@ -1,24 +1,24 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialFailureReason, CredentialId};
+use super::domain::{CredentialFailureReason, CredentialStreamId};
 use super::proto::write_failed_to_proto;
 use super::state::{CredentialDecideError, CredentialEvolveError};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordCredentialWriteFailure {
-    credential_id: CredentialId,
+    stream_id: CredentialStreamId,
     reason: CredentialFailureReason,
 }
 
 impl RecordCredentialWriteFailure {
-    pub fn new(credential_id: CredentialId, reason: CredentialFailureReason) -> Self {
-        Self { credential_id, reason }
+    pub fn new(stream_id: CredentialStreamId, reason: CredentialFailureReason) -> Self {
+        Self { stream_id, reason }
     }
 }
 
 impl Decider for RecordCredentialWriteFailure {
-    type StreamId = str;
+    type StreamId = CredentialStreamId;
     type State = state_v1::CredentialStateSnapshot;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
@@ -27,7 +27,7 @@ impl Decider for RecordCredentialWriteFailure {
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.credential_id.as_str()
+        &self.stream_id
     }
 
     fn initial_state() -> Self::State {
@@ -43,10 +43,10 @@ impl Decider for RecordCredentialWriteFailure {
 
         match current {
             CredentialStateSnapshotCase::PendingWrite(_) => Ok(Decision::event(v1::CredentialEvent {
-                event: Some(write_failed_to_proto(&command.credential_id, &command.reason).into()),
+                event: Some(write_failed_to_proto(&command.stream_id, &command.reason).into()),
             })),
             _ => Err(CredentialDecideError::CredentialWriteNotPending {
-                credential_id: command.credential_id.clone(),
+                credential_id: command.stream_id.credential_id().clone(),
             }),
         }
     }

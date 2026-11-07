@@ -1,12 +1,13 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialId, CredentialKind, CredentialScope};
+use super::domain::{CredentialId, CredentialKind, CredentialScope, CredentialStreamId};
 use super::proto::write_requested_to_proto;
 use super::state::{CredentialDecideError, CredentialEvolveError};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestCredentialWrite {
+    stream_id: CredentialStreamId,
     credential_id: CredentialId,
     scope: CredentialScope,
     kind: CredentialKind,
@@ -15,10 +16,15 @@ pub struct RequestCredentialWrite {
 impl RequestCredentialWrite {
     pub fn new(credential_id: CredentialId, scope: CredentialScope, kind: CredentialKind) -> Self {
         Self {
+            stream_id: CredentialStreamId::new(scope.owner_id().clone(), credential_id.clone()),
             credential_id,
             scope,
             kind,
         }
+    }
+
+    pub fn stream_id(&self) -> &CredentialStreamId {
+        &self.stream_id
     }
 
     pub fn credential_id(&self) -> &CredentialId {
@@ -35,7 +41,7 @@ impl RequestCredentialWrite {
 }
 
 impl Decider for RequestCredentialWrite {
-    type StreamId = str;
+    type StreamId = CredentialStreamId;
     type State = state_v1::CredentialStateSnapshot;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
@@ -44,7 +50,7 @@ impl Decider for RequestCredentialWrite {
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.credential_id.as_str()
+        &self.stream_id
     }
 
     fn initial_state() -> Self::State {

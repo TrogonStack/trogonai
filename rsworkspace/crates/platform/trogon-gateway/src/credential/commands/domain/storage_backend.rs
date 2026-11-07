@@ -1,8 +1,11 @@
 use std::fmt;
 
-use super::CredentialId;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Which adapter holds a credential's material.
+///
+/// Adapter-private knowledge of the aggregate, recovered from its
+/// `StorageLocator`. It is not part of any contract, because ADR#0023 keeps
+/// storage backends out of them.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum StorageBackend {
     InMemory,
     OpenBao,
@@ -10,8 +13,8 @@ pub enum StorageBackend {
 }
 
 impl StorageBackend {
-    pub fn from_credential_id(id: &CredentialId) -> Result<Self, StorageBackendError> {
-        let Some((prefix, _)) = id.as_str().split_once(':') else {
+    pub(super) fn from_locator(locator: &str) -> Result<Self, StorageBackendError> {
+        let Some((prefix, _)) = locator.split_once(':') else {
             return Err(StorageBackendError::MissingPrefix);
         };
         match prefix {
@@ -39,9 +42,9 @@ impl fmt::Display for StorageBackend {
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum StorageBackendError {
-    #[error("credential id has no storage prefix")]
+    #[error("storage locator has no backend prefix")]
     MissingPrefix,
-    #[error("credential id has unknown storage prefix '{0}'")]
+    #[error("storage locator has unknown backend prefix '{0}'")]
     UnknownPrefix(String),
 }
 

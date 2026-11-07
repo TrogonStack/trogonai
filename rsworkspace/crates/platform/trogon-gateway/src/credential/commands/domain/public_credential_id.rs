@@ -6,8 +6,8 @@ use super::{CredentialKind, CredentialOwnerId};
 ///
 /// ADR#0023 requires that storage-provider artifacts never appear in wire
 /// contracts, so this is composed from validated domain identifiers rather than
-/// derived from `CredentialId`, whose value names the storage backend that
-/// happens to hold the material.
+/// derived from `CredentialId`, which is opaque and identifies the aggregate,
+/// not the slot a caller manages.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct PublicCredentialId(String);
 
