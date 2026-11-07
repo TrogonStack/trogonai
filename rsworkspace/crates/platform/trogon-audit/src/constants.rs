@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use trogon_std::NonZeroDuration;
+
 /// The fixed leading subject token of the audit family (ADR#0086 Decision 2).
 ///
 /// The family spans the A2A gateway, the egress proxy and the secrets service, so
@@ -54,6 +56,7 @@ pub const CONSISTENCY_TOKEN_PUNCTUATION: &str = "+/=-_.:~";
 
 pub const RECORD_ID_UUID_VERSION: usize = 7;
 pub const CHAIN_ID_UUID_VERSION: usize = 7;
+pub const CHECKPOINT_ID_UUID_VERSION: usize = 7;
 
 /// A record hash is a SHA-256 digest.
 pub const RECORD_HASH_BYTES: usize = 32;
@@ -86,10 +89,6 @@ pub const GENESIS_SEQUENCE: u64 = 1;
 /// continuing from the head the previous range verified.
 pub const MAX_CHAIN_RANGE_RECORDS: usize = 10_000;
 
-/// The streams that hold the records (ADR#0086 Decision 2).
-pub const STREAM_AUDIT: &str = "AUDIT";
-pub const STREAM_DUPLICATE_WINDOW: Duration = Duration::from_secs(120);
-
 /// The NATS server's default `max_payload`, which bounds a message's payload and
 /// headers together. The `AUDIT` stream sets no message size of its own, so this
 /// is the size a record must fit.
@@ -103,6 +102,11 @@ pub const SEAL_HEADROOM_BYTES: usize = 4 * 1024;
 /// a record the stream would reject never takes a place in the chain.
 pub const MAX_RECORD_BYTES: usize = NATS_DEFAULT_MAX_PAYLOAD_BYTES - SEAL_HEADROOM_BYTES;
 
+/// The streams that hold the records (ADR#0086 Decision 2).
+pub const STREAM_AUDIT: &str = "AUDIT";
+pub const STREAM_AUDIT_CHECKPOINT: &str = "AUDIT_CHECKPOINT";
+pub const STREAM_DUPLICATE_WINDOW: Duration = Duration::from_secs(120);
+
 /// A lost ack is retried inside the stream's duplicate window (two minutes), so
 /// three attempts of a couple of seconds stay well within it.
 pub const DEFAULT_ACK_TIMEOUT: Duration = Duration::from_secs(2);
@@ -111,6 +115,32 @@ pub const DEFAULT_MAX_PUBLISH_ATTEMPTS: u32 = 3;
 pub const DEFAULT_BEST_EFFORT_CAPACITY: usize = 1024;
 pub const DEFAULT_RETRY_BUFFER_CAPACITY: usize = 256;
 pub const DEFAULT_DRAIN_INTERVAL: Duration = Duration::from_secs(1);
+
+/// A checkpoint is signed once this many records have been acknowledged since
+/// the last one, so a crash leaves at most this many records past the last
+/// signed head, where a deleted tail goes unnoticed.
+pub const DEFAULT_CHECKPOINT_EVERY_RECORDS: u64 = 1_000;
+/// The longest a chain goes without a checkpoint. An idle chain is signed again
+/// at this pace with its head unchanged, as a heartbeat that shows the writer is
+/// alive and its chain has not been cut.
+pub const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(60);
+pub const DEFAULT_CHECKPOINT_SIGN_TIMEOUT: NonZeroDuration =
+    NonZeroDuration::from_secs_const(DEFAULT_ACK_TIMEOUT.as_secs());
+pub const DEFAULT_CHECKPOINT_PUBLISH_TIMEOUT: NonZeroDuration =
+    NonZeroDuration::from_secs_const(DEFAULT_ACK_TIMEOUT.as_secs() * DEFAULT_MAX_PUBLISH_ATTEMPTS as u64);
+
+/// The JWS `typ` of a checkpoint signature. It keeps a checkpoint signature from
+/// being taken as any other JWS signed with the same key, and the reverse.
+pub const CHECKPOINT_JWS_TYPE: &str = "trogonai-audit-checkpoint+jws";
+/// Ed25519, the one algorithm of the ADR#0038 suite.
+pub const CHECKPOINT_JWS_ALGORITHM: &str = "EdDSA";
+
+/// A key id is a `did:key`: this prefix, then the multibase base58btc form of
+/// the multicodec-tagged public key (ADR#0038 Decision 1).
+pub const DID_KEY_PREFIX: &str = "did:key:";
+pub const MULTIBASE_BASE58BTC: char = 'z';
+/// The multicodec `ed25519-pub` as its unsigned varint.
+pub const ED25519_MULTICODEC: [u8; 2] = [0xed, 0x01];
 
 /// Target of the structured local log lines the writer emits when it refuses an
 /// action or drops a record.

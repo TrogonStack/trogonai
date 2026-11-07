@@ -61,14 +61,19 @@ Issue a user and its credentials for every workload that connects to PLATFORM,
 and credentials for `sys`:
 
 ```sh
-for workload in trogon-gateway decider-host a2a-gateway a2a-bridge acp-nats mcp-nats channel-bridge-telegram; do
-  nsc add user --account PLATFORM --name "$workload"
+for workload in trogon-gateway decider-host a2a-gateway acp-nats mcp-nats channel-bridge-telegram; do
+  nsc add user --account PLATFORM --name "$workload" \
+    --deny-pub a2a.bridge.auth.callout.request --deny-sub a2a.bridge.auth.callout.request
   nsc generate creds --account PLATFORM --name "$workload" --output-file "$workload.creds"
 done
+nsc add user --account PLATFORM --name a2a-bridge --deny-sub a2a.bridge.auth.callout.request
+nsc generate creds --account PLATFORM --name a2a-bridge --output-file a2a-bridge.creds
 nsc generate creds --account SYS --name sys --output-file sys.creds
 ```
 
-These users carry no publish or subscribe restrictions, and
+The deny lists keep the bridge mint subject to the bridge, as
+[Export the bridge mint service](#export-the-bridge-mint-service) explains.
+Beyond them these users carry no publish or subscribe restrictions, and
 [ADR#0081](../../docs/adr/0081-nats-tls-by-default-and-operator-mode-admission.md) gives each workload its own allow lists. Do not hand them
 to a deployment until each one is issued with those allow lists; see
 [Open decisions](#open-decisions).
@@ -112,6 +117,59 @@ Move every `.creds` file and every seed into OpenBao as
 [Where production keys live](#where-production-keys-live) describes, then
 delete the local copies. `nsc env` shows where nsc keeps them: the store
 directory holds the JWTs, and the keystore (`$NKEYS_PATH`) holds the seeds.
+
+## Export the bridge mint service
+
+An A2A bridge mints a user for each caller by sending the callout a request on
+`a2a.bridge.auth.callout.request`, and the callout answers it. The bridge lives
+in PLATFORM and the callout in AUTH, so the subject crosses accounts as a
+service: AUTH exports it and PLATFORM imports it under the same subject.
+Replies travel back through the service without a grant of their own.
+
+Export it privately, so that only an account holding an activation token for
+PLATFORM can import it, and import it with that token:
+
+```sh
+nsc add export --account AUTH --name bridge-mint \
+  --subject a2a.bridge.auth.callout.request --service --private
+nsc generate activation --account AUTH --target-account "$(nsc describe account --name PLATFORM --json | jq -r .sub)" \
+  --subject a2a.bridge.auth.callout.request --output-file bridge-mint.token
+nsc add import --account PLATFORM --name bridge-mint --token bridge-mint.token --service
+```
+
+Push AUTH and PLATFORM again afterwards, as in
+[Push the platform accounts](#push-the-platform-accounts). The subject is the
+default of both the bridge and the callout, which each override with
+`AUTH_CALLOUT_MINT_SUBJECT`. If you change it, change the export, the import
+and the deny lists above to match.
+
+Two rules keep the exchange to the two processes that belong to it:
+
+- Only the bridge may request. Every PLATFORM user is denied publish on the
+  subject except `a2a-bridge`, and every one is denied subscribe, so no other
+  PLATFORM workload can ask the callout to mint a user and none can read a
+  request or answer one.
+- Only the callout may answer. The service lives in AUTH, whose only users are
+  `auth-callout`, which the callout runs as, and the sentinel, which may not
+  subscribe.
+
+The callout still verifies the credential in every request, so the export
+grants the bridge a way to ask, never a way to mint without proof. It refuses a
+request that carries no sealed credential. A mint request names the tenant
+account the user is minted into, which an A2A bridge takes from
+`BRIDGE_TENANT_ACCOUNT`.
+
+Check the exchange as the bridge user. An unsealed request reaches the callout
+and comes back as a refusal, which shows both the import and the answer work:
+
+```sh
+nats --server tls://nats.example.internal:4222 \
+  --tlsca ca.pem --tlscert client.pem --tlskey client-key.pem --creds a2a-bridge.creds \
+  request a2a.bridge.auth.callout.request '{}' --raw --timeout 5s
+```
+
+The reply is `{"refusal":"invalid_request"}`. A `no responders` error means the
+import, the export, or the callout is missing.
 
 ## Render the server files
 
@@ -260,6 +318,7 @@ account, and the xkey seed from nsc's keystore. Then start it with:
 | `AUTH_CALLOUT_MTLS_TRUST_ANCHORS` | The path of the CA bundle that issues callers' client certificates |
 | `AUTH_CALLOUT_OIDC_ISSUER`, `AUTH_CALLOUT_OIDC_AUDIENCES` | The OIDC issuer whose tokens the callout accepts, and the audiences a token must carry |
 | `A2A_PREFIX` | The A2A subject prefix the gateway and the agents use, `a2a` unless set |
+| `AUTH_CALLOUT_MINT_SUBJECT` | The subject the callout answers A2A bridge mint requests on, `a2a.bridge.auth.callout.request` unless set. It must match [the export](#export-the-bridge-mint-service) |
 
 The seed variables hold references, never seeds. Under `file` custody each one
 must be a `file://` reference. `env` custody reads `env://` references and is
@@ -297,6 +356,11 @@ the bus, so each bridge takes the xkey's public key as
 nsc describe account --name AUTH --json | jq -r .nats.authorization.xkey
 ```
 
+A bridge also takes the public key of the tenant account it mints into as
+`BRIDGE_TENANT_ACCOUNT`. The callout answers a bridge's mint requests on a
+second subscription of its own connection, and it admits them by the same
+checks as a direct caller's.
+
 Check the callout by connecting as a caller and publishing outside every grant.
 Name the tenant account as the URL's user with an empty password, because the
 `nats` CLI sends a user name without a password as a token, which the callout
@@ -316,7 +380,8 @@ says why.
 The local compose stack runs the callout this way. nats-bootstrap writes its
 settings to `clients/auth-callout/callout.env` in the `dev_secrets` volume,
 next to its seeds under `keys/`, and the matching xkey public key to
-`clients/a2a-bridge/bridge.env`. The callout trusts the dev CA, so any dev
+`clients/a2a-bridge/bridge.env`, with the DEV account's public key as
+`BRIDGE_TENANT_ACCOUNT`. The callout trusts the dev CA, so any dev
 client certificate admits a caller into DEV, whose public key nats-bootstrap
 logs as `nats-bootstrap: account DEV <key>`:
 
@@ -354,6 +419,30 @@ The local compose stack creates the bucket on every `up`. nats-kv-provision
 runs [provision-kv.sh](../docker/compose/services/nats/provision-kv.sh) as the
 PLATFORM user `kv-provisioner` once the accounts are pushed, and fails when the
 bucket already exists with another history or maximum age.
+
+## Provision the audit streams
+
+Platform audit records go to two PLATFORM streams that the writers publish to
+but never create
+([platform audit record proposal](https://github.com/TrogonStack/trogonai/pull/766)
+Decision 2): `AUDIT` takes
+`platform.v1.audit.{decision,credential,change,integrity}.>` and
+`AUDIT_CHECKPOINT` takes `platform.v1.audit.checkpoint.>`. Both use file
+storage, limits retention, `discard: new` so a full stream refuses a write and
+does not drop the oldest record, `deny_delete`, `deny_purge`, a two minute
+duplicate window and no `max_age`, with three replicas in production. Create
+them as a PLATFORM user with `trogon_audit::ensure_audit_streams`, or with
+[provision-audit.sh](../docker/compose/services/nats/provision-audit.sh) and
+`AUDIT_REPLICAS=3`.
+
+Both fail on a stream that already exists with a configuration that would
+weaken the trail, naming the field, and neither edits it: an operator decides
+whether to replace it.
+
+The local stack creates them with one replica on every `up`.
+nats-audit-provision runs the script as the PLATFORM user `audit-provisioner`
+once the accounts are pushed. `provision-audit.test.sh` checks it against a
+stand-in `nats`.
 
 ## Where production keys live
 
@@ -519,6 +608,10 @@ plaintext listener, and a deployment never adds one:
   is refused.
 - What PLATFORM exports to tenant accounts, and the imports each tenant
   account carries.
+- Whether the callout's mint exchange stays a cross-account service or moves
+  onto the bridge's own connection once
+  [ADR#0082](../../docs/adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+  settles where the responder lives.
 - Subject permissions per workload. Until each PLATFORM user is issued with
   its own allow lists, its credentials stay out of a deployment.
 - How a direct caller learns the `{kind}.{id}` its grants name, which it needs

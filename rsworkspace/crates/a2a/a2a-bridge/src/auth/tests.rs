@@ -1,8 +1,16 @@
 use std::sync::{Arc, Mutex};
 
+use a2a_auth_callout::{BridgeMintResponder, BridgeMintSubscriber};
+use trogon_nats::test_support::CoreTestServer;
+use trogon_std::env::InMemoryEnv;
+
 use super::*;
 use crate::auth::callout_mint::{InProcessCalloutDispatcherMintWire, harness_callout_dispatcher, harness_callout_xkey};
 use crate::identity::CallerHttpsAuth;
+
+mod subscription_readiness_tests;
+
+use subscription_readiness_tests::wait_for_callout_subscription;
 
 fn harness_client(caller_id: &str) -> AuthCalloutJsonMintClient<InProcessCalloutDispatcherMintWire> {
     let (dispatcher, tenant) = harness_callout_dispatcher(caller_id);
@@ -221,4 +229,62 @@ async fn json_mint_client_forwards_a_mixed_case_bearer_token() {
     let envelope: BridgeMintRequest = serde_json::from_slice(&payloads[0]).unwrap();
     let opened = envelope.sealed_credential.unwrap().open(&callout).unwrap();
     assert!(matches!(opened, BridgeCredential::BearerToken(token) if token.as_str() == "fixture-token"));
+}
+
+#[tokio::test]
+async fn json_mint_client_surfaces_a_callout_refusal_as_a_mint_error() {
+    let client = sealing_client(Arc::new(StaticReplyWire(
+        br#"{"refusal":"invalid_credentials"}"#.to_vec(),
+    )));
+    let err = client.mint(&CallerHttpsAuth::new("Bearer x")).await.unwrap_err();
+    assert!(matches!(&err, BridgeError::Mint(message) if message.contains("invalid_credentials")));
+}
+
+#[tokio::test]
+async fn the_bridge_mints_through_the_callout_responder_over_nats() {
+    let server = CoreTestServer::start().await;
+    let callout_client = async_nats::connect(server.address()).await.unwrap();
+    let bridge_client = async_nats::connect(server.address()).await.unwrap();
+    let (dispatcher, tenant) = harness_callout_dispatcher("over-the-wire");
+    let callout = harness_callout_xkey();
+    let client_xkey = callout.public_key();
+    let env = InMemoryEnv::new();
+    let subscriber = BridgeMintSubscriber::subscribe(
+        callout_client.clone(),
+        BridgeMintResponder::new(dispatcher, Some(callout)),
+        &env,
+    )
+    .await
+    .unwrap();
+    let subject = subscriber.subject().to_owned();
+    let task = tokio::spawn(subscriber.serve());
+    wait_for_callout_subscription(&callout_client, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    let wire = Arc::new(AsyncNatsAuthMintWire::from_client(
+        bridge_client,
+        Duration::from_secs(5),
+    ));
+    let client = AuthCalloutJsonMintClient::with_tenant_account(wire.clone(), subject.clone(), Some(tenant.clone()))
+        .sealing_to(client_xkey.clone());
+    let jwt = client
+        .mint(&CallerHttpsAuth::new("Bearer fixture-token"))
+        .await
+        .expect("mint over NATS");
+    assert_eq!(jwt.as_str().split('.').count(), 3);
+
+    let unknown_tenant = BridgeTenantAccount::new(nkeys::KeyPair::new_account().public_key()).unwrap();
+    let refused = AuthCalloutJsonMintClient::with_tenant_account(wire, subject, Some(unknown_tenant))
+        .sealing_to(client_xkey)
+        .mint(&CallerHttpsAuth::new("Bearer fixture-token"))
+        .await
+        .unwrap_err();
+    assert!(matches!(&refused, BridgeError::Mint(message) if message.contains("unknown_account")));
+
+    callout_client.drain().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
 }

@@ -11,6 +11,12 @@ refuses every mint. Take it from the same bootstrap that hands the callout its
 `AUTH_CALLOUT_XKEY_SEED`, because a credential sealed to any other key does
 not open.
 
+The bridge sends the mint request to `a2a.bridge.auth.callout.request`, or to
+`AUTH_CALLOUT_MINT_SUBJECT` when set, and the callout must answer on the same
+subject. A callout that refuses the request replies with a refusal category,
+which the bridge reports as a mint error. `BRIDGE_TENANT_ACCOUNT` names the
+tenant account the callout mints the caller into.
+
 ### AAuth proof of possession
 
 The HTTP edge verifies the AAuth proof of possession of each request, an
