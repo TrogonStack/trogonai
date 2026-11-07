@@ -58,12 +58,20 @@ for the owner.
 A write that has not activated yet has no event naming its locator:
 `CredentialWriteRequested` records the owner, scope and kind, not the locator.
 Before treating a locator as unmatched, split it into its owner, scope key and
-kind and look for a pending write request with those values. If one exists,
-the path is a write awaiting activation, not an orphan. Check the recovery
-state (`${GATEWAY}/-/credentials/recovery/status`) and leave it to the
-recovery worker, or follow
-[stuck-pending-secret-write.md](stuck-pending-secret-write.md) when it is
-`stuck` or the request predates the checkpoint.
+kind, look for a write request with those values, and check that credential's
+current state in the stream. A request alone does not settle it:
+
+- **`pending_write`.** A write awaiting activation, not an orphan. Check the
+  recovery state (`${GATEWAY}/-/credentials/recovery/status`) and leave it to
+  the recovery worker, or follow
+  [stuck-pending-secret-write.md](stuck-pending-secret-write.md) when it is
+  `stuck` or the request predates the checkpoint.
+- **`write_failed`.** The put can land in OpenBao even though the gateway
+  recorded a failure, for example when the response was lost. The recovery
+  worker never retries this state; only a new `PUT` for the same credential
+  moves it forward. If the owner still wants the credential, have them
+  re-supply it. Otherwise the material is unaccounted for: handle it as
+  absent from the stream, below.
 
 Three outcomes:
 
