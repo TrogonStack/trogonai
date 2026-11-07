@@ -57,9 +57,11 @@ for the owner.
 
 A write that has not activated yet has no event naming its locator:
 `CredentialWriteRequested` records the owner, scope and kind, not the locator.
-Before treating a locator as unmatched, split it into its owner, scope key and
-kind, look for a write request with those values, and check that credential's
-current state in the stream. A request alone does not settle it:
+For every locator, replay the matching credential's stream to its current
+state. Also match write requests by the locator's owner, scope key and kind.
+Do this even when a historical activation or rotation names the locator: a
+destroyed credential can be written again at the same path, and the historical
+event does not account for the new write. A request alone does not settle it:
 
 - **`pending_write`.** A write awaiting activation, not an orphan. Check the
   recovery state (`${GATEWAY}/-/credentials/recovery/status`) and leave it to
@@ -70,12 +72,27 @@ current state in the stream. A request alone does not settle it:
   recorded a failure, for example when the response was lost. The recovery
   worker never retries this state; only a new `PUT` for the same credential
   moves it forward. If the owner still wants the credential, have them
-  re-supply it. Otherwise the material is unaccounted for: handle it as
-  absent from the stream, below.
+  re-supply it. Reconcile versions after that retry as well: a successful retry
+  can activate a new version while the failed attempt's version remains live.
+  Otherwise investigate the failed attempt's material as unaccounted for,
+  using the version-specific cleanup procedure below.
 
-Three outcomes:
+Compare the version numbers in OpenBao metadata with activation and rotation
+versions throughout the credential's stream, including its current state.
+After a successful retry, preserve the active version and all other versions
+accounted for by the stream. Investigate each additional version separately;
+an active locator does not establish that every version at that path is
+accounted for. If stream history is incomplete or a pending operation could
+still activate the version, defer deletion until that uncertainty is resolved.
 
-**Active in the stream.** Not an orphan. Expected state.
+Before any management-API or direct cleanup mutation, establish the write
+quiescence described in [Quiesce writes and clean up exact versions](#quiesce-writes-and-clean-up-exact-versions).
+The current state determines the next step:
+
+**Active in the stream.** Its recorded active version is expected. Any other
+accounted versions remain governed by their lifecycle state. Unaccounted
+versions at this same locator still need reconciliation and, when confirmed
+orphaned, the cleanup procedure below.
 
 **Revoked or destroyed in the stream, versions still live in OpenBao.** This
 is the dangerous kind: material the platform believes is gone. Re-issuing the
@@ -103,13 +120,14 @@ this work, so it is manual, and it depends on the state the stream records:
   records `cleanup_failed` and the same request can be repeated.
 - **Destroyed.** The destroy request returns the existing destroyed state
   without calling OpenBao, so the API cannot reach the material. Destroy the
-  live versions directly under `break_glass_admin`
-  ([break-glass-access.md](break-glass-access.md)), for every version up to
-  `current_version`, and record the reconciliation as the evidence, since the
-  stream has nothing new to say:
+  confirmed leftover versions directly under `break_glass_admin`
+  ([break-glass-access.md](break-glass-access.md)). Hold the write quiescence
+  described below, record the exact versions and recheck the stream before
+  destruction. A new write at the same locator must not be destroyed. Record
+  the reconciliation as the evidence, since the stream has nothing new to say:
 
   ```bash
-  bao kv destroy -mount=secret -versions=1,2,3 \
+  bao kv destroy -mount=secret -versions="${ORPHAN_VERSIONS}" \
     "trogonai/{owner_id}/credentials/{storage_locator}"
   ```
 
@@ -117,8 +135,8 @@ this work, so it is manual, and it depends on the state the stream records:
 a credential absent from the stream because the stream was rolled back is
 recoverable material for a customer who still expects it to work, and
 deleting it turns a bookkeeping problem into data loss. When the path is
-confirmed unaccounted for, soft-delete it first and destroy only after a
-retention interval.
+confirmed unaccounted for, soft-delete only its confirmed orphan versions
+first and destroy only after a retention interval.
 
 ```bash
 bao kv metadata get -mount=secret \
@@ -127,6 +145,42 @@ bao kv metadata get -mount=secret \
 
 Read the metadata before deciding. Creation and update times distinguish a
 recently orphaned write from something that has been sitting for months.
+
+### Quiesce writes and clean up exact versions
+
+Before any cleanup mutation, quiesce every writer for this credential path,
+including management requests, retries, lifecycle/recovery workers and direct
+operator writes. Stop or deny those writers and wait for in-flight writes to
+settle. There is no cleanup lock supplied by this runbook; if exclusive write
+quiescence cannot be established, do not delete or destroy anything. Keep it
+in effect for every cleanup state check and mutation, including management-API
+destruction, which removes every version at the path.
+
+Under that quiescence, reread the credential stream and OpenBao metadata.
+Record the stream position, current state, locator and exact version numbers
+confirmed orphaned in the incident record. Set `ORPHAN_VERSIONS` to that
+nonempty comma-separated list. Recheck the state and version accounting
+immediately before deletion; if either changed or quiescence was lost, stop
+and reconcile again. Never use a path-only delete, which selects the latest
+version and can remove material from a successful retry.
+
+```bash
+bao kv delete -mount=secret -versions="${ORPHAN_VERSIONS}" \
+  "trogonai/{owner_id}/credentials/{storage_locator}"
+```
+
+After the retention interval, establish write quiescence again if it was
+released. Replay the current stream and reread metadata before any irreversible
+action. Confirm each selected version is still unaccounted for and no pending
+operation can activate it; preserve active and other accounted versions. If
+that cannot be confirmed, leave the material recoverable and investigate.
+Destroy only the recorded versions that still qualify, and retain the checks
+and outcomes as evidence:
+
+```bash
+bao kv destroy -mount=secret -versions="${ORPHAN_VERSIONS}" \
+  "trogonai/{owner_id}/credentials/{storage_locator}"
+```
 
 ## What the worker would need
 
