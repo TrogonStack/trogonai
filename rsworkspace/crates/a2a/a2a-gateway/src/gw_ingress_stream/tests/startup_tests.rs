@@ -67,7 +67,15 @@ async fn missing_stream_returns_the_callers_admission_permit() {
     assert!(gate.try_acquire(&caller).is_none());
     tokio::time::timeout(
         Duration::from_secs(5),
-        run_streaming_ingress_pump(client, prefix, config(), permit, spawn(), CancellationToken::new()),
+        run_streaming_ingress_pump(
+            client.clone(),
+            jetstream::new(client),
+            prefix,
+            config(),
+            permit,
+            spawn(),
+            CancellationToken::new(),
+        ),
     )
     .await
     .expect("failed startup returns");
@@ -101,7 +109,15 @@ async fn exhausted_broker_consumer_capacity_returns_the_callers_admission_permit
     let permit = gate.try_acquire(&caller).expect("first request");
     tokio::time::timeout(
         Duration::from_secs(5),
-        run_streaming_ingress_pump(client, prefix, config(), permit, spawn(), CancellationToken::new()),
+        run_streaming_ingress_pump(
+            client.clone(),
+            jetstream::new(client),
+            prefix,
+            config(),
+            permit,
+            spawn(),
+            CancellationToken::new(),
+        ),
     )
     .await
     .expect("rejected consumer returns");
@@ -134,4 +150,108 @@ fn unsupported_metadata_cursors_restart_at_zero_without_changing_task_identity()
         assert_eq!(task.as_str(), "task-1");
         assert_eq!(sequence, 0);
     }
+}
+
+#[derive(Clone)]
+struct ClosingConsumerContext {
+    client: async_nats::Client,
+    closed: std::sync::Arc<tokio::sync::Notify>,
+}
+
+struct ClosingConsumerStream {
+    stream: stream::Stream,
+    context: ClosingConsumerContext,
+}
+
+impl trogon_nats::jetstream::traits::JetStreamGetStream for ClosingConsumerContext {
+    type Error = async_nats::jetstream::context::GetStreamError;
+    type Stream = ClosingConsumerStream;
+
+    async fn get_stream<T: AsRef<str> + Send>(&self, name: T) -> Result<Self::Stream, Self::Error> {
+        Ok(ClosingConsumerStream {
+            stream: jetstream::new(self.client.clone()).get_stream(name).await?,
+            context: self.clone(),
+        })
+    }
+}
+
+impl trogon_nats::jetstream::traits::JetStreamCreateConsumer for ClosingConsumerStream {
+    type Error = stream::ConsumerError;
+    type Consumer = consumer::Consumer<consumer::pull::Config>;
+
+    async fn create_consumer(&self, config: consumer::pull::Config) -> Result<Self::Consumer, Self::Error> {
+        let consumer = self.stream.create_consumer(config).await?;
+        self.context.client.drain().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), self.context.closed.notified())
+            .await
+            .unwrap();
+        self.context
+            .client
+            .flush()
+            .await
+            .expect_err("connection closed after consumer creation");
+        Ok(consumer)
+    }
+}
+
+#[tokio::test]
+async fn message_stream_acquisition_failure_returns_the_callers_admission_permit() {
+    let server = JetStreamTestServer::start().await;
+    let closed = std::sync::Arc::new(tokio::sync::Notify::new());
+    let observed = closed.clone();
+    let client = async_nats::ConnectOptions::new()
+        .event_callback(move |event| {
+            let observed = observed.clone();
+            async move {
+                if matches!(event, async_nats::Event::Closed) {
+                    observed.notify_one();
+                }
+            }
+        })
+        .connect(server.address())
+        .await
+        .unwrap();
+    let observer = server.client().await;
+    let prefix = A2aPrefix::new("startup").unwrap();
+    let mut stream = jetstream::new(observer.clone())
+        .create_stream(stream::Config {
+            name: events_stream_name(&prefix),
+            subjects: vec![TaskAllEventsSubject::new(&prefix).to_string()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _capture = events.install(trogon_std::log_capture::LevelFilter::WARN);
+    let gate = StreamingIngressGate::new(config());
+    spawn_streaming_ingress_pump(
+        client.clone(),
+        ClosingConsumerContext { client, closed },
+        prefix,
+        config(),
+        gate.clone(),
+        spawn(),
+        CancellationToken::new(),
+    )
+    .unwrap();
+    assert!(gate.try_acquire(&principal()).is_none());
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(permit) = gate.try_acquire(&principal()) {
+                drop(permit);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("failed stream acquisition releases admission");
+    assert_eq!(stream.info().await.unwrap().state.consumer_count, 1);
+    let captured = events.events();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(
+        captured[0].message(),
+        Some("gateway streaming ingress messages stream unavailable")
+    );
+    assert!(captured[0].field("error").is_some());
 }

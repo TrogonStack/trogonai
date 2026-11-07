@@ -18,6 +18,7 @@ use futures::{Stream, StreamExt};
 use tracing::{debug, warn};
 use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsDoubleAck, JsMessageRef};
+use trogon_nats::jetstream::traits::{JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetStream};
 
 use crate::constants::STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS;
 pub use crate::constants::{
@@ -254,17 +255,22 @@ pub enum StreamingIngressSpawnError {
 /// path can observe backpressure synchronously — otherwise the caller
 /// couldn't tell a successful spawn from one that the gate refused inside
 /// the spawned task. The permit moves into the task and releases on drop.
-pub fn spawn_streaming_ingress_pump(
+pub fn spawn_streaming_ingress_pump<J>(
     client: async_nats::Client,
+    jetstream: J,
     prefix: A2aPrefix,
     config: GatewayStreamingIngressConfig,
     gate: StreamingIngressGate,
     spawn: StreamingIngressSpawn,
     shutdown: CancellationToken,
-) -> Result<(), StreamingIngressSpawnError> {
+) -> Result<(), StreamingIngressSpawnError>
+where
+    J: JetStreamGetStream,
+    J::Stream: JetStreamCreateConsumer<Consumer: JetStreamConsumer<Message = jetstream::Message>>,
+{
     let permit = try_acquire_streaming_permit(&gate, &spawn)?;
     tokio::spawn(async move {
-        run_streaming_ingress_pump(client, prefix, config, permit, spawn, shutdown).await;
+        run_streaming_ingress_pump(client, jetstream, prefix, config, permit, spawn, shutdown).await;
     });
     Ok(())
 }
@@ -321,15 +327,18 @@ pub async fn events_stream_last_seq(client: &async_nats::Client, prefix: &A2aPre
     }
 }
 
-async fn run_streaming_ingress_pump(
+async fn run_streaming_ingress_pump<J>(
     client: async_nats::Client,
+    jetstream: J,
     prefix: A2aPrefix,
     config: GatewayStreamingIngressConfig,
     _permit: CallerInflightPermit,
     spawn: StreamingIngressSpawn,
     shutdown: CancellationToken,
-) {
-    let jetstream = jetstream::new(client.clone());
+) where
+    J: JetStreamGetStream,
+    J::Stream: JetStreamCreateConsumer<Consumer: JetStreamConsumer<Message = jetstream::Message>>,
+{
     let stream_name = events_stream_name(&prefix);
     let stream = match jetstream.get_stream(&stream_name).await {
         Ok(stream) => stream,
