@@ -6,6 +6,8 @@ use trogon_std::CapturedEvents;
 use trogon_std::log_capture::CapturedLogs;
 use trogon_std::log_capture::LevelFilter;
 use trogon_std::time::FixedEpochClock;
+use trogonai_proto::platform::audit::v1::WriterLifecycleKind;
+use trogonai_proto::platform::audit::v1::audit_record::Detail;
 
 use super::*;
 use crate::chain_anchor::ChainAnchor;
@@ -14,7 +16,7 @@ use crate::constants::{MAX_NAME_BYTES, STREAM_AUDIT};
 use crate::decision_outcome::DecisionOutcome;
 use crate::enforcement::Enforcement;
 use crate::fixtures::{
-    SequentialIds, allow, best_effort, change, credential, decision_facts, deny, identity, name, scope, stamper,
+    SequentialIds, allow, best_effort, body, change, credential, decision_facts, deny, identity, name, scope, stamper,
     writer_id,
 };
 use crate::memory_sink::MemorySink;
@@ -116,6 +118,50 @@ async fn opens_its_chain_with_a_chain_reset_before_any_record() {
     assert_eq!(stored[1].id(), id);
     assert_eq!(stored[1].previous_hash(), Some(stored[0].hash()));
     assert_eq!(verified(&writer, &sink).records(), 2);
+}
+
+#[tokio::test]
+async fn readiness_probes_are_acknowledged_distinct_writer_lifecycle_records() {
+    let (writer, sink, stamper) = setup(4, 4);
+    for _ in 0..2 {
+        assert_eq!(writer.readiness_probe(stamper.stamp()).await, Ok(Disposition::Stored));
+    }
+    let stored = sink.stored();
+    let records = sink.stored_records();
+    assert_eq!(stored.len(), 3);
+    assert_eq!(
+        stored[0].subject(),
+        "platform.v1.audit.integrity.egress_proxy.chain_reset"
+    );
+    assert_eq!(sequences(&sink), vec![1, 2, 3]);
+    assert_ne!(stored[1].id(), stored[2].id());
+    for (index, record) in records.iter().enumerate().skip(1) {
+        assert_eq!(
+            stored[index].subject(),
+            "platform.v1.audit.integrity.egress_proxy.readiness_probe"
+        );
+        assert_eq!(stored[index].class(), AuditClass::Must);
+        assert_eq!(stored[index].writer(), identity().writer());
+        assert_eq!(stored[index].chain(), writer.chain());
+        assert_eq!(stored[index].previous_hash(), Some(stored[index - 1].hash()));
+        let message = body(record);
+        assert!(message.attribution.is_unset());
+        assert_eq!(message.tenant.value, identity().tenant().as_str());
+        assert_eq!(message.project.value, identity().project().as_str());
+        let Some(Detail::WriterLifecycle(lifecycle)) = message.detail.as_ref() else {
+            panic!("readiness lifecycle");
+        };
+        assert_eq!(lifecycle.kind.as_known(), Some(WriterLifecycleKind::ReadinessProbe));
+        assert!(lifecycle.reset_reason.is_none());
+    }
+    assert_eq!(verified(&writer, &sink).records(), 3);
+    sink.fail_all(SinkError::Unreachable);
+    assert_eq!(
+        writer.readiness_probe(stamper.stamp()).await.unwrap_err().reason(),
+        FailureReason::Unreachable
+    );
+    assert_eq!(sink.stored().len(), 3);
+    assert!(writer.is_degraded());
 }
 
 #[tokio::test]
