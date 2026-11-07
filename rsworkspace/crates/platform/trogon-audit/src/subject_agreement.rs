@@ -64,6 +64,11 @@ fn expected(record: &AuditRecord) -> Option<(&'static str, Option<&str>, &'stati
                     || decision.surface.as_known()? != GatewaySurface::GATEWAY_SURFACE_EGRESS
                     || attribution.enforcement_mode.as_known()? != EnforcementMode::ENFORCEMENT_MODE_ENFORCE
                     || attribution.would_deny
+                    || (attribution.decision.as_known()? == AuditDecision::AUDIT_DECISION_ALLOW
+                        && !record
+                            .occurred_at
+                            .as_option()
+                            .is_some_and(|occurred| facts.valid_at(occurred)))
                     || !facts.matches_binding(&record.tenant.value, &record.project.value, &actor.agent_id.value)
                 {
                     return None;
