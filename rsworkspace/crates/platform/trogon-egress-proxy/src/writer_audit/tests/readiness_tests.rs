@@ -61,7 +61,33 @@ async fn cancelled_and_timed_out_readiness_probes_keep_one_worker_until_actual_c
     let shutdown = CancellationToken::new();
     shutdown.cancel();
     audit.run(shutdown).await;
-    assert_eq!(audit.readiness().await, AuditReadiness::Overloaded);
+    assert_eq!(audit.readiness().await, AuditReadiness::Degraded);
+    assert_eq!(audit.capacity().in_flight(), 0);
+}
+
+#[tokio::test]
+async fn a_stopped_audit_stays_degraded_without_probing_recovered_storage() {
+    let (audit, sink) = audit();
+    assert_eq!(audit.readiness().await, AuditReadiness::Ready);
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    audit.run(shutdown.clone()).await;
+    let attempts = sink.attempts();
+    let stored = sink.stored().len();
+
+    assert_eq!(audit.readiness().await, AuditReadiness::Degraded);
+    sink.fail_all(SinkError::Unreachable);
+    assert_eq!(audit.readiness().await, AuditReadiness::Degraded);
+    sink.recover();
+    assert_eq!(audit.readiness().await, AuditReadiness::Degraded);
+    let (outcome, _) = recorded(&audit, Some("api.example.com:443"), Decision::Permitted).await;
+    assert_eq!(outcome, Err(AuditError::Overloaded));
+    audit.run(shutdown).await;
+
+    assert_eq!(sink.attempts(), attempts);
+    assert_eq!(sink.stored().len(), stored);
+    assert_eq!(audit.capacity().in_flight(), 0);
+    assert!(!audit.capacity().has_capacity());
 }
 
 #[tokio::test]
