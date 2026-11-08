@@ -103,8 +103,29 @@ fn a_stream_reported_unlimited_keeps_every_event() {
 }
 
 #[test]
-fn each_limit_that_could_drop_events_is_refused() {
+fn each_setting_that_could_drop_events_is_refused() {
     let cases = [
+        (
+            stream::Config {
+                storage: stream::StorageType::Memory,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::NotOnDisk,
+        ),
+        (
+            stream::Config {
+                retention: stream::RetentionPolicy::WorkQueue,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::DiscardsConsumedEvents,
+        ),
+        (
+            stream::Config {
+                retention: stream::RetentionPolicy::Interest,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::DiscardsConsumedEvents,
+        ),
         (
             stream::Config {
                 max_age: std::time::Duration::from_secs(3600),
@@ -132,6 +153,20 @@ fn each_limit_that_could_drop_events_is_refused() {
                 ..stream_config()
             },
             CredentialEventStreamMismatchError::CapsBytes,
+        ),
+        (
+            stream::Config {
+                allow_message_ttl: true,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::ExpiresPerEvent,
+        ),
+        (
+            stream::Config {
+                allow_rollup: true,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::RollsUpSubjects,
         ),
     ];
 

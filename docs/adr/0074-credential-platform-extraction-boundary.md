@@ -234,8 +234,10 @@ identities are preserved verbatim.
 
 The event stream is the source of truth
 [ADR#0047](./0047-event-sourced-credential-metadata.md) made it, so its
-provisioning refuses every retention limit: maximum age, messages per subject,
-total messages, and total bytes. The gateway creates the stream when it is
+provisioning refuses every setting that could drop an event on its own:
+storage other than disk, retention other than limits, maximum age, messages
+per subject, total messages, total bytes, per-message expiry, and subject
+rollup. The gateway creates the stream when it is
 missing and never updates an existing one. A stream that fails the check
 stops the gateway at startup, which is safer than letting it discard a
 credential's history.
