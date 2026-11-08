@@ -11,9 +11,6 @@ fn runtime_diagnostics_hide_backend_details_but_preserve_typed_causes() {
         !format!("{failure:?}").contains(marker),
         "runtime Debug leaked a backend source"
     );
-    assert!(
-        !failure.to_string().contains(marker),
-        "public diagnostic leaked a backend source"
-    );
+    assert_eq!(failure.to_string(), "peer connection failed");
     assert!(failure.source().is_some(), "redaction must not erase the typed cause");
 }
