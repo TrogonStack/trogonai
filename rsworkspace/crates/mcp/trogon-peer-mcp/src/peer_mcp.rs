@@ -163,7 +163,7 @@ impl<B: EnrollPeer + PreparePeerBatch> ServerHandler for PeerMcp<B> {
     ) -> Result<CallToolResponse, ErrorData> {
         let result = match self.invoke(request).await {
             Ok(result) => result,
-            Err(error) => CallToolResult::error(vec![ContentBlock::text(error.public_message())]),
+            Err(error) => CallToolResult::error(vec![ContentBlock::text(error.to_string())]),
         };
         Ok(CallToolResponse::Complete(result))
     }
