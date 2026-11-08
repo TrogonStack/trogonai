@@ -136,6 +136,17 @@ verdict field names its own author.
   the fact), an optional `ClaimCheck rationale_ref`, and a content digest. The
   evaluated run is a temporal pointer, `SessionPositionRef { session_id,
   through_ordinal }`: that session's log as of that ordinal.
+  It may also carry up to 64 `Finding`s and a `JudgeInputCoverage`. A `Finding`
+  is a rubric-defined `category`, a `FindingTarget` expressed in the terms of
+  the `EditableSurface` (a settings path or a platform component, so a finding
+  can only point at something a candidate could change), a `confidence` between
+  0 and 1, and an optional `ClaimCheck rationale_ref`. `JudgeInputCoverage`
+  records the effective ordinal, withheld count, and clamped count of the
+  run-history read the judge received, so a score is read against what the
+  judge did not see. Findings stay in the evaluation stream like scores: they
+  reach a proposal only as cited `EvaluationResultRef`s, never as content.
+  Recurrence across runs, by category and target, is a projection over these
+  results, not stored state.
 - `evaluation/comparisons`: `OpenComparison` fixes a base revision and a task by
   `ClaimCheck task_ref`; `EnrollComparisonRun` assigns a `CandidateLabel` to a
   session and optionally a `CandidateRef`; `CloseComparison` ends enrollment. A
@@ -254,6 +265,10 @@ charter.
   by a human member.
 - Dispatch of `RecordCandidate` must resolve the base revision's editable
   surface and verify every edit against it and its caps.
+- Dispatch of `RecordEvaluationResult` should verify that a finding's
+  `settings_path` falls inside the `EditableSurface` of the evaluated
+  revision, and must screen each finding against the comparison's withheld
+  vocabulary before it can be cited anywhere an improver can read.
 - Dispatch of `BindRubric` verifies the rubric version exists on a rubric that
   is not retired and that the judge differs from the subject.
 - Rendering a run history must resolve the comparison's screening rubric
