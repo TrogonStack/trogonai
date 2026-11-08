@@ -20,10 +20,12 @@ use crate::runtime_config::RuntimeConfig;
 use crate::runtime_error::RuntimeError;
 
 pub async fn run_stdio<F: Future<Output = ()> + Send>(config: RuntimeConfig, shutdown: F) -> Result<(), RuntimeError> {
-    let client = trogon_nats::connect(config.nats(), Duration::from_secs(2))
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let client = tokio::time::timeout_at(deadline, trogon_nats::connect(config.nats(), Duration::from_secs(2)))
         .await
+        .map_err(|_| RuntimeError::StartupDeadline)?
         .map_err(RuntimeError::Connect)?;
-    tokio::time::timeout(Duration::from_secs(2), client.flush())
+    tokio::time::timeout_at(deadline, client.flush())
         .await
         .map_err(|_| RuntimeError::StartupDeadline)?
         .map_err(|error| RuntimeError::ConnectReady(Box::new(error)))?;
