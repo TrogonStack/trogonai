@@ -1498,7 +1498,7 @@ async fn runtime_terminal_hook_response_and_repeats_survive_heartbeat_completion
     let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
     let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(trogon_peer_mcp::serve_connector(
+    let mut server = tokio::spawn(trogon_peer_mcp::serve_connector(
         adapter.clone(),
         server_transport,
         trogon_peer_mcp::AvailabilityObservation::Ready,
@@ -1513,6 +1513,12 @@ async fn runtime_terminal_hook_response_and_repeats_survive_heartbeat_completion
     assert!(
         result.is_ok(),
         "SessionEnd must return its MCP result before transport closes"
+    );
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut server)
+            .await
+            .is_err(),
+        "a stopped heartbeat must not close a live MCP session"
     );
     let result = client
         .call_tool(detach("native_b"))

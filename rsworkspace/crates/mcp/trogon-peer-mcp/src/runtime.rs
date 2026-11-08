@@ -75,14 +75,14 @@ where
     let waiting = service.waiting();
     let heartbeat = async {
         adapter.run_heartbeat(availability).await;
-        std::future::pending::<()>().await;
+        std::future::pending::<std::convert::Infallible>().await
     };
     tokio::pin!(waiting, heartbeat);
     let completed = tokio::select! {
         biased;
         _ = &mut shutdown => None,
         result = &mut waiting => Some(result),
-        _ = &mut heartbeat => None,
+        never = &mut heartbeat => match never {},
     };
     cancellation.cancel();
     let detached = adapter.shutdown().await;
