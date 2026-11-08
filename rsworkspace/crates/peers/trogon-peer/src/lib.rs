@@ -9,7 +9,7 @@ pub use commands::{Enroll, EnrollError, EvolveError};
 pub use commands::{Attach, AttachError};
 
 pub use commands::domain::{AttachmentRef, PeerObservation, PeerObservationError};
-pub use commands::{Heartbeat, HeartbeatError};
+pub use commands::{Heartbeat, HeartbeatError, guard_live_attachment};
 
 pub use commands::{Detach, DetachError};
 
