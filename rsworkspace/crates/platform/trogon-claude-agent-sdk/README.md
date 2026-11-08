@@ -1,0 +1,41 @@
+# Claude Agent SDK public API
+
+This crate is an initial API draft for review. It exposes configuration and
+client lifecycle signatures without a Claude Code runtime. `connect` and `disconnect`
+return `Error::NotImplemented`; they start no process and exchange no messages.
+
+The interactive client follows Python's `ClaudeAgentOptions` and `ClaudeSDKClient`
+terminology, with Rust acronym casing. Its optional fields default to `None`:
+
+| Rust field | Python field | TypeScript option |
+| --- | --- | --- |
+| `cli_path: Option<PathBuf>` | [`cli_path`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2467) | `pathToClaudeCodeExecutable` |
+| `cwd: Option<PathBuf>` | [`cwd`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2464) | `cwd` |
+| `model: Option<String>` | [`model`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2438) | `model` |
+
+Model strings and paths are stored without extra identifier restrictions.
+Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L93)
+and [`disconnect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L607)
+on an existing client. Rust intentionally uses an async factory for `connect`
+and consumes the client in `disconnect(self)`. Published
+[TypeScript `0.3.319`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk/v/0.3.319)
+uses `Query` and `WarmQuery` with `close()` instead.
+
+```rust
+use std::path::PathBuf;
+use trogon_claude_agent_sdk::{ClaudeAgentOptions, ClaudeSdkClient, Error};
+
+# async fn example() -> Result<(), Error> {
+let options = ClaudeAgentOptions {
+    cli_path: Some(PathBuf::from("tools/claude")),
+    cwd: Some(PathBuf::from(".")),
+    model: Some("claude-sonnet-5".into()),
+};
+let client = ClaudeSdkClient::connect(options).await?;
+client.disconnect().await?;
+# Ok(())
+# }
+```
+
+The example checks API composition; it does not run a session. Further options
+and runtime behavior belong in separate review slices.
