@@ -1,3 +1,4 @@
+use futures::StreamExt;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -27,6 +28,18 @@ impl StdioPeer {
         Self::start_at(broker, identity, connection, broker.server.address()).await
     }
     async fn start_at(broker: &Broker, identity: &str, connection: &str, address: &str) -> TestResult<Self> {
+        Self::start_at_with_routing(broker, identity, identity, connection, address).await
+    }
+    async fn start_with_routing(broker: &Broker, identity: &str, caller: &str, connection: &str) -> TestResult<Self> {
+        Self::start_at_with_routing(broker, identity, caller, connection, broker.server.address()).await
+    }
+    async fn start_at_with_routing(
+        broker: &Broker,
+        identity: &str,
+        caller: &str,
+        connection: &str,
+        address: &str,
+    ) -> TestResult<Self> {
         let mut command = Command::new(env!("CARGO_BIN_EXE_trogon-peer-mcp"));
         command
             .env_clear()
@@ -39,7 +52,7 @@ impl StdioPeer {
             )
             .env("PEER_TENANT_ID", "tenant")
             .env("PEER_ACCOUNT_MODE", "shared_fixture")
-            .env("PEER_CALLER_ID", identity)
+            .env("PEER_CALLER_ID", caller)
             .env("PEER_CONNECTION_ID", connection)
             .env("PEER_INSTALLATION_ID", "install")
             .env("PEER_COLLABORATION_REF", "shared")
@@ -330,6 +343,107 @@ async fn executable_reports_uncertain_shutdown_when_bound_detach_has_no_service(
     assert!(
         !diagnostic.contains("alice"),
         "shutdown diagnostic exposed caller routing"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn executable_credentials_cannot_publish_another_caller_or_read_streams() -> TestResult {
+    let broker = Broker::start().await?;
+    let (service, _) = broker.connect("service").await?;
+    let mut forbidden = service.subscribe("tenant.peer.v1.bob.PeerService.Enroll").await?;
+    observed_barrier(&service).await?;
+    let wrong = StdioPeer::start_with_routing(&broker, "alice", "bob", "one").await?;
+    let request: CallToolRequestParams = serde_json::from_value(
+        json!({"name":"peer_prompt_hook", "arguments":{"session_id":"bob", "hook_event_name":"UserPromptSubmit"}}),
+    )?;
+    let result = wrong.client.call_tool(request).await?;
+    assert_eq!(result.is_error, Some(true));
+    wrong.client.cancel().await?;
+    let output = tokio::time::timeout(Duration::from_secs(3), wrong.child.wait_with_output()).await??;
+    assert!(
+        !output.status.success(),
+        "an unconfirmed enrollment must not claim clean detach"
+    );
+    assert_eq!(
+        String::from_utf8(output.stderr)?,
+        "Peer connector stopped without confirming clean shutdown; remote outcomes remain uncertain.\n"
+    );
+    let (client, mut errors) = broker.connect("alice").await?;
+    client
+        .publish("tenant.peer.v1.bob.PeerService.Enroll", vec![0].into())
+        .await?;
+    client.flush().await?;
+    let error = tokio::time::timeout(Duration::from_secs(2), errors.recv())
+        .await?
+        .ok_or("no broker denial")?;
+    assert_eq!(
+        error,
+        async_nats::ServerError::Other(
+            "Permissions Violation for Publish to \"tenant.peer.v1.bob.PeerService.Enroll\"".into()
+        )
+    );
+    let _subscription = client.subscribe("$JS.API.>").await?;
+    client.flush().await?;
+    let error = tokio::time::timeout(Duration::from_secs(2), errors.recv())
+        .await?
+        .ok_or("no subscription denial")?;
+    assert_eq!(
+        error,
+        async_nats::ServerError::Other("Permissions Violation for Subscription to \"$JS.API.>\"".into())
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), forbidden.next())
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn executable_sigterm_detaches_bound_generation_without_durable_erasure() -> TestResult {
+    let broker = Broker::start().await?;
+    let (service, _) = broker.connect("service").await?;
+    let fixture = Fixture::new().await?;
+    let store = PeerJetStreamStore::open(
+        async_nats::jetstream::new(service.clone()),
+        &PeerStoreConfig::new(PeerTenant::new("tenant")?, PeerStorageBudget::new(16_777_216)?),
+    )
+    .await?;
+    let registration = serve_peer_rpc(&service, account()?, application::compose(store.clone(), &fixture)).await?;
+    observed_barrier(&service).await?;
+    let peer = StdioPeer::start(&broker, "alice", "one").await?;
+    peer.prompt("alice", "initial").await?;
+    let id = peer.child.id().ok_or("missing process")?;
+    let status = Command::new("kill").arg("-TERM").arg(id.to_string()).status().await?;
+    assert!(status.success());
+    let output = tokio::time::timeout(Duration::from_secs(3), peer.child.wait_with_output()).await??;
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    peer.client.cancel().await?;
+    let sender = PeerId::parse(fixture.a.peer_id.clone().ok_or("peer")?)?;
+    let state = history(&store, &sender).await?;
+    assert!(state.enrollment.is_set());
+    assert_eq!(
+        state.attachment.status.and_then(|v| v.as_known()),
+        Some(v1::AttachmentStatus::ATTACHMENT_STATUS_DETACHED)
+    );
+    assert_eq!(state.attachment.attachment_ref.generation, Some(1));
+    registration.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn executable_invalid_settings_keep_stdout_empty_and_diagnostics_static() -> TestResult {
+    let output = Command::new(env!("CARGO_BIN_EXE_trogon-peer-mcp"))
+        .env_clear()
+        .output()
+        .await?;
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr)?,
+        "Peer connector settings are invalid or credentials are missing.\n"
     );
     Ok(())
 }
