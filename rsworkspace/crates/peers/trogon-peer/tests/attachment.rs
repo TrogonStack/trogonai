@@ -462,7 +462,12 @@ fn replacement_clears_the_previous_connectors_condition_and_preserves_progress()
         .given_state(before)
         .when(command("new_connector", "collaboration", now))
         .then([proto::PeerEvent {
-            event: Some(proto::PeerAttached { attachment: MessageField::some(next) }.into()),
+            event: Some(
+                proto::PeerAttached {
+                    attachment: MessageField::some(next),
+                }
+                .into(),
+            ),
         }])
         .then_state(expected);
 }
