@@ -1,15 +1,16 @@
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
 
 use buffa::Enumeration as _;
 use grpc_nats_micro::{ContentType, ReplyError};
 use trogon_decider_runtime::{
-    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, StreamAppend, StreamRead,
+    AppendStreamRequest, AppendStreamResponse, ReadFrom, ReadStreamRequest, ReadStreamResponse, StreamAppend,
+    StreamRead,
 };
 use trogon_nats::AdvancedMockNatsClient;
-use trogon_peer::{PeerId, TenantId};
+use trogon_peer::{EnrollmentIdentity, InstallationId, NativeSessionId, PeerId, TenantId};
 use trogon_peer_nats::{PeerAccount, PeerIngress, PeerMethod, PeerRpcAdmission, PeerRpcApplication, PeerTenant};
 use trogon_peer_service::{
     ContentBinding, ContentOpen, ContentSeal, MessageText, PeerAccess, PeerApplication, PeerPortError, PeerService,
@@ -35,6 +36,8 @@ enum StoreFailure {
     ResumeRead,
     ResumeMalformed,
     ResumeExpired,
+    ResumeReplayPastSnapshot,
+    ResumeConfirmationPastSnapshot,
 }
 #[derive(Debug, thiserror::Error)]
 enum InjectedStoreError {
@@ -46,6 +49,13 @@ enum InjectedStoreError {
     AppendFixture(#[source] <StoreFixture as StreamAppend<PeerId>>::Error),
 }
 #[derive(Clone)]
+struct CapturedPastRead {
+    peer: PeerId,
+    from: ReadFrom,
+    response: ReadStreamResponse,
+    observed: Arc<Mutex<Vec<ReadStreamResponse>>>,
+}
+#[derive(Clone)]
 struct FaultStore {
     inner: StoreFixture,
     tenant: TenantId,
@@ -53,17 +63,64 @@ struct FaultStore {
     reads: Arc<AtomicUsize>,
     injected: Arc<AtomicUsize>,
     clock: ClockFixture,
+    past_read: Option<CapturedPastRead>,
 }
 impl ScopedPeerStore for FaultStore {
     fn tenant(&self) -> &TenantId {
         &self.tenant
     }
 }
+impl FaultStore {
+    async fn read_with_past_snapshot(
+        &self,
+        request: ReadStreamRequest<'_, PeerId>,
+        max: Option<u64>,
+    ) -> Result<ReadStreamResponse, InjectedStoreError> {
+        let call = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
+        let captured = self.past_read.as_ref().ok_or(InjectedStoreError::Unavailable)?;
+        assert_eq!(request.stream_id, &captured.peer);
+        assert_eq!(request.from, captured.from);
+        assert_eq!(captured.from, ReadFrom::Beginning);
+        let target = match self.failure {
+            StoreFailure::ResumeReplayPastSnapshot => 2,
+            StoreFailure::ResumeConfirmationPastSnapshot => 3,
+            _ => return Err(InjectedStoreError::Unavailable),
+        };
+        let read = if call == target {
+            assert_eq!(self.injected.fetch_add(1, Ordering::SeqCst), 0);
+            if let Some(max) = max {
+                assert!(captured.response.events.len() as u64 <= max);
+            }
+            captured.response.clone()
+        } else {
+            let started = std::time::SystemTime::now();
+            let read = match max {
+                Some(max) => self.inner.read_stream_bounded(request, max).await,
+                None => self.inner.read_stream(request).await,
+            }
+            .map_err(|error| InjectedStoreError::Fixture(Box::new(error)))?;
+            assert_current_read_timestamps(&read, started, std::time::SystemTime::now());
+            read
+        };
+        captured
+            .observed
+            .lock()
+            .map_err(|_| InjectedStoreError::Unavailable)?
+            .push(read.clone());
+        Ok(read)
+    }
+}
 impl StreamRead<PeerId> for FaultStore {
     type Error = InjectedStoreError;
     async fn read_stream(&self, request: ReadStreamRequest<'_, PeerId>) -> Result<ReadStreamResponse, Self::Error> {
+        if matches!(
+            self.failure,
+            StoreFailure::ResumeReplayPastSnapshot | StoreFailure::ResumeConfirmationPastSnapshot
+        ) {
+            return self.read_with_past_snapshot(request, None).await;
+        }
         let call = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
-        if matches!(self.failure, StoreFailure::Read) || (matches!(self.failure, StoreFailure::ResumeRead) && call == 2)
+        if matches!(self.failure, StoreFailure::Read) || (matches!(self.failure, StoreFailure::ResumeRead) && call == 3)
         {
             self.injected.fetch_add(1, Ordering::SeqCst);
             return Err(InjectedStoreError::Unavailable);
@@ -83,7 +140,7 @@ impl StreamRead<PeerId> for FaultStore {
         ) || (matches!(
             self.failure,
             StoreFailure::ResumeMalformed | StoreFailure::ResumeExpired
-        ) && call == 2)
+        ) && call == 3)
         {
             self.injected.fetch_add(1, Ordering::SeqCst);
         }
@@ -92,8 +149,8 @@ impl StreamRead<PeerId> for FaultStore {
             StoreFailure::MalformedEvent => read.events[0].event.content = vec![255],
             StoreFailure::InvalidHistory => read.events.push(first),
             StoreFailure::HistoryLimit => read.events = vec![first; 4097],
-            StoreFailure::ResumeMalformed if call == 2 => read.events[0].event.content = vec![255],
-            StoreFailure::ResumeExpired if call == 2 => {
+            StoreFailure::ResumeMalformed if call == 3 => read.events[0].event.content = vec![255],
+            StoreFailure::ResumeExpired if call == 3 => {
                 let mut time = self.clock.time.lock().map_err(|_| InjectedStoreError::Unavailable)?;
                 let advanced = *time + std::time::Duration::from_secs(11);
                 *time = advanced;
@@ -103,15 +160,23 @@ impl StreamRead<PeerId> for FaultStore {
             | StoreFailure::Append
             | StoreFailure::ResumeRead
             | StoreFailure::ResumeMalformed
-            | StoreFailure::ResumeExpired => {}
+            | StoreFailure::ResumeExpired
+            | StoreFailure::ResumeReplayPastSnapshot
+            | StoreFailure::ResumeConfirmationPastSnapshot => {}
         }
         Ok(read)
     }
     async fn read_stream_bounded(
         &self,
         request: ReadStreamRequest<'_, PeerId>,
-        _max: u64,
+        max: u64,
     ) -> Result<ReadStreamResponse, Self::Error> {
+        if matches!(
+            self.failure,
+            StoreFailure::ResumeReplayPastSnapshot | StoreFailure::ResumeConfirmationPastSnapshot
+        ) {
+            return self.read_with_past_snapshot(request, Some(max)).await;
+        }
         self.read_stream(request).await
     }
 }
@@ -195,6 +260,15 @@ struct FaultAdapter {
     injected: Arc<AtomicUsize>,
 }
 fn adapter(fixture: &Fixture, failure: StoreFailure, port: Option<PortFailure>, tenant: TenantId) -> FaultAdapter {
+    adapter_with_past_read(fixture, failure, port, tenant, None)
+}
+fn adapter_with_past_read(
+    fixture: &Fixture,
+    failure: StoreFailure,
+    port: Option<PortFailure>,
+    tenant: TenantId,
+    past_read: Option<CapturedPastRead>,
+) -> FaultAdapter {
     let injected = Arc::default();
     let store = FaultStore {
         inner: fixture.store.clone(),
@@ -203,6 +277,7 @@ fn adapter(fixture: &Fixture, failure: StoreFailure, port: Option<PortFailure>, 
         reads: Arc::default(),
         injected: Arc::clone(&injected),
         clock: fixture.clock.clone(),
+        past_read,
     };
     let backend = Arc::new(PeerRpcApplication::new(
         PeerService::new(store.clone(), fixture.policy.clone(), fixture.clock.clone()),
@@ -549,5 +624,241 @@ async fn rpc_resume_rechecks_history_and_lease_before_confirming_the_existing_at
         )
         .await?;
     }
+    Ok(())
+}
+
+fn assert_current_read_timestamps(
+    read: &ReadStreamResponse,
+    started: std::time::SystemTime,
+    finished: std::time::SystemTime,
+) {
+    for event in &read.events {
+        let timestamp = std::time::SystemTime::from(event.recorded_at);
+        assert!(started <= timestamp && timestamp <= finished);
+    }
+}
+
+// The in-memory fixture stamps each read; injected captures retain their original complete metadata.
+fn assert_same_events(
+    actual: &[trogon_decider_runtime::StreamEvent],
+    expected: &[trogon_decider_runtime::StreamEvent],
+) {
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert_eq!(actual.stream_id, expected.stream_id);
+        assert_eq!(actual.event, expected.event);
+        assert_eq!(actual.stream_position, expected.stream_position);
+    }
+}
+
+fn assert_same_read_contents(actual: &ReadStreamResponse, expected: &ReadStreamResponse) {
+    assert_eq!(actual.current_position, expected.current_position);
+    assert_same_events(&actual.events, &expected.events);
+}
+
+async fn actual_begin_read(fixture: &Fixture, peer: &PeerId) -> TestResult<ReadStreamResponse> {
+    let started = std::time::SystemTime::now();
+    let read = fixture
+        .store
+        .read_stream(ReadStreamRequest {
+            stream_id: peer,
+            from: ReadFrom::Beginning,
+        })
+        .await?;
+    assert_current_read_timestamps(&read, started, std::time::SystemTime::now());
+    Ok(read)
+}
+
+async fn real_read_enrollment_resume(
+    fixture: &Fixture,
+    request: &proto::EnrollRequest,
+) -> TestResult<proto::EnrollResponse> {
+    let admission = PeerRpcAdmission {
+        ingress: PeerIngress::new(PeerAccount::SharedFixture {
+            tenant: PeerTenant::new("tenant")?,
+        }),
+        method: PeerMethod::Enroll,
+        backend: adapter(fixture, StoreFailure::None, None, fixture.alice.tenant().clone()).backend,
+    };
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert("Content-Type", ContentType::Protobuf.header_value());
+    let payload = ContentType::Protobuf.encode(request)?;
+    let message = async_nats::Message {
+        subject: "tenant.peer.v1.alice.PeerService.Enroll".into(),
+        reply: Some("_INBOX.tenant.alice.connection.resume".into()),
+        length: payload.len(),
+        payload: payload.into(),
+        headers: Some(headers),
+        status: None,
+        description: None,
+    };
+    let client = AdvancedMockNatsClient::new();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        grpc_nats_micro::server::dispatch_admitted(&client, &message, &ServiceOptions::default(), &admission),
+    )
+    .await?;
+    assert_eq!(client.published_messages(), ["_INBOX.tenant.alice.connection.resume"]);
+    let headers = client.published_headers();
+    let payloads = client.published_payloads();
+    assert_eq!(headers.len(), 1);
+    assert_eq!(payloads.len(), 1);
+    assert!(headers[0].get(grpc_nats_micro::constants::HEADER_ERROR_CODE).is_none());
+    Ok(grpc_nats_micro::status_codec::decode_reply(
+        Some(&headers[0]),
+        &payloads[0],
+        ContentType::Protobuf,
+    )?)
+}
+
+#[tokio::test]
+async fn rpc_resume_rejects_a_host_replaying_a_genuine_snapshot_older_than_its_preflight() -> TestResult {
+    let f = Fixture::new().await?;
+    let peer = PeerId::parse(f.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let prior = actual_begin_read(&f, &peer).await?;
+    let mut request = heartbeat(&f);
+    request.availability = Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into());
+    let renewed = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone())
+        .heartbeat(&f.alice, request)
+        .await?;
+    assert_eq!(renewed.attachment.attachment_ref.as_option(), Some(&f.a));
+    let current = actual_begin_read(&f, &peer).await?;
+    assert!(
+        current
+            .current_position
+            .zip(prior.current_position)
+            .is_some_and(|(current, prior)| current > prior)
+    );
+    assert_eq!(current.events.len(), prior.events.len() + 1);
+    assert_same_events(&current.events[..prior.events.len()], prior.events.as_slice());
+    let event = current
+        .events
+        .last()
+        .ok_or(PeerPortError::Integrity)?
+        .decode::<proto::PeerEvent>()?
+        .into_decoded()
+        .ok_or(PeerPortError::Integrity)?;
+    assert!(matches!(
+        event.event,
+        Some(trogonai_proto::peers::PeerEventCase::PeerHeartbeatRecorded(_))
+    ));
+    let durable_state = f.history(&peer).await?;
+    assert_eq!(
+        durable_state.availability.and_then(|value| value.as_known()),
+        Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY)
+    );
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let backend = adapter_with_past_read(
+        &f,
+        StoreFailure::ResumeReplayPastSnapshot,
+        None,
+        f.alice.tenant().clone(),
+        Some(CapturedPastRead {
+            peer: peer.clone(),
+            from: ReadFrom::Beginning,
+            response: prior.clone(),
+            observed: Arc::clone(&observed),
+        }),
+    );
+    assert_wire_fault(
+        backend,
+        PeerMethod::Enroll,
+        &Fixture::enrollment("alice"),
+        Code::ABORTED,
+        "peer revision conflict",
+    )
+    .await?;
+    {
+        let reads = observed.lock().map_err(|_| PeerPortError::Unavailable)?;
+        assert_eq!(reads.len(), 2);
+        assert_same_read_contents(&reads[0], &current);
+        assert_eq!(
+            reads[1], prior,
+            "the injected past snapshot must be returned byte-for-byte"
+        );
+    }
+    assert_eq!(
+        f.store.appends.load(Ordering::SeqCst),
+        appends + 1,
+        "only the rejected create attempt may reach append"
+    );
+    assert_same_read_contents(&actual_begin_read(&f, &peer).await?, &current);
+    assert_eq!(f.history(&peer).await?, durable_state);
+    assert_eq!(durable_state.attachment.attachment_ref.as_option(), Some(&f.a));
+    let resumed = real_read_enrollment_resume(&f, &Fixture::enrollment("alice")).await?;
+    assert_eq!(resumed.attachment, renewed.attachment);
+    assert_same_read_contents(&actual_begin_read(&f, &peer).await?, &current);
+    Ok(())
+}
+
+#[tokio::test]
+async fn rpc_resume_rejects_a_host_returning_a_genuine_pre_enrollment_empty_confirmation() -> TestResult {
+    let f = Fixture::new().await?;
+    let mut request = Fixture::enrollment("alice");
+    request.native_session_id = Some("past_read_session".into());
+    request.connector_id = Some("past_read_connector".into());
+    let identity = EnrollmentIdentity::new(
+        f.alice.clone(),
+        InstallationId::new(request.installation_id.clone().ok_or(PeerPortError::Integrity)?)?,
+        NativeSessionId::new(request.native_session_id.clone().ok_or(PeerPortError::Integrity)?)?,
+    );
+    let peer = identity.peer_id().clone();
+    let empty = actual_begin_read(&f, &peer).await?;
+    assert!(empty.events.is_empty());
+    assert!(empty.current_position.is_none());
+    let enrolled = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone())
+        .enroll(&f.alice, request.clone())
+        .await?;
+    assert_eq!(enrolled.peer_id.as_deref(), Some(peer.as_str()));
+    let current = actual_begin_read(&f, &peer).await?;
+    assert!(current.current_position.is_some());
+    assert!(!current.events.is_empty());
+    let durable_state = f.history(&peer).await?;
+    assert_eq!(
+        durable_state.attachment.attachment_ref.as_option(),
+        enrolled.attachment.attachment_ref.as_option()
+    );
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert_wire_fault(
+        adapter_with_past_read(
+            &f,
+            StoreFailure::ResumeConfirmationPastSnapshot,
+            None,
+            f.alice.tenant().clone(),
+            Some(CapturedPastRead {
+                peer: peer.clone(),
+                from: ReadFrom::Beginning,
+                response: empty.clone(),
+                observed: Arc::clone(&observed),
+            }),
+        ),
+        PeerMethod::Enroll,
+        &request,
+        Code::INTERNAL,
+        "peer execution failed",
+    )
+    .await?;
+    {
+        let reads = observed.lock().map_err(|_| PeerPortError::Unavailable)?;
+        assert_eq!(reads.len(), 3);
+        assert_same_read_contents(&reads[0], &current);
+        assert_same_read_contents(&reads[1], &current);
+        assert_eq!(
+            reads[2], empty,
+            "the injected empty capture must be returned byte-for-byte"
+        );
+    }
+    assert_eq!(
+        f.store.appends.load(Ordering::SeqCst),
+        appends + 1,
+        "only the rejected create attempt may reach append"
+    );
+    assert_same_read_contents(&actual_begin_read(&f, &peer).await?, &current);
+    assert_eq!(f.history(&peer).await?, durable_state);
+    let resumed = real_read_enrollment_resume(&f, &request).await?;
+    assert_eq!(resumed, enrolled);
+    assert_same_read_contents(&actual_begin_read(&f, &peer).await?, &current);
     Ok(())
 }

@@ -12,9 +12,9 @@ use crate::{
 use trogon_decider_runtime::{CommandAuthorizer, CommandError, StreamAppend, StreamRead};
 use trogon_peer::{
     AcceptedMessage, AuthoritativeReceipt, DisposeMessage, IntakeMessage, MessageError, MessageId, PeerId,
-    SealedContentRef, SettleMessage, TerminalDisposition, TrustedPeerOwner,
+    SettleMessage, TerminalDisposition, TrustedContent, TrustedPeerOwner,
 };
-use trogonai_proto::{convert::datetime_from_timestamp, peers::v1alpha1 as proto};
+use trogonai_proto::convert::datetime_from_timestamp;
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
     S: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
@@ -50,19 +50,13 @@ where
         let mut obligations = Vec::new();
         for id in messages {
             let evidence = AcceptedMessage::from_sender_history(&history, id)?;
-            let recipient = PeerId::parse(
-                evidence
-                    .metadata()
-                    .recipient_peer_id
-                    .clone()
-                    .ok_or(PeerApplicationError::Scope)?,
-            )?;
+            let recipient = evidence.recipient().clone();
             let scope = self.authorize(owner, &recipient, PeerOperation::ReadPeer)?;
             obligations.push((id, evidence, recipient, scope));
         }
         for (id, evidence, recipient, scope) in obligations {
             let target = self.load(owner, &recipient).await?;
-            if self.collaboration(&target)? != self.collaboration(&history)? {
+            if target.collaboration() != history.collaboration() {
                 return Err(PeerApplicationError::Scope);
             }
             if !target
@@ -82,7 +76,7 @@ where
                 let disposition = if observed_at >= expiry {
                     Some(TerminalDisposition::Expired)
                 } else {
-                    let binding = binding(owner, evidence.metadata())?;
+                    let binding = binding(owner, evidence.content());
                     let opened = self.content.open(&scope, &binding).await?;
                     observed_at = self.clock.now();
                     if observed_at >= expiry {
@@ -100,8 +94,10 @@ where
                         .execute_message(owner, &DisposeMessage::new(evidence, disposition, observed_at))
                         .await
                     {
-                        Ok(_) | Err(CommandError::Decide(MessageError::AlreadyDisposed(_))) => {}
-                        Err(error) => return Err(PeerApplicationError::Message(error)),
+                        Ok(_)
+                        | Err(PeerApplicationError::Message(CommandError::Decide(MessageError::AlreadyDisposed(_)))) => {
+                        }
+                        Err(error) => return Err(error),
                     }
                 } else {
                     match self
@@ -109,11 +105,11 @@ where
                         .await
                     {
                         Ok(_)
-                        | Err(CommandError::Decide(
+                        | Err(PeerApplicationError::Message(CommandError::Decide(
                             MessageError::AlreadyIntaken(_) | MessageError::AlreadyDisposed(_),
-                        )) => {}
-                        Err(CommandError::Decide(MessageError::DeferIntake)) => continue,
-                        Err(error) => return Err(PeerApplicationError::Message(error)),
+                        ))) => {}
+                        Err(PeerApplicationError::Message(CommandError::Decide(MessageError::DeferIntake))) => continue,
+                        Err(error) => return Err(error),
                     }
                 }
             }
@@ -128,8 +124,9 @@ where
                     .execute_message(owner, &SettleMessage::new(sender.clone(), receipt))
                     .await
                 {
-                    Ok(_) | Err(CommandError::Decide(MessageError::AlreadySettled(_))) => {}
-                    Err(error) => return Err(PeerApplicationError::Message(error)),
+                    Ok(_)
+                    | Err(PeerApplicationError::Message(CommandError::Decide(MessageError::AlreadySettled(_)))) => {}
+                    Err(error) => return Err(error),
                 }
             }
         }
@@ -137,26 +134,6 @@ where
     }
 }
 
-pub(crate) fn binding<R, A>(
-    owner: &TrustedPeerOwner,
-    metadata: &proto::MessageMetadata,
-) -> Result<ContentBinding, PeerApplicationError<R, A>> {
-    Ok(ContentBinding::from_port(
-        owner.tenant().clone(),
-        SealedContentRef::new(
-            metadata
-                .content_ref
-                .as_option()
-                .ok_or(PeerApplicationError::Scope)?
-                .clone(),
-        )?,
-        metadata.content_size_bytes.ok_or(PeerApplicationError::Scope)?,
-        metadata
-            .semantic_fingerprint
-            .as_option()
-            .ok_or(PeerApplicationError::Scope)?
-            .value
-            .clone()
-            .ok_or(PeerApplicationError::Scope)?,
-    )?)
+pub(crate) fn binding(owner: &TrustedPeerOwner, content: &TrustedContent) -> ContentBinding {
+    ContentBinding::from_content(owner.tenant().clone(), content.clone())
 }
