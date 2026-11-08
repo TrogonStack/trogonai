@@ -5,7 +5,7 @@ use crate::{
     rpc_serve_error::PeerRpcServeError,
 };
 use grpc_nats_micro::{
-    ServiceBinding, ServiceName, ServiceNameInput, ServiceVersion, ServiceVersionInput, SubjectPrefix,
+    ServiceDescriptor, ServiceName, ServiceNameInput, ServiceVersion, ServiceVersionInput, SubjectPrefix,
     SubjectPrefixInput,
 };
 use std::sync::Arc;
@@ -20,21 +20,22 @@ pub async fn serve_peer_rpc<B: PeerRpcBackend + 'static>(
         PeerAccount::TenantAccount { .. } => "peer.v1".to_owned(),
         PeerAccount::SharedFixture { tenant } => format!("{}.peer.v1", tenant.as_str()),
     };
-    let mut binding = ServiceBinding::new(
+    let prefix = SubjectPrefix::from_input(&SubjectPrefixInput::new(prefix.as_str()))?;
+    let descriptor = ServiceDescriptor::new(
         ServiceName::from_input(&ServiceNameInput::new(RPC_SERVICE_NAME))?,
         ServiceVersion::from_input(&ServiceVersionInput::new(RPC_SERVICE_VERSION))?,
-        SubjectPrefix::from_input(&SubjectPrefixInput::new(prefix.as_str()))?,
     )
     .with_description(RPC_SERVICE_DESCRIPTION);
     let mut endpoints = Vec::new();
     for method in crate::peer_method::PeerMethod::ALL {
-        binding = binding.with_method(
-            grpc_nats_micro::MethodName::from_input(&grpc_nats_micro::MethodNameInput::new(method.as_str()))?,
-            grpc_nats_micro::DiscoveryMetadata::default(),
-        )?;
-        endpoints.push(grpc_nats_micro::AdmittedEndpoint {
+        endpoints.push(grpc_nats_micro::NamedAdmittedEndpoint {
+            method_name: grpc_nats_micro::MethodName::from_input(&grpc_nats_micro::MethodNameInput::new(
+                method.as_str(),
+            ))?,
+            metadata: grpc_nats_micro::DiscoveryMetadata::default(),
             subject: grpc_nats_micro::ServerSubjectPattern::new(&format!(
-                "{prefix}.*.{RPC_SERVICE_NAME}.{}",
+                "{}.*.{RPC_SERVICE_NAME}.{}",
+                prefix.as_str(),
                 method.as_str()
             ))?,
             admission: Box::new(crate::rpc_admission::PeerRpcAdmission {
@@ -44,9 +45,9 @@ pub async fn serve_peer_rpc<B: PeerRpcBackend + 'static>(
             }),
         });
     }
-    Ok(grpc_nats_micro::serve_admitted(
+    Ok(grpc_nats_micro::serve_named_admitted(
         client,
-        &binding,
+        &descriptor,
         ServiceOptions {
             content_type: ContentType::CONTENT_TYPE_PROTOBUF.into(),
             ..Default::default()
