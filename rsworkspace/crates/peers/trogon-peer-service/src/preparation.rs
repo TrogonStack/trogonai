@@ -20,7 +20,7 @@ use trogon_decider_runtime::{CommandAuthorizer, CommandError, StreamAppend, Stre
 use trogon_peer::{BatchId, MessageError, MessageId, PeerId, PrepareBatch, TrustedBatchPlan, TrustedPeerOwner};
 use trogon_peer_context::{MAX_MESSAGES, PeerContext, PeerContextError};
 use trogonai_proto::{
-    convert::{datetime_from_timestamp, timestamp_from_datetime},
+    convert::timestamp_from_datetime,
     peers::{state_v1alpha1::PeerState, v1alpha1 as proto},
 };
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerApplication<S, P, C, Content, Cache, Ids, Catalog>
@@ -51,34 +51,25 @@ where
         }
         let now = self.clock.now();
         let mut eligible = Vec::new();
-        for entry in &state.inbox {
-            let accepted = datetime_from_timestamp(
-                entry
-                    .message
-                    .accepted_at
-                    .as_option()
-                    .ok_or(PeerApplicationError::Scope)?,
-            )
-            .map_err(|_| PeerApplicationError::Scope)?;
-            let expires = datetime_from_timestamp(
-                entry
-                    .message
-                    .expires_at
-                    .as_option()
-                    .ok_or(PeerApplicationError::Scope)?,
-            )
-            .map_err(|_| PeerApplicationError::Scope)?;
-            if !entry.disposition.is_set() && accepted <= now && now < expires {
-                eligible.push(entry);
+        for record in state.inbox_entries() {
+            if !record.entry().disposition.is_set() && record.accepted_at() <= now && now < record.expires_at() {
+                eligible.push(record);
             }
         }
-        eligible.sort_by_key(|e| e.intake_ordinal);
+        eligible.sort_by_key(|record| record.entry().intake_ordinal);
         if eligible.is_empty() {
             return Ok(response(
                 None,
                 Vec::new(),
                 proto::ContentAvailability::CONTENT_AVAILABILITY_AVAILABLE,
             ));
+        }
+        if now.timestamp_subsec_nanos() >= 1_000_000_000 {
+            return Err(PeerApplicationError::Evidence(MessageError::InvalidState(
+                trogon_peer::EvolveError::TimestampRange {
+                    field: "batch.prepared_at",
+                },
+            )));
         }
         let batch_id = self.ids.batch_id()?;
         let mut batch = proto::PeerBatch {
@@ -87,10 +78,11 @@ where
             ..Default::default()
         };
         let mut messages = Vec::new();
+        let mut selected: Vec<MessageId> = Vec::new();
         let mut frame = None;
-        for entry in eligible.into_iter().take(MAX_MESSAGES) {
-            let metadata = entry.message.as_option().ok_or(PeerApplicationError::Scope)?;
-            let content = binding(owner, metadata)?;
+        for record in eligible.into_iter().take(MAX_MESSAGES) {
+            let metadata = record.metadata();
+            let content = binding(owner, record.content());
             let Some(text) = self.content.open(&scope, &content).await? else {
                 if messages.is_empty() {
                     return Ok(response(
@@ -104,9 +96,8 @@ where
             if text.as_str().len() != content.content().size() as usize {
                 return Err(PeerApplicationError::Scope);
             }
-            batch
-                .message_ids
-                .push(metadata.message_id.clone().ok_or(PeerApplicationError::Scope)?);
+            batch.message_ids.push(record.message_id().as_str().to_owned());
+            selected.push(record.message_id().clone());
             messages.push(proto::PreparedMessage {
                 metadata: MessageField::some(metadata.clone()),
                 text: Some(text.as_str().to_owned()),
@@ -116,21 +107,14 @@ where
                 Err(PeerContextError::ContractViolation) if messages.len() > 1 => {
                     messages.pop();
                     batch.message_ids.pop();
+                    selected.pop();
                     break;
                 }
                 Err(error) => return Err(PeerApplicationError::Context(error)),
             }
         }
         let frame = frame.ok_or(PeerApplicationError::Scope)?;
-        let plan = TrustedBatchPlan::from_renderer(
-            batch
-                .message_ids
-                .iter()
-                .cloned()
-                .map(MessageId::new)
-                .collect::<Result<Vec<_>, _>>()?,
-            frame.as_str().len(),
-        )?;
+        let plan = TrustedBatchPlan::from_renderer(selected, frame.as_str().len())?;
         let key = PresentationKey::new(owner.tenant().clone(), reference.peer_id().clone(), batch_id.clone());
         let record = PreparedPresentation::from_port(batch.clone(), messages, frame.as_str().to_owned());
         self.cache.insert(&key, &record).await?;
@@ -144,7 +128,7 @@ where
                     .ok_or(PeerApplicationError::Scope)?;
                 self.replay(owner, reference.peer_id(), &winner, batch).await
             }
-            Err(CommandError::Decide(MessageError::AlreadyPrepared(prepared))) => {
+            Err(PeerApplicationError::Message(CommandError::Decide(MessageError::AlreadyPrepared(prepared)))) => {
                 let winning_key = PresentationKey::new(
                     owner.tenant().clone(),
                     reference.peer_id().clone(),
@@ -162,11 +146,11 @@ where
                     .ok_or(PeerApplicationError::Scope)?;
                 self.replay(owner, reference.peer_id(), &winner, batch).await
             }
-            Err(CommandError::Decide(error)) => {
+            Err(PeerApplicationError::Message(CommandError::Decide(error))) => {
                 self.cache.orphan(&key).await?;
                 Err(PeerApplicationError::Message(CommandError::Decide(error)))
             }
-            Err(error) => Err(PeerApplicationError::Message(error)),
+            Err(error) => Err(error),
         }
     }
     async fn replay(

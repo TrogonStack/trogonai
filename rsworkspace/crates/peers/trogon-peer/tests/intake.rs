@@ -569,3 +569,81 @@ fn receipt_replay_detects_missing_recipient_and_an_unindexed_inbox_disposition()
         Err(EvolveError::InvalidMessageTransition)
     );
 }
+
+#[test]
+fn disposal_replay_requires_receipt_identity_and_rejects_unowned_preparation() {
+    use trogon_decider::evaluate_decision;
+
+    let initial = enrolled("recipient", 0);
+    let intaken = run(initial.clone(), &intake(0, 1));
+    let (_, events) = evaluate_decision(
+        intaken.clone(),
+        &DisposeMessage::new(evidence(0, 1), TerminalDisposition::Unavailable, time(3)),
+    )
+    .unwrap();
+    let original = events.iter().next().unwrap();
+    for before in [initial, intaken] {
+        for (recipient, outcome, batch, expected) in [
+            (
+                None,
+                proto::PreparationOutcome::PREPARATION_OUTCOME_UNAVAILABLE,
+                None,
+                EvolveError::MissingField {
+                    field: "receipt.recipient_peer_id",
+                },
+            ),
+            (
+                Some(identity("recipient").peer_id().to_string()),
+                proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED,
+                None,
+                EvolveError::MissingField {
+                    field: "receipt.batch_id",
+                },
+            ),
+            (
+                Some(identity("recipient").peer_id().to_string()),
+                proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED,
+                Some("invalid.batch".to_owned()),
+                EvolveError::InvalidValue {
+                    field: "receipt.batch_id",
+                    source: PeerValueError::InvalidCharacter,
+                },
+            ),
+            (
+                Some(identity("recipient").peer_id().to_string()),
+                proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED,
+                Some("unowned_batch".to_owned()),
+                EvolveError::InvalidMessageTransition,
+            ),
+        ] {
+            let mut event = original.clone();
+            assert!(matches!(
+                event.event,
+                Some(trogonai_proto::peers::PeerEventCase::PeerMessageDisposed(_))
+            ));
+            if let Some(trogonai_proto::peers::PeerEventCase::PeerMessageDisposed(disposed)) = event.event.as_mut() {
+                let receipt = disposed.receipt.as_option_mut().unwrap();
+                receipt.recipient_peer_id = recipient;
+                receipt.outcome = Some(outcome.into());
+                receipt.batch_id = batch;
+            }
+            assert_eq!(commands::state::evolve(before.clone(), &event), Err(expected));
+        }
+    }
+}
+
+#[test]
+fn disposal_cannot_emit_a_receipt_with_a_non_protobuf_leap_timestamp() {
+    use chrono::TimeZone as _;
+    let at = chrono::Utc
+        .timestamp_opt(time(59).timestamp(), 1_500_000_000)
+        .single()
+        .unwrap();
+    let command = DisposeMessage::new(evidence(0, 1), TerminalDisposition::Unavailable, at);
+    assert_eq!(
+        error(enrolled("recipient", 55), &command),
+        MessageError::InvalidState(EvolveError::TimestampRange {
+            field: "receipt.decided_at"
+        })
+    );
+}
