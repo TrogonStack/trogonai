@@ -33,7 +33,7 @@ fn enrollment_and_attachment_events_roundtrip_through_public_codec() {
     });
     assert_roundtrip(v1alpha1::PeerAttached {
         attachment: MessageField::some(v1alpha1::PeerAttachment {
-            attachment: MessageField::some(v1alpha1::AttachmentRef {
+            attachment_ref: MessageField::some(v1alpha1::AttachmentRef {
                 peer_id: Some("peer-one".into()),
                 connector_id: Some("connector-one".into()),
                 generation: Some(3),
@@ -46,7 +46,7 @@ fn enrollment_and_attachment_events_roundtrip_through_public_codec() {
         ..Default::default()
     });
     assert_roundtrip(v1alpha1::PeerDetached {
-        attachment: MessageField::some(v1alpha1::AttachmentRef {
+        attachment_ref: MessageField::some(v1alpha1::AttachmentRef {
             peer_id: Some("peer-one".into()),
             ..Default::default()
         }),

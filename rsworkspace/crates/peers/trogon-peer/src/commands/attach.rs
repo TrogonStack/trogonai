@@ -7,6 +7,7 @@ use trogonai_proto::peers::{
     v1alpha1::{self as proto, PeerEvent},
 };
 
+use super::constants::ATTACHMENT_LEASE;
 use super::domain::{CollaborationRef, ConnectorId, EnrollmentIdentity, PeerId};
 use super::state::{self, EvolveError};
 
@@ -110,7 +111,7 @@ impl Decider for Attach {
             && command.now < expires
         {
             return Err(
-                if previous.attachment.connector_id.as_deref() == Some(command.connector_id.as_str()) {
+                if previous.attachment_ref.connector_id.as_deref() == Some(command.connector_id.as_str()) {
                     AttachError::AlreadyAttached
                 } else {
                     AttachError::InUse
@@ -118,17 +119,20 @@ impl Decider for Attach {
             );
         }
         let generation = previous
-            .attachment
+            .attachment_ref
             .generation
             .and_then(|generation| generation.checked_add(1))
             .ok_or(AttachError::GenerationOverflow)?;
+        if command.now.timestamp_subsec_nanos() >= 1_000_000_000 {
+            return Err(AttachError::LeaseDeadlineOverflow);
+        }
         let expires_at = command
             .now
-            .checked_add_signed(chrono::Duration::seconds(10))
-            .filter(|at| (-62_135_596_800..=253_402_300_799).contains(&at.timestamp()))
+            .checked_add_signed(ATTACHMENT_LEASE)
+            .filter(|at| state::timestamp_seconds_supported(at.timestamp()))
             .ok_or(AttachError::LeaseDeadlineOverflow)?;
         let attachment = proto::PeerAttachment {
-            attachment: MessageField::some(proto::AttachmentRef {
+            attachment_ref: MessageField::some(proto::AttachmentRef {
                 peer_id: Some(command.identity.peer_id().to_string()),
                 connector_id: Some(command.connector_id.as_str().to_owned()),
                 generation: Some(generation),

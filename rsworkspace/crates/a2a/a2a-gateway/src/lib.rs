@@ -7,10 +7,6 @@
 //! share a single seam.
 //!
 //! Modules:
-//! - [`aauth`] — AAuth (draft-hardt-aauth-protocol) ingress verifier; turns
-//!   inline `aa-agent+jwt` + PoP + optional `aa-auth+jwt` headers into an
-//!   [`aauth::AAuthResolution`] or an [`aauth::AAuthDenyError`] carrying a
-//!   `ResourceChallenge` for the reply.
 //! - [`agent_card_surface`] — schema-validates AgentCard JSON before the
 //!   gateway's discover surface returns it, so a stored card that drifted
 //!   from the spec can't be surfaced unchecked.
@@ -21,9 +17,10 @@
 //!   streaming ingress (`message/stream`, `tasks/resubscribe`).
 //! - [`gw_pull_backpressure`] — pull consumer for task-event egress
 //!   (`A2A_EVENTS`) with JetStream flow control + per-caller inflight cap.
-//! - [`jwt_caller_identity`] — resolves a verified caller identity from a
-//!   minted NATS User JWT carried on the inbound message, with a
-//!   labs-only header-trust fallback gated behind an env flag.
+//! - [`ingress_identity`]: rejects a forwarded caller JWT that does not name
+//!   the principal of the ingress subject, and strips identity headers so no
+//!   policy tier or agent reads them. It verifies against issuer public keys
+//!   (`A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS`), never a signing seed.
 //! - [`policy`] — shared policy-tier scaffold; later slices layer Tier 1
 //!   declarative, Tier 1 SpiceDB, Tier 2 CEL, and Tier 3 redaction on top.
 //! - [`push_dlq_mirror`] — pull-consumer that mirrors `{prefix}.v1.push.dlq.>`
@@ -35,18 +32,19 @@
 #![allow(clippy::module_name_repetitions)]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-pub mod aauth;
 pub mod agent_card_surface;
-pub mod audit_ingress;
 pub mod caller_jwt_header;
 pub mod config;
 pub mod constants;
 pub mod gw_ingress_stream;
 pub mod gw_pull_backpressure;
-pub mod jwt_caller_identity;
+pub mod ingress_identity;
+mod non_unary_relay_timeout;
+pub use non_unary_relay_timeout::{NonUnaryRelayTimeout, NonUnaryRelayTimeoutError};
 pub mod policy;
 pub mod push_dlq_mirror;
 pub mod runtime;
+mod telemetry;
 
 pub use config::{Args, Config, ConfigError};
 pub use runtime::RuntimeError;

@@ -231,7 +231,11 @@ same way as the escape encoding. It costs 57 of the 256 bytes and one of the
 The slug form of `{tenant}` remains for single-account test fixtures. A
 decider in `PLATFORM` that serves several tenants builds its
 [ADR#0027](./0027-decider-multi-tenancy-primitive.md) `SubjectScope` from the
-same account key token.
+same account key token. Until decider state is scoped by tenant, the decider
+host refuses to start with a wildcard at the tenant position, so each host
+serves one tenant account
+([ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+Decision 2).
 
 A stream import carries messages one way, so a request that a `PLATFORM`
 workload sends to a responder inside a tenant account travels through a

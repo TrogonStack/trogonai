@@ -1,10 +1,14 @@
 //! `A2aClient` — JSON-RPC client facade over NATS request/reply + JetStream.
 //!
-//! The struct holds the request/reply path (prefix + agent id + NATS + JetStream)
-//! plus the ingress overlay (talk to the agent directly, or route via a gateway
-//! with a minted caller JWT). Per-operation methods (`message_send`, `tasks_get`,
-//! `message_stream`, …) land in their dedicated PRs so each operation's wire
-//! contract is reviewed on its own.
+//! The struct holds the request/reply path (prefix + agent id + caller principal +
+//! NATS + JetStream) plus the ingress overlay (talk to the agent directly, or route
+//! via a gateway with a minted caller JWT). Per-operation methods (`message_send`,
+//! `tasks_get`, `message_stream`, …) land in their dedicated PRs so each operation's
+//! wire contract is reviewed on its own.
+//!
+//! Every subject the client publishes or consumes embeds the caller principal at
+//! the position ADR#0082 fixes, so the client can only speak for the principal its
+//! connection's allow list names.
 
 use std::time::Duration;
 
@@ -16,6 +20,7 @@ use a2a::types::{
     SendMessageResponse, SubscribeToTaskRequest, Task, TaskPushNotificationConfig,
 };
 use a2a_identity_types::MintedUserJwt;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
@@ -37,9 +42,10 @@ use super::streaming::{StreamingRequest, send_streaming_validated};
 use super::unary::send_unary_validated;
 use super::validated::ValidatedRpc;
 
-/// Whether `A2aClient` publishes to `{prefix}.v1.agents.{agent_id}.…` (talking to the
-/// agent directly on a trusted NATS connection) or to `{prefix}.v1.gateway.…` with a
-/// minted caller JWT (going through the policy edge).
+/// Whether `A2aClient` publishes to `{prefix}.v1.agents.{agent_id}.{kind}.{id}.…`
+/// (talking to the agent directly on a trusted NATS connection) or to
+/// `{prefix}.v1.gateway.{agent_id}.{kind}.{id}.…` with a minted caller JWT (going
+/// through the policy edge).
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // GatewayIngress JWT is unwrapped by per-operation methods that land afterward
 enum ClientIngressTarget {
@@ -52,6 +58,7 @@ enum ClientIngressTarget {
 pub struct A2aClient<N, J> {
     prefix: A2aPrefix,
     agent_id: A2aAgentId,
+    caller: SubjectPrincipal,
     operation_timeout: Duration,
     nats: N,
     js: J,
@@ -59,10 +66,14 @@ pub struct A2aClient<N, J> {
 }
 
 impl<N, J> A2aClient<N, J> {
-    pub fn new(prefix: A2aPrefix, agent_id: A2aAgentId, nats: N, js: J) -> Self {
+    /// `caller` is the principal every subject of this client embeds; it must be the
+    /// one the connection's allow list names, which an adapter reads from its minted
+    /// caller JWT with [`MintedUserJwt::subject_principal`].
+    pub fn new(prefix: A2aPrefix, agent_id: A2aAgentId, caller: SubjectPrincipal, nats: N, js: J) -> Self {
         Self {
             prefix,
             agent_id,
+            caller,
             operation_timeout: DEFAULT_OPERATION_TIMEOUT,
             nats,
             js,
@@ -77,7 +88,7 @@ impl<N, J> A2aClient<N, J> {
     }
 
     /// Routes unary / bootstrap RPCs through `a2a-gateway`: subjects become
-    /// `{prefix}.v1.gateway.{agent_id}.{method…}` (see
+    /// `{prefix}.v1.gateway.{agent_id}.{kind}.{id}.{method…}` (see
     /// [`gateway_ingress_subject_from_agent_subject`]), with `caller_jwt`
     /// attached as the caller-JWT header on every gateway publish.
     ///
@@ -89,7 +100,7 @@ impl<N, J> A2aClient<N, J> {
         self
     }
 
-    /// Default (direct) routing to `{prefix}.v1.agents.{agent_id}.{method…}`.
+    /// Default (direct) routing to `{prefix}.v1.agents.{agent_id}.{kind}.{id}.{method…}`.
     #[must_use]
     pub fn routing_to_agent(mut self) -> Self {
         self.ingress = ClientIngressTarget::AgentSubjects;
@@ -98,6 +109,10 @@ impl<N, J> A2aClient<N, J> {
 
     pub fn agent_id(&self) -> &A2aAgentId {
         &self.agent_id
+    }
+
+    pub fn caller(&self) -> &SubjectPrincipal {
+        &self.caller
     }
 
     pub(super) fn prefix(&self) -> &A2aPrefix {
@@ -131,7 +146,8 @@ where
     N: RequestClient,
 {
     pub async fn tasks_cancel_validated(&self, req: &CancelTaskRequest) -> Result<ValidatedRpc<Task>, ClientError> {
-        let subject = self.outbound_rpc_subject(TasksCancelSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let subject = self
+            .outbound_rpc_subject(TasksCancelSubject::new(self.prefix(), &self.agent_id, &self.caller).to_string())?;
         let req_id = ReqId::new();
         send_unary_validated(
             &self.nats,
@@ -153,7 +169,8 @@ where
         &self,
         req: &ListTasksRequest,
     ) -> Result<ValidatedRpc<ListTasksResponse>, ClientError> {
-        let subject = self.outbound_rpc_subject(TasksListSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let subject =
+            self.outbound_rpc_subject(TasksListSubject::new(self.prefix(), &self.agent_id, &self.caller).to_string())?;
         let req_id = ReqId::new();
         send_unary_validated(
             &self.nats,
@@ -172,7 +189,8 @@ where
     }
 
     pub async fn tasks_get_validated(&self, req: &GetTaskRequest) -> Result<ValidatedRpc<Task>, ClientError> {
-        let subject = self.outbound_rpc_subject(TasksGetSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let subject =
+            self.outbound_rpc_subject(TasksGetSubject::new(self.prefix(), &self.agent_id, &self.caller).to_string())?;
         let req_id = ReqId::new();
         send_unary_validated(
             &self.nats,
@@ -194,7 +212,8 @@ where
         &self,
         req: &SendMessageRequest,
     ) -> Result<ValidatedRpc<SendMessageResponse>, ClientError> {
-        let subject = self.outbound_rpc_subject(MessageSendSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let subject = self
+            .outbound_rpc_subject(MessageSendSubject::new(self.prefix(), &self.agent_id, &self.caller).to_string())?;
         let req_id = ReqId::new();
         send_unary_validated(
             &self.nats,
@@ -216,7 +235,8 @@ where
         &self,
         req: &DeleteTaskPushNotificationConfigRequest,
     ) -> Result<ValidatedRpc<()>, ClientError> {
-        let subject = self.outbound_rpc_subject(PushDeleteSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let subject =
+            self.outbound_rpc_subject(PushDeleteSubject::new(self.prefix(), &self.agent_id, &self.caller).to_string())?;
         let req_id = ReqId::new();
         send_unary_validated(
             &self.nats,
@@ -239,7 +259,8 @@ where
         &self,
         req: &ListTaskPushNotificationConfigsRequest,
     ) -> Result<ValidatedRpc<ListTaskPushNotificationConfigsResponse>, ClientError> {
-        let subject = self.outbound_rpc_subject(PushListSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let subject =
+            self.outbound_rpc_subject(PushListSubject::new(self.prefix(), &self.agent_id, &self.caller).to_string())?;
         let req_id = ReqId::new();
         send_unary_validated(
             &self.nats,
@@ -264,7 +285,8 @@ where
         &self,
         req: &GetTaskPushNotificationConfigRequest,
     ) -> Result<ValidatedRpc<TaskPushNotificationConfig>, ClientError> {
-        let subject = self.outbound_rpc_subject(PushGetSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let subject =
+            self.outbound_rpc_subject(PushGetSubject::new(self.prefix(), &self.agent_id, &self.caller).to_string())?;
         let req_id = ReqId::new();
         send_unary_validated(
             &self.nats,
@@ -289,7 +311,8 @@ where
         &self,
         req: &TaskPushNotificationConfig,
     ) -> Result<ValidatedRpc<TaskPushNotificationConfig>, ClientError> {
-        let subject = self.outbound_rpc_subject(PushSetSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let subject =
+            self.outbound_rpc_subject(PushSetSubject::new(self.prefix(), &self.agent_id, &self.caller).to_string())?;
         let req_id = ReqId::new();
         send_unary_validated(
             &self.nats,
@@ -308,7 +331,8 @@ where
     }
 
     pub async fn agent_card_validated(&self) -> Result<ValidatedRpc<AgentCard>, ClientError> {
-        let subject = self.outbound_rpc_subject(AgentCardSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let subject =
+            self.outbound_rpc_subject(AgentCardSubject::new(self.prefix(), &self.agent_id, &self.caller).to_string())?;
         let req_id = ReqId::new();
         let req = GetExtendedAgentCardRequest { tenant: None };
         send_unary_validated(
@@ -345,7 +369,7 @@ where
         last_seq: u64,
     ) -> Result<(ValidatedRpc<Task>, TypedEventStream), ClientError> {
         let subject =
-            self.outbound_rpc_subject(TasksResubscribeSubject::new(self.prefix(), &self.agent_id).to_string())?;
+            self.outbound_rpc_subject(TasksResubscribeSubject::new(self.prefix(), &self.agent_id, &self.caller).to_string())?;
         let req_id = ReqId::new();
         let req = SubscribeToTaskRequest {
             id: task_id.as_str().to_owned(),
@@ -361,7 +385,7 @@ where
             self.gateway_caller_jwt(),
         )
         .await?;
-        let stream = open_resubscribe_stream(&self.js, self.prefix(), task_id, last_seq).await?;
+        let stream = open_resubscribe_stream(&self.js, self.prefix(), task_id, &self.caller, last_seq).await?;
         Ok((snapshot, stream))
     }
 
@@ -378,7 +402,7 @@ where
         &self,
         req: &SendMessageRequest,
     ) -> Result<(ValidatedRpc<SendMessageResponse>, TypedEventStream), ClientError> {
-        let subject = self.outbound_rpc_subject(MessageStreamSubject::new(self.prefix(), &self.agent_id).to_string())?;
+        let subject = self.outbound_rpc_subject(MessageStreamSubject::new(self.prefix(), &self.agent_id, &self.caller).to_string())?;
         let req_id = ReqId::new();
         let ctx = StreamingRequest {
             nats: &self.nats,
@@ -387,6 +411,7 @@ where
             method: "message/stream",
             req_id: &req_id,
             prefix: self.prefix(),
+            caller: &self.caller,
             op_timeout: self.operation_timeout(),
             gateway_caller_jwt: self.gateway_caller_jwt(),
         };
