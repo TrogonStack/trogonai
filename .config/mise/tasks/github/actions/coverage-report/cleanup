@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+rm -rf .coverage-output.comment .coverage-comparison-status coverage-action .coverage-output.final .coverage-output \
+  .coverage-total .coverage-output.diff \
+  .coverage-output.diff-branch .coverage-total.diff-branch \
+  "${COVERAGE_STORAGE_BRANCH}"-not-found
