@@ -101,14 +101,22 @@ async fn fork_session_records_metrics_on_failure() {
     provider.shutdown().unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn fork_session_records_error_when_session_ready_publish_fails() {
     let (mock, js, bridge, exporter, provider) = mock_bridge_with_metrics();
     set_js_response(&js, &ForkSessionResponse::new("forked-1"));
     mock.fail_publish_count(4);
+    let publish_entered = mock.delay_next_publish_to("acp.v1.session.forked-1.agent.ext.ready");
 
-    let _ = bridge.fork_session(ForkSessionRequest::new("s1", ".")).await;
+    let _response = bridge
+        .fork_session(ForkSessionRequest::new("s1", "."))
+        .await
+        .expect("fork response before delayed ready publication");
 
+    tokio::time::timeout(Duration::from_secs(1), publish_entered)
+        .await
+        .expect("session.ready publish must enter the bounded mock delay")
+        .expect("publish entry signal");
     tokio::time::sleep(Duration::from_millis(600)).await;
     provider.force_flush().unwrap();
     let finished_metrics = exporter.get_finished_metrics().unwrap();
