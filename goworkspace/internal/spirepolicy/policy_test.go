@@ -120,7 +120,7 @@ func TestSocketAdmissionBoundaryRequiresCompleteFixture(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("SPIRE_POLICY_FIXTURE", path)
-			output, err := exec.Command(binary, "-test.run=^TestSocketAdmissionBoundary$").CombinedOutput()
+			output, err := exec.CommandContext(t.Context(), binary, "-test.run=^TestSocketAdmissionBoundary$").CombinedOutput()
 			if err == nil {
 				t.Fatalf("incomplete fixture passed socket admission checks: %s", output)
 			}
