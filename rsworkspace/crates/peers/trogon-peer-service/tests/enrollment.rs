@@ -685,10 +685,8 @@ async fn expired_resume_unknown_authority_history() -> (ObservedStore, PeerId, R
         .await
         .unwrap();
     let peer = PeerId::parse(enrolled.peer_id.clone().unwrap()).unwrap();
-    let expiry = trogonai_proto::convert::datetime_from_timestamp(
-        enrolled.attachment.expires_at.as_option().unwrap(),
-    )
-    .unwrap();
+    let expiry =
+        trogonai_proto::convert::datetime_from_timestamp(enrolled.attachment.expires_at.as_option().unwrap()).unwrap();
     let original = store
         .read_stream(ReadStreamRequest {
             stream_id: &peer,
@@ -740,7 +738,9 @@ async fn expired_connector_replacement_refuses_unknown_authority_history_without
     assert!(
         matches!(
             &result,
-            Err(EnrollServiceError::History(trogon_peer_service::HistoryError::UnknownEvent))
+            Err(EnrollServiceError::History(
+                trogon_peer_service::HistoryError::UnknownEvent
+            ))
         ),
         "expired replacement cannot infer authority across an unknown event: {result:?}"
     );
@@ -877,8 +877,8 @@ async fn expired_replacement_cannot_append_after_authority_changes_past_its_vali
         .await
         .unwrap();
     let peer = PeerId::parse(first.peer_id.clone().unwrap()).unwrap();
-    let expiry = trogonai_proto::convert::datetime_from_timestamp(first.attachment.expires_at.as_option().unwrap())
-        .unwrap();
+    let expiry =
+        trogonai_proto::convert::datetime_from_timestamp(first.attachment.expires_at.as_option().unwrap()).unwrap();
     let store = UnknownAuthorityAfterHistoryRead {
         inner: inner.clone(),
         armed: Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -904,7 +904,12 @@ async fn expired_replacement_cannot_append_after_authority_changes_past_its_vali
         appends + 3,
         "create rejection, competing envelope, and one fenced attachment attempt are the only append calls"
     );
-    let injected = store.injected_history.lock().unwrap().clone().expect("the competing envelope was persisted");
+    let injected = store
+        .injected_history
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the competing envelope was persisted");
     let actual = inner
         .read_stream(ReadStreamRequest {
             stream_id: &peer,

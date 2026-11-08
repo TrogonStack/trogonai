@@ -1,3 +1,4 @@
+use crate::constants::PEER_REPLAY_LIMIT;
 use trogon_decider_runtime::{
     CommandAuthorizer, CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind, StreamAppend, StreamRead,
 };
@@ -94,7 +95,18 @@ where
                     command.collaboration().clone(),
                     self.clock.now(),
                 );
+                self.authorizer
+                    .authorize_execution(Some(&principal), &attach)
+                    .map_err(|error| {
+                        EnrollServiceError::Attach(trogon_decider_runtime::CommandError::Unauthorized(error))
+                    })?;
+                let (_, validated_position) =
+                    crate::history::load_with_position(&self.store, command.identity().peer_id())
+                        .await
+                        .map_err(EnrollServiceError::History)?;
                 match CommandExecution::new(&self.store, &attach)
+                    .with_expected_revision(validated_position)
+                    .with_replay_limit(PEER_REPLAY_LIMIT)
                     .with_principal(principal)
                     .with_authorizer(&self.authorizer)
                     .execute()
