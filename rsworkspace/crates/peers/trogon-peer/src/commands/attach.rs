@@ -111,7 +111,7 @@ impl Decider for Attach {
             && command.now < expires
         {
             return Err(
-                if previous.attachment.connector_id.as_deref() == Some(command.connector_id.as_str()) {
+                if previous.attachment_ref.connector_id.as_deref() == Some(command.connector_id.as_str()) {
                     AttachError::AlreadyAttached
                 } else {
                     AttachError::InUse
@@ -119,7 +119,7 @@ impl Decider for Attach {
             );
         }
         let generation = previous
-            .attachment
+            .attachment_ref
             .generation
             .and_then(|generation| generation.checked_add(1))
             .ok_or(AttachError::GenerationOverflow)?;
@@ -132,7 +132,7 @@ impl Decider for Attach {
             .filter(|at| state::timestamp_seconds_supported(at.timestamp()))
             .ok_or(AttachError::LeaseDeadlineOverflow)?;
         let attachment = proto::PeerAttachment {
-            attachment: MessageField::some(proto::AttachmentRef {
+            attachment_ref: MessageField::some(proto::AttachmentRef {
                 peer_id: Some(command.identity.peer_id().to_string()),
                 connector_id: Some(command.connector_id.as_str().to_owned()),
                 generation: Some(generation),

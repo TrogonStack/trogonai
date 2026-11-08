@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+// GatewaySurface is the enforcing point that produced a decision. Unspecified
+// and unknown values are invalid.
+enum GatewaySurface {
+  GATEWAY_SURFACE_UNSPECIFIED = 0;
+  // The A2A gateway admitting a request toward an agent.
+  GATEWAY_SURFACE_A2A_INGRESS = 1;
+  // The egress proxy admitting an agent's outbound connection.
+  GATEWAY_SURFACE_EGRESS = 2;
+}

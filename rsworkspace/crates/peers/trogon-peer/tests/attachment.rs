@@ -26,7 +26,7 @@ fn attachment(
     now: DateTime<Utc>,
 ) -> proto::PeerAttachment {
     proto::PeerAttachment {
-        attachment: MessageField::some(proto::AttachmentRef {
+        attachment_ref: MessageField::some(proto::AttachmentRef {
             peer_id: Some(identity.peer_id().to_string()),
             connector_id: Some(connector.to_owned()),
             generation: Some(generation),
@@ -350,9 +350,9 @@ fn attachment_rejects_missing_or_invalid_lease_fields_in_a_persisted_snapshot() 
         }));
     let mut missing_generation = replayed_state(start);
     let mut value = missing_generation.attachment.into_option().unwrap();
-    value.attachment = MessageField::some(proto::AttachmentRef {
+    value.attachment_ref = MessageField::some(proto::AttachmentRef {
         generation: None,
-        ..value.attachment.into_option().unwrap()
+        ..value.attachment_ref.into_option().unwrap()
     });
     missing_generation.attachment = MessageField::some(value);
     TestCase::<Attach>::new()

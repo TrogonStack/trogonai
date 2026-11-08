@@ -192,7 +192,7 @@ async fn completed_dispatches_free_capacity_and_every_reply_drains_on_eof() {
     let count = MAX_INFLIGHT_DISPATCH + 5;
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("capacity-reused");
-    nats.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.tasks.get", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let (stdin, mut input) = tokio::io::duplex(64 * 1024);
     let (mut output, writer) = tokio::io::duplex(64 * 1024);

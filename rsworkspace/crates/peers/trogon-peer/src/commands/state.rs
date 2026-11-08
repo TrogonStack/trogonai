@@ -74,12 +74,12 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
                 return Err(EvolveError::InvalidAttachment);
             }
             let observed = read_time(attachment.observed_at.as_option(), "attachment.observed_at")?;
-            let generation = attachment.attachment.generation.ok_or(EvolveError::InvalidAttachment)?;
+            let generation = attachment.attachment_ref.generation.ok_or(EvolveError::InvalidAttachment)?;
             if let Some(previous) = state.attachment.as_option() {
                 validate_attachment(enrollment, previous)?;
                 let previous_observed = read_time(previous.observed_at.as_option(), "attachment.observed_at")?;
                 let previous_expires = read_time(previous.expires_at.as_option(), "attachment.expires_at")?;
-                let previous_generation = previous.attachment.generation.ok_or(EvolveError::InvalidAttachment)?;
+                let previous_generation = previous.attachment_ref.generation.ok_or(EvolveError::InvalidAttachment)?;
                 if previous_generation.checked_add(1) != Some(generation) || observed < previous_observed {
                     return Err(EvolveError::InvalidAttachment);
                 }
@@ -163,7 +163,7 @@ pub(super) fn validate_attachment(
     enrollment: &proto::PeerEnrollment,
     attachment: &proto::PeerAttachment,
 ) -> Result<(), EvolveError> {
-    let reference = attachment.attachment.as_option().ok_or(EvolveError::MissingField {
+    let reference = attachment.attachment_ref.as_option().ok_or(EvolveError::MissingField {
         field: "attachment.ref",
     })?;
     if required(&reference.peer_id, "attachment.peer_id")? != required(&enrollment.peer_id, "enrollment.peer_id")? {
