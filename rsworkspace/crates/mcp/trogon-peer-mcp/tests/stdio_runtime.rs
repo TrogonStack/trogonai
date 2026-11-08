@@ -18,7 +18,6 @@ use trogon_peer_nats::test_support::{
 };
 use trogon_peer_nats::{PeerAccount, PeerTenant, serve_peer_rpc};
 use trogon_peer_service::{WorkLimit, test_support::Fixture};
-use trogon_std::env::{ReadEnv, SystemEnv};
 use trogonai_proto::peers::state_v1alpha1::PeerState;
 use trogonai_proto::peers::v1alpha1 as v1;
 
