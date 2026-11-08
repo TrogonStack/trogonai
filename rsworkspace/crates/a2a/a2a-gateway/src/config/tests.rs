@@ -124,3 +124,27 @@ fn queue_group_trims() {
     let qg = QueueGroup::new("  gateways  ").expect("trim accepts");
     assert_eq!(qg.as_str(), "gateways");
 }
+
+#[test]
+fn non_unary_relay_timeout_rejects_invalid_configuration() {
+    for value in ["", "0", "3601", "-1", "no", "18446744073709551616"] {
+        let env = InMemoryEnv::new();
+        env.set("A2A_GATEWAY_NON_UNARY_RELAY_TIMEOUT_SECS", value);
+        assert!(
+            config_from_args(args("localhost:4222", "a2a", None), &env).is_err(),
+            "accepted {value:?}"
+        );
+    }
+}
+
+#[test]
+fn non_unary_relay_timeout_defaults_and_boundaries() {
+    let env = InMemoryEnv::new();
+    let (config, _) = config_from_args(args("localhost:4222", "a2a", None), &env).unwrap();
+    assert_eq!(config.non_unary_relay_timeout.duration().as_secs(), 300);
+    for (value, expected) in [("1", 1), ("3600", 3600), (" 120 ", 120)] {
+        env.set("A2A_GATEWAY_NON_UNARY_RELAY_TIMEOUT_SECS", value);
+        let (config, _) = config_from_args(args("localhost:4222", "a2a", None), &env).unwrap();
+        assert_eq!(config.non_unary_relay_timeout.duration().as_secs(), expected);
+    }
+}

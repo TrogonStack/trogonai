@@ -16,7 +16,7 @@
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use buffa::Message;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, RwLock, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -29,10 +29,12 @@ use crate::audit_sink::AuditSink;
 use crate::audit_unavailable_error::AuditUnavailableError;
 use crate::chain_head::ChainHead;
 use crate::chain_id::ChainId;
+use crate::chain_key::ChainKey;
 use crate::chain_tip::ChainTip;
 use crate::constants::{GENESIS_SEQUENCE, LOG_TARGET, MAX_RECORD_BYTES};
 use crate::disposition::Disposition;
 use crate::failure_reason::FailureReason;
+use crate::head_watch::HeadWatch;
 use crate::obligation::Obligation;
 use crate::record::Record;
 use crate::record_id::RecordId;
@@ -60,8 +62,17 @@ struct Inner<S> {
     /// stream receives the chain in order and one record at a time. Waiters take
     /// it in arrival order.
     tip: tokio::sync::Mutex<ChainTip>,
+    /// The final drain takes this exclusively, after every admitted producer
+    /// and drainer has finished, so its acknowledged head cannot move again.
+    admission: RwLock<()>,
     state: Mutex<WriterState>,
     wake: Notify,
+    /// The last acknowledged link, published so a checkpoint task can follow the
+    /// head without taking the chain gate.
+    heads: watch::Sender<Option<ChainHead>>,
+    /// Cancelled once the drain task has made its final drain, so nothing moves
+    /// the head after it.
+    stopped: CancellationToken,
 }
 
 impl<S> Clone for AuditWriter<S> {
@@ -93,8 +104,11 @@ impl<S: AuditSink> AuditWriter<S> {
                 chain,
                 config,
                 tip: tokio::sync::Mutex::new(ChainTip::opened_by(genesis)),
+                admission: RwLock::new(()),
                 state: Mutex::new(WriterState::default()),
                 wake: Notify::new(),
+                heads: watch::Sender::new(None),
+                stopped: CancellationToken::new(),
             }),
         };
         writer.inner.wake.notify_one();
@@ -107,7 +121,13 @@ impl<S: AuditSink> AuditWriter<S> {
     /// the chain and is stored by a later retry, so the stream can hold the record
     /// of a decision whose act was refused, a limit ADR#0086 states. A refusal's
     /// record and a best-effort record never fail the caller.
+    /// After the final drain, effects are refused and other records are dropped
+    /// and counted, so no write can move a head whose final checkpoint was taken.
     pub async fn write(&self, record: Record) -> Result<Disposition, AuditUnavailableError> {
+        let _admission = self.inner.admission.read().await;
+        if self.inner.stopped.is_cancelled() {
+            return self.closed(&record);
+        }
         if !fits_a_message(&record) {
             return self.too_large(&record);
         }
@@ -127,22 +147,35 @@ impl<S: AuditSink> AuditWriter<S> {
     /// writer refuses every action that needs a must-audit record before an effect
     /// and keeps denying what it denies.
     pub fn is_degraded(&self) -> bool {
-        self.state().degraded()
+        self.inner.stopped.is_cancelled() || self.state().degraded()
     }
 
     pub fn stats(&self) -> WriterStats {
-        self.state().stats()
+        let mut stats = self.state().stats();
+        stats.degraded |= self.inner.stopped.is_cancelled();
+        stats
     }
 
     /// The last record the stream acknowledged, or `None` until the chain reset is
     /// stored.
     pub fn head(&self) -> Option<ChainHead> {
-        self.state().head.clone()
+        self.inner.heads.borrow().clone()
     }
 
     /// The chain this writer instance appends to.
     pub fn chain(&self) -> ChainId {
         self.inner.chain
+    }
+
+    /// Follows this writer's head from outside the chain gate, for a checkpoint
+    /// task.
+    pub(crate) fn head_watch(&self) -> HeadWatch {
+        HeadWatch::new(
+            ChainKey::new(self.inner.identity.writer().clone(), self.inner.chain),
+            self.inner.identity.component().clone(),
+            self.inner.heads.subscribe(),
+            self.inner.stopped.clone(),
+        )
     }
 
     /// Stores the chain's head if it is waiting, then numbers and stores the
@@ -151,7 +184,17 @@ impl<S: AuditSink> AuditWriter<S> {
     /// record at the head, so a stream that is down costs one publish per pass.
     /// The writer leaves audit-degraded once the head is stored and the retry
     /// buffer is empty.
+    /// After the final drain this is a no-op: a recovered sink must not advance a
+    /// head after the checkpoint task has stopped following it.
     pub async fn drain_once(&self) {
+        let _admission = self.inner.admission.read().await;
+        if self.inner.stopped.is_cancelled() {
+            return;
+        }
+        self.drain().await;
+    }
+
+    async fn drain(&self) {
         loop {
             let mut tip = self.inner.tip.lock().await;
             if self.settle(&mut tip).await.is_err() {
@@ -168,17 +211,30 @@ impl<S: AuditSink> AuditWriter<S> {
     }
 
     /// Drains on every best-effort enqueue and every `drain_interval` until
-    /// `shutdown`, then once more so a clean stop flushes what it can.
+    /// `shutdown`, then once more so a clean stop flushes what it can. A
+    /// checkpoint task following this writer stops after that final drain.
+    /// The final drain fences new producers and waits for admitted writes before
+    /// it closes the writer and announces a stable head to the checkpoint task.
     pub async fn run(&self, shutdown: CancellationToken) {
         loop {
             tokio::select! {
+                biased;
                 () = shutdown.cancelled() => break,
                 () = self.inner.wake.notified() => {}
                 () = tokio::time::sleep(self.inner.config.drain_interval) => {}
             }
-            self.drain_once().await;
+            tokio::select! {
+                biased;
+                () = shutdown.cancelled() => break,
+                () = self.drain_once() => {}
+            }
         }
-        self.drain_once().await;
+        let _admission = self.inner.admission.write().await;
+        if self.inner.stopped.is_cancelled() {
+            return;
+        }
+        self.drain().await;
+        self.inner.stopped.cancel();
     }
 
     pub fn spawn_drain(&self, shutdown: CancellationToken) -> JoinHandle<()> {
@@ -202,6 +258,22 @@ impl<S: AuditSink> AuditWriter<S> {
             ?class,
             reason = %FailureReason::TooLarge,
             "an audit record is larger than the stream takes and was dropped"
+        );
+        Ok(Disposition::Dropped)
+    }
+
+    fn closed(&self, record: &Record) -> Result<Disposition, AuditUnavailableError> {
+        let class = record.kind().audit_class();
+        if record.obligation() == Obligation::BeforeEffect {
+            return Err(self.refuse(record.id(), class, FailureReason::Closed));
+        }
+        self.state().count_drop(class, FailureReason::Closed);
+        error!(
+            target: LOG_TARGET,
+            record_id = %record.id(),
+            ?class,
+            reason = %FailureReason::Closed,
+            "the audit writer has stopped, a record was dropped"
         );
         Ok(Disposition::Dropped)
     }
@@ -376,14 +448,14 @@ impl<S: AuditSink> AuditWriter<S> {
     }
 
     fn stored(&self, record: &SealedRecord, first_attempt: Instant, ack: &StoredAck) {
-        let mut state = self.state();
-        state.blocked = false;
-        state.head = Some(ChainHead::new(
+        self.inner.heads.send_replace(Some(ChainHead::new(
             record.sequence(),
             record.hash(),
             ack.stream(),
             ack.stream_sequence(),
-        ));
+        )));
+        let mut state = self.state();
+        state.blocked = false;
         if !ack.duplicate() && first_attempt.elapsed() > self.inner.config.duplicate_window {
             state.possible_duplicates += 1;
             warn!(

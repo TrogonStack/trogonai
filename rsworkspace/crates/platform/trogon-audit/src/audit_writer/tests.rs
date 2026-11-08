@@ -860,12 +860,54 @@ async fn a_clean_stop_drains_the_head_and_the_buffers() {
     assert_eq!(verified(&writer, &sink).records(), 3);
 }
 
+#[tokio::test]
+async fn repeated_shutdown_does_not_retry_a_closed_writer_when_the_sink_recovers() {
+    let (writer, sink, stamper) = setup(4, 4);
+    sink.fail_all(SinkError::Unreachable);
+    writer.write(allow(&stamper)).await.unwrap_err();
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    writer.run(shutdown.clone()).await;
+    let final_head = writer.head();
+    let attempts = sink.attempts();
+    sink.recover();
+
+    writer.run(shutdown).await;
+
+    assert_eq!(sink.attempts(), attempts);
+    assert!(sink.stored().is_empty());
+    assert_eq!(writer.head(), final_head);
+    assert!(writer.is_degraded());
+}
+
 fn field_of(captured: &CapturedEvents, message: &str, field: &str) -> Option<String> {
     captured
         .events()
         .iter()
         .find(|event| event.message() == Some(message))
         .and_then(|event| event.field(field).map(str::to_owned))
+}
+
+#[tokio::test]
+async fn a_record_dropped_after_shutdown_logs_its_id_and_closed_reason() {
+    let captured = CapturedEvents::new();
+    let _guard = captured.install(LevelFilter::TRACE);
+    let (writer, sink, stamper) = setup(4, 4);
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    writer.run(shutdown).await;
+    let final_head = writer.head();
+    let record = deny(&stamper);
+    let id = record.id().to_string();
+    let attempts = sink.attempts();
+
+    assert_eq!(writer.write(record).await, Ok(Disposition::Dropped));
+
+    let message = "the audit writer has stopped, a record was dropped";
+    assert_eq!(field_of(&captured, message, "reason").as_deref(), Some("closed"));
+    assert_eq!(field_of(&captured, message, "record_id"), Some(id));
+    assert_eq!(sink.attempts(), attempts);
+    assert_eq!(writer.head(), final_head);
 }
 
 #[tokio::test]
@@ -966,6 +1008,34 @@ async fn an_exhausted_chain_is_logged_as_an_error() {
 
     let message = "the audit chain has no sequence left, the writer is audit-degraded";
     assert_eq!(field_of(&captured, message, "record_id"), Some(id));
+}
+
+#[tokio::test]
+async fn closed_writer_diagnostics_reach_the_log_facade_when_no_subscriber_is_installed() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+    let (writer, _sink, stamper) = setup(4, 4);
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    writer.run(shutdown).await;
+    let record = deny(&stamper);
+    let id = record.id().to_string();
+
+    assert_eq!(writer.write(record).await, Ok(Disposition::Dropped));
+
+    let records = logs.records();
+    let line = records
+        .iter()
+        .find(|record| {
+            record
+                .message
+                .contains("the audit writer has stopped, a record was dropped")
+        })
+        .expect("closed-writer drop must reach the log facade");
+    assert!(line.message.contains(&id));
+    assert!(line.message.contains("closed"));
+    assert!(records.iter().all(|record| !record.message.contains(marker())));
 }
 
 #[tokio::test]

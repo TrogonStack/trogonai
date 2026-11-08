@@ -6,6 +6,8 @@
 /// and refuse identically.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FailureReason {
+    /// The writer has made its final drain and no longer accepts records.
+    Closed,
     /// The stream could not be reached or refused the publish.
     Unreachable,
     /// No acknowledgement arrived, after the bounded same-id retries.
@@ -27,6 +29,7 @@ pub enum FailureReason {
 impl FailureReason {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Closed => "closed",
             Self::Unreachable => "unreachable",
             Self::Timeout => "timeout",
             Self::StreamFull => "stream_full",
