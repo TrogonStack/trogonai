@@ -53,6 +53,26 @@ The service/method suffix follows
 [ADR 0016](../../../../docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md).
 
 
+## Request transport
+
+`PeerRequester` accepts an already connected client and fixed typed account,
+caller, connection and timeout settings. Each call accepts only a method and
+payload. It derives the route, builds a fresh exact reply subject, and validates
+that reply with `PeerReplySubject` before sending. An explicit SDK request inbox
+preserves this shape without using the default request multiplexer.
+
+The positive timeout is capped at two seconds per RPC. An outer deadline covers
+the whole send-request future, including subscription and publish queueing; the
+SDK's response timeout is bounded too. Both timeout paths retain the typed
+transport timeout classification. A timeout does not establish that remote
+effects were absent.
+
+This per-RPC bound is separate from the host hook's two-second total budget.
+An adapter that performs enrollment and batch preparation needs an end-to-end
+hook deadline across those calls. The requester does not add authentication or
+prove that the broker applied the supplied permission profile. The broker tests
+observe routing and reply shape, rather than authorization enforcement.
+
 ## Durable peer histories
 
 `peer::open_store` takes an existing JetStream context and a tenant-specific

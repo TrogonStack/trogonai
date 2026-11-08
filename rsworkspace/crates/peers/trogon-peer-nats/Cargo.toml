@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
 trogon-decider-nats = { workspace = true }
 trogon-nats = { path = "../../platform/trogon-nats" }
 trogon-peer = { path = "../trogon-peer" }
