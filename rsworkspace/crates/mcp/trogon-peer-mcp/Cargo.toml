@@ -41,3 +41,6 @@ trogon-peer-service = { path = "../../peers/trogon-peer-service", features = ["t
 trogon-decider-runtime = { workspace = true }
 async-nats = { workspace = true }
 futures = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.4", features = ["fs"] }

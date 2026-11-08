@@ -19,7 +19,8 @@ async fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             match error {
-                RuntimeError::StartupDeadline
+                RuntimeError::Stdio(_)
+                | RuntimeError::StartupDeadline
                 | RuntimeError::Connect(_)
                 | RuntimeError::ConnectReady(_)
                 | RuntimeError::Configure(_)

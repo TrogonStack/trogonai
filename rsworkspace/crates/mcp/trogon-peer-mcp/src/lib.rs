@@ -47,3 +47,7 @@ mod runtime_error;
 pub use rpc_peer_backend::RpcPeerBackend;
 pub use runtime::{run_stdio, serve_connector};
 pub use runtime_error::RuntimeError;
+
+#[cfg(unix)]
+mod native_pipe;
+mod stdio_transport;
