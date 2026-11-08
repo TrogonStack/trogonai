@@ -19,8 +19,9 @@ use trogon_peer_service::{EnrollServiceError, PeerClock, PeerService};
 use trogonai_proto::convert::timestamp_from_datetime;
 use trogonai_proto::peers::{PeerEventCase, v1alpha1 as proto};
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct ObservedStore {
+    tenant: TenantId,
     inner: InMemoryStore,
     reads: Arc<AtomicUsize>,
     appends: Arc<AtomicUsize>,
@@ -894,4 +895,21 @@ async fn resume_does_not_return_a_competing_connector_that_won_during_the_respon
         store.before_read.lock().unwrap().is_none(),
         "competing connector interleave must execute"
     );
+}
+
+impl Default for ObservedStore {
+    fn default() -> Self {
+        Self {
+            tenant: TenantId::new("tenant_alpha").unwrap(),
+            inner: InMemoryStore::new(),
+            reads: Arc::default(),
+            appends: Arc::default(),
+            before_read: Arc::default(),
+        }
+    }
+}
+impl trogon_peer_service::ScopedPeerStore for ObservedStore {
+    fn tenant(&self) -> &TenantId {
+        &self.tenant
+    }
 }
