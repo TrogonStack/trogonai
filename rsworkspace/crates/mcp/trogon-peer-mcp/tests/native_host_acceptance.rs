@@ -1,6 +1,8 @@
 //! Opt-in installed-host proof. Never run this as an ordinary CI model call.
 
 use std::io::Write as _;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -575,8 +577,6 @@ async fn installed_host_next_prompt_context() -> TestResult {
 #[cfg(unix)]
 #[tokio::test]
 async fn verifier_drains_stderr_after_retention_cap_without_terminating_host() -> TestResult {
-    use std::os::unix::fs::PermissionsExt as _;
-
     let broker = Broker::start().await?;
     let cwd = tempfile::tempdir()?;
     let program = cwd.path().join("synthetic-host");
