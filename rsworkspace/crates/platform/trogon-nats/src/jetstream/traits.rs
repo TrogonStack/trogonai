@@ -232,7 +232,10 @@ pub trait JetStreamCreateConsumer: Send + 'static {
 }
 
 pub trait JetStreamDeleteConsumer: Send + Sync + 'static {
-    fn delete_consumer(&self, name: &str) -> impl Future<Output = Result<(), stream::ConsumerError>> + Send;
+    type Error: Error + Send + Sync;
+    type Response: Send;
+
+    fn delete_consumer(&self, name: &str) -> impl Future<Output = Result<Self::Response, Self::Error>> + Send;
 }
 
 pub trait JetStreamConsumer: Send + Sync + 'static {
@@ -347,8 +350,11 @@ impl JetStreamCreateConsumer for jetstream::stream::Stream {
 }
 
 impl<I: Send + Sync + 'static> JetStreamDeleteConsumer for jetstream::stream::Stream<I> {
-    async fn delete_consumer(&self, name: &str) -> Result<(), stream::ConsumerError> {
-        jetstream::stream::Stream::delete_consumer(self, name).await.map(|_| ())
+    type Error = stream::ConsumerError;
+    type Response = stream::DeleteStatus;
+
+    async fn delete_consumer(&self, name: &str) -> Result<Self::Response, Self::Error> {
+        jetstream::stream::Stream::delete_consumer(self, name).await
     }
 }
 
