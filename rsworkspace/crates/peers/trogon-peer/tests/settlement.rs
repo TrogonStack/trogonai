@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+use chrono::TimeZone;
 mod support;
 use support::*;
 use trogon_decider::{Decider, WritePrecondition, evaluate_decision};
@@ -417,7 +418,6 @@ fn core761_ack_and_settlement_replay_reject_duplicate_or_fenced_effects() {
 
 #[test]
 fn acknowledgment_rejects_a_leap_clock_before_serializing_receipt_time() {
-    use chrono::TimeZone;
     let sender = run(enrolled("sender", -3), &send(0, -2, 1));
     let evidence = AcceptedMessage::from_sender_history(&sender, &MessageId::new("message_0").unwrap()).unwrap();
     let recipient = run(enrolled("recipient", -3), &IntakeMessage::new(evidence, time(-1)));
