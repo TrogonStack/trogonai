@@ -76,6 +76,16 @@ pub struct MessageMetadata {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
     pub content_ref: ::buffa::MessageField<ClaimCheck, ::buffa::Inline<ClaimCheck>>,
+    /// Field 12: `semantic_fingerprint`
+    #[serde(
+        rename = "semanticFingerprint",
+        alias = "semantic_fingerprint",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub semantic_fingerprint: ::buffa::MessageField<
+        ContentSemanticFingerprint,
+        ::buffa::Inline<ContentSemanticFingerprint>,
+    >,
 }
 impl ::core::fmt::Debug for MessageMetadata {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -89,6 +99,7 @@ impl ::core::fmt::Debug for MessageMetadata {
             .field("expires_at", &self.expires_at)
             .field("reply_to_message_id", &self.reply_to_message_id)
             .field("content_ref", &self.content_ref)
+            .field("semantic_fingerprint", &self.semantic_fingerprint)
             .finish()
     }
 }
@@ -220,6 +231,14 @@ impl ::buffa::Message for MessageMetadata {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        if self.semantic_fingerprint.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.semantic_fingerprint.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -270,6 +289,14 @@ impl ::buffa::Message for MessageMetadata {
                 buf,
             );
             self.content_ref.write_to(__cache, buf);
+        }
+        if self.semantic_fingerprint.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                12u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.semantic_fingerprint.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -385,6 +412,17 @@ impl ::buffa::Message for MessageMetadata {
                     ctx,
                 )?;
             }
+            12u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.semantic_fingerprint.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -401,6 +439,7 @@ impl ::buffa::Message for MessageMetadata {
         self.expires_at = ::buffa::MessageField::none();
         self.reply_to_message_id = ::core::option::Option::None;
         self.content_ref = ::buffa::MessageField::none();
+        self.semantic_fingerprint = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for MessageMetadata {
