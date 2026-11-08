@@ -134,6 +134,10 @@ async fn main() {
     };
     let user_jwt_ttl = match env.var("AUTH_CALLOUT_USER_JWT_TTL_SECS") {
         Ok(raw) => match raw.parse::<u64>() {
+            Ok(0) => {
+                tracing::error!("AUTH_CALLOUT_USER_JWT_TTL_SECS must be at least 1");
+                std::process::exit(1);
+            }
             Ok(secs) => Duration::from_secs(secs),
             Err(e) => {
                 tracing::error!(error = %e, raw = %raw, "invalid AUTH_CALLOUT_USER_JWT_TTL_SECS");
