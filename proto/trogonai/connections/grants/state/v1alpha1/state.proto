@@ -1,0 +1,60 @@
+edition = "2024";
+
+package trogonai.connections.grants.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/connections/grants/v1alpha1/grant.proto";
+import "trogonai/connections/grants/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// The present fold retains its immutable resource_parent from genesis. A
+// command or event with another parent is refused before applying a transition;
+// current hierarchy placement and logical ownership do not rewrite this value.
+
+// One fold per grant, not a joined projection. Unknown events and invalid
+// transitions reject replay. Missing is the explicit initial state.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    ConnectionGrant present = 2;
+  }
+}
+
+// Terms are copied from genesis and only expires_at moves, by renewal of an
+// Activated grant. Revoked and Expired are terminal. A revocation reason is
+// present exactly when the grant is Revoked. Whether a grant is usable at a
+// given moment is this state plus a comparison of expires_at with the reader's
+// clock, plus the live checks of each call.
+message ConnectionGrant {
+  option (buf.validate.message).cel = {
+    id: "connection_grant_state.terms_parent"
+    message: "the stored grant and its terms share one Session project parent"
+    expression: "this.terms.resource_parent == this.resource_parent"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "connection_grant_state.revocation_reason"
+    message: "a revocation reason is present exactly when the grant is revoked"
+    expression: "(this.lifecycle == 3) == has(this.revocation_reason)"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.grants.v1alpha1.ConnectionGrantTerms terms = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.grants.v1alpha1.ConnectionGrantLifecycle lifecycle = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.grants.v1alpha1.ConnectionGrantRevocationReason revocation_reason = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 5 [features.field_presence = LEGACY_REQUIRED];
+}

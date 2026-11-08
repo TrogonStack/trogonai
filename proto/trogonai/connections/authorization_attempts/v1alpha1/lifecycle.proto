@@ -1,0 +1,26 @@
+edition = "2024";
+
+package trogonai.connections.authorization_attempts.v1alpha1;
+
+// The attempt states of ADR#0094 Decision 1. Completed, Failed, Expired and
+// Cancelled are terminal. Unspecified and unknown values are invalid.
+enum AuthorizationAttemptPhase {
+  AUTHORIZATION_ATTEMPT_PHASE_UNSPECIFIED = 0;
+  // Entered by BeginAuthorization. The principal is at the provider's consent
+  // screen.
+  AUTHORIZATION_ATTEMPT_PHASE_AWAITING_CONSENT = 1;
+  // Entered by ClaimOAuthCallback. Exactly one callback won the claim.
+  AUTHORIZATION_ATTEMPT_PHASE_CALLBACK_CLAIMED = 2;
+  // Entered by StartCodeExchange, written before any byte leaves for the
+  // provider. A sent exchange cannot be un-sent, so Cancel and Expire are
+  // refused from here on.
+  AUTHORIZATION_ATTEMPT_PHASE_EXCHANGING = 3;
+  // Entered by RecordExchangeUnknown when the exchange response was lost,
+  // timed out or could not be attributed. Reconciliation leaves it for
+  // Completed or Failed (ADR#0094 Decision 4).
+  AUTHORIZATION_ATTEMPT_PHASE_OUTCOME_UNKNOWN = 4;
+  AUTHORIZATION_ATTEMPT_PHASE_COMPLETED = 5;
+  AUTHORIZATION_ATTEMPT_PHASE_FAILED = 6;
+  AUTHORIZATION_ATTEMPT_PHASE_EXPIRED = 7;
+  AUTHORIZATION_ATTEMPT_PHASE_CANCELLED = 8;
+}

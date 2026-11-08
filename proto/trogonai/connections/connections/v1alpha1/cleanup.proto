@@ -1,0 +1,63 @@
+edition = "2024";
+
+package trogonai.connections.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/types/v1alpha1/cleanup.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/outcome.proto";
+
+// One attempt to revoke the connection's tokens at the provider, after the
+// revoke intent committed (ADR#0093 Decision 9 step 4). Each attempt's result
+// is an EffectOutcome, which keeps saga state out of the aggregate (ADR#0092
+// Decision 4, ADR#0094 Decision 13). CONFIRMED, UNSUPPORTED and REJECTED are
+// terminal; UNAVAILABLE and UNKNOWN may be retried until the revoke window
+// ends. Material is destroyed only after a terminal outcome or the window's
+// end (R3).
+message ProviderRevokeOutcome {
+  trogonai.connections.types.v1alpha1.EffectOutcome outcome = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // When the revoke request was sent, or found unsendable. A domain fact that
+  // the window is measured from.
+  google.protobuf.Timestamp attempted_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}
+
+// One open obligation on the connection: a cleanup step that could not finish.
+// Debt is durable, queryable and aged, and a trigger is not done while debt
+// for it is open (ADR#0093 Decision 9). At most one open obligation per kind.
+message CleanupObligation {
+  trogonai.connections.types.v1alpha1.CleanupObligationKind kind = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // When the step gave up, which ages the debt. ADR-silent shape: the fold
+  // never sees the envelope, so the age needs a time in the payload.
+  google.protobuf.Timestamp opened_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}
+
+// The erasure fact of ADR#0093 Decision 12: the erasable provider account
+// profile was purged with its revisions. It carries the digest of the purged
+// record and the time, and no content, so the connection's history stays
+// intact while the personal data is gone.
+message ProviderAccountProfileErasure {
+  trogonai.connections.types.v1alpha1.Digest profile_digest = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp erased_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}

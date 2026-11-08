@@ -7,6 +7,9 @@ date: 2026-07-18
 
 # ADR#0032: Model Route and Credential Binding
 
+> **Proposed connector refinement:** [ADR#0096](./0096-connection-use-by-agents.md) remains a draft. Non-model connections use their own attempt grant and authenticated HTTPS relay; model route bindings retain this ADR's meaning. This note does not change either ADR's status.
+
+
 ## Context
 
 Platform-managed model access requires an [AgentImplementation](../glossary/agentimplementation)

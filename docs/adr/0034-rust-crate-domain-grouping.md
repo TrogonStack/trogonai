@@ -47,6 +47,7 @@ Current groups:
 | `decider/` | Decider domain, runtime, WASM host, guest SDK, and sim. |
 | `aauth/` | Agent authentication crates. |
 | `scheduler/` | Scheduler domain and service. |
+| `policy/` | Policy evaluation: the pure bindings evaluator and the request-rule engines that narrow its decisions. |
 | `platform/` | Cross-cutting foundations and standalone services that are not part of a domain family (e.g. `trogon-std`, `trogon-nats`, `trogon-telemetry`, `trogonai-proto`, `trogon-gateway`). |
 
 ### Grouping rule

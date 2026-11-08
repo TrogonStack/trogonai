@@ -1,0 +1,33 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/audit/v1/chain_reset_reason.proto";
+import "trogonai/platform/audit/v1/writer_lifecycle_kind.proto";
+
+// WriterLifecycle is the detail of a record a writer writes about its own
+// chain, such as the record that opens a new chain.
+//
+// The writer id and the chain id are in the record's integrity, and the
+// component is in its subject, so neither is repeated here. It is a statement
+// about the writer, not a decision, so it carries no attribution.
+message WriterLifecycle {
+  option (buf.validate.message).cel = {
+    id: "writer_lifecycle.reset_reason_on_chain_reset"
+    message: "a chain reset states its reason, and no other kind has one"
+    expression: "(this.kind == trogonai.platform.audit.v1.WriterLifecycleKind.WRITER_LIFECYCLE_KIND_CHAIN_RESET) == has(this.reset_reason)"
+  };
+
+  WriterLifecycleKind kind = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ChainResetReason reset_reason = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}

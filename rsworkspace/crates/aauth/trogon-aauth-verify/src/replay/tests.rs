@@ -39,3 +39,38 @@ async fn expires_after_ttl() {
     now.store(1010, Ordering::SeqCst);
     assert!(store.check_and_insert("k", 5).await.unwrap());
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn contains_reports_a_live_record_without_creating_one() {
+    let store = InMemoryReplayStore::new();
+    assert!(!store.contains("k").await.unwrap());
+    assert!(store.check_and_insert("k", 60).await.unwrap());
+    assert!(store.contains("k").await.unwrap());
+    assert!(!store.contains("other").await.unwrap());
+    assert!(store.check_and_insert("other", 60).await.unwrap());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn contains_stops_reporting_a_record_once_it_expires() {
+    let now = std::sync::Arc::new(AtomicI64::new(1000));
+    let now_c = now.clone();
+    let store = InMemoryReplayStore::new().with_clock(move || now_c.load(Ordering::SeqCst));
+    assert!(store.check_and_insert("k", 5).await.unwrap());
+    now.store(1004, Ordering::SeqCst);
+    assert!(store.contains("k").await.unwrap());
+    now.store(1005, Ordering::SeqCst);
+    assert!(!store.contains("k").await.unwrap());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn contains_reports_a_poisoned_mutex() {
+    let store = std::sync::Arc::new(InMemoryReplayStore::new());
+    let s2 = std::sync::Arc::clone(&store);
+    let _ = std::thread::spawn(move || {
+        let _guard = s2.inner.lock().expect("acquire");
+        panic!("intentional poison");
+    })
+    .join();
+    let err = store.contains("k").await.unwrap_err();
+    assert!(matches!(err, ReplayError::MutexPoisoned), "got {err:?}");
+}
