@@ -1653,3 +1653,149 @@ async fn a_model_operation_queued_behind_uncertain_enrollment_observes_terminal_
     assert_eq!(committed.lock().expect("remote enrollment state").len(), 1);
     assert_eq!(calls.lock().expect("calls").len(), 1);
 }
+
+#[tokio::test(start_paused = true)]
+async fn heartbeat_uses_the_latest_valid_attachment_after_same_native_session_revalidation() {
+    let backend = backend(Default::default());
+    let calls = backend.calls.clone();
+    let enrollment_response = backend.enrollment.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter
+        .invoke(prompt("native_b", "generation_1"))
+        .await
+        .expect("first binding");
+    let loop_task = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move {
+            adapter
+                .run_heartbeat(trogon_peer_mcp::AvailabilityObservation::Ready)
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    let first: Vec<_> = calls
+        .lock()
+        .expect("calls")
+        .iter()
+        .filter_map(|call| match call {
+            ObservedCall::Heartbeat(request) => Some(request.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].attachment_ref.as_option(), Some(&attachment()));
+    let mut replacement = enrollment();
+    replacement
+        .attachment
+        .as_option_mut()
+        .expect("valid lease")
+        .attachment_ref
+        .as_option_mut()
+        .expect("valid attachment")
+        .generation = Some(2);
+    *enrollment_response.lock().expect("enrollment response") = replacement;
+    adapter
+        .invoke(prompt("native_b", "generation_2"))
+        .await
+        .expect("same native session revalidation");
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    let mut expected = attachment();
+    expected.generation = Some(2);
+    {
+        let observed = calls.lock().expect("calls");
+        let enrollments: Vec<_> = observed
+            .iter()
+            .filter_map(|call| match call {
+                ObservedCall::Enroll(request) => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(enrollments.len(), 2);
+        assert!(
+            enrollments
+                .iter()
+                .all(|request| request.native_session_id.as_deref() == Some("native_b"))
+        );
+        let preparations: Vec<_> = observed
+            .iter()
+            .filter_map(|call| match call {
+                ObservedCall::Prepare(request) => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(preparations.len(), 2);
+        assert_eq!(preparations[0].attachment_ref.as_option(), Some(&attachment()));
+        assert_eq!(preparations[1].attachment_ref.as_option(), Some(&expected));
+        let heartbeats: Vec<_> = observed
+            .iter()
+            .filter_map(|call| match call {
+                ObservedCall::Heartbeat(request) => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(heartbeats.len(), 2);
+        assert_eq!(heartbeats[0].attachment_ref.as_option(), Some(&attachment()));
+        assert_eq!(heartbeats[1].attachment_ref.as_option(), Some(&expected));
+        for heartbeat in heartbeats {
+            assert_eq!(
+                heartbeat.availability.as_ref().and_then(|value| value.as_known()),
+                Some(v1::PeerAvailability::PEER_AVAILABILITY_READY)
+            );
+            assert!(!heartbeat.active_at.is_set());
+            assert!(heartbeat.condition.is_none());
+        }
+    }
+    adapter.shutdown().await.expect("detach latest attachment");
+    loop_task.await.expect("heartbeat settles after shutdown");
+    let observed = calls.lock().expect("calls");
+    let detaches: Vec<_> = observed
+        .iter()
+        .filter_map(|call| match call {
+            ObservedCall::Detach(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(detaches.len(), 1);
+    assert_eq!(detaches[0].attachment_ref.as_option(), Some(&expected));
+}
+
+#[tokio::test(start_paused = true)]
+async fn heartbeat_waits_for_a_confirmed_attachment_when_the_native_session_is_only_reserved() {
+    use std::future::{Future as _, poll_fn};
+    use std::task::Poll;
+
+    let mut backend = backend(Default::default());
+    backend.enroll_delay = std::time::Duration::from_secs(3);
+    let calls = backend.calls.clone();
+    let committed = backend.committed_enrollments.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    let enrollment = adapter.invoke(prompt("native_b", "reserved_session"));
+    tokio::pin!(enrollment);
+    assert!(poll_fn(|cx| Poll::Ready(enrollment.as_mut().poll(cx).is_pending())).await);
+    assert_eq!(committed.lock().expect("remote enrollment state").len(), 1);
+    let heartbeat = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move {
+            adapter
+                .run_heartbeat(trogon_peer_mcp::AvailabilityObservation::Ready)
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+    assert_eq!(
+        calls.lock().expect("calls").len(),
+        1,
+        "an unconfirmed attachment must not emit a heartbeat"
+    );
+    let shutdown = adapter.shutdown();
+    tokio::pin!(shutdown);
+    assert!(poll_fn(|cx| Poll::Ready(shutdown.as_mut().poll(cx).is_pending())).await);
+    assert!(matches!(enrollment.await, Err(PeerMcpError::Detached)));
+    assert!(matches!(shutdown.await, Err(PeerMcpError::EnrollmentUncertain)));
+    heartbeat.await.expect("heartbeat settles after terminal cancellation");
+    assert_eq!(committed.lock().expect("remote enrollment state").len(), 1);
+    assert_eq!(calls.lock().expect("calls").len(), 1);
+}
