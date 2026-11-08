@@ -50,7 +50,7 @@ impl StdioPeer {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+        if let Some(profile) = SystemEnv.var_os("LLVM_PROFILE_FILE") {
             command.env("LLVM_PROFILE_FILE", profile);
         }
         let mut child = command.spawn()?;
