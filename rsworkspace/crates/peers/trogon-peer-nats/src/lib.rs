@@ -44,3 +44,10 @@ mod rpc_client;
 mod rpc_client_error;
 pub use rpc_client::PeerRpcClient;
 pub use rpc_client_error::PeerRpcClientError;
+
+mod rpc_application;
+mod rpc_backend;
+pub use rpc_application::PeerRpcApplication;
+pub use rpc_backend::PeerRpcBackend;
+
+mod rpc_fault;

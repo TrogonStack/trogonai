@@ -11,6 +11,7 @@ workspace = true
 buffa = { workspace = true }
 serde = { workspace = true }
 grpc-nats-micro = { workspace = true }
+trogon-peer-service = { path = "../trogon-peer-service" }
 trogon-decider-runtime = { workspace = true }
 trogonai-proto = { workspace = true, features = ["peers"] }
 async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
