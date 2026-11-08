@@ -424,13 +424,13 @@ fn disposal_replay_requires_receipt_identity_and_rejects_unowned_preparation() {
 #[test]
 fn disposal_cannot_emit_a_receipt_with_a_non_protobuf_leap_timestamp() {
     use chrono::TimeZone as _;
-    let at = chrono::Utc.timestamp_opt(time(59).timestamp(), 1_500_000_000).single().unwrap();
+    let at = chrono::Utc
+        .timestamp_opt(time(59).timestamp(), 1_500_000_000)
+        .single()
+        .unwrap();
     let command = DisposeMessage::new(evidence(0, 1), TerminalDisposition::Unavailable, at);
-    let result = DisposeMessage::decide(&enrolled("recipient", 55), &command);
-    assert!(matches!(
-        &result,
-        Err(MessageError::InvalidState(EvolveError::TimestampRange {
-            field: "receipt.decided_at",
-        }))
-    ), "{result:?}");
+    assert_eq!(
+        error(enrolled("recipient", 55), &command),
+        MessageError::InvalidState(EvolveError::TimestampRange { field: "receipt.decided_at" })
+    );
 }
