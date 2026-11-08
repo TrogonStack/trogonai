@@ -4,6 +4,7 @@ use std::process::ExitCode;
 
 use trogon_peer_mcp::{RuntimeConfig, RuntimeError, run_stdio};
 use trogon_std::env::SystemEnv;
+use trogon_std::signal::shutdown_signal;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -19,7 +20,8 @@ async fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             match error {
-                RuntimeError::StartupDeadline
+                RuntimeError::Stdio(_)
+                | RuntimeError::StartupDeadline
                 | RuntimeError::Connect(_)
                 | RuntimeError::ConnectReady(_)
                 | RuntimeError::Configure(_)
@@ -30,25 +32,5 @@ async fn main() -> ExitCode {
             }
             ExitCode::FAILURE
         }
-    }
-}
-
-async fn shutdown_signal() {
-    #[cfg(unix)]
-    {
-        let signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
-        match signal {
-            Ok(mut signal) => tokio::select! {
-                _ = signal.recv() => {},
-                _ = tokio::signal::ctrl_c() => {},
-            },
-            Err(_) => {
-                let _result = tokio::signal::ctrl_c().await;
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _result = tokio::signal::ctrl_c().await;
     }
 }

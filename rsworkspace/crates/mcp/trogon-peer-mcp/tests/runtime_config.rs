@@ -83,3 +83,37 @@ fn runtime_config_rejects_invalid_modes_tokens_observations_and_anonymous_auth()
     }
     Ok(())
 }
+
+#[test]
+fn runtime_configuration_preserves_broker_order_tls_and_unresolved_auth_for_each_observation()
+-> Result<(), Box<dyn std::error::Error>> {
+    use trogon_nats::{CredentialValue, NatsAuth, NatsTls};
+    use trogon_peer_mcp::AvailabilityObservation;
+
+    for (setting, observation) in [
+        ("ready", AvailabilityObservation::Ready),
+        ("busy", AvailabilityObservation::Busy),
+        ("blocked", AvailabilityObservation::Blocked),
+        ("draining", AvailabilityObservation::Draining),
+    ] {
+        let env = settings();
+        env.set("PEER_AVAILABILITY", setting);
+        env.set("NATS_URL", "tls://first.invalid:4222, tls://second.invalid:4222");
+        let config = RuntimeConfig::from_env(&env)?;
+        assert_eq!(
+            std::mem::discriminant(&config.availability()),
+            std::mem::discriminant(&observation)
+        );
+        assert_eq!(
+            config.nats().servers,
+            ["tls://first.invalid:4222", "tls://second.invalid:4222"]
+        );
+        assert!(matches!(config.nats().tls, Ok(NatsTls::Enabled { .. })));
+        assert!(matches!(
+            &config.nats().auth,
+            NatsAuth::Token(CredentialValue::Env(name)) if name == "CONNECTOR_TEST_TOKEN"
+        ));
+        assert_eq!(format!("{config:?}"), "RuntimeConfig { .. }");
+    }
+    Ok(())
+}

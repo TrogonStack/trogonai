@@ -5,6 +5,7 @@ mod connector_config;
 mod connector_config_input;
 mod message_metadata_projection;
 mod model_inputs;
+mod model_operation;
 mod model_tool_definitions;
 mod model_tools;
 mod native_binding;
@@ -46,3 +47,7 @@ mod runtime_error;
 pub use rpc_peer_backend::RpcPeerBackend;
 pub use runtime::{run_stdio, serve_connector};
 pub use runtime_error::RuntimeError;
+
+#[cfg(unix)]
+mod native_pipe;
+mod stdio_transport;

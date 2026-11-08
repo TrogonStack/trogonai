@@ -35,7 +35,13 @@ pub async fn run_stdio<F: Future<Output = ()> + Send>(config: RuntimeConfig, shu
     );
     let adapter =
         Arc::new(PeerMcp::new(RpcPeerBackend::new(rpc), config.connector_input()).map_err(RuntimeError::Configure)?);
-    let result = serve_connector(adapter, rmcp::transport::stdio(), config.availability(), shutdown).await;
+    let result = serve_connector(
+        adapter,
+        crate::stdio_transport::native_stdio().map_err(RuntimeError::Stdio)?,
+        config.availability(),
+        shutdown,
+    )
+    .await;
     let _drained = tokio::time::timeout(Duration::from_secs(1), client.drain()).await;
     result
 }
