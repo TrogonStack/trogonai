@@ -4949,46 +4949,70 @@ async fn public_send_rejects_a_leap_admission_clock_before_sealing_and_keeps_exa
         .ok_or(PeerPortError::Integrity)?;
     let ordinary = renewed_at + Duration::seconds(1);
     *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = ordinary;
-    let leap = chrono::Utc.timestamp_opt(ordinary.timestamp(), 1_500_000_000)
-        .single().ok_or(PeerPortError::Integrity)?;
+    let leap = chrono::Utc
+        .timestamp_opt(ordinary.timestamp(), 1_500_000_000)
+        .single()
+        .ok_or(PeerPortError::Integrity)?;
     let clock = SendAdmissionObservationClock {
-        live_at: ordinary, admission_at: leap, reads: std::sync::Arc::default(),
+        live_at: ordinary,
+        admission_at: leap,
+        reads: std::sync::Arc::default(),
     };
     let app = PeerApplication::new(
-        f.store.clone(), f.policy.clone(), clock.clone(), f.content.clone(),
-        f.cache.clone(), f.ids.clone(), f.catalog.clone(),
+        f.store.clone(),
+        f.policy.clone(),
+        clock.clone(),
+        f.content.clone(),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
     );
     let appends = f.store.appends.load(Ordering::SeqCst);
     let ids = f.ids.0.load(Ordering::SeqCst);
     let owner = f.alice.clone();
     let request = f.send("admission_clock", "durable message");
     let joined = tokio::spawn(async move { app.send(&owner, request).await }).await;
-    assert!(joined.is_ok(), "public send must reject an unrepresentable admission clock without panicking");
+    assert!(
+        joined.is_ok(),
+        "public send must reject an unrepresentable admission clock without panicking"
+    );
     assert!(matches!(
         joined?,
-        Err(PeerApplicationError::Evidence(MessageError::InvalidState(EvolveError::TimestampRange {
-            field: "accepted_at"
-        })))
+        Err(PeerApplicationError::Evidence(MessageError::InvalidState(
+            EvolveError::TimestampRange { field: "accepted_at" }
+        )))
     ));
     assert_eq!(clock.reads.load(Ordering::SeqCst), 2);
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
     assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
     assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
     assert_eq!(f.ids.0.load(Ordering::SeqCst), ids + 1);
-    let accepted = f.app().send(&f.alice, f.send("admission_clock", "durable message")).await?;
+    let accepted = f
+        .app()
+        .send(&f.alice, f.send("admission_clock", "durable message"))
+        .await?;
     assert_eq!(
         accepted.message.accepted_at,
         buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&ordinary))
     );
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
     let retry_clock = SendAdmissionObservationClock {
-        live_at: ordinary, admission_at: leap, reads: std::sync::Arc::default(),
+        live_at: ordinary,
+        admission_at: leap,
+        reads: std::sync::Arc::default(),
     };
     let retry_app = PeerApplication::new(
-        f.store.clone(), f.policy.clone(), retry_clock.clone(), f.content.clone(),
-        f.cache.clone(), f.ids.clone(), f.catalog.clone(),
+        f.store.clone(),
+        f.policy.clone(),
+        retry_clock.clone(),
+        f.content.clone(),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
     );
-    let retry = retry_app.send(&f.alice, f.send("admission_clock", "durable message")).await?;
+    let retry = retry_app
+        .send(&f.alice, f.send("admission_clock", "durable message"))
+        .await?;
     assert_eq!(retry, accepted);
     assert_eq!(retry_clock.reads.load(Ordering::SeqCst), 3);
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
@@ -5004,18 +5028,30 @@ async fn public_send_keeps_unsupported_admission_seconds_owned_by_the_renderer()
     use trogon_peer_service::{PeerApplication, PeerApplicationError, PeerClock, PeerPortError};
     for seconds in [-62_135_596_801, 253_402_300_800] {
         let f = Fixture::new().await?;
-        let invalid = chrono::Utc.timestamp_opt(seconds, 0).single().ok_or(PeerPortError::Integrity)?;
+        let invalid = chrono::Utc
+            .timestamp_opt(seconds, 0)
+            .single()
+            .ok_or(PeerPortError::Integrity)?;
         let clock = SendAdmissionObservationClock {
-            live_at: f.clock.now(), admission_at: invalid, reads: std::sync::Arc::default(),
+            live_at: f.clock.now(),
+            admission_at: invalid,
+            reads: std::sync::Arc::default(),
         };
         let app = PeerApplication::new(
-            f.store.clone(), f.policy.clone(), clock.clone(), f.content.clone(),
-            f.cache.clone(), f.ids.clone(), f.catalog.clone(),
+            f.store.clone(),
+            f.policy.clone(),
+            clock.clone(),
+            f.content.clone(),
+            f.cache.clone(),
+            f.ids.clone(),
+            f.catalog.clone(),
         );
         let appends = f.store.appends.load(Ordering::SeqCst);
         assert!(matches!(
             app.send(&f.alice, f.send("admission_seconds", "durable message")).await,
-            Err(PeerApplicationError::Context(trogon_peer_context::PeerContextError::ContractViolation))
+            Err(PeerApplicationError::Context(
+                trogon_peer_context::PeerContextError::ContractViolation
+            ))
         ));
         assert_eq!(clock.reads.load(Ordering::SeqCst), 2);
         assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);

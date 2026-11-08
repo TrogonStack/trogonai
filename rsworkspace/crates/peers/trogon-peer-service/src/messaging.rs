@@ -50,7 +50,13 @@ where
             .any(|entry| entry.idempotency_key.as_deref() == Some(key.as_str()))
         {
             let batch_id = BatchId::new("b".repeat(MAX_BATCH_ID_BYTES))?;
-            let mut admission_at = timestamp_from_datetime(&self.clock.now());
+            let admission_time = self.clock.now();
+            if admission_time.timestamp_subsec_nanos() >= 1_000_000_000 {
+                return Err(PeerApplicationError::Evidence(trogon_peer::MessageError::InvalidState(
+                    trogon_peer::EvolveError::TimestampRange { field: "accepted_at" },
+                )));
+            }
+            let mut admission_at = timestamp_from_datetime(&admission_time);
             admission_at.nanos = MAX_TIMESTAMP_NANOS;
             let batch = proto::PeerBatch {
                 batch_id: Some(batch_id.as_str().to_owned()),
