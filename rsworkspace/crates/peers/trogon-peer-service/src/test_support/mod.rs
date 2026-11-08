@@ -267,9 +267,13 @@ impl ContentSeal for DisposableContentFixture {
             scope.owner().tenant().clone(),
             SealedContentRef::new(proto::ClaimCheck {
                 storage_ref: proto::StorageLocator { value: Some(reference) }.into(),
-                digest: proto::Digest { algorithm: Some("sha256".into()),
-                    value: Some(<sha2::Sha256 as sha2::Digest>::digest(text.as_str().as_bytes()).to_vec()) }.into(),
-            }).map_err(|_| PeerPortError::Integrity)?,
+                digest: proto::Digest {
+                    algorithm: Some("sha256".into()),
+                    value: Some(<sha2::Sha256 as sha2::Digest>::digest(text.as_str().as_bytes()).to_vec()),
+                }
+                .into(),
+            })
+            .map_err(|_| PeerPortError::Integrity)?,
             text.as_str().len() as u32,
             fingerprint,
         )
@@ -293,7 +297,9 @@ impl ContentOpen for DisposableContentFixture {
             .cloned();
         if let Some(text) = &text {
             let fingerprints = self.fingerprints.lock().map_err(|_| PeerPortError::Unavailable)?;
-            if text.as_str().len() != binding.content().size() as usize
+            let integrity = <sha2::Sha256 as sha2::Digest>::digest(text.as_str().as_bytes());
+            if &integrity[..] != binding.content().reference().integrity_digest()
+                || text.as_str().len() != binding.content().size() as usize
                 || fingerprints.get(text.as_str()).map(Vec::as_slice) != Some(binding.content().semantic_fingerprint())
             {
                 return Err(PeerPortError::Integrity);
