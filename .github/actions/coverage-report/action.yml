@@ -1,0 +1,487 @@
+---
+# yamllint disable rule:line-length
+name: Code Coverage Report Action
+author: Inisghts Engineering
+description: Action that converts a Cobertura XML report into a markdown report.
+
+inputs:
+  token:
+    description: Github token to use to publish the check.
+    required: false
+    default: ${{ github.token }}
+  path:
+    description: Path to the Cobertura coverage XML report.
+    required: false
+    default: coverage.xml
+  threshold:
+    description: The minimum allowed coverage percentage, as a real number.
+    required: false
+    default: 0
+  fail:
+    description: Fail the action when the minimum coverage was not met.
+    required: false
+    default: true
+  publish:
+    description: Publish the coverage report as an issue comment.
+    required: false
+    default: false
+  diff:
+    description: Create a diff of the coverage report.
+    required: false
+    default: false
+  diff-branch:
+    description: Branch to diff against.
+    required: false
+    default: main
+  storage-subdirectory:
+    description: Subdirectory in the diff-storage branch where the XML reports will be stored.
+    required: false
+    default: "."
+  diff-storage:
+    description: Branch where coverage reports are stored for diff purposes.
+    required: false
+    default: _xml_coverage_reports
+  skip-diff-storage:
+    description: |
+      Skip all interactions with the `diff-storage` branch (fetch, diff
+      generation, badge build, commit, and push). When `true`, the action
+      only produces a coverage report from the input XML and does not
+      require write access to the repo. The PR comment falls back to a
+      text coverage line instead of the badge image.
+    required: false
+    default: false
+  coverage-summary-title:
+    description: Title for the code coverage summary in the Pull Request comment.
+    required: false
+    default: "Code Coverage Summary"
+  uncovered-statements-increase-failure:
+    description: |
+      Fail the action if any changed file has an increase in uncovered lines compared to the `diff-branch`.
+      This corresponds to pycobertura exit code 2, which indicates that at least one changed file has
+      more uncovered lines than before (Miss > 0). Note that this is different from coverage rate
+      reduction - it specifically checks for increases in the absolute number of uncovered lines.
+    required: false
+    default: false
+  new-uncovered-statements-failure:
+    description: |
+      Fail the action if new uncovered statements are introduced AND overall coverage improved
+      (total uncovered lines decreased) compared to the `diff-branch`.
+      This corresponds to pycobertura exit code 3, which only occurs when total uncovered lines
+      decreased (Miss <= 0) but there are still new uncovered statements (Missing != []).
+      To fail on ALL new uncovered statements regardless of overall coverage improvement,
+      use this flag together with `coverage-reduction-failure: true`.
+    required: false
+    default: false
+  coverage-rate-reduction-failure:
+    description: |
+      Fail the action if the overall coverage percentage (rate) decreases compared to the `diff-branch`.
+      This is different from `uncovered-statements-increase-failure` which checks for absolute
+      increases in uncovered lines. This flag specifically looks at the coverage percentage
+      and fails if it goes down, regardless of whether uncovered lines increased or decreased.
+      This is a more forgiving approach that focuses on the relative coverage rate rather than
+      absolute uncovered line counts.
+    required: false
+    default: false
+  pycobertura-exception-failure:
+    description: Fail the action in case of a `Pycobertura` exception.
+    required: false
+    default: true
+  togglable-report:
+    description: Make the code coverage report togglable.
+    required: false
+    default: false
+  report-low-coverage-only:
+    description: |
+      When true, the detailed coverage report will only include files where
+      coverage is less than 100%. The TOTAL summary line is always included.
+    required: false
+    default: false
+  exclude-detailed-coverage:
+    description: |
+      Whether a detailed coverage report should be excluded from the PR comment.
+      The detailed coverage report contains the following information per file:
+      number of code statements, number of statements not covered by any test,
+      coverage percentage, and line numbers not covered by any test.
+    required: false
+    default: false
+
+outputs:
+  summary:
+    description: Summary of coverage report
+    value: ${{ steps.create-output.outputs.summary }}
+
+branding:  # https://feathericons.com/
+  icon: "umbrella"
+  color: "red"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      with:
+        python-version: '3.11'
+
+    - name: Verify coverage publication
+      run: python3 "$GITHUB_ACTION_PATH/test_publish.py"
+      shell: bash
+
+    - name: Install pycobertura
+      uses: insightsengineering/pip-action@905c7a9be173f62965b791e91d0079355d99f19b # v2.0.2
+      with:
+        packages: pycobertura==3.0.0
+
+    - name: Get branch names
+      id: branch-names
+      uses: tj-actions/branch-names@6c999acf206f5561e19f46301bb310e9e70d8815 # v7.0.7
+
+    - name: Generate text report
+      run: |
+        mkdir -p coverage-action
+        cp ${{ inputs.path }} coverage-action/
+        pycobertura show ${{ inputs.path }} --output .coverage-output
+        if [[ "${{ inputs.report-low-coverage-only }}" == "true" ]]
+        then {
+          # Keep header lines, the TOTAL line, and any file with missed lines (Miss != 0)
+          awk 'NR<=2 || /^TOTAL / || $3 != 0' .coverage-output > .coverage-output.filtered
+          mv .coverage-output.filtered .coverage-output
+        }
+        fi
+        cat .coverage-output
+      shell: bash
+
+    - name: Fetch report from ${{ inputs.diff-storage }}
+      if: inputs.skip-diff-storage != 'true'
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      with:
+        path: ${{ inputs.diff-storage }}
+        ref: ${{ inputs.diff-storage }}
+        fetch-depth: 0
+        token: ${{ inputs.token }}
+
+    - name: Get token identity
+      if: inputs.skip-diff-storage != 'true'
+      id: identity
+      uses: octokit/graphql-action@f7836e89a7e5bac63911bbe9653c21147b3d9bc3
+      with:
+        query: |
+          query {
+            viewer {
+              databaseId
+              login
+            }
+          }
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+
+    - name: Configure git
+      if: inputs.skip-diff-storage != 'true'
+      run: |
+        name="${{ fromJSON(steps.identity.outputs.data).viewer.login }}"
+        email="${{ format('{0}+{1}@users.noreply.github.com', fromJSON(steps.identity.outputs.data).viewer.databaseId, fromJSON(steps.identity.outputs.data).viewer.login) }}"
+
+        cat >> "$GITHUB_ENV" << EOF
+        GIT_AUTHOR_NAME=$name
+        GIT_AUTHOR_EMAIL=$email
+        GIT_COMMITTER_NAME=$name
+        GIT_COMMITTER_EMAIL=$email
+        EOF
+      shell: bash
+
+    - name: Initialize storage branch
+      if: inputs.skip-diff-storage != 'true'
+      working-directory: ${{ inputs.diff-storage }}
+      env:
+        COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+        COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+        COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+        COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      run: |
+        git fetch --quiet origin "$COVERAGE_STORAGE_BRANCH"
+        git switch --force-create "$COVERAGE_STORAGE_BRANCH" FETCH_HEAD
+        python3 "$GITHUB_ACTION_PATH/publish.py" init
+        mkdir -p data
+        touch README.md data/.gitkeep
+        git add -f -- README.md data/.gitkeep
+        if ! git diff --cached --quiet; then
+          git commit -m "Initialize coverage storage"
+        fi
+      shell: bash
+
+    - name: Push storage branch
+      if: inputs.skip-diff-storage != 'true'
+      working-directory: ${{ inputs.diff-storage }}
+      env:
+        COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+        COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+        COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+        COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      run: python3 "$GITHUB_ACTION_PATH/publish.py" push
+      shell: bash
+
+    - name: Generate diff against ${{ inputs.diff-branch }}
+      if: contains(inputs.diff, 'true') && inputs.skip-diff-storage != 'true'
+      run: |
+        echo "storage_subdirectory = '${{ inputs.storage-subdirectory }}'"
+        pushd ${{ inputs.diff-storage }}
+        git checkout ${{ inputs.diff-storage }} || touch ${{ inputs.diff-storage }}-not-found
+        popd
+        if [[ -f "${{ inputs.diff-storage }}/data/${{ inputs.diff-branch }}/${{ inputs.storage-subdirectory }}/coverage.xml" && (! -f ${{ inputs.diff-storage }}-not-found) ]]
+        then {
+          pycobertura diff --no-color --no-source ${{ inputs.diff-storage }}/data/${{ inputs.diff-branch }}/${{ inputs.storage-subdirectory }}/coverage.xml \
+            ${{ inputs.path }} \
+            --output .coverage-output.diff && pycobertura_status=$? || pycobertura_status=$?
+            # Save status both in case of success and failure.
+            echo "pycobertura_status=$pycobertura_status" >> $GITHUB_ENV
+          cat .coverage-output.diff
+        } else {
+          echo "${{ inputs.diff-storage }}/data/${{ inputs.diff-branch }}/${{ inputs.storage-subdirectory }}/coverage.xml not found! Not diffing."
+        }
+        fi
+      shell: bash
+
+    - name: Extract diff-branch coverage percentage
+      if: contains(inputs.diff, 'true') && contains(inputs.coverage-rate-reduction-failure, 'true') && inputs.skip-diff-storage != 'true'
+      run: |
+        if [[ -f "${{ inputs.diff-storage }}/data/${{ inputs.diff-branch }}/${{ inputs.storage-subdirectory }}/coverage.xml" ]]
+        then {
+          # Generate a text report for the diff-branch coverage
+          pycobertura show ${{ inputs.diff-storage }}/data/${{ inputs.diff-branch }}/${{ inputs.storage-subdirectory }}/coverage.xml --output .coverage-output.diff-branch
+          # Extract the total coverage percentage
+          grep -E "^TOTAL " .coverage-output.diff-branch | \
+            awk '{printf "%.8f", (1 - $3/$2) * 100}' > .coverage-total.diff-branch
+          echo "Diff-branch coverage: $(cat .coverage-total.diff-branch)%"
+        } else {
+          echo "Diff-branch coverage file not found, cannot compare coverage rates."
+          echo "0" > .coverage-total.diff-branch
+        }
+        fi
+      shell: bash
+
+    - name: Get total
+      run: |
+        grep -E "^TOTAL " .coverage-output | \
+          awk '{printf "%.8f", (1 - $3/$2) * 100}' > .coverage-total
+      shell: bash
+
+    - name: Store coverage percent
+      id: coverage_percent
+      run: |
+        echo "coverage_total=$(cat .coverage-total)" >> $GITHUB_OUTPUT
+        BRANCH=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
+        echo "diff_storage_branch=$BRANCH" >> $GITHUB_ENV
+        mkdir -p ${{ inputs.diff-storage }}/data/${BRANCH}/${{ inputs.storage-subdirectory }}
+      shell: bash
+
+    # Use the output from the `coverage_percent` step
+    - name: Generate the badge SVG image
+      if: inputs.skip-diff-storage != 'true'
+      uses: emibcn/badge-action@808173dd03e2f30c980d03ee49e181626088eee8 # v2.0.3
+      id: badge
+      with:
+        label: 'Test Coverage'
+        status: "${{ steps.coverage_percent.outputs.coverage_total }}%"
+        color: ${{
+          steps.coverage_percent.outputs.coverage_total > 90 && 'green'              ||
+          steps.coverage_percent.outputs.coverage_total > 80 && 'yellow,green'       ||
+          steps.coverage_percent.outputs.coverage_total > 70 && 'yellow'             ||
+          steps.coverage_percent.outputs.coverage_total > 60 && 'orange,yellow'      ||
+          steps.coverage_percent.outputs.coverage_total > 50 && 'orange'             ||
+          steps.coverage_percent.outputs.coverage_total > 40 && 'red,orange'         ||
+          steps.coverage_percent.outputs.coverage_total > 30 && 'red,red,orange'     ||
+          steps.coverage_percent.outputs.coverage_total > 20 && 'red,red,red,orange' ||
+          'red' }}
+        path: ${{ inputs.diff-storage }}/data/${{ env.diff_storage_branch }}/${{ inputs.storage-subdirectory }}/badge.svg
+
+    - name: Commit badge
+      if: inputs.skip-diff-storage != 'true'
+      working-directory: ${{ inputs.diff-storage }}/data
+      run: |
+        git switch ${{ inputs.diff-storage }}
+        git add "${{ env.diff_storage_branch }}/${{ inputs.storage-subdirectory }}/badge.svg"
+        if ! git diff --cached --quiet; then
+          git commit -m "Add/Update badge: ${{ github.sha }}"
+        fi
+      shell: bash
+
+    # Badge has to be committed and pushed to be used in comment
+    - name: Push badges
+      if: inputs.skip-diff-storage != 'true'
+      working-directory: ${{ inputs.diff-storage }}
+      env:
+        COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+        COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+        COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+        COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      run: python3 "$GITHUB_ACTION_PATH/publish.py" push
+      shell: bash
+
+    - name: Determine repository visibility
+      if: contains(inputs.publish, 'true')
+      id: repository-visibility
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+      with:
+        script: |
+          const result = await github.rest.repos.get({
+            owner: "${{ github.repository_owner }}",
+            repo: "${{ github.repository }}".split("/")[1]
+          });
+          return result.data.visibility;
+        result-encoding: string
+
+    - name: Generate issue comment body
+      if: contains(inputs.publish, 'true')
+      run: |
+        BRANCH=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
+        if [[ "${{ steps.repository-visibility.outputs.result }}" == "public" && "${{ inputs.skip-diff-storage }}" != "true" ]]
+        then {
+          # URL encoding for branch name
+          URL_ENCODED_BRANCH=$(python3 -c 'import urllib.parse; print(urllib.parse.quote_plus("${{ env.diff_storage_branch }}"))')
+          echo -e "![badge](https://raw.githubusercontent.com/${{ github.repository_owner }}/${{ github.event.repository.name }}/${{ inputs.diff-storage }}/data/${URL_ENCODED_BRANCH}/${{ inputs.storage-subdirectory }}/badge.svg)\n\n" > .coverage-output.final
+        }
+        else {
+          echo -e "🧪 Test coverage: ${{ steps.coverage_percent.outputs.coverage_total }}%\n\n" > .coverage-output.final
+        }
+        fi
+        echo -e "## ${{ inputs.coverage-summary-title }}\n" >> .coverage-output.final
+        if [[ "${{ inputs.exclude-detailed-coverage }}" == "false" ]]
+        then {
+          if [[ "${{ inputs.togglable-report }}" == "true" ]]
+          then {
+            echo -e "<details>\n\n" >> .coverage-output.final
+          }
+          fi
+          echo -e "\`\`\`" >> .coverage-output.final
+          cat .coverage-output >> .coverage-output.final
+          echo -e "\n\`\`\`\n" >> .coverage-output.final
+          if [[ "${{ inputs.togglable-report }}" == "true" ]]
+          then {
+            echo -e "</details>\n\n" >> .coverage-output.final
+          }
+          fi
+        }
+        else {
+          echo -e "\n" >> .coverage-output.final
+        }
+        fi
+        if [[ "${{ inputs.diff }}" == "true" && -f .coverage-output.diff ]]
+        then {
+          echo -e "### Diff against ${{ inputs.diff-branch }}\n" >> .coverage-output.final
+          echo -e "\`\`\`" >> .coverage-output.final
+          cat .coverage-output.diff >> .coverage-output.final
+          echo -e "\n\`\`\`\n" >> .coverage-output.final
+        }
+        fi
+        COMMIT_SHA="${{ github.sha }}"
+        if [ "${{ github.event_name }}" == "pull_request" ]
+        then {
+          COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
+        }
+        fi
+        echo -e "\nResults for commit: $COMMIT_SHA\n" >> .coverage-output.final
+        echo -e "\n_Minimum allowed coverage is \`${{ inputs.threshold }}%\`_\n" >> .coverage-output.final
+        if [[ "${{ inputs.publish }}" == "true" ]]
+        then {
+          echo -e "\n:recycle: This comment has been updated with latest results\n" >> .coverage-output.final
+        }
+        fi
+      shell: bash
+
+    - name: Post as comment
+      if: contains(inputs.publish, 'true')
+      uses: marocchino/sticky-pull-request-comment@773744901bac0e8cbb5a0dc842800d45e9b2b405 # v2.9.4
+      with:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        header: ${{ inputs.path }}
+        path: .coverage-output.final
+
+    - name: Set as output
+      id: create-output
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        echo "summary<<$EOF" >> $GITHUB_OUTPUT
+        echo "$(cat .coverage-output.final)" >> $GITHUB_OUTPUT
+        echo "$EOF" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Commit XML report to ${{ inputs.diff-storage }}
+      if: >
+        contains(inputs.diff, 'true') && inputs.skip-diff-storage != 'true'
+      working-directory: ${{ inputs.diff-storage }}
+      run: |
+        git switch ${{ inputs.diff-storage }}
+        filename=$(basename ${{ inputs.path }})
+        mv ../coverage-action/${filename} ./data/${{ env.diff_storage_branch }}/${{ inputs.storage-subdirectory }}/coverage.xml
+        git add -f "./data/${{ env.diff_storage_branch }}/${{ inputs.storage-subdirectory }}/coverage.xml"
+        if ! git diff --cached --quiet; then
+          git commit -m "Coverage report for ${{ github.sha }}"
+        fi
+      shell: bash
+
+    - name: Push XML report to ${{ inputs.diff-storage }}
+      if: contains(inputs.diff, 'true') && inputs.skip-diff-storage != 'true'
+      working-directory: ${{ inputs.diff-storage }}
+      env:
+        COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+        COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+        COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+        COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      run: python3 "$GITHUB_ACTION_PATH/publish.py" push
+      shell: bash
+
+    - name: Check threshold
+      if: contains(inputs.fail, 'true')
+      run: |
+        with open('.coverage-total', 'r') as t:
+          total = float(t.read().rstrip())
+        min = float('${{ inputs.threshold }}')
+        if total < min:
+          raise SystemExit(
+            f"Total Coverage of {total}% falls below minimum threshold of {min}%."
+          )
+      shell: python
+
+    - name: Fail if coverage worsened
+      if: contains(inputs.diff, 'true')
+      run: |
+        if [[ "${{ env.pycobertura_status }}" == "2" && "${{ inputs.uncovered-statements-increase-failure }}" == "true" ]]
+        then {
+          echo "Code changes increased the number of uncovered lines in at least one file."
+          exit 1
+        }
+        fi
+        if [[ "${{ env.pycobertura_status }}" == "3" && "${{ inputs.new-uncovered-statements-failure }}" == "true" ]]
+        then {
+          echo "Code changes introduced new uncovered statements despite overall coverage improvement."
+          exit 1
+        }
+        fi
+        if [[ "${{ env.pycobertura_status }}" == "1" && "${{ inputs.pycobertura-exception-failure }}" == "true" ]]
+        then {
+          echo "Pycobertura exception occurred."
+          exit 1
+        }
+        fi
+        if [[ "${{ inputs.coverage-rate-reduction-failure }}" == "true" && -f .coverage-total.diff-branch ]]
+        then {
+          current_coverage=$(cat .coverage-total)
+          diff_branch_coverage=$(cat .coverage-total.diff-branch)
+          if (( $(echo "$current_coverage < $diff_branch_coverage" | bc -l) ))
+          then {
+            echo "Coverage rate decreased from ${diff_branch_coverage}% to ${current_coverage}%."
+            exit 1
+          }
+          fi
+        }
+        fi
+      shell: bash
+
+    - name: Clean up intermediate files
+      if: always()
+      run: |
+        rm -rf coverage-action .coverage-output.final .coverage-output \
+          .coverage-total .coverage-output.diff \
+          .coverage-output.diff-branch .coverage-total.diff-branch \
+          ${{ inputs.diff-storage }}-not-found
+      shell: bash
+
