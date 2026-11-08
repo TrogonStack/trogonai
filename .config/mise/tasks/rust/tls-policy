@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Enforce ADR#0015: fail if native-tls/OpenSSL enter the Rust dependency graph"
+#MISE dir="rsworkspace"
+
+exec cargo deny check bans "$@"

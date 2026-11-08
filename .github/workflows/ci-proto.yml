@@ -10,7 +10,7 @@ on:
       - 'buf.yaml'
       - 'buf.gen.yaml'
       - 'buf.lock'
-      - '.mise.toml'
+      - 'mise.toml'
       - '.config/mise/tasks/**'
       - 'tests/proto/**'
       - 'rsworkspace/crates/platform/trogonai-proto/src/gen/**'

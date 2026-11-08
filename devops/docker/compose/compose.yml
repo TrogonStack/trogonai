@@ -12,8 +12,9 @@ x-nats-client-env: &nats-client-env
 
 services:
   # Runs to completion on every `up`: creates the dev operator, the SYS, AUTH,
-  # PLATFORM and DEV accounts, and a creds file per NATS client, keeping any
-  # that already exist. See services/nats/bootstrap.sh.
+  # PLATFORM and DEV accounts, a creds file per NATS client and the auth
+  # callout's signing seeds, keeping any that already exist. See
+  # services/nats/bootstrap.sh.
   nats-bootstrap:
     image: natsio/nats-box:0.20.1
     entrypoint:
@@ -98,6 +99,117 @@ services:
       nats:
         condition: service_healthy
     restart: on-failure:3
+
+  # Runs to completion on every `up`: creates the PLATFORM key-value buckets
+  # that workloads open but never create, such as the AAUTH_REPLAY bucket an
+  # a2a-bridge in enforce refuses to start without (ADR#0082 Decision 4). See
+  # services/nats/provision-kv.sh.
+  nats-kv-provision:
+    image: natsio/nats-box:0.20.1
+    entrypoint:
+      - /bin/sh
+      - /bootstrap/provision-kv.sh
+    environment:
+      <<: *nats-client-env
+    volumes:
+      - ./services/nats:/bootstrap:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/nats
+        read_only: true
+        volume:
+          subpath: clients/kv-provisioner
+    depends_on:
+      nats-account-push:
+        condition: service_completed_successfully
+    restart: on-failure:3
+
+  # Runs to completion on every `up`: creates the PLATFORM audit streams, AUDIT
+  # and AUDIT_CHECKPOINT, that audit writers publish to but never create
+  # (platform audit record proposal, PR 766, Decision 2), with one replica.
+  # See services/nats/provision-audit.sh.
+  nats-audit-provision:
+    image: natsio/nats-box:0.20.1
+    entrypoint:
+      - /bin/sh
+      - /bootstrap/provision-audit.sh
+    environment:
+      <<: *nats-client-env
+    volumes:
+      - ./services/nats:/bootstrap:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/nats
+        read_only: true
+        volume:
+          subpath: clients/audit-provisioner
+    depends_on:
+      nats-account-push:
+        condition: service_completed_successfully
+    restart: on-failure:3
+
+  # Admits a client that connects without a user JWT and names the DEV account
+  # as its user into DEV, once its client certificate chains to the dev CA. Its
+  # settings, file references to its signing seeds included, are the
+  # callout.env that nats-bootstrap writes.
+  a2a-auth-callout:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/a2a-auth-callout/Dockerfile
+    entrypoint:
+      - /bin/sh
+      - -c
+      - set -a && . /run/secrets/nats/callout.env && set +a && exec /usr/local/bin/a2a-auth-callout
+    environment:
+      <<: *nats-client-env
+      RUST_LOG: "${RUST_LOG:-info}"
+    volumes:
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/nats
+        read_only: true
+        volume:
+          subpath: clients/auth-callout
+    depends_on:
+      nats:
+        condition: service_healthy
+      nats-account-push:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Subscribes to the A2A ingress wildcard in PLATFORM and forwards a request
+  # to its agent only once the Tier-1 declarative bundle mounted below allows
+  # it. The issuer public key and the audience that verify forwarded caller
+  # JWTs are in the gateway.env that nats-bootstrap writes. A bundle directory that is missing
+  # keeps the gateway from booting, so edit the bundle and restart rather than
+  # unmount it. See services/a2a-gateway/README.md.
+  a2a-gateway:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/a2a-gateway/Dockerfile
+    entrypoint:
+      - /bin/sh
+      - -c
+      - set -a && . /run/secrets/nats/gateway.env && set +a && exec /usr/local/bin/a2a-gateway
+    environment:
+      <<: *nats-client-env
+      A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED: "true"
+      A2A_GATEWAY_TIER1_BUNDLE_DIR: "/etc/a2a-gateway/policy"
+      RUST_LOG: "${RUST_LOG:-info}"
+    volumes:
+      - ./services/a2a-gateway/policy:/etc/a2a-gateway/policy:ro
+      - type: volume
+        source: dev_secrets
+        target: /run/secrets/nats
+        read_only: true
+        volume:
+          subpath: clients/a2a-gateway
+    depends_on:
+      nats:
+        condition: service_healthy
+      nats-account-push:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
   trogon-gateway:
     build:

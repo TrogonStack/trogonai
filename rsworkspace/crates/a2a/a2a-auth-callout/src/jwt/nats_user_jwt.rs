@@ -17,7 +17,7 @@ use super::{
 };
 use crate::constants::{HEADER_ALGORITHM, HEADER_TYPE};
 use crate::permissions::IssuedPermissions;
-use crate::signing_key_source::{MintingMaterial, SigningKeyHandle, SigningKeySource};
+use crate::signing_key_source::{MintingMaterial, SigningKeyHandle, VerifyingKey, VerifyingKeySource};
 
 #[derive(Serialize, Deserialize)]
 struct NatsJwtHeader {
@@ -105,7 +105,7 @@ pub(crate) fn mint_nats_user_jwt(
             version: 2,
             tags: None,
         },
-        issuer_account: Some(material.issuer_public()),
+        issuer_account: material.issuer_account().map(|tenant| tenant.as_str().to_owned()),
         ..Default::default()
     };
     let perm_claims = NatsPermissionClaims::from(&claims.nats_permissions);
@@ -176,21 +176,26 @@ pub(crate) fn mint_nats_user_jwt(
 }
 
 pub(crate) fn verify_nats_user_jwt(token: &str, handles: &[SigningKeyHandle]) -> Result<UserJwtClaims, JwtError> {
-    if handles.is_empty() {
+    let keys: Vec<VerifyingKey> = handles.iter().map(SigningKeyHandle::verifying_key).collect();
+    verify_nats_user_jwt_with_keys(token, &keys)
+}
+
+pub(crate) fn verify_nats_user_jwt_with_keys(token: &str, keys: &[VerifyingKey]) -> Result<UserJwtClaims, JwtError> {
+    if keys.is_empty() {
         return Err(JwtError::NoSigningKeyForKid);
     }
 
     let header_kid = peek_header_kid(token)?;
 
     if let Some(kid) = header_kid.as_deref()
-        && let Some(handle) = handles.iter().find(|h| h.version().as_str() == kid)
+        && let Some(key) = keys.iter().find(|k| k.version().is_some_and(|v| v.as_str() == kid))
     {
-        return verify_with_material(token, &handle.minting_material());
+        return verify_with_key(token, key);
     }
 
     let mut last_err = None;
-    for handle in handles {
-        match verify_with_material(token, &handle.minting_material()) {
+    for key in keys {
+        match verify_with_key(token, key) {
             Ok(claims) => return Ok(claims),
             Err(e) => last_err = Some(e),
         }
@@ -200,12 +205,12 @@ pub(crate) fn verify_nats_user_jwt(token: &str, handles: &[SigningKeyHandle]) ->
 
 pub(crate) fn verify_nats_user_jwt_with_source(
     token: &str,
-    source: &dyn SigningKeySource,
+    source: &(impl VerifyingKeySource + ?Sized),
 ) -> Result<UserJwtClaims, JwtError> {
-    verify_nats_user_jwt(token, &source.accepted())
+    verify_nats_user_jwt_with_keys(token, &source.accepted_verifying_keys())
 }
 
-fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJwtClaims, JwtError> {
+fn verify_with_key(token: &str, key: &VerifyingKey) -> Result<UserJwtClaims, JwtError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return Err(JwtError::Decode("invalid JWT segment count".into()));
@@ -220,13 +225,10 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
         .decode(parts[2].as_bytes())
         .map_err(|e| JwtError::Decode(e.to_string()))?;
     let signing_input = &token.as_bytes()[0..token.len() - parts[2].len() - 1];
-    material
-        .issuer_keypair()
-        .verify(signing_input, &decoded_sig)
-        .map_err(|e| JwtError::Decode(e.to_string()))?;
+    key.verify(signing_input, &decoded_sig)?;
 
     let payload: VerifiedPayload = decode_segment(parts[1])?;
-    if payload.iss != material.issuer_public() {
+    if payload.iss != key.issuer_public() {
         return Err(JwtError::Decode("issuer does not match signing key".into()));
     }
 

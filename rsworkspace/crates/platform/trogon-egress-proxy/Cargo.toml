@@ -18,6 +18,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 rustls = { workspace = true }
@@ -27,14 +28,20 @@ serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
 tokio-rustls = { workspace = true }
-tokio-util = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
 toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
-trogon-std = { workspace = true, features = ["signal"] }
+trogon-audit = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true, features = ["signal", "uuid"] }
 x509-parser = { workspace = true }
 
 [dev-dependencies]
+buffa = { workspace = true }
 rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
 tempfile = { workspace = true }
+trogon-audit = { workspace = true, features = ["test-support"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
+trogonai-proto = { workspace = true, features = ["audit"] }

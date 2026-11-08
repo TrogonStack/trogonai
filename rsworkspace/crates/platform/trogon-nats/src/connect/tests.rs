@@ -7,8 +7,10 @@ use crate::server_info::wait_for_server_info;
 use crate::test_support::CoreTestServer;
 use crate::tls::ClientCertificate;
 use tracing::subscriber::DefaultGuard;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use trogon_std::env::InMemoryEnv;
-use trogon_std::log_capture::{CapturedEvent, CapturedEvents, LevelFilter};
+use trogon_std::log_capture::{CapturedEvent, CapturedEvents, CapturedLogs, LevelFilter, LogLevel};
 use trogon_std::secret_string::SecretString;
 
 const TLS_DISABLED_WARNING: &str = "NATS TLS is disabled, which is only for tests and local debugging";
@@ -21,6 +23,7 @@ const REFUSED_DIAL_TIMEOUT: Duration = Duration::from_secs(1);
 const FAIL_FAST_DEADLINE: Duration = Duration::from_secs(5);
 const SHUFFLED_PASSES: usize = 32;
 const REFUSING_SERVER: &str = "127.0.0.1:1";
+const REFUSING_SERVER_WITH_USERINFO: &str = "nats://test-user:redaction-test-secret@127.0.0.1:1";
 const SERVER_TOKEN: &str = "server-token";
 const OTHER_TOKEN: &str = "other-token";
 
@@ -456,6 +459,17 @@ fn keep_another_subscriber_registered(max_level: LevelFilter) -> DefaultGuard {
 
 #[tokio::test]
 async fn connect_once_logs_the_servers_it_could_not_reach_instead_of_naming_them_in_the_error() {
+    {
+        let quiet = CapturedEvents::new();
+        let _guard = quiet.install(LevelFilter::ERROR);
+        let config = NatsConfig::from_url(REFUSING_SERVER).with_tls(NatsTls::Disabled);
+        assert!(
+            connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT)
+                .await
+                .is_err()
+        );
+        assert!(quiet.events().is_empty());
+    }
     let _registered = keep_another_subscriber_registered(LevelFilter::WARN);
     let events = CapturedEvents::new();
     let _guard = events.install(LevelFilter::WARN);
@@ -480,6 +494,83 @@ async fn connect_once_logs_the_servers_it_could_not_reach_instead_of_naming_them
             .field("servers")
             .is_some_and(|servers| servers.contains(REFUSING_SERVER)),
         "{failure:?}"
+    );
+    assert_eq!(failure.field("auth"), Some("none"));
+}
+
+#[tokio::test]
+async fn connect_once_reports_failures_to_log_only_consumers() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+    let config = NatsConfig::from_url(REFUSING_SERVER).with_tls(NatsTls::Disabled);
+
+    assert!(
+        connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT)
+            .await
+            .is_err()
+    );
+
+    let records = logs.records();
+    let failure = records
+        .iter()
+        .find(|record| record.message.contains(CONNECT_FAILURE_WARNING))
+        .expect("the connection failure reaches the log facade");
+    assert_eq!(failure.level, LogLevel::Warn);
+    assert!(failure.message.contains(REFUSING_SERVER), "{}", failure.message);
+    assert!(failure.message.contains("auth=none"), "{}", failure.message);
+}
+
+#[tokio::test]
+async fn connect_once_redacts_server_userinfo_from_failure_diagnostics() {
+    let _registered = keep_another_subscriber_registered(LevelFilter::WARN);
+    let events = CapturedEvents::new();
+    let _guard = events.install(LevelFilter::WARN);
+    let config = NatsConfig::from_url(REFUSING_SERVER_WITH_USERINFO).with_tls(NatsTls::Disabled);
+
+    let err = connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT)
+        .await
+        .unwrap_err();
+
+    let ConnectError::ConnectionFailed { servers, .. } = &err else {
+        panic!("expected a connection failure, got {err:?}");
+    };
+    assert_eq!(*servers, config.servers);
+    let failure = events
+        .events()
+        .into_iter()
+        .find(|event| event.message() == Some(CONNECT_FAILURE_WARNING))
+        .expect("the connection failure is logged");
+    let logged_servers = failure.field("servers").expect("the failed servers are logged");
+    assert!(logged_servers.contains("127.0.0.1:1"), "{logged_servers}");
+    assert!(!logged_servers.contains("test-user"), "{logged_servers}");
+    assert!(!logged_servers.contains("redaction-test-secret"), "{logged_servers}");
+}
+
+#[tokio::test]
+async fn connect_once_redacts_server_userinfo_from_log_facade_diagnostics() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+    let config = NatsConfig::from_url(REFUSING_SERVER_WITH_USERINFO).with_tls(NatsTls::Disabled);
+
+    assert!(
+        connect_once(&config, NatsAuth::None, REFUSED_DIAL_TIMEOUT)
+            .await
+            .is_err()
+    );
+
+    let records = logs.records();
+    let failure = records
+        .iter()
+        .find(|record| record.message.contains(CONNECT_FAILURE_WARNING))
+        .expect("the connection failure reaches the log facade");
+    assert!(failure.message.contains("127.0.0.1:1"), "{}", failure.message);
+    assert!(!failure.message.contains("test-user"), "{}", failure.message);
+    assert!(
+        !failure.message.contains("redaction-test-secret"),
+        "{}",
+        failure.message
     );
 }
 
@@ -716,6 +807,83 @@ async fn connect_does_not_warn_when_tls_is_on() {
         .unwrap();
 
     assert_eq!(tls_disabled_warnings(&events), 0);
+}
+/// Every field this crate records on its spans and events, so a test can prove
+/// that a value never reaches any of them, not just the one event it expects.
+#[derive(Clone, Default)]
+struct RecordedFields(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+struct FieldText<'a>(&'a mut Vec<String>);
+
+impl tracing::field::Visit for FieldText<'_> {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0.push(format!("{}={value:?}", field.name()));
+    }
+}
+
+impl RecordedFields {
+    fn install(&self) -> DefaultGuard {
+        tracing_subscriber::registry()
+            .with(LevelFilter::TRACE)
+            .with(self.clone())
+            .set_default()
+    }
+
+    fn fields(&self) -> Vec<String> {
+        self.0.lock().expect("recorded fields are not poisoned").clone()
+    }
+
+    fn record(&self, metadata: &tracing::Metadata<'_>, record: impl FnOnce(&mut FieldText<'_>)) {
+        if metadata.target().starts_with(env!("CARGO_CRATE_NAME")) {
+            record(&mut FieldText(
+                &mut self.0.lock().expect("recorded fields are not poisoned"),
+            ));
+        }
+    }
+}
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for RecordedFields {
+    fn on_new_span(
+        &self,
+        attrs: &tracing::span::Attributes<'_>,
+        _id: &tracing::span::Id,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        self.record(attrs.metadata(), |fields| attrs.record(fields));
+    }
+
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+        self.record(event.metadata(), |fields| event.record(fields));
+    }
+}
+
+#[tokio::test]
+async fn connect_once_keeps_server_userinfo_out_of_every_span_and_event() {
+    let server = CoreTestServer::start().await;
+    let address = format!("nats://test-user:redaction-test-secret@{}", server.address());
+    let config = NatsConfig::from_url(&address).with_tls(NatsTls::Disabled);
+    let _registered = keep_another_subscriber_registered(LevelFilter::WARN);
+    let recorded = RecordedFields::default();
+    let _guard = recorded.install();
+
+    let client = connect_once(&config, NatsAuth::None, PLAINTEXT_CONNECT_TIMEOUT)
+        .await
+        .unwrap();
+    client.flush().await.unwrap();
+
+    let fields = recorded.fields();
+    let logged_servers: Vec<&String> = fields.iter().filter(|field| field.starts_with("servers=")).collect();
+    assert!(logged_servers.len() >= 4, "{fields:?}");
+    assert!(
+        logged_servers.iter().all(|field| field.contains(server.address())),
+        "{fields:?}"
+    );
+    assert!(
+        fields
+            .iter()
+            .all(|field| !field.contains("test-user") && !field.contains("redaction-test-secret")),
+        "{fields:?}"
+    );
 }
 
 fn logged<'a>(events: &'a [CapturedEvent], message: &str) -> &'a CapturedEvent {

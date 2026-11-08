@@ -57,33 +57,6 @@ impl StreamingMaxInflightPerCaller {
     }
 }
 
-/// Validated identifier for the caller bucket in the per-caller inflight
-/// gate. Construction trims and refuses empty values so a configuration
-/// bug can't widen every caller into a single "" bucket.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct CallerKey(String);
-
-impl CallerKey {
-    pub fn new(raw: impl Into<String>) -> Result<Self, CallerKeyError> {
-        let value = raw.into();
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return Err(CallerKeyError::Empty);
-        }
-        Ok(Self(trimmed.to_owned()))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum CallerKeyError {
-    #[error("caller key must not be empty")]
-    Empty,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GatewayStreamingIngressConfig {
     max_ack_pending: StreamingMaxAckPending,
@@ -157,7 +130,6 @@ pub enum StreamingIngressKind {
 pub struct StreamingIngressSpawn {
     pub kind: StreamingIngressKind,
     pub reply: async_nats::Subject,
-    pub caller_key: CallerKey,
     pub caller: SubjectPrincipal,
 }
 
@@ -181,7 +153,7 @@ impl StreamingIngressSpawn {
 /// against the same gateway. The runtime constructs one instance and hands
 /// it to every `spawn_streaming_ingress_pump` call — otherwise each pump
 /// would build a fresh gate and `max_inflight_per_caller` would never
-/// constrain concurrent pumps for the same `caller_key`.
+/// constrain concurrent pumps for the same caller.
 #[derive(Clone)]
 pub struct StreamingIngressGate {
     inner: std::sync::Arc<CallerInflightGate>,
@@ -197,19 +169,19 @@ impl StreamingIngressGate {
         }
     }
 
-    fn try_acquire(&self, caller_key: &CallerKey) -> Option<CallerInflightPermit> {
-        self.inner.clone().try_acquire(caller_key)
+    pub(crate) fn try_acquire(&self, caller: &SubjectPrincipal) -> Option<CallerInflightPermit> {
+        self.inner.clone().try_acquire(caller)
     }
 }
 
 #[derive(Debug)]
-struct CallerInflightGate {
+pub(crate) struct CallerInflightGate {
     limit: usize,
-    inflight: Mutex<HashMap<String, usize>>,
+    inflight: Mutex<HashMap<SubjectPrincipal, usize>>,
 }
 
 impl CallerInflightGate {
-    fn new(limit: usize) -> Self {
+    pub(crate) fn new(limit: usize) -> Self {
         Self {
             limit,
             inflight: Mutex::new(HashMap::new()),
@@ -219,17 +191,16 @@ impl CallerInflightGate {
     /// Take a permit. Returns `None` once the per-caller bucket has reached
     /// the configured limit. The returned permit holds an `Arc` back to the
     /// gate so it can be moved into a spawned task and released on drop.
-    fn try_acquire(self: std::sync::Arc<Self>, caller_key: &CallerKey) -> Option<CallerInflightPermit> {
+    pub(crate) fn try_acquire(self: std::sync::Arc<Self>, caller: &SubjectPrincipal) -> Option<CallerInflightPermit> {
         // Recover from a poisoned lock — the inflight map is plain counters;
         // a partial inc/dec can't leave it logically corrupt, and panicking
         // every caller after an unrelated panic would turn the gate into a
         // service-wide DoS.
-        let key = caller_key.as_str().to_owned();
         let mut guard = match self.inflight.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        let count = guard.entry(key.clone()).or_insert(0);
+        let count = guard.entry(caller.clone()).or_insert(0);
         if *count >= self.limit {
             return None;
         }
@@ -237,7 +208,7 @@ impl CallerInflightGate {
         drop(guard);
         Some(CallerInflightPermit {
             gate: self,
-            caller_key: key,
+            caller: caller.clone(),
         })
     }
 }
@@ -245,7 +216,7 @@ impl CallerInflightGate {
 #[derive(Debug)]
 pub struct CallerInflightPermit {
     gate: std::sync::Arc<CallerInflightGate>,
-    caller_key: String,
+    caller: SubjectPrincipal,
 }
 
 impl Drop for CallerInflightPermit {
@@ -258,10 +229,10 @@ impl Drop for CallerInflightPermit {
         // decrements only its own key, so the entry is always present here.
         // Use `entry().or_insert(0)` instead of `if let Some` to avoid a
         // defensive branch that the type system already rules out.
-        let count = guard.entry(self.caller_key.clone()).or_insert(0);
+        let count = guard.entry(self.caller.clone()).or_insert(0);
         *count = count.saturating_sub(1);
         if *count == 0 {
-            guard.remove(&self.caller_key);
+            guard.remove(&self.caller);
         }
     }
 }
@@ -273,8 +244,8 @@ pub enum StreamingIngressSpawnError {
     /// The shared gate refused this spawn because the caller is already at
     /// `max_inflight_per_caller`. The request path should map this to a
     /// 429-style response to the caller.
-    #[error("caller {caller:?} is at the per-caller inflight limit")]
-    PerCallerLimit { caller: String },
+    #[error("caller {caller} is at the per-caller inflight limit")]
+    PerCallerLimit { caller: SubjectPrincipal },
 }
 
 /// Spawn the streaming-ingress pump on a background task.
@@ -283,6 +254,9 @@ pub enum StreamingIngressSpawnError {
 /// path can observe backpressure synchronously — otherwise the caller
 /// couldn't tell a successful spawn from one that the gate refused inside
 /// the spawned task. The permit moves into the task and releases on drop.
+/// Cancellation may already be set when this is called. A cancelled pump returns
+/// its permit without starting consumption. Once created, its ephemeral consumer
+/// is explicitly deleted on exit, with a bounded best-effort cleanup request.
 pub fn spawn_streaming_ingress_pump(
     client: async_nats::Client,
     prefix: A2aPrefix,
@@ -306,9 +280,9 @@ fn try_acquire_streaming_permit(
     gate: &StreamingIngressGate,
     spawn: &StreamingIngressSpawn,
 ) -> Result<CallerInflightPermit, StreamingIngressSpawnError> {
-    gate.try_acquire(&spawn.caller_key)
+    gate.try_acquire(&spawn.caller)
         .ok_or_else(|| StreamingIngressSpawnError::PerCallerLimit {
-            caller: spawn.caller_key.as_str().to_owned(),
+            caller: spawn.caller.clone(),
         })
 }
 
@@ -358,9 +332,17 @@ async fn run_streaming_ingress_pump(
     spawn: StreamingIngressSpawn,
     shutdown: CancellationToken,
 ) {
+    if shutdown.is_cancelled() {
+        return;
+    }
     let jetstream = jetstream::new(client.clone());
     let stream_name = events_stream_name(&prefix);
-    let stream = match jetstream.get_stream(&stream_name).await {
+    let opened = tokio::select! {
+        biased;
+        _ = shutdown.cancelled() => return,
+        result = jetstream.get_stream(&stream_name) => result,
+    };
+    let stream = match opened {
         Ok(stream) => stream,
         Err(error) => {
             warn!(
@@ -372,7 +354,7 @@ async fn run_streaming_ingress_pump(
         }
     };
 
-    let consumer_config = match &spawn.kind {
+    let mut consumer_config = match &spawn.kind {
         StreamingIngressKind::MessageStream { last_seq, .. } => {
             gateway_stream_events_consumer(&prefix, &spawn.caller, *last_seq, config.max_ack_pending.as_i64())
         }
@@ -385,33 +367,50 @@ async fn run_streaming_ingress_pump(
         ),
     };
 
-    let consumer = match stream.create_consumer(consumer_config).await {
-        Ok(consumer) => consumer,
-        Err(error) => {
-            warn!(error = %error, "gateway streaming ingress failed to create ephemeral consumer");
-            return;
-        }
-    };
+    // A host-owned name lets cancellation clean up an in-flight creation even
+    // when its acknowledgement has not arrived. The consumer remains ephemeral.
+    let consumer_name = format!("gateway_{}", uuid::Uuid::new_v4().simple());
+    consumer_config.name = Some(consumer_name.clone());
+    let consume = async {
+        let consumer = match stream.create_consumer(consumer_config).await {
+            Ok(consumer) => consumer,
+            Err(error) => {
+                warn!(error = %error, "gateway streaming ingress failed to create ephemeral consumer");
+                return;
+            }
+        };
+        let messages = match consumer.messages().await {
+            Ok(messages) => messages,
+            Err(error) => {
+                warn!(error = %error, "gateway streaming ingress messages stream unavailable");
+                return;
+            }
+        };
 
-    // `consumer.fetch().max_messages(1).messages()` would yield ONE batch
-    // and then close — the pump exited after a single event. Use the
-    // continuous `messages()` stream so the pump keeps pulling until the
-    // shutdown token fires or the consumer ends.
-    let messages = match consumer.messages().await {
-        Ok(messages) => messages,
-        Err(error) => {
-            warn!(error = %error, "gateway streaming ingress messages stream unavailable");
-            return;
-        }
+        let deliveries = messages.map(|item| {
+            item.map(|message| StreamingDelivery {
+                attempt: message.info().map(|info| info.delivered).unwrap_or(1),
+                message,
+            })
+        });
+        forward_stream_deliveries(&client, &spawn, shutdown.clone(), deliveries).await;
     };
+    tokio::select! {
+        biased;
+        _ = shutdown.cancelled() => {}
+        () = consume => {}
+    }
+    delete_streaming_consumer(&stream, &consumer_name).await;
+}
 
-    let deliveries = messages.map(|item| {
-        item.map(|message| StreamingDelivery {
-            attempt: message.info().map(|info| info.delivered).unwrap_or(1),
-            message,
-        })
-    });
-    forward_stream_deliveries(&client, &spawn, shutdown, deliveries).await;
+/// The SDK's response timeout starts after enqueueing. Bound the whole deletion
+/// so a saturated command queue cannot retain the caller permit after cancellation.
+async fn delete_streaming_consumer<I>(stream: &jetstream::stream::Stream<I>, name: &str) {
+    match tokio::time::timeout(std::time::Duration::from_secs(5), stream.delete_consumer(name)).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => warn!(%error, "gateway streaming consumer cleanup failed"),
+        Err(error) => warn!(%error, "gateway streaming consumer cleanup timed out"),
+    }
 }
 
 struct StreamingDelivery<M> {

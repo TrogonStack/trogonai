@@ -4,6 +4,7 @@ use trogon_nats::jetstream::mocks::{AckKindSnapshot, AckKindValue};
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 use super::super::*;
+use super::principal;
 use crate::gateway_test_support::{ObservedMessage, event, event_on};
 
 fn routed_event() -> async_nats::Message {
@@ -117,7 +118,7 @@ async fn unroutable_and_backpressured_ack_failures_preserve_context_and_retry_bu
     let client = AdvancedMockNatsClient::new();
     let attempts = Arc::new(ForwardAttempts::new());
     let gate = Arc::new(CallerInflightGate::new(1));
-    let held = gate.clone().try_acquire("person.alice").unwrap();
+    let held = gate.clone().try_acquire(&principal("person", "alice")).unwrap();
     for (message, expected) in [
         (
             ObservedMessage::with_failing_signals(event(async_nats::HeaderMap::new())),
@@ -152,10 +153,10 @@ async fn unroutable_and_backpressured_ack_failures_preserve_context_and_retry_bu
         assert_eq!(message.signals(), [AckKindSnapshot::AckWith(expected)]);
         assert!(attempts.by_sequence.lock().unwrap().is_empty());
         assert!(client.published_messages().is_empty());
-        assert!(gate.clone().try_acquire("person.bob").is_some());
+        assert!(gate.clone().try_acquire(&principal("person", "bob")).is_some());
     }
     drop(held);
-    assert!(gate.try_acquire("person.alice").is_some());
+    assert!(gate.try_acquire(&principal("person", "alice")).is_some());
 }
 
 #[tokio::test]
@@ -165,11 +166,27 @@ async fn a_caller_header_never_redirects_an_event_away_from_its_subject_principa
     headers.insert(a2a_nats::constants::REQ_ID_HEADER, "request-1");
     headers.insert(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "mallory");
     headers.insert(a2a_nats::constants::GATEWAY_PRINCIPAL_HEADER, "mallory");
+    headers.insert(a2a_auth_callout::CALLER_JWT_HEADER_NAME, "a.b.c");
     let message = ObservedMessage::new(event(headers));
 
     deliver(&client, &Arc::new(ForwardAttempts::new()), message.clone(), 41).await;
 
     assert_eq!(client.published_messages(), ["a2a.v1.gateway.person.alice.events"]);
+    let egress = client.published_headers();
+    let [egress] = egress.as_slice() else {
+        panic!("expected one egress publish, got {egress:?}");
+    };
+    assert_eq!(
+        egress.len(),
+        1,
+        "egress carries only the request correlation: {egress:?}"
+    );
+    assert_eq!(
+        egress
+            .get(a2a_nats::constants::REQ_ID_HEADER)
+            .map(async_nats::HeaderValue::as_str),
+        Some("request-1")
+    );
     assert_eq!(message.signals(), [AckKindSnapshot::DoubleAck]);
 }
 

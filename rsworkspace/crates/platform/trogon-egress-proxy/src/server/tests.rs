@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
     KeyPair, KeyUsagePurpose, SanType, string::Ia5String,
@@ -15,6 +16,7 @@ use tokio_rustls::TlsConnector;
 
 use super::*;
 use crate::audit::{AuditEvent, AuditSink};
+use crate::audit_error::AuditError;
 use crate::limits::Limits;
 use crate::mtls::server_config;
 use crate::policy_source::PolicySource;
@@ -27,9 +29,44 @@ const TRUST_DOMAIN: &str = "trogon.example";
 #[derive(Default)]
 struct Decisions(AtomicUsize);
 
+#[async_trait]
 impl AuditSink for Decisions {
-    fn record(&self, _: &AuditEvent<'_>) {
+    async fn record(&self, _: &AuditEvent<'_>) -> Result<(), AuditError> {
         self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// A sink with background work: it notes that it was told to flush, and only
+/// then that it finished.
+#[derive(Default)]
+struct Draining {
+    flushed: AtomicBool,
+}
+
+#[async_trait]
+impl AuditSink for Draining {
+    async fn record(&self, _: &AuditEvent<'_>) -> Result<(), AuditError> {
+        Ok(())
+    }
+
+    async fn run(&self, shutdown: CancellationToken) {
+        shutdown.cancelled().await;
+        self.flushed.store(true, Ordering::SeqCst);
+    }
+}
+
+/// A sink whose background work dies.
+struct Crashing;
+
+#[async_trait]
+impl AuditSink for Crashing {
+    async fn record(&self, _: &AuditEvent<'_>) -> Result<(), AuditError> {
+        Ok(())
+    }
+
+    async fn run(&self, _: CancellationToken) {
+        panic!("the drain task crashed");
     }
 }
 
@@ -136,6 +173,11 @@ impl Pki {
 }
 
 async fn server(tls: ServerConfig, limits: Limits) -> (Server, Arc<Decisions>) {
+    let decisions = Arc::new(Decisions::default());
+    (audited_server(tls, limits, decisions.clone()).await, decisions)
+}
+
+async fn audited_server(tls: ServerConfig, limits: Limits, audit: Arc<dyn AuditSink>) -> Server {
     let snapshot = StaticSnapshot::from_toml(
         PolicySource::StaticFile {
             path: PathBuf::from("policy.toml"),
@@ -143,17 +185,16 @@ async fn server(tls: ServerConfig, limits: Limits) -> (Server, Arc<Decisions>) {
         "[agents.agent-1]\nallow = [\"example.com:443\"]\n",
     )
     .expect("policy");
-    let decisions = Arc::new(Decisions::default());
     let proxy = Proxy::new(
         Arc::new(snapshot),
         Arc::new(SystemResolver),
-        decisions.clone(),
+        audit,
         limits,
         Default::default(),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let trust_domain = TrustDomain::new(TRUST_DOMAIN).expect("trust domain");
-    (Server::new(listener, Arc::new(tls), proxy, trust_domain), decisions)
+    Server::new(listener, Arc::new(tls), proxy, trust_domain)
 }
 
 /// Reads until the proxy closes the connection, however it does.
@@ -185,6 +226,27 @@ async fn a_client_that_never_finishes_the_handshake_is_dropped() {
     let mut client = TcpStream::connect(address).await.expect("connect");
     assert!(drain(&mut client).await.is_empty());
     assert_eq!(decisions.count(), 0);
+    stop(shutdown, task).await;
+}
+
+#[tokio::test]
+async fn the_audit_drain_runs_while_serving_and_has_flushed_when_run_returns() {
+    let audit = Arc::new(Draining::default());
+    let server = audited_server(Pki::new().strict_config(), Limits::default(), audit.clone()).await;
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(server.run(shutdown.clone()));
+
+    tokio::task::yield_now().await;
+    assert!(!audit.flushed.load(Ordering::SeqCst), "not before shutdown");
+    stop(shutdown, task).await;
+    assert!(audit.flushed.load(Ordering::SeqCst), "run returns only after the flush");
+}
+
+#[tokio::test]
+async fn a_crashed_audit_drain_does_not_take_the_server_down_with_it() {
+    let server = audited_server(Pki::new().strict_config(), Limits::default(), Arc::new(Crashing)).await;
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(server.run(shutdown.clone()));
     stop(shutdown, task).await;
 }
 

@@ -12,7 +12,10 @@ mod tests;
 pub use context::Tier3EvaluationContext;
 pub use decision::{Tier3EngineError, Tier3RedactionDecision, Tier3RefusalReason};
 pub use gate::{NoopTier3RedactionGate, Tier3RedactionGate};
-pub use manifest::{Tier3SkillManifest, load_tier3_manifests_from_bundle};
+pub use manifest::{
+    Tier3ManifestLoadError, Tier3SkillManifest, Tier3SkillManifestError, load_tier3_manifest_from_bundle,
+    load_tier3_manifests_from_bundle,
+};
 pub use real_gate::{RealTier3RedactionGate, Tier3PartInvoker};
 pub use rewrite::{RedactionRewrite, RedactionRewriteError, RewriteKind};
 
