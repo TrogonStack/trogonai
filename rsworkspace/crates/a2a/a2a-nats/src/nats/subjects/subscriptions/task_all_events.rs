@@ -1,10 +1,12 @@
 use crate::a2a_prefix::A2aPrefix;
 
-/// `{prefix}.v1.tasks.*.events`: filter subject covering every task's events.
+/// `{prefix}.v1.tasks.*.*.*.events`: filter subject covering every task's events, for
+/// every caller.
 ///
-/// The source of the `EVENTS` stream, and the filter for consumers that cannot narrow
-/// to one task: the gateway durable, which serves every caller, and the gateway's
-/// `message/stream` pump, which never sees the bootstrap reply that names the task.
+/// The source of the `EVENTS` stream, and the filter of the gateway durable, which
+/// serves every caller and egresses each event to the principal its subject names.
+/// A consumer that serves one caller narrows to
+/// [`super::CallerTaskEventsSubject`] instead.
 #[derive(Debug)]
 pub struct TaskAllEventsSubject {
     prefix: A2aPrefix,
@@ -18,7 +20,7 @@ impl TaskAllEventsSubject {
 
 impl std::fmt::Display for TaskAllEventsSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.v1.tasks.*.events", self.prefix.as_str())
+        write!(f, "{}.v1.tasks.*.*.*.events", self.prefix.as_str())
     }
 }
 

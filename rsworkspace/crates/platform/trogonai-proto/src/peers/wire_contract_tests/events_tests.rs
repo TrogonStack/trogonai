@@ -26,7 +26,10 @@ fn enrollment_attachment_and_heartbeat_facts_keep_their_own_payloads() {
         proto::PeerAttachedOwnedView,
         payload("peerAttached"),
         |handle| {
-            assert_eq!(handle.attachment().as_option().unwrap().attachment.generation, Some(7));
+            assert_eq!(
+                handle.attachment().as_option().unwrap().attachment_ref.generation,
+                Some(7)
+            );
         }
     );
     retained_message!(
@@ -35,7 +38,7 @@ fn enrollment_attachment_and_heartbeat_facts_keep_their_own_payloads() {
         payload("peerHeartbeatRecorded"),
         |handle| {
             assert_eq!(
-                handle.attachment().as_option().unwrap().attachment.connector_id,
+                handle.attachment().as_option().unwrap().attachment_ref.connector_id,
                 Some("connector_alpha")
             );
             assert_eq!(
@@ -54,7 +57,7 @@ fn enrollment_attachment_and_heartbeat_facts_keep_their_own_payloads() {
         proto::PeerDetachedOwnedView,
         payload("peerDetached"),
         |handle| {
-            assert_eq!(handle.attachment().as_option().unwrap().peer_id, Some("peer_alpha"));
+            assert_eq!(handle.attachment_ref().as_option().unwrap().peer_id, Some("peer_alpha"));
             assert!(handle.detached_at().is_set());
         }
     );
@@ -224,7 +227,7 @@ fn a_different_oneof_case_replaces_the_previous_case_without_mixing_facts() {
     let enrolled =
         assert_json_codec::<proto::PeerEvent>(json!({"peerEnrolled": {"enrollment": fixtures::enrollment()}}));
     let detached = assert_json_codec::<proto::PeerEvent>(
-        json!({"peerDetached": {"attachment": fixtures::attachment_ref(), "detachedAt": fixtures::LEASE_END}}),
+        json!({"peerDetached": {"attachmentRef": fixtures::attachment_ref(), "detachedAt": fixtures::LEASE_END}}),
     );
     let wire = [enrolled.encode_to_vec(), detached.encode_to_vec()].concat();
     assert_wire_codec(&wire, &detached);

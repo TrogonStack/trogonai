@@ -10,16 +10,26 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 pub mod challenge;
+mod challenge_kid;
+mod clock_tolerance;
 pub mod constants;
 pub mod delegation;
+pub mod freshness;
 pub mod http_pop;
 pub mod jkt;
+mod jti;
 pub mod jwks;
 pub mod jwks_cache;
 pub mod jwks_http;
 pub mod mission;
 pub mod nats_pop;
+mod nonce_ttl;
 pub mod replay;
+pub mod server_nonce;
+mod server_nonces;
+mod signature_freshness;
+mod signature_validity;
+mod signature_window;
 pub mod time_source;
 pub mod token;
 pub mod upstream;
@@ -31,14 +41,29 @@ pub use constants::{DEFAULT_NEGATIVE_TTL_SECS, DEFAULT_TTL_SECS, MAX_CHAIN_DEPTH
 pub use delegation::{
     DelegationError, FlattenedActEntry, flatten_act_chain, is_valid_agent_identifier, verify_act_chain,
 };
-pub use http_pop::{HttpPopError, HttpPopVerifier, HttpRequest, VerifiedAuthPresenter, VerifiedPresenter};
+pub use freshness::{
+    ClockTolerance, ClockToleranceError, FreshnessError, SignatureFreshness, SignatureValidity, SignatureValidityError,
+    SignatureWindow,
+};
+pub use http_pop::{
+    HttpPopBindingError, HttpPopError, HttpPopVerifier, HttpRequest, InvalidJtiError, Jti, SignatureParameter,
+    VerifiedAuthPresenter, VerifiedPresenter,
+};
 pub use jkt::jwk_thumbprint;
 pub use jwks::{JwksError, JwksResolver, StaticJwks};
 pub use jwks_cache::CachedJwksResolver;
 pub use jwks_http::{HttpJwksResolver, MaxResponseBytes, RequestTimeout, WellKnownDwk};
 pub use mission::{MissionError, extract_mission_claim, verify_mission_blob_hash, verify_mission_header_matches_claim};
 pub use nats_pop::{NatsHeaders, NatsPopError, NatsPopVerifier, NatsRequest};
-pub use replay::{InMemoryReplayStore, ReplayStore};
+#[cfg(feature = "nats-kv")]
+pub use replay::nats_kv::{
+    IncompatibleReplayBucketError, NatsKvReplayStore, RecordOutlivesBucketError, ReplayBucketError, ReplayBucketSpec,
+};
+pub use replay::{InMemoryReplayStore, ReplayError, ReplayStore};
+pub use server_nonce::{
+    ChallengeKey, ChallengeKeyError, ChallengeKid, EmptyChallengeKidError, NonceChallenge, NonceError, NonceIssueError,
+    NonceRequirement, NonceTtl, NonceTtlError, ServerNonce, ServerNonces,
+};
 pub use time_source::{SystemTimeSource, TimeSource};
 pub use token::{
     InvalidKeyMaterialSourceError, RequestContextError, RequestSigningContext, TokenError, TokenVerifier,

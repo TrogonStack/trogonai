@@ -1,13 +1,18 @@
+use nkeys::XKey;
+
 use super::*;
+use crate::admission_keys::CalloutXkey;
+use crate::credentials::oidc::BearerToken;
 
 #[test]
-fn bridge_mint_request_debug_redacts_nkey_and_jwt() {
+fn bridge_mint_request_debug_redacts_the_nkey_and_the_sealed_credential() {
+    let callout = CalloutXkey::from_seed(&XKey::new().seed().unwrap()).unwrap();
+    let credential = BridgeCredential::BearerToken(BearerToken::new("agent.jwt.value"));
     let request = BridgeMintRequest {
         user_nkey: Some("SUAABBCC".to_string()),
-        user_jwt: Some("agent.jwt.value".to_string()),
         account: Some("ACCT".to_string()),
-        client_info: None,
-        connect_opts: None,
+        sealed_credential: Some(SealedBridgeCredential::seal(&credential, &callout.public_key()).unwrap()),
+        ..BridgeMintRequest::default()
     };
     let debug_output = format!("{request:?}");
     assert!(!debug_output.contains("SUAABBCC"));
@@ -17,14 +22,14 @@ fn bridge_mint_request_debug_redacts_nkey_and_jwt() {
 }
 
 #[test]
-fn bridge_connect_opts_debug_redacts_api_key() {
-    let opts = BridgeConnectOpts {
-        auth_scheme: Some(BridgeAuthScheme::ApiKey),
-        api_key: Some("super-secret-key".to_string()),
-    };
-    let debug_output = format!("{opts:?}");
-    assert!(!debug_output.contains("super-secret-key"));
-    assert!(debug_output.contains("<redacted>"));
+fn a_bridge_mint_request_naming_a_plaintext_credential_does_not_decode() {
+    let documents = [
+        r#"{"account":"ACCT","user_jwt":"agent.jwt.value"}"#,
+        r#"{"account":"ACCT","connect_opts":{"auth_scheme":"api_key","api_key":"super-secret-key"}}"#,
+    ];
+    for document in documents {
+        assert!(serde_json::from_str::<BridgeMintRequest>(document).is_err());
+    }
 }
 
 #[test]

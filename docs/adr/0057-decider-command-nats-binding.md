@@ -7,6 +7,14 @@ date: 2026-08-15
 
 # ADR#0057: Decider Command NATS Binding
 
+> **Amended by [ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+> (2026-10-31).** The endpoint subject carries the principal the command runs
+> for, `[{tenant}.]{prefix}.{kind}.{id}.DeciderService.Decide`, and the host
+> subscribes with wildcards at the principal positions. The host derives the
+> principal from the delivered subject before it decodes the request, runs
+> every execution through an authorizer, and refuses to start with the tenant
+> wildcard until decider state is scoped by tenant.
+
 ## Context
 
 The WASM decider path is complete as a library. A component declares its command
@@ -100,11 +108,29 @@ document.
 The service declares one `rpc`, and therefore exposes one endpoint:
 
 ```text
-{prefix}.DeciderService.Decide
+[{tenant}.]{prefix}.{kind}.{id}.DeciderService.Decide
 ```
 
 `prefix` is the configured subject namespace, a dotted NATS token defaulting to
-`decider`, which yields `decider.DeciderService.Decide`.
+`decider`. `{kind}.{id}` is the principal the command runs for, under
+[ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+Decision 2, so the default prefix yields
+`decider.{kind}.{id}.DeciderService.Decide` and the host subscribes on
+`decider.*.*.DeciderService.Decide`. To a generated client the principal
+tokens are the tail of its configured prefix, which it builds with
+`PrincipalPrefix`. That maps the id the way every edge maps a verified
+credential's id, so an id the mapping does not carry verbatim, a multi-token
+or a longer one, travels in its `~` digest form; it refuses only an id
+already in that form and a prefix whose `Decide` subject exceeds
+[ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md)'s token budget.
+
+`{tenant}` follows `DECIDER_TENANT_POSITION`. `absent`, the default,
+subscribes without a tenant token, as a host inside a tenant's own account
+does. `wildcard` would subscribe with one ahead of the prefix, but the events
+stream, the snapshot bucket and the `CommandPrincipal` the host authorizes
+carry no tenant, so `DeciderHost::start` refuses it with
+`StartupError::StateNotScopedByTenant`: until decider state is scoped by
+tenant, a host serves one tenant account.
 
 **One method rather than one per command type.** 0016 derives an endpoint from
 each `rpc`, which requires the method set to be known when the schema is written.
@@ -124,10 +150,16 @@ part of the caller's contract.
 
 The endpoint subject is checked at startup against
 [ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md)'s shape and limit rules
-with `trogon_nats::validate_published_subject`. A host whose configured prefix
+with `trogon_nats::validate_published_subject`. The check runs on the shortest
+subject the subscription matches, each wildcard standing for a one-character
+token, so the principal positions, and the tenant position when present, count
+against the token budget. A host whose configured prefix
 pushes the subject past those limits can never receive a command, so it refuses to
 start rather than serving a subject nobody can reach. The casing rule does not
-apply: per 0016 the terminal is the method name verbatim, PascalCase included.
+apply: per 0016 the terminal is the method name verbatim, PascalCase included,
+and the id token carries the subject form that
+[ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
+Decision 1 fixes.
 
 ### 4. The request is one `DecideRequest`
 
@@ -260,8 +292,15 @@ asked determined that the answer was no.
 A denial is a service error for the same reason. Per
 [ADR#0026](./0026-command-authorization-principal.md) a denied command was
 refused before anything was read, decided, or appended, because the submitting
-principal was absent or the host's authorizer refused it. Nothing is broken and
-no retry of the same command by the same principal will fare differently, so the
+principal was absent or the host's authorizer refused it. The principal is the
+one the host derived from the delivered subject under
+[ADR#0082](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md),
+and a subject whose principal tokens name no principal is refused like an
+absent principal, before the request is decoded. A host without a policy of
+its own runs `AdmitAnyPrincipal`, which admits any derived principal, and
+`DeciderHost::with_authorizer` replaces it rather than disabling it. Nothing
+is broken and no retry of the same command by the same principal will fare
+differently, so the
 caller's correct response is different credentials rather than backoff, and an
 operator counting it is counting attempted access rather than service health. The
 two refusals are separate codes because the caller's next move differs:
@@ -293,7 +332,7 @@ The mapping from the runtime's error taxonomy is total:
 | --- | --- | --- | --- | --- |
 | `Rejected` | service error | `FAILED_PRECONDITION` | the module's own code, under the module's domain | No; the command is wrong, not the moment |
 | `Overloaded` | service error | `RESOURCE_EXHAUSTED` | `ADMISSION_LIMIT_REACHED` | Yes, after backoff |
-| `Unauthorized::MissingPrincipal` | service error | `UNAUTHENTICATED` | `PRINCIPAL_MISSING` | No; not without credentials |
+| `Unauthorized::MissingPrincipal`, subject naming no principal | service error | `UNAUTHENTICATED` | `PRINCIPAL_MISSING` | No; not without credentials |
 | `Unauthorized::Denied` | service error | `PERMISSION_DENIED` | `PRINCIPAL_UNAUTHORIZED` | No; not by this principal |
 | unrouted command type | service error | `UNIMPLEMENTED` | `COMMAND_TYPE_UNROUTABLE` | Only after a module claiming it activates |
 | undecodable request, unparseable field | service error | `INVALID_ARGUMENT` | `COMMAND_REQUEST_MALFORMED` | No |
@@ -339,19 +378,24 @@ does.
 
 A host records the spans and attributes the runtime already defines
 (`command_type`, `decision_outcome`, `guest_phase`, the replay and snapshot
-metrics), rather than introducing a transport-specific parallel vocabulary. The
-subject is one value for every command this host serves, so recording it
-alongside `command_type` would say nothing `command_type` does not.
+metrics), rather than introducing a transport-specific parallel vocabulary.
+Apart from its principal tokens, the subject is one value for every command
+this host serves, so recording it alongside `command_type` would say nothing
+about the command that `command_type` does not.
 
 ## Invariants
 
 - A responder covers its command surface with one subscription, on the endpoint
-  subject the descriptor names; per-command-type subscriptions are never used,
-  because they cannot track runtime activation.
+  subject the descriptor names, with wildcards at the principal positions;
+  per-command-type subscriptions are never used, because they cannot track
+  runtime activation.
 - The command type is read from `DecideRequest.command.type_url`. The host never
   decodes `command.value`.
 - Neither the module name, the module version, nor the command type appears in
   the endpoint subject.
+- The host reads the principal from the subject's principal positions before it
+  decodes the request, never from a header or the payload, and runs every
+  execution with that principal and an authorizer.
 - A reply is an error if, and only if, `Nats-Service-Error-Code` is present. A
   reply is never both a `DecideResponse` and a `Status`, and an outcome is never
   signalled by an absent or malformed reply.
@@ -479,9 +523,9 @@ of a caller being able to read a reply with types it already has.
   the wire, so an outcome can be split for an operator's benefit without being a
   breaking change for a caller.
 - An authorization policy written against the subject can no longer distinguish
-  one command type from another, because there is one subject. Per-command
-  authorization is the host's, via [ADR#0026](./0026-command-authorization-principal.md),
-  and not the broker's.
+  one command type from another, because there is one subject per principal.
+  Per-command authorization is the host's, via
+  [ADR#0026](./0026-command-authorization-principal.md), and not the broker's.
 
 ## Related ADRs
 
@@ -491,3 +535,4 @@ of a caller being able to read a reply with types it already has.
 - [ADR#0042: NATS Trace Context and Message Path Tracing](./0042-nats-trace-context-and-message-path-tracing.md)
 - [ADR#0045: Aggregate-Oriented Module Layout for Event-Sourced Services](./0045-event-sourced-service-module-layout.md)
 - [ADR#0055: NATS Subject Design for JSON-RPC Protocol Bindings](./0055-nats-subject-design-jsonrpc-bindings.md)
+- [ADR#0082: Inside the Bus the Principal Is Derived from the Subject, and Proof of Possession Is Enforced Only at the External Edge](./0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
