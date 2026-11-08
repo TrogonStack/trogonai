@@ -17,6 +17,7 @@ use crate::backend::{DetachPeer, HeartbeatPeer};
 use crate::connector_config::ConnectorConfig;
 use crate::detach_hook_input::DetachHookInput;
 use crate::detach_tool::detach_tool;
+use crate::model_operation::ModelOperation;
 use crate::model_tool_definitions::model_tool;
 use crate::model_tools;
 use crate::native_binding::NativeBinding;
@@ -173,43 +174,44 @@ where
     }
 
     pub async fn invoke(&self, request: CallToolRequestParams) -> Result<CallToolResult, PeerMcpError> {
-        match request.name.as_ref() {
+        let operation = match request.name.as_ref() {
             "peer_prompt_hook" => {
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-                tokio::select! {
+                return tokio::select! {
                     biased;
                     _ = self.stopped.cancelled() => Err(PeerMcpError::Detached),
                     result = tokio::time::timeout_at(deadline, self.prompt_hook(request)) => {
                         result.map_err(|_| PeerMcpError::PromptDeadline)?
                     }
-                }
+                };
             }
-            "peer_detach_hook" => self.detach_hook(request).await,
-            "peer_roster" | "peer_send" | "peer_status" | "peer_acknowledge_batch" => {
-                if self.stopped.is_cancelled() {
-                    return Err(PeerMcpError::Detached);
-                }
-                let _operation = self.operation.lock().await;
-                if self.stopped.is_cancelled() {
-                    return Err(PeerMcpError::Detached);
-                }
-                let attachment = self
-                    .binding
-                    .lock()
-                    .await
-                    .as_ref()
-                    .and_then(NativeBinding::attachment)
-                    .cloned()
-                    .ok_or(PeerMcpError::Unbound)?;
-                match request.name.as_ref() {
-                    "peer_roster" => model_tools::roster(&self.backend, request, &attachment).await,
-                    "peer_send" => model_tools::send(&self.backend, request, &attachment, &self.config).await,
-                    "peer_status" => model_tools::status(&self.backend, request, &attachment, &self.config).await,
-                    "peer_acknowledge_batch" => model_tools::acknowledge(&self.backend, request, &attachment).await,
-                    _ => Err(PeerMcpError::UnsupportedTool),
-                }
-            }
-            _ => Err(PeerMcpError::UnsupportedTool),
+            "peer_detach_hook" => return self.detach_hook(request).await,
+            "peer_roster" => ModelOperation::Roster,
+            "peer_send" => ModelOperation::Send,
+            "peer_status" => ModelOperation::Status,
+            "peer_acknowledge_batch" => ModelOperation::Acknowledge,
+            _ => return Err(PeerMcpError::UnsupportedTool),
+        };
+        if self.stopped.is_cancelled() {
+            return Err(PeerMcpError::Detached);
+        }
+        let _operation = self.operation.lock().await;
+        if self.stopped.is_cancelled() {
+            return Err(PeerMcpError::Detached);
+        }
+        let attachment = self
+            .binding
+            .lock()
+            .await
+            .as_ref()
+            .and_then(NativeBinding::attachment)
+            .cloned()
+            .ok_or(PeerMcpError::Unbound)?;
+        match operation {
+            ModelOperation::Roster => model_tools::roster(&self.backend, request, &attachment).await,
+            ModelOperation::Send => model_tools::send(&self.backend, request, &attachment, &self.config).await,
+            ModelOperation::Status => model_tools::status(&self.backend, request, &attachment, &self.config).await,
+            ModelOperation::Acknowledge => model_tools::acknowledge(&self.backend, request, &attachment).await,
         }
     }
 

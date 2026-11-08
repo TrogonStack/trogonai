@@ -104,6 +104,9 @@ impl Decider for SendMessage {
             .now
             .checked_add_signed(chrono::Duration::hours(1))
             .ok_or(EvolveError::InvalidMessageTransition)?;
+        if command.now.timestamp_subsec_nanos() >= 1_000_000_000 {
+            return Err(EvolveError::TimestampRange { field: "accepted_at" }.into());
+        }
         message.accepted_at = buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&command.now));
         message.expires_at = buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&expires));
         super::message_rules::metadata(&message)?;
