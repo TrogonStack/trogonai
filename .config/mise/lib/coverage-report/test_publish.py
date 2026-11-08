@@ -24,6 +24,7 @@ class PublicationTests(unittest.TestCase):
         run(self.base, 'git', 'init', '--bare', '--initial-branch=_xml_coverage_reports', str(self.remote))
         self.seed = self.clone('seed')
         self.change(self.seed, 'data/main/coverage.xml', 'immutable baseline')
+        self.change(self.seed, 'data/main/sources.json', 'immutable source binding')
         self.change(self.seed, 'data/pr/a/coverage.xml', 'old a')
         self.change(self.seed, 'data/pr/b/coverage.xml', 'old b')
         run(self.seed, 'git', 'push', '-u', 'origin', 'HEAD')
@@ -158,6 +159,86 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(self.remote_value('data/pr/a/coverage.xml'), 'new a')
         self.assertEqual(self.remote_value('data/pr/b/coverage.xml'), 'racing b')
 
+
+    def test_changed_baseline_source_sidecar_rejects_stale_publication(self):
+        a, b = self.clone('a'), self.clone('b')
+        self.invoke(a, 'pr/a', 'init')
+        self.change(a, 'data/pr/a/coverage.xml', 'new a')
+        self.change(b, 'data/main/sources.json', 'new source binding')
+        run(b, 'git', 'push', '--quiet', 'origin', 'HEAD')
+        rejected = self.invoke(a, 'pr/a', 'push', check=False)
+        self.assertEqual(rejected.returncode, 1)
+        self.assertIn('data/main/sources.json', rejected.stderr)
+        self.assertEqual(self.remote_value('data/pr/a/coverage.xml'), 'old a')
+
+    def test_competing_destination_sidecar_rejects_stale_publication(self):
+        a, b = self.clone('a'), self.clone('b')
+        self.invoke(a, 'pr/a', 'init')
+        self.change(a, 'data/pr/a/coverage.xml', 'new a')
+        self.change(b, 'data/pr/a/sources.json', 'racing source binding')
+        run(b, 'git', 'push', '--quiet', 'origin', 'HEAD')
+        rejected = self.invoke(a, 'pr/a', 'push', check=False)
+        self.assertEqual(rejected.returncode, 1)
+        self.assertIn('data/pr/a/sources.json', rejected.stderr)
+        self.assertEqual(self.remote_value('data/pr/a/coverage.xml'), 'old a')
+
+    def test_local_baseline_source_mutation_is_rejected(self):
+        a = self.clone('a')
+        self.invoke(a, 'pr/a', 'init')
+        self.change(a, 'data/main/sources.json', 'unapproved local source binding')
+        rejected = self.invoke(a, 'pr/a', 'push', check=False)
+        self.assertEqual(rejected.returncode, 1)
+        self.assertIn('local coverage comparison baseline changed', rejected.stderr)
+
+    def test_xml_source_pair_is_published_together(self):
+        a = self.clone('a')
+        self.invoke(a, 'pr/a', 'init')
+        self.change(a, 'data/pr/a/coverage.xml', 'new a')
+        self.change(a, 'data/pr/a/sources.json', 'new a source binding')
+        self.invoke(a, 'pr/a', 'push')
+        self.assertEqual(self.remote_value('data/pr/a/coverage.xml'), 'new a')
+        self.assertEqual(self.remote_value('data/pr/a/sources.json'), 'new a source binding')
+
+
+
+    def test_missing_baseline_source_sidecar_refuses_initialization(self):
+        a = self.clone('a')
+        run(a, 'git', 'rm', 'data/main/sources.json')
+        run(a, 'git', 'commit', '--quiet', '-m', 'fixture source removal')
+        rejected = self.invoke(a, 'pr/a', 'init', check=False)
+        self.assertEqual(rejected.returncode, 1)
+        self.assertIn('comparison baseline is missing', rejected.stderr)
+        self.assertEqual(self.remote_value('data/main/sources.json'), 'immutable source binding')
+
+    def test_baseline_source_change_between_fetch_and_push_rejects_retry(self):
+        import shlex
+        a, b = self.clone('a'), self.clone('b')
+        self.invoke(a, 'pr/a', 'init')
+        self.change(a, 'data/pr/a/coverage.xml', 'new a')
+        self.change(b, 'data/main/sources.json', 'new baseline binding during push')
+        hook = a / '.git/hooks/pre-push'
+        hook.write_text('#!/bin/sh\nrm -- "$0"\ngit -C ' + shlex.quote(str(b)) + ' push --quiet origin HEAD\n')
+        hook.chmod(0o755)
+        rejected = self.invoke(a, 'pr/a', 'push', check=False)
+        self.assertEqual(rejected.returncode, 1)
+        self.assertIn('data/main/sources.json', rejected.stderr)
+        self.assertEqual(self.remote_value('data/pr/a/coverage.xml'), 'old a')
+        self.assertEqual(self.remote_value('data/main/sources.json'), 'new baseline binding during push')
+
+    def test_destination_source_change_between_fetch_and_push_rejects_retry(self):
+        import shlex
+        a, b = self.clone('a'), self.clone('b')
+        self.invoke(a, 'pr/a', 'init')
+        self.change(a, 'data/pr/a/coverage.xml', 'new a')
+        self.change(b, 'data/pr/a/sources.json', 'new destination binding during push')
+        hook = a / '.git/hooks/pre-push'
+        hook.write_text('#!/bin/sh\nrm -- "$0"\ngit -C ' + shlex.quote(str(b)) + ' push --quiet origin HEAD\n')
+        hook.chmod(0o755)
+        rejected = self.invoke(a, 'pr/a', 'push', check=False)
+        self.assertEqual(rejected.returncode, 1)
+        self.assertIn('data/pr/a/sources.json', rejected.stderr)
+        self.assertEqual(self.remote_value('data/pr/a/coverage.xml'), 'old a')
+        self.assertEqual(self.remote_value('data/pr/a/sources.json'), 'new destination binding during push')
 
 
 if __name__ == "__main__":
