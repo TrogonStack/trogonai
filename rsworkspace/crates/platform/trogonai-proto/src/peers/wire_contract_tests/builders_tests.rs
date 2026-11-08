@@ -59,7 +59,8 @@ fn identity_builders_match_wire_fields_and_replace_only_the_selected_value() {
 #[test]
 fn message_builders_keep_the_content_reference_digest_and_reply_provenance() {
     let metadata: proto::MessageMetadata = nested(json!({
-        "contentRef": fixtures::content_ref(), "acceptedAt": fixtures::OBSERVED, "expiresAt": "2026-11-02T13:00:00Z"
+        "contentRef": fixtures::content_ref(), "semanticFingerprint": fixtures::semantic_fingerprint(),
+        "acceptedAt": fixtures::OBSERVED, "expiresAt": "2026-11-02T13:00:00Z"
     }));
     let metadata = metadata
         .with_message_id("message_outgoing")
@@ -237,6 +238,10 @@ fn scalar_builders_preserve_present_zero_and_empty_values_instead_of_absence() {
 
 #[test]
 fn claim_check_construction_keeps_the_storage_locator_and_digest_together() {
+    let semantic = proto::ContentSemanticFingerprint::default()
+        .with_value(vec![9; 32])
+        .with_value(vec![1; 32]);
+    assert_builder(semantic, fixtures::semantic_fingerprint());
     let locator = proto::StorageLocator::default()
         .with_value("discarded")
         .with_value("content_outgoing");
