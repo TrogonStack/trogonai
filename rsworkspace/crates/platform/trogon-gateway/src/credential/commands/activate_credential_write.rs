@@ -1,29 +1,27 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialMetadata, CredentialStreamId};
+use super::domain::{CredentialKey, CredentialMetadata};
 use super::proto::{activated_to_proto, decode_pending_write_state};
-use super::state::{
-    CredentialDecideError, CredentialEvolveError, validate_activation_metadata, validate_ref_matches_pending,
-};
+use super::state::{CredentialDecideError, CredentialEvolveError, ensure_active_metadata, ensure_recorded_identity};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActivateCredentialWrite {
-    stream_id: CredentialStreamId,
+    stream_id: CredentialKey,
     metadata: CredentialMetadata,
 }
 
 impl ActivateCredentialWrite {
     pub fn new(metadata: CredentialMetadata) -> Self {
         Self {
-            stream_id: CredentialStreamId::from(metadata.reference()),
+            stream_id: metadata.reference().key(),
             metadata,
         }
     }
 }
 
 impl Decider for ActivateCredentialWrite {
-    type StreamId = CredentialStreamId;
+    type StreamId = CredentialKey;
     type State = state_v1::CredentialStateSnapshot;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
@@ -53,10 +51,10 @@ impl Decider for ActivateCredentialWrite {
                 });
             }
         };
-        let (pending_id, pending_scope, pending_kind) = decode_pending_write_state(pending)?;
+        let identity = decode_pending_write_state(pending)?;
 
-        validate_activation_metadata(&command.metadata)?;
-        validate_ref_matches_pending(command.metadata.reference(), &pending_id, &pending_scope, pending_kind)?;
+        ensure_active_metadata(&command.metadata)?;
+        ensure_recorded_identity(&identity, command.metadata.reference().identity())?;
 
         Ok(Decision::event(v1::CredentialEvent {
             event: Some(activated_to_proto(&command.metadata).into()),

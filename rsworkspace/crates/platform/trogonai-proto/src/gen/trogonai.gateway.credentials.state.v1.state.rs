@@ -797,54 +797,17 @@ pub const __CREDENTIAL_MISSING_STATE_JSON_ANY: ::buffa::type_registry::JsonAnyEn
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct PendingCredentialWriteState {
-    /// Field 1: `credential_id`
-    #[serde(
-        rename = "credentialId",
-        alias = "credential_id",
-        with = "::buffa::json_helpers::proto_string"
-    )]
-    pub credential_id: ::buffa::alloc::string::String,
-    /// Field 2: `owner_id`
-    #[serde(
-        rename = "ownerId",
-        alias = "owner_id",
-        with = "::buffa::json_helpers::proto_string"
-    )]
-    pub owner_id: ::buffa::alloc::string::String,
-    /// Field 3: `source`
-    #[serde(
-        rename = "source",
-        with = "::buffa::json_helpers::opt_enum",
-        skip_serializing_if = "::core::option::Option::is_none"
-    )]
-    pub source: ::core::option::Option<
-        ::buffa::EnumValue<super::super::v1::CredentialSource>,
+    /// Field 1: `identity`
+    #[serde(rename = "identity")]
+    pub identity: ::buffa::MessageField<
+        super::super::v1::CredentialIdentity,
+        ::buffa::Inline<super::super::v1::CredentialIdentity>,
     >,
-    /// Field 4: `kind`
-    #[serde(
-        rename = "kind",
-        with = "::buffa::json_helpers::opt_enum",
-        skip_serializing_if = "::core::option::Option::is_none"
-    )]
-    pub kind: ::core::option::Option<
-        ::buffa::EnumValue<super::super::v1::CredentialKind>,
-    >,
-    /// Field 5: `scope_key`
-    #[serde(
-        rename = "scopeKey",
-        alias = "scope_key",
-        with = "::buffa::json_helpers::proto_string"
-    )]
-    pub scope_key: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for PendingCredentialWriteState {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("PendingCredentialWriteState")
-            .field("credential_id", &self.credential_id)
-            .field("owner_id", &self.owner_id)
-            .field("source", &self.source)
-            .field("kind", &self.kind)
-            .field("scope_key", &self.scope_key)
+            .field("identity", &self.identity)
             .finish()
     }
 }
@@ -854,28 +817,6 @@ impl PendingCredentialWriteState {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.PendingCredentialWriteState";
-}
-impl PendingCredentialWriteState {
-    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
-    #[inline]
-    ///Sets [`Self::source`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_source(
-        mut self,
-        value: impl Into<::buffa::EnumValue<super::super::v1::CredentialSource>>,
-    ) -> Self {
-        self.source = Some(value.into());
-        self
-    }
-    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
-    #[inline]
-    ///Sets [`Self::kind`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_kind(
-        mut self,
-        value: impl Into<::buffa::EnumValue<super::super::v1::CredentialKind>>,
-    ) -> Self {
-        self.kind = Some(value.into());
-        self
-    }
 }
 ::buffa::impl_default_instance!(PendingCredentialWriteState);
 impl ::buffa::MessageName for PendingCredentialWriteState {
@@ -893,37 +834,35 @@ impl ::buffa::Message for PendingCredentialWriteState {
     /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
     /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.credential_id) as u64;
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.owner_id) as u64;
-        if let Some(ref v) = self.source {
-            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
+        if self.identity.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.identity.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        if let Some(ref v) = self.kind {
-            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
-        }
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.scope_key) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::types::put_string_field(1u32, &self.credential_id, buf);
-        ::buffa::types::put_string_field(2u32, &self.owner_id, buf);
-        if let Some(ref v) = self.source {
-            ::buffa::types::put_int32_field(3u32, v.to_i32(), buf);
+        if self.identity.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                1u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.identity.write_to(__cache, buf);
         }
-        if let Some(ref v) = self.kind {
-            ::buffa::types::put_int32_field(4u32, v.to_i32(), buf);
-        }
-        ::buffa::types::put_string_field(5u32, &self.scope_key, buf);
     }
     fn merge_field(
         &mut self,
@@ -941,39 +880,11 @@ impl ::buffa::Message for PendingCredentialWriteState {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.credential_id, buf)?;
-            }
-            2u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
+                ::buffa::Message::merge_length_delimited(
+                    self.identity.get_or_insert_default(),
+                    buf,
+                    ctx,
                 )?;
-                ::buffa::types::merge_string(&mut self.owner_id, buf)?;
-            }
-            3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                self.source = ::core::option::Option::Some(
-                    ::buffa::EnumValue::from(::buffa::types::decode_int32(buf)?),
-                );
-            }
-            4u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                self.kind = ::core::option::Option::Some(
-                    ::buffa::EnumValue::from(::buffa::types::decode_int32(buf)?),
-                );
-            }
-            5u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::types::merge_string(&mut self.scope_key, buf)?;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -982,11 +893,7 @@ impl ::buffa::Message for PendingCredentialWriteState {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.credential_id.clear();
-        self.owner_id.clear();
-        self.source = ::core::option::Option::None;
-        self.kind = ::core::option::Option::None;
-        self.scope_key.clear();
+        self.identity = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for PendingCredentialWriteState {
@@ -1013,25 +920,37 @@ pub const __PENDING_CREDENTIAL_WRITE_STATE_JSON_ANY: ::buffa::type_registry::Jso
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct ActiveCredentialState {
-    /// Field 1: `metadata`
-    #[serde(rename = "metadata")]
-    pub metadata: ::buffa::MessageField<
-        CredentialMetadata,
-        ::buffa::Inline<CredentialMetadata>,
+    /// Field 1: `identity`
+    #[serde(rename = "identity")]
+    pub identity: ::buffa::MessageField<
+        super::super::v1::CredentialIdentity,
+        ::buffa::Inline<super::super::v1::CredentialIdentity>,
     >,
-    /// Field 2: `previous_versions`
+    /// Field 2: `version`
+    #[serde(
+        rename = "version",
+        with = "::buffa::json_helpers::opt_uint64",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub version: ::core::option::Option<u64>,
+    /// Field 3: `fingerprint`
+    #[serde(rename = "fingerprint", with = "::buffa::json_helpers::proto_string")]
+    pub fingerprint: ::buffa::alloc::string::String,
+    /// Field 4: `previous_versions`
     #[serde(
         rename = "previousVersions",
         alias = "previous_versions",
-        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
-        deserialize_with = "::buffa::json_helpers::null_as_default"
+        with = "::buffa::json_helpers::proto_seq",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec"
     )]
-    pub previous_versions: ::buffa::alloc::vec::Vec<super::super::v1::CredentialRef>,
+    pub previous_versions: ::buffa::alloc::vec::Vec<u64>,
 }
 impl ::core::fmt::Debug for ActiveCredentialState {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("ActiveCredentialState")
-            .field("metadata", &self.metadata)
+            .field("identity", &self.identity)
+            .field("version", &self.version)
+            .field("fingerprint", &self.fingerprint)
             .field("previous_versions", &self.previous_versions)
             .finish()
     }
@@ -1042,6 +961,15 @@ impl ActiveCredentialState {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.ActiveCredentialState";
+}
+impl ActiveCredentialState {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::version`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_version(mut self, value: u64) -> Self {
+        self.version = Some(value);
+        self
+    }
 }
 ::buffa::impl_default_instance!(ActiveCredentialState);
 impl ::buffa::MessageName for ActiveCredentialState {
@@ -1063,21 +991,25 @@ impl ::buffa::Message for ActiveCredentialState {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        if self.metadata.is_set() {
+        if self.identity.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.metadata.compute_size(__cache);
+            let inner_size = self.identity.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
-        for v in &self.previous_versions {
-            let __slot = __cache.reserve();
-            let inner_size = v.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
-                    + inner_size as u64;
+        if let Some(v) = self.version {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
+        }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.fingerprint) as u64;
+        if !self.previous_versions.is_empty() {
+            let payload: u64 = self
+                .previous_versions
+                .iter()
+                .map(|&v| ::buffa::types::uint64_encoded_len(v) as u64)
+                .sum::<u64>();
+            size += 1u64 + ::buffa::encoding::varint_len(payload) as u64 + payload;
         }
         ::buffa::saturate_size(size)
     }
@@ -1088,21 +1020,28 @@ impl ::buffa::Message for ActiveCredentialState {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        if self.metadata.is_set() {
+        if self.identity.is_set() {
             ::buffa::types::put_len_delimited_header(
                 1u32,
                 u64::from(__cache.consume_next()),
                 buf,
             );
-            self.metadata.write_to(__cache, buf);
+            self.identity.write_to(__cache, buf);
         }
-        for v in &self.previous_versions {
-            ::buffa::types::put_len_delimited_header(
-                2u32,
-                u64::from(__cache.consume_next()),
-                buf,
-            );
-            v.write_to(__cache, buf);
+        if let Some(v) = self.version {
+            ::buffa::types::put_uint64_field(2u32, v, buf);
+        }
+        ::buffa::types::put_string_field(3u32, &self.fingerprint, buf);
+        if !self.previous_versions.is_empty() {
+            let payload: u64 = self
+                .previous_versions
+                .iter()
+                .map(|&v| ::buffa::types::uint64_encoded_len(v) as u64)
+                .sum::<u64>();
+            ::buffa::types::put_len_delimited_header(4u32, payload, buf);
+            for &v in &self.previous_versions {
+                ::buffa::types::encode_uint64(v, buf);
+            }
         }
     }
     fn merge_field(
@@ -1122,7 +1061,7 @@ impl ::buffa::Message for ActiveCredentialState {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 ::buffa::Message::merge_length_delimited(
-                    self.metadata.get_or_insert_default(),
+                    self.identity.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
@@ -1130,14 +1069,58 @@ impl ::buffa::Message for ActiveCredentialState {
             2u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.version = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint64(buf)?,
+                );
+            }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                let mut elem = ::core::default::Default::default();
-                ctx.register_element_memory(
-                    ::buffa::__private::element_footprint(&elem),
-                )?;
-                ::buffa::Message::merge_length_delimited(&mut elem, buf, ctx)?;
-                self.previous_versions.push(elem);
+                ::buffa::types::merge_string(&mut self.fingerprint, buf)?;
+            }
+            4u32 => {
+                if tag.wire_type() == ::buffa::encoding::WireType::LengthDelimited {
+                    let len = ::buffa::encoding::decode_varint(buf)?;
+                    let len = usize::try_from(len)
+                        .map_err(|_| ::buffa::DecodeError::MessageTooLarge)?;
+                    if buf.remaining() < len {
+                        return ::core::result::Result::Err(
+                            ::buffa::DecodeError::UnexpectedEof,
+                        );
+                    }
+                    if buf.chunk().len() >= len {
+                        ::buffa::types::extend_packed_uint64(
+                            &buf.chunk()[..len],
+                            &mut self.previous_versions,
+                            len,
+                        )?;
+                        buf.advance(len);
+                    } else {
+                        self.previous_versions.reserve(len);
+                        let mut limited = buf.take(len);
+                        while limited.has_remaining() {
+                            self.previous_versions
+                                .push(::buffa::types::decode_uint64_packed(&mut limited)?);
+                        }
+                        let leftover = limited.remaining();
+                        if leftover > 0 {
+                            limited.advance(leftover);
+                        }
+                    }
+                } else if tag.wire_type() == ::buffa::encoding::WireType::Varint {
+                    self.previous_versions.push(::buffa::types::decode_uint64(buf)?);
+                } else {
+                    return ::core::result::Result::Err(
+                        ::buffa::encoding::wire_type_mismatch(
+                            tag,
+                            ::buffa::encoding::WireType::LengthDelimited,
+                        ),
+                    );
+                }
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -1146,7 +1129,9 @@ impl ::buffa::Message for ActiveCredentialState {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.metadata = ::buffa::MessageField::none();
+        self.identity = ::buffa::MessageField::none();
+        self.version = ::core::option::Option::None;
+        self.fingerprint.clear();
         self.previous_versions.clear();
     }
 }
@@ -1174,30 +1159,21 @@ pub const __ACTIVE_CREDENTIAL_STATE_JSON_ANY: ::buffa::type_registry::JsonAnyEnt
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct FailedCredentialWriteState {
-    /// Field 1: `credential_id`
-    #[serde(
-        rename = "credentialId",
-        alias = "credential_id",
-        with = "::buffa::json_helpers::proto_string"
-    )]
-    pub credential_id: ::buffa::alloc::string::String,
+    /// Field 1: `identity`
+    #[serde(rename = "identity")]
+    pub identity: ::buffa::MessageField<
+        super::super::v1::CredentialIdentity,
+        ::buffa::Inline<super::super::v1::CredentialIdentity>,
+    >,
     /// Field 2: `reason`
     #[serde(rename = "reason", with = "::buffa::json_helpers::proto_string")]
     pub reason: ::buffa::alloc::string::String,
-    /// Field 3: `owner_id`
-    #[serde(
-        rename = "ownerId",
-        alias = "owner_id",
-        with = "::buffa::json_helpers::proto_string"
-    )]
-    pub owner_id: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for FailedCredentialWriteState {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("FailedCredentialWriteState")
-            .field("credential_id", &self.credential_id)
+            .field("identity", &self.identity)
             .field("reason", &self.reason)
-            .field("owner_id", &self.owner_id)
             .finish()
     }
 }
@@ -1224,25 +1200,37 @@ impl ::buffa::Message for FailedCredentialWriteState {
     /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
     /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.credential_id) as u64;
+        if self.identity.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.identity.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         size += 1u64 + ::buffa::types::string_encoded_len(&self.reason) as u64;
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.owner_id) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::types::put_string_field(1u32, &self.credential_id, buf);
+        if self.identity.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                1u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.identity.write_to(__cache, buf);
+        }
         ::buffa::types::put_string_field(2u32, &self.reason, buf);
-        ::buffa::types::put_string_field(3u32, &self.owner_id, buf);
     }
     fn merge_field(
         &mut self,
@@ -1260,7 +1248,11 @@ impl ::buffa::Message for FailedCredentialWriteState {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.credential_id, buf)?;
+                ::buffa::Message::merge_length_delimited(
+                    self.identity.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
             }
             2u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -1269,13 +1261,6 @@ impl ::buffa::Message for FailedCredentialWriteState {
                 )?;
                 ::buffa::types::merge_string(&mut self.reason, buf)?;
             }
-            3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::types::merge_string(&mut self.owner_id, buf)?;
-            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -1283,9 +1268,8 @@ impl ::buffa::Message for FailedCredentialWriteState {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.credential_id.clear();
+        self.identity = ::buffa::MessageField::none();
         self.reason.clear();
-        self.owner_id.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for FailedCredentialWriteState {
@@ -1435,17 +1419,25 @@ pub const __ROTATION_PENDING_CREDENTIAL_STATE_JSON_ANY: ::buffa::type_registry::
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct RevokedCredentialState {
-    /// Field 1: `credential_ref`
-    #[serde(rename = "credentialRef", alias = "credential_ref")]
-    pub credential_ref: ::buffa::MessageField<
-        super::super::v1::CredentialRef,
-        ::buffa::Inline<super::super::v1::CredentialRef>,
+    /// Field 1: `identity`
+    #[serde(rename = "identity")]
+    pub identity: ::buffa::MessageField<
+        super::super::v1::CredentialIdentity,
+        ::buffa::Inline<super::super::v1::CredentialIdentity>,
     >,
+    /// Field 2: `version`
+    #[serde(
+        rename = "version",
+        with = "::buffa::json_helpers::opt_uint64",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub version: ::core::option::Option<u64>,
 }
 impl ::core::fmt::Debug for RevokedCredentialState {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("RevokedCredentialState")
-            .field("credential_ref", &self.credential_ref)
+            .field("identity", &self.identity)
+            .field("version", &self.version)
             .finish()
     }
 }
@@ -1455,6 +1447,15 @@ impl RevokedCredentialState {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.RevokedCredentialState";
+}
+impl RevokedCredentialState {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::version`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_version(mut self, value: u64) -> Self {
+        self.version = Some(value);
+        self
+    }
 }
 ::buffa::impl_default_instance!(RevokedCredentialState);
 impl ::buffa::MessageName for RevokedCredentialState {
@@ -1476,13 +1477,16 @@ impl ::buffa::Message for RevokedCredentialState {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        if self.credential_ref.is_set() {
+        if self.identity.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.credential_ref.compute_size(__cache);
+            let inner_size = self.identity.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
+        }
+        if let Some(v) = self.version {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         ::buffa::saturate_size(size)
     }
@@ -1493,13 +1497,16 @@ impl ::buffa::Message for RevokedCredentialState {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        if self.credential_ref.is_set() {
+        if self.identity.is_set() {
             ::buffa::types::put_len_delimited_header(
                 1u32,
                 u64::from(__cache.consume_next()),
                 buf,
             );
-            self.credential_ref.write_to(__cache, buf);
+            self.identity.write_to(__cache, buf);
+        }
+        if let Some(v) = self.version {
+            ::buffa::types::put_uint64_field(2u32, v, buf);
         }
     }
     fn merge_field(
@@ -1519,10 +1526,19 @@ impl ::buffa::Message for RevokedCredentialState {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 ::buffa::Message::merge_length_delimited(
-                    self.credential_ref.get_or_insert_default(),
+                    self.identity.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.version = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint64(buf)?,
+                );
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -1531,7 +1547,8 @@ impl ::buffa::Message for RevokedCredentialState {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.credential_ref = ::buffa::MessageField::none();
+        self.identity = ::buffa::MessageField::none();
+        self.version = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for RevokedCredentialState {
@@ -1558,20 +1575,28 @@ pub const __REVOKED_CREDENTIAL_STATE_JSON_ANY: ::buffa::type_registry::JsonAnyEn
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct DestroyRequestedCredentialState {
-    /// Field 1: `credential_ref`
-    #[serde(rename = "credentialRef", alias = "credential_ref")]
-    pub credential_ref: ::buffa::MessageField<
-        super::super::v1::CredentialRef,
-        ::buffa::Inline<super::super::v1::CredentialRef>,
+    /// Field 1: `identity`
+    #[serde(rename = "identity")]
+    pub identity: ::buffa::MessageField<
+        super::super::v1::CredentialIdentity,
+        ::buffa::Inline<super::super::v1::CredentialIdentity>,
     >,
-    /// Field 2: `reason`
+    /// Field 2: `version`
+    #[serde(
+        rename = "version",
+        with = "::buffa::json_helpers::opt_uint64",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub version: ::core::option::Option<u64>,
+    /// Field 3: `reason`
     #[serde(rename = "reason", with = "::buffa::json_helpers::proto_string")]
     pub reason: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for DestroyRequestedCredentialState {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("DestroyRequestedCredentialState")
-            .field("credential_ref", &self.credential_ref)
+            .field("identity", &self.identity)
+            .field("version", &self.version)
             .field("reason", &self.reason)
             .finish()
     }
@@ -1582,6 +1607,15 @@ impl DestroyRequestedCredentialState {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.DestroyRequestedCredentialState";
+}
+impl DestroyRequestedCredentialState {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::version`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_version(mut self, value: u64) -> Self {
+        self.version = Some(value);
+        self
+    }
 }
 ::buffa::impl_default_instance!(DestroyRequestedCredentialState);
 impl ::buffa::MessageName for DestroyRequestedCredentialState {
@@ -1603,13 +1637,16 @@ impl ::buffa::Message for DestroyRequestedCredentialState {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        if self.credential_ref.is_set() {
+        if self.identity.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.credential_ref.compute_size(__cache);
+            let inner_size = self.identity.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
+        }
+        if let Some(v) = self.version {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         size += 1u64 + ::buffa::types::string_encoded_len(&self.reason) as u64;
         ::buffa::saturate_size(size)
@@ -1621,15 +1658,18 @@ impl ::buffa::Message for DestroyRequestedCredentialState {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        if self.credential_ref.is_set() {
+        if self.identity.is_set() {
             ::buffa::types::put_len_delimited_header(
                 1u32,
                 u64::from(__cache.consume_next()),
                 buf,
             );
-            self.credential_ref.write_to(__cache, buf);
+            self.identity.write_to(__cache, buf);
         }
-        ::buffa::types::put_string_field(2u32, &self.reason, buf);
+        if let Some(v) = self.version {
+            ::buffa::types::put_uint64_field(2u32, v, buf);
+        }
+        ::buffa::types::put_string_field(3u32, &self.reason, buf);
     }
     fn merge_field(
         &mut self,
@@ -1648,12 +1688,21 @@ impl ::buffa::Message for DestroyRequestedCredentialState {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 ::buffa::Message::merge_length_delimited(
-                    self.credential_ref.get_or_insert_default(),
+                    self.identity.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
             }
             2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.version = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint64(buf)?,
+                );
+            }
+            3u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
@@ -1667,7 +1716,8 @@ impl ::buffa::Message for DestroyRequestedCredentialState {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.credential_ref = ::buffa::MessageField::none();
+        self.identity = ::buffa::MessageField::none();
+        self.version = ::core::option::Option::None;
         self.reason.clear();
     }
 }
@@ -1695,17 +1745,25 @@ pub const __DESTROY_REQUESTED_CREDENTIAL_STATE_JSON_ANY: ::buffa::type_registry:
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct DestroyedCredentialState {
-    /// Field 1: `credential_ref`
-    #[serde(rename = "credentialRef", alias = "credential_ref")]
-    pub credential_ref: ::buffa::MessageField<
-        super::super::v1::CredentialRef,
-        ::buffa::Inline<super::super::v1::CredentialRef>,
+    /// Field 1: `identity`
+    #[serde(rename = "identity")]
+    pub identity: ::buffa::MessageField<
+        super::super::v1::CredentialIdentity,
+        ::buffa::Inline<super::super::v1::CredentialIdentity>,
     >,
+    /// Field 2: `version`
+    #[serde(
+        rename = "version",
+        with = "::buffa::json_helpers::opt_uint64",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub version: ::core::option::Option<u64>,
 }
 impl ::core::fmt::Debug for DestroyedCredentialState {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("DestroyedCredentialState")
-            .field("credential_ref", &self.credential_ref)
+            .field("identity", &self.identity)
+            .field("version", &self.version)
             .finish()
     }
 }
@@ -1715,6 +1773,15 @@ impl DestroyedCredentialState {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.DestroyedCredentialState";
+}
+impl DestroyedCredentialState {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::version`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_version(mut self, value: u64) -> Self {
+        self.version = Some(value);
+        self
+    }
 }
 ::buffa::impl_default_instance!(DestroyedCredentialState);
 impl ::buffa::MessageName for DestroyedCredentialState {
@@ -1736,13 +1803,16 @@ impl ::buffa::Message for DestroyedCredentialState {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        if self.credential_ref.is_set() {
+        if self.identity.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.credential_ref.compute_size(__cache);
+            let inner_size = self.identity.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
+        }
+        if let Some(v) = self.version {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         ::buffa::saturate_size(size)
     }
@@ -1753,13 +1823,16 @@ impl ::buffa::Message for DestroyedCredentialState {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        if self.credential_ref.is_set() {
+        if self.identity.is_set() {
             ::buffa::types::put_len_delimited_header(
                 1u32,
                 u64::from(__cache.consume_next()),
                 buf,
             );
-            self.credential_ref.write_to(__cache, buf);
+            self.identity.write_to(__cache, buf);
+        }
+        if let Some(v) = self.version {
+            ::buffa::types::put_uint64_field(2u32, v, buf);
         }
     }
     fn merge_field(
@@ -1779,10 +1852,19 @@ impl ::buffa::Message for DestroyedCredentialState {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 ::buffa::Message::merge_length_delimited(
-                    self.credential_ref.get_or_insert_default(),
+                    self.identity.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.version = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint64(buf)?,
+                );
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -1791,7 +1873,8 @@ impl ::buffa::Message for DestroyedCredentialState {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.credential_ref = ::buffa::MessageField::none();
+        self.identity = ::buffa::MessageField::none();
+        self.version = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for DestroyedCredentialState {
@@ -1818,20 +1901,28 @@ pub const __DESTROYED_CREDENTIAL_STATE_JSON_ANY: ::buffa::type_registry::JsonAny
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct CleanupFailedCredentialState {
-    /// Field 1: `credential_ref`
-    #[serde(rename = "credentialRef", alias = "credential_ref")]
-    pub credential_ref: ::buffa::MessageField<
-        super::super::v1::CredentialRef,
-        ::buffa::Inline<super::super::v1::CredentialRef>,
+    /// Field 1: `identity`
+    #[serde(rename = "identity")]
+    pub identity: ::buffa::MessageField<
+        super::super::v1::CredentialIdentity,
+        ::buffa::Inline<super::super::v1::CredentialIdentity>,
     >,
-    /// Field 2: `reason`
+    /// Field 2: `version`
+    #[serde(
+        rename = "version",
+        with = "::buffa::json_helpers::opt_uint64",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub version: ::core::option::Option<u64>,
+    /// Field 3: `reason`
     #[serde(rename = "reason", with = "::buffa::json_helpers::proto_string")]
     pub reason: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for CleanupFailedCredentialState {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("CleanupFailedCredentialState")
-            .field("credential_ref", &self.credential_ref)
+            .field("identity", &self.identity)
+            .field("version", &self.version)
             .field("reason", &self.reason)
             .finish()
     }
@@ -1842,6 +1933,15 @@ impl CleanupFailedCredentialState {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CleanupFailedCredentialState";
+}
+impl CleanupFailedCredentialState {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::version`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_version(mut self, value: u64) -> Self {
+        self.version = Some(value);
+        self
+    }
 }
 ::buffa::impl_default_instance!(CleanupFailedCredentialState);
 impl ::buffa::MessageName for CleanupFailedCredentialState {
@@ -1863,13 +1963,16 @@ impl ::buffa::Message for CleanupFailedCredentialState {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        if self.credential_ref.is_set() {
+        if self.identity.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.credential_ref.compute_size(__cache);
+            let inner_size = self.identity.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
+        }
+        if let Some(v) = self.version {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         size += 1u64 + ::buffa::types::string_encoded_len(&self.reason) as u64;
         ::buffa::saturate_size(size)
@@ -1881,15 +1984,18 @@ impl ::buffa::Message for CleanupFailedCredentialState {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        if self.credential_ref.is_set() {
+        if self.identity.is_set() {
             ::buffa::types::put_len_delimited_header(
                 1u32,
                 u64::from(__cache.consume_next()),
                 buf,
             );
-            self.credential_ref.write_to(__cache, buf);
+            self.identity.write_to(__cache, buf);
         }
-        ::buffa::types::put_string_field(2u32, &self.reason, buf);
+        if let Some(v) = self.version {
+            ::buffa::types::put_uint64_field(2u32, v, buf);
+        }
+        ::buffa::types::put_string_field(3u32, &self.reason, buf);
     }
     fn merge_field(
         &mut self,
@@ -1908,12 +2014,21 @@ impl ::buffa::Message for CleanupFailedCredentialState {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 ::buffa::Message::merge_length_delimited(
-                    self.credential_ref.get_or_insert_default(),
+                    self.identity.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
             }
             2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.version = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint64(buf)?,
+                );
+            }
+            3u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
@@ -1927,7 +2042,8 @@ impl ::buffa::Message for CleanupFailedCredentialState {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.credential_ref = ::buffa::MessageField::none();
+        self.identity = ::buffa::MessageField::none();
+        self.version = ::core::option::Option::None;
         self.reason.clear();
     }
 }

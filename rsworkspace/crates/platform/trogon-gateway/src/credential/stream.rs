@@ -5,17 +5,17 @@ use trogon_decider_nats::{
     StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectScope, SubjectScopeError, SubjectState,
     subject_current_position,
 };
-use trogon_nats::jetstream::JetStreamContext;
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 
-use super::commands::domain::{CredentialOwnerId, CredentialStreamId};
+use super::commands::domain::{CredentialKey, CredentialOwnerId};
 use super::constants::{CREDENTIAL_EVENT_SUBJECT_PREFIX, CREDENTIAL_STREAM};
+use super::event_stream_mismatch_error::CredentialEventStreamMismatchError;
 
 /// Resolves one project's credential streams onto its event subjects.
 ///
 /// ADR#0027 makes the resolver the isolation boundary, so each project gets a
 /// resolver whose [`SubjectScope`] is its own subtree,
-/// `gateway.credentials.events.v1.{project}`. The opaque credential id sits
+/// `credentials.events.v1.{project}`. The opaque credential id sits
 /// directly below it, which keeps an aggregate from being addressable outside
 /// its project even though the id itself carries no hierarchy.
 #[derive(Clone, Debug)]
@@ -44,7 +44,7 @@ pub(crate) enum CredentialEventSubjectResolverError {
     #[error("credential stream '{stream_id}' does not belong to project '{owner_id}'")]
     OutsideProject {
         owner_id: CredentialOwnerId,
-        stream_id: CredentialStreamId,
+        stream_id: CredentialKey,
     },
     #[error(transparent)]
     Stream(StreamStoreError),
@@ -64,7 +64,7 @@ impl CredentialEventSubjectResolver {
     /// The subject carrying one credential's events.
     pub(crate) fn subject_for(
         &self,
-        stream_id: &CredentialStreamId,
+        stream_id: &CredentialKey,
     ) -> Result<StreamSubject, CredentialEventSubjectResolverError> {
         if stream_id.owner_id() != &self.owner_id {
             return Err(CredentialEventSubjectResolverError::OutsideProject {
@@ -83,7 +83,7 @@ impl CredentialEventSubjectResolver {
 
 /// The subject for one credential stream, whichever project it belongs to.
 pub(crate) fn credential_event_subject(
-    stream_id: &CredentialStreamId,
+    stream_id: &CredentialKey,
 ) -> Result<StreamSubject, CredentialEventSubjectResolverError> {
     CredentialEventSubjectResolver::for_owner(stream_id.owner_id())?.subject_for(stream_id)
 }
@@ -97,7 +97,7 @@ fn owner_subject_token(owner_id: &CredentialOwnerId) -> Result<NatsToken, Creden
         .map_err(|source| CredentialEventSubjectResolverError::BuildSubjectToken { source })
 }
 
-impl StreamSubjectResolver<CredentialStreamId> for CredentialEventSubjectResolver {
+impl StreamSubjectResolver<CredentialKey> for CredentialEventSubjectResolver {
     type Error = CredentialEventSubjectResolverError;
 
     fn subject_scope(&self) -> Option<&SubjectScope> {
@@ -107,7 +107,7 @@ impl StreamSubjectResolver<CredentialStreamId> for CredentialEventSubjectResolve
     async fn resolve_subject_state(
         &self,
         events_stream: &Stream,
-        stream_id: &CredentialStreamId,
+        stream_id: &CredentialKey,
     ) -> Result<SubjectState, Self::Error> {
         let subject = self.subject_for(stream_id)?;
         let current_position = subject_current_position(events_stream, &subject)
@@ -121,11 +121,6 @@ impl StreamSubjectResolver<CredentialStreamId> for CredentialEventSubjectResolve
     }
 }
 
-pub(crate) async fn provision<C: JetStreamContext>(client: &C) -> Result<(), C::Error> {
-    client.get_or_create_stream(stream_config()).await?;
-    Ok(())
-}
-
 pub(crate) fn stream_config() -> stream::Config {
     stream::Config {
         name: CREDENTIAL_STREAM.to_string(),
@@ -133,6 +128,27 @@ pub(crate) fn stream_config() -> stream::Config {
         allow_atomic_publish: true,
         ..Default::default()
     }
+}
+
+/// Refuses an event stream that could drop events on its own.
+///
+/// The credential streams are the system of record: replay rebuilds every
+/// identity from the write request that opened its stream, so a limit that ages
+/// out or caps events would erase identities that nothing else records.
+pub(crate) fn validate_stream_config(actual: &stream::Config) -> Result<(), CredentialEventStreamMismatchError> {
+    if !actual.max_age.is_zero() {
+        return Err(CredentialEventStreamMismatchError::ExpiresByAge);
+    }
+    if actual.max_messages_per_subject > 0 {
+        return Err(CredentialEventStreamMismatchError::CapsEventsPerSubject);
+    }
+    if actual.max_messages > 0 {
+        return Err(CredentialEventStreamMismatchError::CapsEvents);
+    }
+    if actual.max_bytes > 0 {
+        return Err(CredentialEventStreamMismatchError::CapsBytes);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

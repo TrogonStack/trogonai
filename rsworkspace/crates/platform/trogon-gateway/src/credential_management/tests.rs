@@ -16,7 +16,7 @@ use trogon_decider_runtime::{
 
 use super::idempotency::IdempotencyKeyError;
 use super::*;
-use crate::credential::commands::domain::{CredentialDestroyReason, CredentialFailureReason, CredentialId};
+use crate::credential::commands::domain::{CredentialDestroyReason, CredentialFailureReason};
 use crate::credential::commands::proto::{
     active_state_to_proto, cleanup_failed_to_proto_state, destroy_requested_to_proto_state, destroyed_to_proto_state,
     pending_write_to_proto_state, revoked_to_proto_state, rotation_pending_to_proto_state, write_failed_to_proto_state,
@@ -60,12 +60,12 @@ impl ManagementTestStreamStore {
     }
 }
 
-impl StreamRead<CredentialStreamId> for ManagementTestStreamStore {
+impl StreamRead<CredentialKey> for ManagementTestStreamStore {
     type Error = ManagementTestStreamError;
 
     async fn read_stream(
         &self,
-        request: ReadStreamRequest<'_, CredentialStreamId>,
+        request: ReadStreamRequest<'_, CredentialKey>,
     ) -> Result<ReadStreamResponse, Self::Error> {
         self.ensure_available()?;
         let start = match request.from {
@@ -86,12 +86,12 @@ impl StreamRead<CredentialStreamId> for ManagementTestStreamStore {
     }
 }
 
-impl StreamAppend<CredentialStreamId> for ManagementTestStreamStore {
+impl StreamAppend<CredentialKey> for ManagementTestStreamStore {
     type Error = ManagementTestStreamError;
 
     async fn append_stream(
         &self,
-        request: AppendStreamRequest<'_, CredentialStreamId>,
+        request: AppendStreamRequest<'_, CredentialKey>,
     ) -> Result<AppendStreamResponse, Self::Error> {
         let mut events = self.events.lock().await;
         let current_position = current_position(&events, &request.stream_id.to_string());
@@ -121,12 +121,12 @@ impl StreamAppend<CredentialStreamId> for ManagementTestStreamStore {
     }
 }
 
-impl SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId> for ManagementTestStreamStore {
+impl SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey> for ManagementTestStreamStore {
     type Error = ManagementTestStreamError;
 
     async fn read_snapshot(
         &self,
-        request: ReadSnapshotRequest<'_, CredentialStreamId>,
+        request: ReadSnapshotRequest<'_, CredentialKey>,
     ) -> Result<ReadSnapshotResponse<state_v1::CredentialStateSnapshot>, Self::Error> {
         self.ensure_available()?;
         let snapshots = self.snapshots.lock().await;
@@ -136,12 +136,12 @@ impl SnapshotRead<state_v1::CredentialStateSnapshot, CredentialStreamId> for Man
     }
 }
 
-impl SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialStreamId> for ManagementTestStreamStore {
+impl SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey> for ManagementTestStreamStore {
     type Error = ManagementTestStreamError;
 
     async fn write_snapshot(
         &self,
-        request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, CredentialStreamId>,
+        request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, CredentialKey>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
         let mut snapshots = self.snapshots.lock().await;
         snapshots.insert(request.snapshot_id.to_string(), request.snapshot);
@@ -2498,12 +2498,14 @@ impl SnapshotFixture {
         let secrets = MockOpenBaoSecretStore::default();
         let credential = secrets
             .put(
-                CredentialScope::integration(
-                    CredentialOwnerId::new("tenant-1").unwrap(),
-                    SourceKind::GitHub,
-                    SourceIntegrationId::new("primary").unwrap(),
+                CredentialIdentity::derive(
+                    CredentialScope::integration(
+                        CredentialOwnerId::new("tenant-1").unwrap(),
+                        SourceKind::GitHub,
+                        SourceIntegrationId::new("primary").unwrap(),
+                    ),
+                    CredentialKind::WebhookSecret,
                 ),
-                CredentialKind::WebhookSecret,
                 SecretString::new("super-secret").unwrap(),
             )
             .await
@@ -2518,7 +2520,7 @@ impl SnapshotFixture {
     }
 
     fn active(&self) -> state_v1::ActiveCredentialState {
-        active_state_to_proto(&self.metadata, &[])
+        active_state_to_proto(self.metadata.reference(), self.metadata.fingerprint(), &[])
     }
 }
 
@@ -2580,23 +2582,15 @@ async fn command_response_rejects_states_a_command_cannot_end_in() {
         SourceKind::GitHub,
         SourceIntegrationId::new("primary").unwrap(),
     );
-    let credential_id = CredentialId::derive(&scope, CredentialKind::WebhookSecret);
-    let stream_id = CredentialStreamId::new(scope.owner_id().clone(), credential_id.clone());
+    let identity = CredentialIdentity::derive(scope, CredentialKind::WebhookSecret);
     let failure = CredentialFailureReason::new("openbao write failed").unwrap();
     let cases = [
         ("missing", state_v1::CredentialStateSnapshot { state: None }),
         ("missing", snapshot(state_v1::CredentialMissingState {})),
-        (
-            "pending_write",
-            snapshot(pending_write_to_proto_state(
-                &credential_id,
-                &scope,
-                CredentialKind::WebhookSecret,
-            )),
-        ),
+        ("pending_write", snapshot(pending_write_to_proto_state(&identity))),
         (
             "write_failed",
-            snapshot(write_failed_to_proto_state(&stream_id, &failure)),
+            snapshot(write_failed_to_proto_state(&identity, &failure)),
         ),
     ];
 

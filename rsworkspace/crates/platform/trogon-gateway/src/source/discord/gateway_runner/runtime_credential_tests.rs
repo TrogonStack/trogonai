@@ -5,9 +5,9 @@ use trogon_std::SecretString;
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 use super::*;
-use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
+use crate::credential::commands::domain::{CredentialIdentity, CredentialOwnerId, CredentialScope};
 use crate::credential::commands::proto::{activated_to_proto, write_requested_to_proto};
-use crate::credential::{evolve, initial_state};
+use crate::credential::{evolve_stream, initial_state};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut};
 use trogonai_proto::gateway::credentials::v1;
@@ -25,8 +25,10 @@ async fn runtime_bot_token_resolves_from_source_scoped_projection() {
     let store = MockOpenBaoSecretStore::default();
     let credential = store
         .put(
-            CredentialScope::source(owner_id(), SourceKind::Discord),
-            CredentialKind::BotToken,
+            CredentialIdentity::derive(
+                CredentialScope::source(owner_id(), SourceKind::Discord),
+                CredentialKind::BotToken,
+            ),
             SecretString::new("Bot runtime-token").unwrap(),
         )
         .await
@@ -34,21 +36,16 @@ async fn runtime_bot_token_resolves_from_source_scoped_projection() {
     let metadata = store.metadata(&credential).await.unwrap();
     let state = [
         v1::CredentialEvent {
-            event: Some(
-                write_requested_to_proto(
-                    credential.id(),
-                    &CredentialScope::source(owner_id(), SourceKind::Discord),
-                    CredentialKind::BotToken,
-                )
-                .into(),
-            ),
+            event: Some(write_requested_to_proto(credential.identity()).into()),
         },
         v1::CredentialEvent {
             event: Some(activated_to_proto(&metadata).into()),
         },
     ]
     .into_iter()
-    .try_fold(initial_state(), |state, event| evolve(state, &event))
+    .try_fold(initial_state(), |state, event| {
+        evolve_stream(&credential.key(), state, &event)
+    })
     .unwrap();
     let registry = RuntimeCredentialRegistry::default();
     registry.apply_state(&state, position(2)).await.unwrap();
@@ -92,15 +89,17 @@ async fn runtime_bot_token_retry_backs_off_until_the_projection_catches_up() {
     );
     let credential = store
         .put(
-            CredentialScope::source(owner_id(), SourceKind::Discord),
-            CredentialKind::BotToken,
+            CredentialIdentity::derive(
+                CredentialScope::source(owner_id(), SourceKind::Discord),
+                CredentialKind::BotToken,
+            ),
             SecretString::new("Bot runtime-token").unwrap(),
         )
         .await
         .unwrap();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
     let token = tokio::time::timeout(Duration::from_secs(5), retry).await.unwrap();
 

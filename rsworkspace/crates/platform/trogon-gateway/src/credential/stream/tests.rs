@@ -1,16 +1,16 @@
 use super::*;
-use crate::credential::commands::domain::{CredentialId, CredentialKind, CredentialScope, SourceKind};
+use crate::credential::commands::domain::{CredentialIdentity, CredentialKind, CredentialScope, SourceKind};
 
 fn owner(raw: &str) -> CredentialOwnerId {
     CredentialOwnerId::new(raw).unwrap()
 }
 
-fn stream_id(owner_id: &str) -> CredentialStreamId {
-    let scope = CredentialScope::source(owner(owner_id), SourceKind::GitHub);
-    CredentialStreamId::new(
-        owner(owner_id),
-        CredentialId::derive(&scope, CredentialKind::WebhookSecret),
+fn stream_id(owner_id: &str) -> CredentialKey {
+    CredentialIdentity::derive(
+        CredentialScope::source(owner(owner_id), SourceKind::GitHub),
+        CredentialKind::WebhookSecret,
     )
+    .key()
 }
 
 #[test]
@@ -83,6 +83,61 @@ fn stream_config_matches_credential_contract() {
     assert_eq!(config.name, CREDENTIAL_STREAM);
     assert_eq!(config.subjects, vec![format!("{CREDENTIAL_EVENT_SUBJECT_PREFIX}.>")]);
     assert!(config.allow_atomic_publish);
+}
+
+#[test]
+fn the_stream_config_keeps_every_event() {
+    assert_eq!(validate_stream_config(&stream_config()), Ok(()));
+}
+
+#[test]
+fn a_stream_reported_unlimited_keeps_every_event() {
+    let reported = stream::Config {
+        max_messages_per_subject: -1,
+        max_messages: -1,
+        max_bytes: -1,
+        ..stream_config()
+    };
+
+    assert_eq!(validate_stream_config(&reported), Ok(()));
+}
+
+#[test]
+fn each_limit_that_could_drop_events_is_refused() {
+    let cases = [
+        (
+            stream::Config {
+                max_age: std::time::Duration::from_secs(3600),
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::ExpiresByAge,
+        ),
+        (
+            stream::Config {
+                max_messages_per_subject: 1,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::CapsEventsPerSubject,
+        ),
+        (
+            stream::Config {
+                max_messages: 1,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::CapsEvents,
+        ),
+        (
+            stream::Config {
+                max_bytes: 1,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::CapsBytes,
+        ),
+    ];
+
+    for (config, expected) in cases {
+        assert_eq!(validate_stream_config(&config), Err(expected));
+    }
 }
 
 mod jetstream_tests;

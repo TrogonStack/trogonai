@@ -1,6 +1,8 @@
 use super::*;
-use crate::credential::commands::domain::CredentialId;
-use crate::credential::commands::domain::{CredentialRef, CredentialScope, CredentialVersion, SourceKind};
+use crate::credential::commands::domain::{
+    CredentialId, CredentialIdentity, CredentialIdentityVersion, CredentialRef, CredentialScope, CredentialVersion,
+    SourceKind,
+};
 use crate::source_integration_id::SourceIntegrationId;
 
 fn owner() -> CredentialOwnerId {
@@ -16,41 +18,34 @@ fn composes_owner_scope_and_kind() {
 
 #[test]
 fn omits_the_owner_scope_and_kind_from_the_opaque_internal_id() {
-    let scope = CredentialScope::source(owner(), SourceKind::Discord);
-    let internal = CredentialId::derive(&scope, CredentialKind::BotToken);
-    let reference = CredentialRef::new(
-        internal.clone(),
-        CredentialVersion::initial(),
-        &scope,
+    let identity = CredentialIdentity::derive(
+        CredentialScope::source(owner(), SourceKind::Discord),
         CredentialKind::BotToken,
     );
+    let internal = identity.id().to_string();
+    let reference = CredentialRef::new(identity, CredentialVersion::initial());
 
-    assert!(!internal.as_str().contains("tenant-1"));
-    assert!(!internal.as_str().contains("discord"));
+    assert!(!internal.contains("tenant-1"));
+    assert!(!internal.contains("discord"));
     assert_eq!(reference.public_id().as_str(), "tenant-1:discord:bot_token");
 }
 
 #[test]
-fn is_stable_across_storage_backends() {
+fn is_stable_whatever_id_the_slot_was_minted_with() {
     let scope = CredentialScope::integration(
         owner(),
         SourceKind::GitHub,
         SourceIntegrationId::new("primary").unwrap(),
     );
-    let openbao = CredentialRef::new(
-        CredentialId::derive(&scope, CredentialKind::WebhookSecret),
-        CredentialVersion::initial(),
-        &scope,
+    let derived = CredentialIdentity::derive(scope.clone(), CredentialKind::WebhookSecret);
+    let recorded = CredentialIdentity::new(
+        CredentialId::new("00000000-0000-0000-0000-000000000000").unwrap(),
+        scope,
         CredentialKind::WebhookSecret,
-    );
-    let static_config = CredentialRef::new(
-        CredentialId::new("0".repeat(32)).unwrap(),
-        CredentialVersion::initial(),
-        &scope,
-        CredentialKind::WebhookSecret,
+        CredentialIdentityVersion::V1,
     );
 
-    assert_eq!(openbao.public_id(), static_config.public_id());
+    assert_eq!(derived.public_id(), recorded.public_id());
 }
 
 #[test]

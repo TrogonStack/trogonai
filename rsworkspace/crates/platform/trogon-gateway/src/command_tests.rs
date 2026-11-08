@@ -18,12 +18,12 @@ struct EmptyCredentialEventStore {
 #[error("empty credential event store failed")]
 struct EmptyCredentialEventStoreError;
 
-impl StreamRead<CredentialStreamId> for EmptyCredentialEventStore {
+impl StreamRead<CredentialKey> for EmptyCredentialEventStore {
     type Error = EmptyCredentialEventStoreError;
 
     async fn read_stream(
         &self,
-        request: ReadStreamRequest<'_, CredentialStreamId>,
+        request: ReadStreamRequest<'_, CredentialKey>,
     ) -> Result<ReadStreamResponse, Self::Error> {
         let start = match request.from {
             ReadFrom::Beginning => 1,

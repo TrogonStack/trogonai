@@ -12,9 +12,11 @@ use trogon_nats::jetstream::{
 };
 use uuid::Uuid;
 
-use super::commands::domain::CredentialStreamId;
+use super::commands::domain::CredentialKey;
 use super::constants::{CREDENTIAL_NAMESPACE, CREDENTIAL_SNAPSHOT_BUCKET};
-use super::stream::{CredentialEventSubjectResolver, CredentialEventSubjectResolverError, stream_config};
+use super::ensure_event_stream::ensure_credential_event_stream;
+use super::ensure_event_stream_error::EnsureCredentialEventStreamError;
+use super::stream::{CredentialEventSubjectResolver, CredentialEventSubjectResolverError};
 
 type CredentialStoreError<Payload = std::convert::Infallible, Type = std::convert::Infallible> =
     JetStreamStoreError<CredentialEventSubjectResolverError, Payload, Type>;
@@ -22,7 +24,7 @@ type CredentialStoreError<Payload = std::convert::Infallible, Type = std::conver
 /// Event store whose every operation runs inside the stream's own project.
 ///
 /// The ADR#0027 scope is fixed when a resolver is built, so the store builds
-/// one per call from the project that travels in the [`CredentialStreamId`].
+/// one per call from the project that travels in the [`CredentialKey`].
 /// Building is a handful of handle clones, and it is what lets the shared
 /// JetStream stream and snapshot bucket serve every project while no call can
 /// resolve outside the project it names.
@@ -54,7 +56,7 @@ impl CredentialEventStore {
 
     fn project_store(
         &self,
-        stream_id: &CredentialStreamId,
+        stream_id: &CredentialKey,
     ) -> Result<JetStreamStore<CredentialEventSubjectResolver>, CredentialStoreError> {
         let resolver = CredentialEventSubjectResolver::for_owner(stream_id.owner_id())
             .map_err(JetStreamStoreError::ResolveSubject)?;
@@ -62,29 +64,29 @@ impl CredentialEventStore {
     }
 }
 
-impl StreamRead<CredentialStreamId> for CredentialEventStore {
+impl StreamRead<CredentialKey> for CredentialEventStore {
     type Error = CredentialStoreError;
 
     async fn read_stream(
         &self,
-        request: ReadStreamRequest<'_, CredentialStreamId>,
+        request: ReadStreamRequest<'_, CredentialKey>,
     ) -> Result<ReadStreamResponse, Self::Error> {
         self.project_store(request.stream_id)?.read_stream(request).await
     }
 }
 
-impl StreamAppend<CredentialStreamId> for CredentialEventStore {
+impl StreamAppend<CredentialKey> for CredentialEventStore {
     type Error = CredentialStoreError;
 
     async fn append_stream(
         &self,
-        request: AppendStreamRequest<'_, CredentialStreamId>,
+        request: AppendStreamRequest<'_, CredentialKey>,
     ) -> Result<AppendStreamResponse, Self::Error> {
         self.project_store(request.stream_id)?.append_stream(request).await
     }
 }
 
-impl<Payload> SnapshotRead<Payload, CredentialStreamId> for CredentialEventStore
+impl<Payload> SnapshotRead<Payload, CredentialKey> for CredentialEventStore
 where
     Payload: SnapshotPayloadDecode + SnapshotType + Send,
     <Payload as SnapshotPayloadDecode>::Error: std::error::Error + Send + Sync + 'static,
@@ -94,7 +96,7 @@ where
 
     async fn read_snapshot(
         &self,
-        request: ReadSnapshotRequest<'_, CredentialStreamId>,
+        request: ReadSnapshotRequest<'_, CredentialKey>,
     ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
         trogon_decider_nats::read_snapshot(&self.snapshot_bucket, &credential_snapshot_id(request.snapshot_id))
             .await
@@ -103,7 +105,7 @@ where
     }
 }
 
-impl<Payload> SnapshotWrite<Payload, CredentialStreamId> for CredentialEventStore
+impl<Payload> SnapshotWrite<Payload, CredentialKey> for CredentialEventStore
 where
     Payload: SnapshotPayloadEncode + SnapshotType + Send,
     <Payload as SnapshotPayloadEncode>::Error: std::error::Error + Send + Sync + 'static,
@@ -113,7 +115,7 @@ where
 
     async fn write_snapshot(
         &self,
-        request: WriteSnapshotRequest<'_, Payload, CredentialStreamId>,
+        request: WriteSnapshotRequest<'_, Payload, CredentialKey>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
         trogon_decider_nats::write_snapshot(
             &self.snapshot_bucket,
@@ -131,15 +133,15 @@ where
 /// Key/Value keys cannot carry every character a project id may, so the key is
 /// a digest of the whole stream id, project included. Two projects can never
 /// share a key, and the key reveals neither the project nor the credential.
-fn credential_snapshot_id(stream_id: &CredentialStreamId) -> String {
+fn credential_snapshot_id(stream_id: &CredentialKey) -> String {
     let key = Uuid::new_v5(&CREDENTIAL_NAMESPACE, stream_id.to_string().as_bytes());
     format!("credential.{}", key.as_simple())
 }
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CredentialEventStoreError {
-    #[error("failed to create credential event stream: {0}")]
-    CreateEventStream(#[source] Box<context::CreateStreamError>),
+    #[error("failed to ensure the credential event stream: {0}")]
+    EnsureEventStream(#[source] Box<EnsureCredentialEventStreamError>),
     #[error("failed to create credential snapshot bucket: {0}")]
     CreateSnapshotBucket(#[source] Box<context::CreateKeyValueError>),
     #[error("failed to open existing credential snapshot bucket: {0}")]
@@ -178,10 +180,9 @@ impl SnapshotBucketSettings {
 }
 
 pub(crate) async fn open(context: jetstream::Context) -> Result<CredentialEventStore, CredentialEventStoreError> {
-    let events_stream = context
-        .get_or_create_stream(stream_config())
+    let events_stream = ensure_credential_event_stream(&context)
         .await
-        .map_err(|source| CredentialEventStoreError::CreateEventStream(Box::new(source)))?;
+        .map_err(|source| CredentialEventStoreError::EnsureEventStream(Box::new(source)))?;
     let snapshot_bucket = provision_snapshot_bucket::<_, kv::Store>(&context).await?;
 
     Ok(CredentialEventStore::new(context, events_stream, snapshot_bucket))

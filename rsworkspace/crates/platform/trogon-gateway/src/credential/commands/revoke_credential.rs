@@ -1,20 +1,20 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialRef, CredentialStreamId};
+use super::domain::{CredentialKey, CredentialRef};
 use super::proto::{active_credential_ref, decode_message_field, revoked_to_proto};
-use super::state::{CredentialDecideError, CredentialEvolveError, validate_same_ref};
+use super::state::{CredentialDecideError, CredentialEvolveError, ensure_recorded_ref};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RevokeCredential {
-    stream_id: CredentialStreamId,
+    stream_id: CredentialKey,
     credential_ref: CredentialRef,
 }
 
 impl RevokeCredential {
     pub fn new(credential_ref: CredentialRef) -> Self {
         Self {
-            stream_id: CredentialStreamId::from(&credential_ref),
+            stream_id: credential_ref.key(),
             credential_ref,
         }
     }
@@ -35,12 +35,12 @@ impl RevokeCredential {
                 });
             }
         };
-        validate_same_ref(&current_ref, &self.credential_ref)
+        ensure_recorded_ref(&current_ref, &self.credential_ref)
     }
 }
 
 impl Decider for RevokeCredential {
-    type StreamId = CredentialStreamId;
+    type StreamId = CredentialKey;
     type State = state_v1::CredentialStateSnapshot;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;

@@ -4,13 +4,16 @@ use uuid::Uuid;
 
 use super::*;
 use crate::credential::commands::domain::{
-    CredentialId, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind,
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind,
 };
 
-fn stream_id(owner_id: &str) -> CredentialStreamId {
+fn stream_id(owner_id: &str) -> CredentialKey {
     let owner = CredentialOwnerId::new(owner_id).unwrap();
-    let scope = CredentialScope::source(owner.clone(), SourceKind::GitHub);
-    CredentialStreamId::new(owner, CredentialId::derive(&scope, CredentialKind::WebhookSecret))
+    CredentialIdentity::derive(
+        CredentialScope::source(owner, SourceKind::GitHub),
+        CredentialKind::WebhookSecret,
+    )
+    .key()
 }
 
 fn event(id: u128, content: &[u8]) -> Event {
@@ -157,7 +160,7 @@ async fn an_opaque_id_from_another_project_does_not_reach_that_projects_events()
         .await
         .unwrap();
 
-    let borrowed = CredentialStreamId::new(stream_id("tenant-1").owner_id().clone(), theirs.credential_id().clone());
+    let borrowed = CredentialKey::new(stream_id("tenant-1").owner_id().clone(), theirs.credential_id().clone());
     let read = store
         .read_stream(ReadStreamRequest {
             stream_id: &borrowed,
@@ -175,7 +178,7 @@ async fn the_same_opaque_id_in_two_projects_keeps_separate_snapshots() {
     let server = JetStreamTestServer::start().await;
     let store = open_store(&server).await;
     let mine = stream_id("tenant-1");
-    let theirs = CredentialStreamId::new(stream_id("tenant-2").owner_id().clone(), mine.credential_id().clone());
+    let theirs = CredentialKey::new(stream_id("tenant-2").owner_id().clone(), mine.credential_id().clone());
     let snapshot = Snapshot::new(
         StreamPosition::try_new(3).unwrap(),
         state_v1::CredentialStateSnapshot::default(),

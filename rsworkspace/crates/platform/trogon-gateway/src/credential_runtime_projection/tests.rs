@@ -1,12 +1,14 @@
 use axum::http::StatusCode;
+use buffa::MessageField;
 use std::sync::{Arc, Mutex};
 
 use crate::credential::commands::domain::{
-    AllowedHosts, AllowedRuntimeServices, CredentialDestroyReason, CredentialFailureReason, CredentialMetadata,
-    CredentialScope, CredentialVersion, InjectionLocation, InjectionLocations, RuntimeServiceId,
+    AllowedHosts, AllowedRuntimeServices, CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint,
+    CredentialIdentity, CredentialIdentityVersion, CredentialMetadata, CredentialScope, CredentialStatus,
+    CredentialVersion, InjectionLocation, InjectionLocations, RuntimeServiceId,
 };
 use crate::credential::commands::proto::{
-    activated_to_proto, decode_scope_key, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto,
+    activated_to_proto, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, identity_to_proto,
     revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
     write_requested_to_proto,
 };
@@ -50,12 +52,12 @@ impl ProjectionTestEventStore {
     }
 }
 
-impl StreamRead<CredentialStreamId> for ProjectionTestEventStore {
+impl StreamRead<CredentialKey> for ProjectionTestEventStore {
     type Error = ProjectionTestEventStoreError;
 
     async fn read_stream(
         &self,
-        request: ReadStreamRequest<'_, CredentialStreamId>,
+        request: ReadStreamRequest<'_, CredentialKey>,
     ) -> Result<ReadStreamResponse, Self::Error> {
         {
             let mut failing_reads = self.failing_reads.lock().unwrap();
@@ -106,8 +108,10 @@ fn source_key() -> RuntimeIntegrationKey {
 async fn put_bot_token(store: &MockOpenBaoSecretStore, value: &str) -> CredentialRef {
     store
         .put(
-            CredentialScope::integration(owner_id(), SourceKind::Discord, integration_id()),
-            CredentialKind::BotToken,
+            CredentialIdentity::derive(
+                CredentialScope::integration(owner_id(), SourceKind::Discord, integration_id()),
+                CredentialKind::BotToken,
+            ),
             SecretString::new(value).unwrap(),
         )
         .await
@@ -117,8 +121,10 @@ async fn put_bot_token(store: &MockOpenBaoSecretStore, value: &str) -> Credentia
 async fn put_source_bot_token(store: &MockOpenBaoSecretStore, value: &str) -> CredentialRef {
     store
         .put(
-            CredentialScope::source(owner_id(), SourceKind::Discord),
-            CredentialKind::BotToken,
+            CredentialIdentity::derive(
+                CredentialScope::source(owner_id(), SourceKind::Discord),
+                CredentialKind::BotToken,
+            ),
             SecretString::new(value).unwrap(),
         )
         .await
@@ -126,7 +132,7 @@ async fn put_source_bot_token(store: &MockOpenBaoSecretStore, value: &str) -> Cr
 }
 
 fn stream_key(credential: &CredentialRef) -> String {
-    CredentialStreamId::from(credential).to_string()
+    CredentialKey::from(credential).to_string()
 }
 
 fn position(value: u64) -> StreamPosition {
@@ -159,7 +165,7 @@ async fn raw_stream(events: impl IntoIterator<Item = Event>) -> MockJetStreamPub
     }
     append_stream(
         &stream,
-        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        StreamSubject::new("credentials.events.v1.raw").unwrap(),
         None,
         &events,
     )
@@ -169,15 +175,8 @@ async fn raw_stream(events: impl IntoIterator<Item = Event>) -> MockJetStreamPub
 }
 
 fn write_requested(credential: &CredentialRef) -> v1::CredentialEvent {
-    let scope = decode_scope_key(
-        credential.owner_id().clone(),
-        credential.source(),
-        "scope_key",
-        credential.scope_key(),
-    )
-    .unwrap();
     v1::CredentialEvent {
-        event: Some(write_requested_to_proto(credential.id(), &scope, credential.kind()).into()),
+        event: Some(write_requested_to_proto(credential.identity()).into()),
     }
 }
 
@@ -207,6 +206,15 @@ fn destroy_failed(credential: &CredentialRef) -> v1::CredentialEvent {
     }
 }
 
+/// Evolves `state` by `event` as read from the stream of the credential it names.
+fn evolve(
+    state: state_v1::CredentialStateSnapshot,
+    event: &v1::CredentialEvent,
+) -> Result<state_v1::CredentialStateSnapshot, CredentialEvolveError> {
+    let stream = event_key(event.event.as_ref().unwrap()).unwrap();
+    evolve_stream(&stream, state, event)
+}
+
 fn build_state(events: impl IntoIterator<Item = v1::CredentialEvent>) -> state_v1::CredentialStateSnapshot {
     events
         .into_iter()
@@ -218,7 +226,7 @@ fn build_state(events: impl IntoIterator<Item = v1::CredentialEvent>) -> state_v
 async fn active_projection_can_be_built_from_credential_ref() {
     let store = MockOpenBaoSecretStore::default();
     let credential = put_bot_token(&store, "Bot token").await;
-    let projection = RuntimeIntegrationProjection::active_from_credential_ref(credential, 7).unwrap();
+    let projection = RuntimeIntegrationProjection::active_from_credential_ref(credential, 7);
     let projections = InMemoryRuntimeProjectionRepository::default();
     projections.upsert(projection.clone()).await;
     let resolver = RuntimeCredentialResolver::new(projections, store);
@@ -278,9 +286,9 @@ async fn refresh_rebuilds_runtime_projection_from_credential_events() {
 
     let report = registry
         .refresh_from_credential_events([
-            stream_event("credential-a", 1, write_requested(&credential)),
+            stream_event(&subject_of(&credential), 1, write_requested(&credential)),
             stream_event(
-                "credential-a",
+                &subject_of(&credential),
                 2,
                 v1::CredentialEvent {
                     event: Some(activated_to_proto(&metadata).into()),
@@ -312,7 +320,7 @@ async fn refresh_rebuilds_runtime_projection_from_persisted_credential_stream() 
     let stream = MockJetStreamPublishMessage::new();
     append_stream(
         &stream,
-        StreamSubject::new("credential-a").unwrap(),
+        StreamSubject::new(subject_of(&credential)).unwrap(),
         None,
         &[
             runtime_event(1, write_requested(&credential)),
@@ -352,7 +360,7 @@ async fn refresh_from_sequence_zero_reads_the_stream_from_its_first_event() {
     let stream = MockJetStreamPublishMessage::new();
     append_stream(
         &stream,
-        StreamSubject::new("credential-a").unwrap(),
+        StreamSubject::new(subject_of(&credential)).unwrap(),
         None,
         &[
             runtime_event(1, write_requested(&credential)),
@@ -485,7 +493,7 @@ async fn independent_registries_each_observe_a_revocation_regardless_of_the_othe
     event_store.push(&stream_key(&credential), 3, revoked(&credential));
     append_stream(
         &stream,
-        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        StreamSubject::new("credentials.events.v1.raw").unwrap(),
         None,
         &[runtime_event(3, revoked(&credential))],
     )
@@ -524,9 +532,9 @@ async fn refresh_removes_revoked_projection_and_clears_stale_cache() {
 
     registry
         .refresh_from_credential_events([
-            stream_event("credential-a", 1, write_requested(&credential)),
+            stream_event(&subject_of(&credential), 1, write_requested(&credential)),
             stream_event(
-                "credential-a",
+                &subject_of(&credential),
                 2,
                 v1::CredentialEvent {
                     event: Some(activated_to_proto(&metadata).into()),
@@ -547,16 +555,16 @@ async fn refresh_removes_revoked_projection_and_clears_stale_cache() {
     store.revoke(&credential).await.unwrap();
     let report = registry
         .refresh_from_credential_events([
-            stream_event("credential-a", 1, write_requested(&credential)),
+            stream_event(&subject_of(&credential), 1, write_requested(&credential)),
             stream_event(
-                "credential-a",
+                &subject_of(&credential),
                 2,
                 v1::CredentialEvent {
                     event: Some(activated_to_proto(&metadata).into()),
                 },
             ),
             stream_event(
-                "credential-a",
+                &subject_of(&credential),
                 3,
                 v1::CredentialEvent {
                     event: Some(revoked_to_proto(&credential).into()),
@@ -592,9 +600,9 @@ async fn refresh_projects_source_scoped_active_state() {
 
     let report = registry
         .refresh_from_credential_events([
-            stream_event("credential-a", 1, write_requested(&credential)),
+            stream_event(&subject_of(&credential), 1, write_requested(&credential)),
             stream_event(
-                "credential-a",
+                &subject_of(&credential),
                 2,
                 v1::CredentialEvent {
                     event: Some(activated_to_proto(&metadata).into()),
@@ -615,6 +623,55 @@ async fn refresh_projects_source_scoped_active_state() {
             .as_str(),
         "Bot token"
     );
+}
+
+#[tokio::test]
+async fn a_rebuild_refuses_an_event_filed_under_another_credentials_subject() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let other = put_source_bot_token(&store, "Bot token").await;
+    let registry = RuntimeCredentialRegistry::default();
+
+    let error = registry
+        .refresh_from_credential_events([stream_event(&subject_of(&other), 1, write_requested(&credential))])
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "credential event at stream position 1 on '{}' names credential '{}', whose events belong on another subject",
+            subject_of(&other),
+            CredentialKey::from(&credential)
+        )
+    );
+    assert!(matches!(
+        &error,
+        RuntimeProjectionRefreshError::MisfiledEvent { subject, stream_position: 1, key }
+            if *subject == subject_of(&other) && *key == CredentialKey::from(&credential)
+    ));
+}
+
+#[tokio::test]
+async fn a_rebuild_refuses_an_event_that_names_no_credential() {
+    let credential = cache_credential("unnamed");
+    let mut write_without_identity = stream_event(&subject_of(&credential), 1, write_requested(&credential));
+    write_without_identity.event = runtime_event_without_a_case(1);
+    let activation_without_key = stream_event(
+        &subject_of(&credential),
+        1,
+        v1::CredentialEvent {
+            event: Some(v1::CredentialActivated::default().into()),
+        },
+    );
+    let registry = RuntimeCredentialRegistry::default();
+
+    for event in [write_without_identity, activation_without_key] {
+        assert!(matches!(
+            registry.refresh_from_credential_events([event]).await,
+            Err(RuntimeProjectionRefreshError::InvalidEvent { .. })
+        ));
+    }
 }
 
 #[tokio::test]
@@ -776,12 +833,14 @@ async fn activating_one_credential_leaves_other_cached_secrets_in_place() {
     let first = put_bot_token(&store, "Bot first").await;
     let second = store
         .put(
-            CredentialScope::integration(
-                owner_id(),
-                SourceKind::Discord,
-                SourceIntegrationId::new("secondary").unwrap(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    owner_id(),
+                    SourceKind::Discord,
+                    SourceIntegrationId::new("secondary").unwrap(),
+                ),
+                CredentialKind::BotToken,
             ),
-            CredentialKind::BotToken,
             SecretString::new("Bot second").unwrap(),
         )
         .await
@@ -1010,14 +1069,14 @@ async fn registry_applies_cleanup_failed_state_incrementally_and_invalidates_cac
 
 #[test]
 fn source_scoped_credential_ref_builds_source_runtime_projection_key() {
-    let scope = CredentialScope::source(owner_id(), SourceKind::Discord);
     let credential = CredentialRef::new(
-        CredentialId::derive(&scope, CredentialKind::BotToken),
+        CredentialIdentity::derive(
+            CredentialScope::source(owner_id(), SourceKind::Discord),
+            CredentialKind::BotToken,
+        ),
         CredentialVersion::initial(),
-        &scope,
-        CredentialKind::BotToken,
     );
-    let key = RuntimeIntegrationKey::from_credential_ref(&credential).unwrap();
+    let key = RuntimeIntegrationKey::from_credential_ref(&credential);
 
     assert_eq!(key, source_key());
     assert_eq!(key.integration_id(), None);
@@ -1533,10 +1592,13 @@ async fn missing_required_credential_fails_closed() {
 
 fn cache_credential(id: &str) -> CredentialRef {
     CredentialRef::new(
-        CredentialId::new(Uuid::new_v5(&Uuid::NAMESPACE_OID, id.as_bytes()).simple().to_string()).unwrap(),
+        CredentialIdentity::new(
+            CredentialId::new(Uuid::new_v5(&Uuid::NAMESPACE_OID, id.as_bytes()).to_string()).unwrap(),
+            CredentialScope::integration(owner_id(), SourceKind::Discord, integration_id()),
+            CredentialKind::BotToken,
+            CredentialIdentityVersion::V1,
+        ),
         CredentialVersion::initial(),
-        &CredentialScope::integration(owner_id(), SourceKind::Discord, integration_id()),
-        CredentialKind::BotToken,
     )
 }
 
@@ -1697,7 +1759,7 @@ async fn incremental_refresh_invalidates_cache_and_removes_projection_on_revoked
     );
     append_stream(
         &stream,
-        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        StreamSubject::new("credentials.events.v1.raw").unwrap(),
         None,
         &[runtime_event(
             3,
@@ -1755,7 +1817,7 @@ async fn incremental_refresh_invalidates_cache_and_removes_projection_when_batch
     event_store.push(&stream_key(&credential), 4, destroy_requested(&credential));
     append_stream(
         &stream,
-        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        StreamSubject::new("credentials.events.v1.raw").unwrap(),
         None,
         &[
             runtime_event(3, revoked(&credential)),
@@ -1834,7 +1896,7 @@ async fn incremental_refresh_stops_serving_a_destroyed_credential_once_it_is_rew
         .collect::<Vec<_>>();
     append_stream(
         &stream,
-        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        StreamSubject::new("credentials.events.v1.raw").unwrap(),
         None,
         &runtime_events,
     )
@@ -1887,7 +1949,7 @@ async fn incremental_refresh_invalidates_cache_and_removes_projection_when_batch
     event_store.push(&stream_key(&credential), 5, destroy_failed(&credential));
     append_stream(
         &stream,
-        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        StreamSubject::new("credentials.events.v1.raw").unwrap(),
         None,
         &[
             runtime_event(3, revoked(&credential)),
@@ -1921,7 +1983,7 @@ async fn incremental_refresh_invalidates_cache_and_removes_projection_when_batch
 }
 
 fn subject_of(credential: &CredentialRef) -> String {
-    credential_event_subject(&CredentialStreamId::from(credential))
+    credential_event_subject(&CredentialKey::from(credential))
         .unwrap()
         .as_str()
         .to_string()
@@ -2015,7 +2077,7 @@ async fn incremental_refresh_evicts_a_credential_whose_history_cannot_be_replaye
     event_store.push(&stream_key(&credential), 3, rotated.clone());
     append_stream(
         &stream,
-        StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+        StreamSubject::new("credentials.events.v1.raw").unwrap(),
         None,
         &[runtime_event(3, rotated)],
     )
@@ -2511,7 +2573,7 @@ async fn applying_a_pending_write_or_failed_write_for_an_unprojected_credential_
     let failed = build_state([
         write_requested(&credential),
         v1::CredentialEvent {
-            event: Some(write_failed_to_proto(&CredentialStreamId::from(&credential), &reason).into()),
+            event: Some(write_failed_to_proto(&CredentialKey::from(&credential), &reason).into()),
         },
     ]);
 
@@ -2531,17 +2593,19 @@ async fn applying_a_state_whose_credential_id_is_invalid_is_refused() {
     let mut failed = build_state([
         write_requested(&credential),
         v1::CredentialEvent {
-            event: Some(write_failed_to_proto(&CredentialStreamId::from(&credential), &reason).into()),
+            event: Some(write_failed_to_proto(&CredentialKey::from(&credential), &reason).into()),
         },
     ]);
+    let mut invalid_identity = identity_to_proto(credential.identity());
+    invalid_identity.credential_id.clear();
     let Some(CredentialStateSnapshotCase::PendingWrite(inner)) = pending.state.as_mut() else {
         panic!("expected a pending write");
     };
-    inner.credential_id.clear();
+    inner.identity = MessageField::some(invalid_identity.clone());
     let Some(CredentialStateSnapshotCase::WriteFailed(inner)) = failed.state.as_mut() else {
         panic!("expected a failed write");
     };
-    inner.credential_id.clear();
+    inner.identity = MessageField::some(invalid_identity);
 
     for state in [pending, failed] {
         let error = registry.apply_state(&state, position(1)).await.unwrap_err();
@@ -2551,24 +2615,23 @@ async fn applying_a_state_whose_credential_id_is_invalid_is_refused() {
 
 #[test]
 fn every_credential_event_kind_names_the_credential_it_belongs_to() {
-    let scope = CredentialScope::source(owner_id(), SourceKind::Discord);
     let store_credential = CredentialRef::new(
-        CredentialId::derive(&scope, CredentialKind::BotToken),
+        CredentialIdentity::derive(
+            CredentialScope::source(owner_id(), SourceKind::Discord),
+            CredentialKind::BotToken,
+        ),
         CredentialVersion::initial(),
-        &scope,
-        CredentialKind::BotToken,
     );
     let metadata = CredentialMetadata::new(
         store_credential.clone(),
-        crate::credential::commands::domain::CredentialStatus::Active,
-        crate::credential::commands::domain::StorageLocator::openbao(&store_credential).unwrap(),
-        crate::credential::commands::domain::CredentialFingerprint::new("fingerprint").unwrap(),
+        CredentialStatus::Active,
+        CredentialFingerprint::new("fingerprint").unwrap(),
     );
     let reason = CredentialFailureReason::new("backend refused").unwrap();
     let events = [
         write_requested(&store_credential),
         v1::CredentialEvent {
-            event: Some(write_failed_to_proto(&CredentialStreamId::from(&store_credential), &reason).into()),
+            event: Some(write_failed_to_proto(&CredentialKey::from(&store_credential), &reason).into()),
         },
         activated(&metadata),
         v1::CredentialEvent {
@@ -2590,8 +2653,8 @@ fn every_credential_event_kind_names_the_credential_it_belongs_to() {
 
     for event in &events {
         assert_eq!(
-            event_stream_id(event.event.as_ref().unwrap()).unwrap(),
-            CredentialStreamId::from(&store_credential)
+            event_key(event.event.as_ref().unwrap()).unwrap(),
+            CredentialKey::from(&store_credential)
         );
     }
 }
@@ -2730,7 +2793,6 @@ async fn every_runtime_credential_error_maps_to_the_status_a_webhook_caller_sees
     let cases = [
         (
             RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable {
-                backend: crate::credential::commands::domain::StorageBackend::OpenBao,
                 message: "down".to_string(),
             }),
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2776,12 +2838,12 @@ async fn every_runtime_credential_error_maps_to_the_status_a_webhook_caller_sees
 
 #[test]
 fn credential_event_subjects_are_told_apart_from_foreign_ones() {
-    let id = "0123456789abcdef0123456789abcdef";
+    let id = "6f9619ff-8b86-4011-b42d-00c04fc964ff";
 
     assert!(is_credential_event_subject(&format!(
         "{CREDENTIAL_EVENT_SUBJECT_PREFIX}.acme.{id}"
     )));
-    assert!(is_credential_event_subject(&format!(
+    assert!(!is_credential_event_subject(&format!(
         "{CREDENTIAL_EVENT_SUBJECT_PREFIX}.{id}"
     )));
     assert!(!is_credential_event_subject(&format!("other.events.v1.acme.{id}")));

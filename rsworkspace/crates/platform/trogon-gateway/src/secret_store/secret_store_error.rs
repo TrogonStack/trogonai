@@ -1,5 +1,5 @@
 use super::GeneratedValueError;
-use crate::credential::commands::domain::{CredentialRef, CredentialStatus, StorageBackend};
+use crate::credential::commands::domain::{CredentialRef, CredentialStatus};
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum SecretStoreError {
@@ -15,22 +15,18 @@ pub enum SecretStoreError {
         credential: CredentialRef,
         status: CredentialStatus,
     },
-    #[error("{backend} secret store error: {message}")]
-    BackendUnavailable { backend: StorageBackend, message: String },
-    #[error("{backend} secret store error: {source}")]
+    #[error("secret store error: {message}")]
+    BackendUnavailable { message: String },
+    #[error("secret store error: {source}")]
     InvalidGenerated {
-        backend: StorageBackend,
         #[source]
         source: GeneratedValueError,
     },
 }
 
 impl SecretStoreError {
-    pub(super) fn invalid_generated<E: Into<GeneratedValueError>>(backend: StorageBackend) -> impl FnOnce(E) -> Self {
-        move |error| Self::InvalidGenerated {
-            backend,
-            source: error.into(),
-        }
+    pub(super) fn invalid_generated(error: impl Into<GeneratedValueError>) -> Self {
+        Self::InvalidGenerated { source: error.into() }
     }
 }
 

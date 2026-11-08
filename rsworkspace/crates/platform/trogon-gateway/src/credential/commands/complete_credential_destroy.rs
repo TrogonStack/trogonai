@@ -1,27 +1,27 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialRef, CredentialStreamId};
+use super::domain::{CredentialKey, CredentialRef};
 use super::proto::{decode_destroy_requested_state, destroyed_to_proto};
-use super::state::{CredentialDecideError, CredentialEvolveError, validate_same_ref};
+use super::state::{CredentialDecideError, CredentialEvolveError, ensure_recorded_ref};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompleteCredentialDestroy {
-    stream_id: CredentialStreamId,
+    stream_id: CredentialKey,
     credential_ref: CredentialRef,
 }
 
 impl CompleteCredentialDestroy {
     pub fn new(credential_ref: CredentialRef) -> Self {
         Self {
-            stream_id: CredentialStreamId::from(&credential_ref),
+            stream_id: credential_ref.key(),
             credential_ref,
         }
     }
 }
 
 impl Decider for CompleteCredentialDestroy {
-    type StreamId = CredentialStreamId;
+    type StreamId = CredentialKey;
     type State = state_v1::CredentialStateSnapshot;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
@@ -49,7 +49,7 @@ impl Decider for CompleteCredentialDestroy {
             });
         };
         let (current_ref, _) = decode_destroy_requested_state(pending)?;
-        validate_same_ref(&current_ref, &command.credential_ref)?;
+        ensure_recorded_ref(&current_ref, &command.credential_ref)?;
         Ok(Decision::event(v1::CredentialEvent {
             event: Some(destroyed_to_proto(&command.credential_ref).into()),
         }))

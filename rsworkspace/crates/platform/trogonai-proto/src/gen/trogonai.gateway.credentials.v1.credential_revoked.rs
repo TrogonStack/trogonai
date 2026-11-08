@@ -5,17 +5,22 @@
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct CredentialRevoked {
-    /// Field 1: `credential_ref`
-    #[serde(rename = "credentialRef", alias = "credential_ref")]
-    pub credential_ref: ::buffa::MessageField<
-        CredentialRef,
-        ::buffa::Inline<CredentialRef>,
-    >,
+    /// Field 1: `key`
+    #[serde(rename = "key")]
+    pub key: ::buffa::MessageField<CredentialKey, ::buffa::Inline<CredentialKey>>,
+    /// Field 2: `version`
+    #[serde(
+        rename = "version",
+        with = "::buffa::json_helpers::opt_uint64",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub version: ::core::option::Option<u64>,
 }
 impl ::core::fmt::Debug for CredentialRevoked {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("CredentialRevoked")
-            .field("credential_ref", &self.credential_ref)
+            .field("key", &self.key)
+            .field("version", &self.version)
             .finish()
     }
 }
@@ -25,6 +30,15 @@ impl CredentialRevoked {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialRevoked";
+}
+impl CredentialRevoked {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::version`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_version(mut self, value: u64) -> Self {
+        self.version = Some(value);
+        self
+    }
 }
 ::buffa::impl_default_instance!(CredentialRevoked);
 impl ::buffa::MessageName for CredentialRevoked {
@@ -46,13 +60,16 @@ impl ::buffa::Message for CredentialRevoked {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        if self.credential_ref.is_set() {
+        if self.key.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.credential_ref.compute_size(__cache);
+            let inner_size = self.key.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
+        }
+        if let Some(v) = self.version {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         ::buffa::saturate_size(size)
     }
@@ -63,13 +80,16 @@ impl ::buffa::Message for CredentialRevoked {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        if self.credential_ref.is_set() {
+        if self.key.is_set() {
             ::buffa::types::put_len_delimited_header(
                 1u32,
                 u64::from(__cache.consume_next()),
                 buf,
             );
-            self.credential_ref.write_to(__cache, buf);
+            self.key.write_to(__cache, buf);
+        }
+        if let Some(v) = self.version {
+            ::buffa::types::put_uint64_field(2u32, v, buf);
         }
     }
     fn merge_field(
@@ -89,10 +109,19 @@ impl ::buffa::Message for CredentialRevoked {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 ::buffa::Message::merge_length_delimited(
-                    self.credential_ref.get_or_insert_default(),
+                    self.key.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.version = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint64(buf)?,
+                );
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -101,7 +130,8 @@ impl ::buffa::Message for CredentialRevoked {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.credential_ref = ::buffa::MessageField::none();
+        self.key = ::buffa::MessageField::none();
+        self.version = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for CredentialRevoked {

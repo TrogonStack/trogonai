@@ -1,33 +1,32 @@
 use std::fmt;
 
 use super::{
-    CredentialId, CredentialKind, CredentialOwnerId, CredentialScope, CredentialVersion, PublicCredentialId, SourceKind,
+    CredentialId, CredentialIdentity, CredentialKey, CredentialKind, CredentialOwnerId, CredentialScope,
+    CredentialVersion, PublicCredentialId, SourceKind,
 };
 
+/// One version of a credential's material.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CredentialRef {
-    id: CredentialId,
+    identity: CredentialIdentity,
     version: CredentialVersion,
-    owner_id: CredentialOwnerId,
-    source: SourceKind,
-    scope_key: String,
-    kind: CredentialKind,
 }
 
 impl CredentialRef {
-    pub fn new(id: CredentialId, version: CredentialVersion, scope: &CredentialScope, kind: CredentialKind) -> Self {
-        Self {
-            id,
-            version,
-            owner_id: scope.owner_id().clone(),
-            source: scope.source_kind(),
-            scope_key: scope.scope_key(),
-            kind,
-        }
+    pub fn new(identity: CredentialIdentity, version: CredentialVersion) -> Self {
+        Self { identity, version }
+    }
+
+    pub fn identity(&self) -> &CredentialIdentity {
+        &self.identity
+    }
+
+    pub fn key(&self) -> CredentialKey {
+        self.identity.key()
     }
 
     pub fn id(&self) -> &CredentialId {
-        &self.id
+        self.identity.id()
     }
 
     pub fn version(&self) -> CredentialVersion {
@@ -35,27 +34,31 @@ impl CredentialRef {
     }
 
     pub fn owner_id(&self) -> &CredentialOwnerId {
-        &self.owner_id
+        self.identity.owner_id()
+    }
+
+    pub fn scope(&self) -> &CredentialScope {
+        self.identity.scope()
     }
 
     pub fn source(&self) -> SourceKind {
-        self.source
+        self.identity.source()
     }
 
-    pub fn scope_key(&self) -> &str {
-        &self.scope_key
+    pub fn scope_key(&self) -> String {
+        self.identity.scope_key()
     }
 
     pub fn kind(&self) -> CredentialKind {
-        self.kind
+        self.identity.kind()
     }
 
     pub fn is_scoped_to(&self, scope: &CredentialScope) -> bool {
-        &self.owner_id == scope.owner_id() && self.source == scope.source_kind() && self.scope_key == scope.scope_key()
+        self.identity.scope() == scope
     }
 
     pub fn public_id(&self) -> PublicCredentialId {
-        PublicCredentialId::new(&self.owner_id, &self.scope_key, self.kind)
+        self.identity.public_id()
     }
 
     pub fn next_version(&self) -> Self {
@@ -63,19 +66,21 @@ impl CredentialRef {
     }
 
     pub fn with_version(&self, version: CredentialVersion) -> Self {
-        Self {
-            id: self.id.clone(),
-            version,
-            owner_id: self.owner_id.clone(),
-            source: self.source,
-            scope_key: self.scope_key.clone(),
-            kind: self.kind,
-        }
+        Self::new(self.identity.clone(), version)
+    }
+}
+
+impl From<&CredentialRef> for CredentialKey {
+    fn from(credential: &CredentialRef) -> Self {
+        credential.key()
     }
 }
 
 impl fmt::Display for CredentialRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}@{}", self.id, self.version.get())
+        write!(f, "{}@{}", self.identity.id(), self.version.get())
     }
 }
+
+#[cfg(test)]
+mod tests;

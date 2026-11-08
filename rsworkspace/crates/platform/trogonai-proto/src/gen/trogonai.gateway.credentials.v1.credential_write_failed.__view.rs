@@ -3,23 +3,23 @@
 
 #[derive(Clone, Debug, Default)]
 pub struct CredentialWriteFailedView<'a> {
-    /// Field 1: `credential_id`
-    pub credential_id: &'a str,
+    /// Field 1: `key`
+    pub key: ::buffa::MessageFieldView<
+        super::super::__buffa::view::CredentialKeyView<'a>,
+    >,
     /// Field 2: `reason`
     pub reason: &'a str,
-    /// Field 3: `owner_id`
-    pub owner_id: &'a str,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
 impl<'a> CredentialWriteFailedView<'a> {
-    /**Whether required field `credential_id` was present on the wire.
+    /**Whether required field `key` is set.
 
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
-    pub const fn has_credential_id(&self) -> bool {
-        self.__buffa_required_seen_0 & 1u64 != 0
+    pub const fn has_key(&self) -> bool {
+        self.key.is_set()
     }
     /**Whether required field `reason` was present on the wire.
 
@@ -27,15 +27,7 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[must_use]
     #[inline]
     pub const fn has_reason(&self) -> bool {
-        self.__buffa_required_seen_0 & 2u64 != 0
-    }
-    /**Whether required field `owner_id` was present on the wire.
-
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
-    #[must_use]
-    #[inline]
-    pub const fn has_owner_id(&self) -> bool {
-        self.__buffa_required_seen_0 & 4u64 != 0
+        self.__buffa_required_seen_0 & 1u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for CredentialWriteFailedView<'a> {
@@ -71,8 +63,21 @@ impl<'a> ::buffa::MessageView<'a> for CredentialWriteFailedView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.credential_id = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 1u64;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.key.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.key = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::CredentialKeyView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
             }
             2u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -80,15 +85,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialWriteFailedView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 view.reason = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 2u64;
-            }
-            3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                view.owner_id = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 4u64;
+                view.__buffa_required_seen_0 |= 1u64;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
@@ -116,35 +113,54 @@ impl<'a> ::buffa::MessageView<'a> for CredentialWriteFailedView<'a> {
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
         ::core::result::Result::Ok(super::super::CredentialWriteFailed {
-            credential_id: self.credential_id.to_string(),
+            key: match self.key.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::CredentialKey,
+                        ::buffa::Inline<super::super::CredentialKey>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             reason: self.reason.to_string(),
-            owner_id: self.owner_id.to_string(),
             ..::core::default::Default::default()
         })
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for CredentialWriteFailedView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.credential_id) as u64;
+        if self.key.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.key.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         size += 1u64 + ::buffa::types::string_encoded_len(&self.reason) as u64;
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.owner_id) as u64;
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::types::put_string_field(1u32, &self.credential_id, buf);
+        if self.key.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                1u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.key.write_to(__cache, buf);
+        }
         ::buffa::types::put_string_field(2u32, &self.reason, buf);
-        ::buffa::types::put_string_field(3u32, &self.owner_id, buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -166,13 +182,12 @@ impl<'__a> ::serde::Serialize for CredentialWriteFailedView<'__a> {
         use ::serde::ser::SerializeMap as _;
         let mut __map = __s.serialize_map(::core::option::Option::None)?;
         {
-            __map.serialize_entry("credentialId", self.credential_id)?;
+            if let ::core::option::Option::Some(__v) = self.key.as_option() {
+                __map.serialize_entry("key", __v)?;
+            }
         }
         {
             __map.serialize_entry("reason", self.reason)?;
-        }
-        {
-            __map.serialize_entry("ownerId", self.owner_id)?;
         }
         __map.end()
     }
@@ -269,20 +284,17 @@ impl CredentialWriteFailedOwnedView {
     pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
         self.0.into_bytes()
     }
-    /// Field 1: `credential_id`
+    /// Field 1: `key`
     #[must_use]
-    pub fn credential_id(&self) -> &'_ str {
-        self.0.reborrow().credential_id
+    pub fn key(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CredentialKeyView<'_>> {
+        &self.0.reborrow().key
     }
     /// Field 2: `reason`
     #[must_use]
     pub fn reason(&self) -> &'_ str {
         self.0.reborrow().reason
-    }
-    /// Field 3: `owner_id`
-    #[must_use]
-    pub fn owner_id(&self) -> &'_ str {
-        self.0.reborrow().owner_id
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<CredentialWriteFailedView<'static>>>

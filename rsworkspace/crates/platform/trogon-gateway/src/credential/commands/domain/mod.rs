@@ -4,6 +4,9 @@ mod credential_destroy_reason;
 mod credential_failure_reason;
 mod credential_fingerprint;
 mod credential_id;
+mod credential_identity;
+mod credential_identity_version;
+mod credential_key;
 mod credential_kind;
 mod credential_metadata;
 mod credential_owner_id;
@@ -11,15 +14,12 @@ mod credential_path;
 mod credential_ref;
 mod credential_scope;
 mod credential_status;
-mod credential_stream_id;
 mod credential_version;
 mod injection_location;
 mod public_credential_id;
 mod runtime_release_policy;
 mod runtime_service_id;
 mod source_kind;
-mod storage_backend;
-mod storage_locator;
 
 #[allow(unused_imports)]
 pub use allowed_host::{AllowedHost, AllowedHostError, AllowedHosts};
@@ -27,6 +27,9 @@ pub use credential_destroy_reason::{CredentialDestroyReason, CredentialDestroyRe
 pub use credential_failure_reason::{CredentialFailureReason, CredentialFailureReasonError};
 pub use credential_fingerprint::{CredentialFingerprint, CredentialFingerprintError};
 pub use credential_id::{CredentialId, CredentialIdError};
+pub use credential_identity::CredentialIdentity;
+pub use credential_identity_version::CredentialIdentityVersion;
+pub use credential_key::CredentialKey;
 pub use credential_kind::CredentialKind;
 pub use credential_metadata::CredentialMetadata;
 pub use credential_owner_id::{CredentialOwnerId, CredentialOwnerIdError};
@@ -34,7 +37,6 @@ pub use credential_path::CredentialPath;
 pub use credential_ref::CredentialRef;
 pub use credential_scope::CredentialScope;
 pub use credential_status::CredentialStatus;
-pub use credential_stream_id::CredentialStreamId;
 pub use credential_version::{CredentialVersion, CredentialVersionError};
 #[allow(unused_imports)]
 pub use injection_location::{InjectionLocation, InjectionLocationError, InjectionLocations};
@@ -46,5 +48,3 @@ pub use runtime_release_policy::{
 #[allow(unused_imports)]
 pub use runtime_service_id::{AllowedRuntimeServices, RuntimeServiceId, RuntimeServiceIdError};
 pub use source_kind::SourceKind;
-pub use storage_backend::{StorageBackend, StorageBackendError};
-pub use storage_locator::{StorageLocator, StorageLocatorError};

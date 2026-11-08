@@ -6,18 +6,21 @@ use trogon_nats::test_support::JetStreamTestServer;
 use uuid::Uuid;
 
 use super::*;
-use crate::credential::commands::domain::{CredentialId, CredentialKind, CredentialScope, SourceKind};
+use crate::credential::commands::domain::{CredentialIdentity, CredentialKind, CredentialScope, SourceKind};
 use crate::credential::store;
 
-fn stream_id(owner_id: &str) -> CredentialStreamId {
+fn stream_id(owner_id: &str) -> CredentialKey {
     let owner = CredentialOwnerId::new(owner_id).unwrap();
-    let scope = CredentialScope::source(owner.clone(), SourceKind::GitHub);
-    CredentialStreamId::new(owner, CredentialId::derive(&scope, CredentialKind::WebhookSecret))
+    CredentialIdentity::derive(
+        CredentialScope::source(owner, SourceKind::GitHub),
+        CredentialKind::WebhookSecret,
+    )
+    .key()
 }
 
 async fn resolve(
     store: &store::CredentialEventStore,
-    stream_id: &CredentialStreamId,
+    stream_id: &CredentialKey,
 ) -> Result<SubjectState, CredentialEventSubjectResolverError> {
     CredentialEventSubjectResolver::for_owner(stream_id.owner_id())?
         .resolve_subject_state(store.events_stream(), stream_id)

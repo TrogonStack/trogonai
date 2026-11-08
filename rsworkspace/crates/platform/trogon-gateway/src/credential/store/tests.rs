@@ -5,13 +5,16 @@ use trogon_nats::jetstream::{MockJetStreamKvClient, MockJetStreamKvStore};
 use trogonai_proto::gateway::credentials::state_v1;
 
 use crate::credential::commands::domain::{
-    CredentialId, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind,
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind,
 };
 
-fn stream_id(owner_id: &str) -> CredentialStreamId {
+fn stream_id(owner_id: &str) -> CredentialKey {
     let owner = CredentialOwnerId::new(owner_id).unwrap();
-    let scope = CredentialScope::source(owner.clone(), SourceKind::GitHub);
-    CredentialStreamId::new(owner, CredentialId::derive(&scope, CredentialKind::WebhookSecret))
+    CredentialIdentity::derive(
+        CredentialScope::source(owner, SourceKind::GitHub),
+        CredentialKind::WebhookSecret,
+    )
+    .key()
 }
 
 #[test]
@@ -46,7 +49,7 @@ fn snapshot_key_keeps_the_project_and_credential_id_out_of_nats_kv_key() {
 
     assert!(key.starts_with("snapshots.data.trogonai.gateway.credentials.state.v1.CredentialStateSnapshot."));
     assert!(!key.contains("tenant"));
-    assert!(!key.contains(stream_id.credential_id().as_str()));
+    assert!(!key.contains(&stream_id.credential_id().to_string()));
     assert!(!key.contains(':'));
     assert!(key.ends_with(&snapshot_id));
 }

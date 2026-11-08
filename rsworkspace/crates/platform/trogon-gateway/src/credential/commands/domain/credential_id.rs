@@ -1,5 +1,4 @@
 use std::fmt;
-use std::sync::Arc;
 
 use uuid::Uuid;
 
@@ -8,20 +7,23 @@ use super::{CredentialKind, CredentialScope};
 
 /// Opaque identity of a credential aggregate.
 ///
-/// The value carries no owner, scope, kind, or storage backend: it is thirty-two
-/// lowercase hex digits. It is derived rather than random because a credential
-/// is addressed by `PublicCredentialId` (owner, scope, kind) and nothing keeps
-/// an index from that composite to a minted id, so the same slot has to yield
-/// the same id every time. The id is unique only within its project, which is
-/// why the aggregate's stream identity pairs it with the owner.
-#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
-pub struct CredentialId(Arc<str>);
+/// The value carries no owner, scope, kind, or storage backend: it is a UUID in
+/// its canonical lowercase hyphenated text. The management API derives it from
+/// the slot a caller manages, because nothing yet keeps an index from that slot
+/// to a minted id. Everything else reads the id recorded on the write request
+/// that opened the credential's stream and never derives it again. The id is
+/// unique only within its project, which is why `CredentialKey` pairs it with
+/// the owner.
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CredentialId(Uuid);
 
 impl CredentialId {
-    pub fn derive(scope: &CredentialScope, kind: CredentialKind) -> Self {
-        let name = format!("{}\0{}\0{}", scope.owner_id(), scope.scope_key(), kind.as_str());
-        let uuid = Uuid::new_v5(&CREDENTIAL_ID_NAMESPACE, name.as_bytes());
-        Self(Arc::from(uuid.as_simple().to_string()))
+    /// Derives the id the way `CREDENTIAL_IDENTITY_VERSION_V1` declares.
+    pub(super) fn derive(scope: &CredentialScope, kind: CredentialKind) -> Self {
+        Self(Uuid::new_v5(
+            &CREDENTIAL_ID_NAMESPACE,
+            derivation_name(scope, kind).as_bytes(),
+        ))
     }
 
     pub fn new(value: impl AsRef<str>) -> Result<Self, CredentialIdError> {
@@ -33,28 +35,31 @@ impl CredentialId {
         if char_count != CREDENTIAL_ID_LEN {
             return Err(CredentialIdError::InvalidLength(char_count));
         }
-        for ch in value.chars() {
-            if !matches!(ch, '0'..='9' | 'a'..='f') {
-                return Err(CredentialIdError::InvalidCharacter(ch));
-            }
+        if let Some(ch) = value.chars().find(|ch| !matches!(ch, '0'..='9' | 'a'..='f' | '-')) {
+            return Err(CredentialIdError::InvalidCharacter(ch));
         }
-        Ok(Self(Arc::from(value)))
+        Uuid::try_parse(value)
+            .map(Self)
+            .map_err(CredentialIdError::InvalidFormat)
     }
+}
 
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+/// Owner ids and kinds never hold a slash and a scope key is a source with an
+/// optional integration id, so the first slash ends the owner and the last one
+/// starts the kind: no two slots share a name.
+fn derivation_name(scope: &CredentialScope, kind: CredentialKind) -> String {
+    format!("{}/{}/{}", scope.owner_id(), scope.scope_key(), kind.as_str())
 }
 
 impl fmt::Debug for CredentialId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("CredentialId").field(&self.as_str()).finish()
+        f.debug_tuple("CredentialId").field(&self.to_string()).finish()
     }
 }
 
 impl fmt::Display for CredentialId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        fmt::Display::fmt(&self.0.hyphenated(), f)
     }
 }
 
@@ -64,8 +69,10 @@ pub enum CredentialIdError {
     Empty,
     #[error("credential id contains invalid character '{0}'")]
     InvalidCharacter(char),
-    #[error("credential id must be 32 characters, got {0}")]
+    #[error("credential id must be 36 characters, got {0}")]
     InvalidLength(usize),
+    #[error("credential id is not a hyphenated UUID: {0}")]
+    InvalidFormat(#[source] uuid::Error),
 }
 
 #[cfg(test)]

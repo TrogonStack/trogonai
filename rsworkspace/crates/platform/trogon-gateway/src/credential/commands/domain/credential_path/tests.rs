@@ -1,34 +1,30 @@
 use super::*;
+use crate::credential::commands::domain::{CredentialId, CredentialOwnerId};
 
-fn owner() -> CredentialOwnerId {
-    CredentialOwnerId::new("tenant-1").unwrap()
-}
-
-fn locator(value: &str) -> StorageLocator {
-    StorageLocator::new(value).unwrap()
+fn key() -> CredentialKey {
+    CredentialKey::new(
+        CredentialOwnerId::new("tenant-1").unwrap(),
+        CredentialId::new("93171e83-3fe8-5776-ab3e-f27b7fdaed81").unwrap(),
+    )
 }
 
 #[test]
 fn renders_the_managed_subtree_layout() {
-    let path = CredentialPath::new(owner(), locator("openbao:tenant-1:github:webhook_secret"));
-
     assert_eq!(
-        path.to_string(),
-        "trogonai/tenant-1/credentials/openbao:tenant-1:github:webhook_secret"
+        CredentialPath::new(key()).to_string(),
+        "trogonai/tenant-1/credentials/93171e83-3fe8-5776-ab3e-f27b7fdaed81"
     );
 }
 
 #[test]
 fn segments_are_unjoined_so_a_caller_can_encode_each_one() {
-    let path = CredentialPath::new(owner(), locator("openbao:tenant-1:github/acme:webhook_secret"));
-
     assert_eq!(
-        path.segments(),
+        CredentialPath::new(key()).segments(),
         [
             "trogonai",
             "tenant-1",
             "credentials",
-            "openbao:tenant-1:github/acme:webhook_secret",
+            "93171e83-3fe8-5776-ab3e-f27b7fdaed81",
         ]
     );
 }

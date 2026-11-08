@@ -9,8 +9,7 @@ use super::{
     SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
 };
 use crate::credential::commands::domain::{
-    CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
-    CredentialVersion, StorageBackend, StorageLocator,
+    CredentialIdentity, CredentialMetadata, CredentialRef, CredentialStatus, CredentialVersion,
 };
 
 #[derive(Clone, Default)]
@@ -33,19 +32,9 @@ struct StoredCredential {
 impl SecretStorePut for InMemorySecretStore {
     type Error = SecretStoreError;
 
-    async fn put(
-        &self,
-        scope: CredentialScope,
-        kind: CredentialKind,
-        value: SecretString,
-    ) -> Result<CredentialRef, Self::Error> {
+    async fn put(&self, identity: CredentialIdentity, value: SecretString) -> Result<CredentialRef, Self::Error> {
         let mut state = self.state.lock().await;
-        let credential = CredentialRef::new(
-            CredentialId::derive(&scope, kind),
-            CredentialVersion::initial(),
-            &scope,
-            kind,
-        );
+        let credential = CredentialRef::new(identity, CredentialVersion::initial());
         let metadata = metadata(&credential, CredentialStatus::Active)?;
         state.entries.insert(
             credential.clone(),
@@ -129,7 +118,7 @@ impl SecretStoreRevoke for InMemorySecretStore {
             });
         }
         for (stored_ref, stored) in &mut state.entries {
-            if stored_ref.id() == credential.id() && stored.metadata.status() != CredentialStatus::Destroyed {
+            if stored_ref.key() == credential.key() && stored.metadata.status() != CredentialStatus::Destroyed {
                 stored.metadata = metadata(stored_ref, CredentialStatus::Revoked)?;
             }
         }
@@ -174,16 +163,8 @@ impl SecretStoreMetadata for InMemorySecretStore {
 }
 
 fn metadata(credential: &CredentialRef, status: CredentialStatus) -> Result<CredentialMetadata, SecretStoreError> {
-    let fingerprint = fingerprint::digest("memory", credential)
-        .map_err(SecretStoreError::invalid_generated(StorageBackend::InMemory))?;
-    let locator =
-        StorageLocator::in_memory(credential).map_err(SecretStoreError::invalid_generated(StorageBackend::InMemory))?;
-    Ok(CredentialMetadata::new(
-        credential.clone(),
-        status,
-        locator,
-        fingerprint,
-    ))
+    let fingerprint = fingerprint::digest("memory", credential).map_err(SecretStoreError::invalid_generated)?;
+    Ok(CredentialMetadata::new(credential.clone(), status, fingerprint))
 }
 
 #[cfg(test)]
