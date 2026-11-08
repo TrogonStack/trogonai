@@ -34,4 +34,9 @@ message RecordEvaluationResult {
   repeated Finding findings = 8 [(buf.validate.field).repeated.max_items = 64];
   // What the judge saw of the run. Absent means coverage was not recorded.
   JudgeInputCoverage coverage = 9;
+  // The judge's own session position when it ran as an agent session. Its
+  // model spend is read from that session's usage events, so the result links
+  // to spend without a second copy of it. Absent means the judge ran outside a
+  // session.
+  trogonai.session.sessions.v1alpha1.SessionPositionRef judge_session_ref = 10;
 }
