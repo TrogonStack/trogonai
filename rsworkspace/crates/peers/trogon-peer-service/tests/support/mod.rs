@@ -17,6 +17,7 @@ pub struct StoreFixture {
     pub reads: Arc<AtomicUsize>,
     pub appends: Arc<AtomicUsize>,
     pub append_barrier: Arc<Mutex<Option<Arc<tokio::sync::Barrier>>>>,
+    pub lose_append_reply: Arc<AtomicBool>,
 }
 impl StoreFixture {
     pub fn new(tenant: TenantId) -> Self {
@@ -26,6 +27,7 @@ impl StoreFixture {
             reads: Arc::default(),
             appends: Arc::default(),
             append_barrier: Arc::default(),
+            lose_append_reply: Arc::default(),
         }
     }
 }
@@ -65,7 +67,7 @@ impl StreamRead<PeerId> for StoreFixture {
     }
 }
 impl StreamAppend<PeerId> for StoreFixture {
-    type Error = <InMemoryStore as StreamAppend<str>>::Error;
+    type Error = AppendFixtureError;
     async fn append_stream(&self, r: AppendStreamRequest<'_, PeerId>) -> Result<AppendStreamResponse, Self::Error> {
         let barrier = self.append_barrier.lock().map(|v| v.clone()).unwrap_or_default();
         if let Some(barrier) = barrier {
@@ -73,16 +75,27 @@ impl StreamAppend<PeerId> for StoreFixture {
         }
         self.appends.fetch_add(1, Ordering::SeqCst);
         let key = format!("{}:{}", self.tenant.as_str(), r.stream_id.as_str());
-        self.inner
+        let response = self
+            .inner
             .append_stream(AppendStreamRequest {
                 stream_id: key.as_str(),
                 stream_write_precondition: r.stream_write_precondition,
                 events: r.events,
             })
             .await
+            .map_err(AppendFixtureError::Backend)?;
+        if self.lose_append_reply.swap(false, Ordering::SeqCst) {
+            return Err(AppendFixtureError::LostResponse);
+        }
+        Ok(response)
     }
     fn classify_append_failure(&self, e: &Self::Error) -> AppendFailure {
-        <InMemoryStore as StreamAppend<str>>::classify_append_failure(&self.inner, e)
+        match e {
+            AppendFixtureError::Backend(e) => {
+                <InMemoryStore as StreamAppend<str>>::classify_append_failure(&self.inner, e)
+            }
+            AppendFixtureError::LostResponse => AppendFailure::Fatal,
+        }
     }
 }
 #[derive(Clone)]
@@ -230,6 +243,7 @@ pub struct DisposableContentFixture {
     pub calls: Arc<AtomicUsize>,
     pub bodies: Arc<Mutex<BTreeMap<String, MessageText>>>,
     pub fingerprints: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+    pub fail_open: Arc<AtomicBool>,
 }
 impl ContentSeal for DisposableContentFixture {
     async fn seal(&self, scope: &PeerAccess, text: &MessageText) -> Result<ContentBinding, PeerPortError> {
@@ -262,6 +276,9 @@ impl ContentSeal for DisposableContentFixture {
 impl ContentOpen for DisposableContentFixture {
     async fn open(&self, scope: &PeerAccess, binding: &ContentBinding) -> Result<Option<MessageText>, PeerPortError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.fail_open.load(Ordering::SeqCst) {
+            return Err(PeerPortError::Unavailable);
+        }
         if binding.tenant() != scope.owner().tenant() {
             return Err(PeerPortError::Denied);
         }
@@ -519,4 +536,12 @@ impl Fixture {
         }
         Ok(state)
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AppendFixtureError {
+    #[error("fixture store failure: {0}")]
+    Backend(#[source] StreamAppendError),
+    #[error("fixture lost append response")]
+    LostResponse,
 }
