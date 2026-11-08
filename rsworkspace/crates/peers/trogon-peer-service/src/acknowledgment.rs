@@ -33,8 +33,10 @@ where
                 .find(|b| b.batch_id.as_deref() == Some(batch_id.as_str()))
                 .cloned()
                 .ok_or(PeerApplicationError::Scope)?,
-            Err(CommandError::Decide(MessageError::AlreadyAcknowledged(batch))) => *batch,
-            Err(error) => return Err(PeerApplicationError::Message(error)),
+            Err(PeerApplicationError::Message(CommandError::Decide(MessageError::AlreadyAcknowledged(batch)))) => {
+                *batch
+            }
+            Err(error) => return Err(error),
         };
         Ok(proto::AcknowledgeBatchResponse {
             batch: MessageField::some(batch),

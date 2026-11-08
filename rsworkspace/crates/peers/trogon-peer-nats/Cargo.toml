@@ -28,7 +28,7 @@ trogon-peer-service = { path = "../trogon-peer-service", features = ["test-suppo
 futures = { workspace = true }
 serde_json = { workspace = true }
 buffa-types = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "test-util"] }
 trogon-decider-runtime = { workspace = true }
 trogon-nats = { path = "../../platform/trogon-nats", features = ["test-support"] }
 trogonai-proto = { workspace = true, features = ["peers"] }
