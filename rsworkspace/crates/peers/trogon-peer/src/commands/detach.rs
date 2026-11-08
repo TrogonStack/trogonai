@@ -72,8 +72,8 @@ impl Decider for Detach {
         let previous = state.attachment.as_option().ok_or(EvolveError::InvalidAttachment)?;
         state::validate_attachment(enrollment, previous)?;
         if command.attachment.peer_id() != identity.peer_id()
-            || previous.attachment.connector_id.as_deref() != Some(command.attachment.connector_id().as_str())
-            || previous.attachment.generation != Some(command.attachment.generation())
+            || previous.attachment_ref.connector_id.as_deref() != Some(command.attachment.connector_id().as_str())
+            || previous.attachment_ref.generation != Some(command.attachment.generation())
         {
             return Err(DetachError::Fenced);
         }
@@ -94,7 +94,7 @@ impl Decider for Detach {
         Ok(Decision::event(PeerEvent {
             event: Some(
                 proto::PeerDetached {
-                    attachment: previous.attachment.clone(),
+                    attachment_ref: previous.attachment_ref.clone(),
                     detached_at: MessageField::some(timestamp_from_datetime(&command.now)),
                 }
                 .into(),

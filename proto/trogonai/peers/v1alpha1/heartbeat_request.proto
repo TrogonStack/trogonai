@@ -8,7 +8,9 @@ import "trogonai/peers/v1alpha1/peer_availability.proto";
 import "trogonai/peers/v1alpha1/peer_condition.proto";
 
 message HeartbeatRequest {
-  AttachmentRef attachment = 1;
+  reserved attachment;
+
+  AttachmentRef attachment_ref = 1;
   PeerAvailability availability = 2;
   PeerCondition condition = 3;
   // Reported activity is an observation and cannot extend a connector lease.

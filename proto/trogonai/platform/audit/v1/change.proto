@@ -1,0 +1,41 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/audit/v1/change_kind.proto";
+
+// Change is a pointer to a decider event, not a copy of one.
+//
+// A policy or credential change already is an append-only event, and a record
+// written by hand beside it would be a second source of truth that could
+// disagree. The record names the event by stream, sequence, id and type, so a
+// reader fetches the fact from its stream. It holds no payload, which also means
+// it never holds sealed credential material.
+message Change {
+  ChangeKind kind = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The resource name of the aggregate the event belongs to.
+  string resource_name = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string event_type = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string source_stream = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // The event's sequence in the source stream, which makes a gap in what the
+  // projector saw detectable.
+  uint64 stream_sequence = 5 [features.field_presence = LEGACY_REQUIRED];
+  // The event's message id.
+  string event_id = 6 [features.field_presence = LEGACY_REQUIRED];
+}

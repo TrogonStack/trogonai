@@ -12,6 +12,7 @@ mod events_tests;
 mod fixtures;
 mod messages_tests;
 mod public_apis_tests;
+mod reference_fields_tests;
 mod rpc_tests;
 mod writer_failures;
 

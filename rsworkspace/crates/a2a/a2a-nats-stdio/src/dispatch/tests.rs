@@ -4,6 +4,7 @@ use a2a_nats::{A2aAgentId, A2aPrefix};
 use bytes::Bytes;
 use jsonrpc_nats::{Message as JrpcMessage, RequestId, ResponseId, encode};
 use serde_json::json;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
 
@@ -13,7 +14,13 @@ fn make_client(
 ) -> A2aClient<AdvancedMockNatsClient, MockJetStreamConsumerFactory> {
     let prefix = A2aPrefix::new("a2a").unwrap();
     let agent_id = A2aAgentId::new("bot").unwrap();
-    A2aClient::new(prefix, agent_id, nats, js)
+    A2aClient::new(
+        prefix,
+        agent_id,
+        SubjectPrincipal::from_tokens("person", "alice").unwrap(),
+        nats,
+        js,
+    )
 }
 
 fn task_response(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
@@ -75,7 +82,7 @@ async fn dispatch(
 async fn tasks_get_success() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("t1");
-    nats.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.tasks.get", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -106,7 +113,7 @@ async fn tasks_get_error_maps_to_rpc_error() {
 async fn tasks_cancel_success() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("tc");
-    nats.set_response_wire("a2a.v1.agents.bot.tasks.cancel", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.tasks.cancel", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -122,7 +129,7 @@ async fn tasks_cancel_success() {
 async fn message_send_success() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response("ms");
-    nats.set_response_wire("a2a.v1.agents.bot.message.send", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.message.send", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -145,7 +152,7 @@ async fn message_stream_returns_when_bootstrap_send_fails() {
     // the JetStream loop (which would ack events the caller never saw).
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response("ms-drop");
-    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -175,7 +182,7 @@ async fn message_stream_returns_when_bootstrap_send_fails() {
 async fn tasks_resubscribe_returns_when_bootstrap_send_fails() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("rsub-drop");
-    nats.set_response_wire("a2a.v1.agents.bot.tasks.resubscribe", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.tasks.resubscribe", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -203,7 +210,7 @@ async fn tasks_resubscribe_returns_when_bootstrap_send_fails() {
 async fn message_stream_emits_bootstrap_then_events() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response("ms2");
-    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -230,7 +237,7 @@ async fn message_stream_emits_bootstrap_then_events() {
 async fn tasks_resubscribe_emits_snapshot_then_empty_stream() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("task1");
-    nats.set_response_wire("a2a.v1.agents.bot.tasks.resubscribe", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.tasks.resubscribe", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -278,7 +285,7 @@ async fn agent_card_success() {
         result: serde_json::json!(card),
     })
     .unwrap();
-    nats.set_response_wire("a2a.v1.agents.bot.card", encoded.headers, encoded.body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.card", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -339,7 +346,11 @@ async fn tasks_list_success() {
         result: serde_json::json!(list),
     })
     .unwrap();
-    nats.set_response_wire("a2a.v1.agents.bot.tasks.list", encoded.headers, encoded.body);
+    nats.set_response_wire(
+        "a2a.v1.agents.bot.person.alice.tasks.list",
+        encoded.headers,
+        encoded.body,
+    );
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(&client, RequestId::Number(1), "tasks/list", json!({})).await;
     assert!(matches!(frame, OutboundFrame::RawBody(_)));
@@ -361,7 +372,7 @@ async fn push_set_success() {
         result: serde_json::json!(cfg),
     })
     .unwrap();
-    nats.set_response_wire("a2a.v1.agents.bot.push.set", encoded.headers, encoded.body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.push.set", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -389,7 +400,7 @@ async fn push_get_success() {
         result: serde_json::json!(cfg),
     })
     .unwrap();
-    nats.set_response_wire("a2a.v1.agents.bot.push.get", encoded.headers, encoded.body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.push.get", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -413,7 +424,11 @@ async fn push_list_success() {
         result: serde_json::json!(resp),
     })
     .unwrap();
-    nats.set_response_wire("a2a.v1.agents.bot.push.list", encoded.headers, encoded.body);
+    nats.set_response_wire(
+        "a2a.v1.agents.bot.person.alice.push.list",
+        encoded.headers,
+        encoded.body,
+    );
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -433,7 +448,11 @@ async fn push_delete_success() {
         result: serde_json::json!(null),
     })
     .unwrap();
-    nats.set_response_wire("a2a.v1.agents.bot.push.delete", encoded.headers, encoded.body);
+    nats.set_response_wire(
+        "a2a.v1.agents.bot.person.alice.push.delete",
+        encoded.headers,
+        encoded.body,
+    );
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -489,7 +508,7 @@ async fn client_err_to_frame_maps_every_typed_variant() {
     for (input, expected) in cases {
         let nats = AdvancedMockNatsClient::new();
         let (headers, body) = err_response(input, "x");
-        nats.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
+        nats.set_response_wire("a2a.v1.agents.bot.person.alice.tasks.get", headers, body);
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let frame = dispatch(
             &client,
@@ -524,38 +543,38 @@ async fn agent_error_routes_to_outbound_error_for_every_typed_method() {
     // through that method's Err arm.
     let cases = [
         (
-            "a2a.v1.agents.bot.message.send",
+            "a2a.v1.agents.bot.person.alice.message.send",
             "message/send",
             json!({"message": {"messageId": "m", "role": "ROLE_USER", "parts": []}}),
         ),
-        ("a2a.v1.agents.bot.tasks.list", "tasks/list", json!({})),
+        ("a2a.v1.agents.bot.person.alice.tasks.list", "tasks/list", json!({})),
         (
-            "a2a.v1.agents.bot.tasks.cancel",
+            "a2a.v1.agents.bot.person.alice.tasks.cancel",
             "tasks/cancel",
             json!({"id": "t", "tenant": ""}),
         ),
         (
-            "a2a.v1.agents.bot.push.set",
+            "a2a.v1.agents.bot.person.alice.push.set",
             "tasks/pushNotificationConfig/set",
             json!({"url":"https://example.com","id":"c","taskId":"t1"}),
         ),
         (
-            "a2a.v1.agents.bot.push.get",
+            "a2a.v1.agents.bot.person.alice.push.get",
             "tasks/pushNotificationConfig/get",
             json!({"taskId":"t1","id":"c"}),
         ),
         (
-            "a2a.v1.agents.bot.push.list",
+            "a2a.v1.agents.bot.person.alice.push.list",
             "tasks/pushNotificationConfig/list",
             json!({"taskId":"t1"}),
         ),
         (
-            "a2a.v1.agents.bot.push.delete",
+            "a2a.v1.agents.bot.person.alice.push.delete",
             "tasks/pushNotificationConfig/delete",
             json!({"taskId":"t1","id":"c"}),
         ),
         (
-            "a2a.v1.agents.bot.card",
+            "a2a.v1.agents.bot.person.alice.card",
             "agent/getAuthenticatedExtendedCard",
             json!({}),
         ),
@@ -574,7 +593,7 @@ async fn agent_error_routes_to_outbound_error_for_every_typed_method() {
 async fn message_stream_error_at_bootstrap_routes_to_outbound_error() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = err_response(a2a_nats::error::AGENT_UNAVAILABLE, "down");
-    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.message.stream", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -593,7 +612,7 @@ async fn message_stream_error_at_bootstrap_routes_to_outbound_error() {
 async fn tasks_resubscribe_error_at_snapshot_routes_to_outbound_error() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = err_response(a2a_nats::error::TASK_NOT_FOUND, "gone");
-    nats.set_response_wire("a2a.v1.agents.bot.tasks.resubscribe", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.tasks.resubscribe", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -634,7 +653,7 @@ fn js_msg(payload: Vec<u8>, req_id: &str) -> MockJsMessage {
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(a2a_nats::constants::REQ_ID_HEADER, req_id);
     let inner = async_nats::Message {
-        subject: "a2a.v1.tasks.task1.events".into(),
+        subject: "a2a.v1.tasks.task1.person.alice.events".into(),
         reply: Some("$JS.ACK.A2A_EVENTS.consumer.1.1.1.0.0".into()),
         payload: Bytes::from(payload),
         headers: Some(headers),
@@ -693,7 +712,7 @@ fn status_event(task_id: &str) -> a2a::event::StreamResponse {
 async fn message_stream_forwards_status_events_as_responses() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response("ms3");
-    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.message.stream", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, evt_tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -727,7 +746,7 @@ async fn message_stream_forwards_status_events_as_responses() {
 async fn tasks_resubscribe_forwards_status_events_as_responses() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("rsub");
-    nats.set_response_wire("a2a.v1.agents.bot.tasks.resubscribe", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.tasks.resubscribe", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, evt_tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);

@@ -7,8 +7,11 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     paths:
       - 'rsworkspace/**'
+      - 'devops/docker/compose/compose.yml'
+      - 'devops/docker/compose/services/a2a-gateway/**'
+      - 'devops/docker/compose/services/nats/**'
       - 'LICENSE'
-      - '.mise.toml'
+      - 'mise.toml'
       - '.config/mise/tasks/**'
       - '.github/actions/setup-rust/**'
       - '.github/workflows/ci-rust.yml'
@@ -70,6 +73,14 @@ jobs:
         run: cargo clippy --all-targets --all-features
         working-directory: rsworkspace
 
+      - name: Run clippy (a2a-gateway, default features)
+        run: cargo clippy -p a2a-gateway --all-targets
+        working-directory: rsworkspace
+
+      - name: Run clippy (a2a-gateway, spicedb)
+        run: cargo clippy -p a2a-gateway --all-targets --features spicedb
+        working-directory: rsworkspace
+
   test:
     runs-on: ubuntu-latest
     permissions:
@@ -113,6 +124,13 @@ jobs:
       - name: Check stable compiler diagnostics
         run: cargo nextest run -p trogon-decider-guest-macros --all-features --test compile_fail
         working-directory: rsworkspace
+
+      - name: Test a2a-gateway (default features)
+        run: cargo test -p a2a-gateway
+        working-directory: rsworkspace
+
+      - name: Test gateway bootstrap identity
+        run: sh devops/docker/compose/services/nats/gateway-env.test.sh
 
       - name: Run tests with coverage
         run: mise run --skip-tools github-actions:rust-coverage

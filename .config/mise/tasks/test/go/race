@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE dir="goworkspace"
+
+exec go test -race ./... "$@"

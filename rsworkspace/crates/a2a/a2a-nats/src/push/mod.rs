@@ -1,6 +1,6 @@
 //! Push-notification subsystem value objects + transport-level value types.
 //!
-//! `caller_id`, dispatch, DLQ, and the live wire shapes that drive the push
+//! Dispatch, DLQ, and the live wire shapes that drive the push
 //! pipeline land in follow-up PRs alongside their integration harnesses;
 //! this slice ships only the validated value-object surface (config id,
 //! idempotency key, status transition id, terminal task state, subject,
@@ -8,7 +8,6 @@
 //! without each one re-deriving the same validation.
 
 pub mod authentication_header;
-pub mod caller_id;
 pub mod delivery_semantics;
 pub mod dispatch_error;
 pub mod dispatcher;

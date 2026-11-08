@@ -47,3 +47,15 @@ fn ordering() {
     let long = NonZeroDuration::from_secs(10).unwrap();
     assert!(short < long);
 }
+
+#[test]
+fn try_from_duration_rejects_zero() {
+    assert_eq!(NonZeroDuration::try_from(Duration::ZERO), Err(ZeroDurationError));
+}
+
+#[test]
+fn try_from_duration_preserves_positive_durations() {
+    for duration in [Duration::from_nanos(1), Duration::from_millis(7), Duration::MAX] {
+        assert_eq!(Duration::from(NonZeroDuration::try_from(duration).unwrap()), duration);
+    }
+}

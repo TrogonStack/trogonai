@@ -1,0 +1,216 @@
+edition = "2024";
+
+package trogonai.connections.catalog.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/connections/catalog/v1alpha1/oauth_parameters.proto";
+import "trogonai/connections/catalog/v1alpha1/oauth_response.proto";
+import "trogonai/connections/types/v1alpha1/client_authentication.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+
+// How the platform runs OAuth against one provider. Refresh and scope policy
+// is data a reviewer sees in the release, not code (ADR#0092 Decision 2).
+message OAuthProfile {
+  option (buf.validate.message).cel = {
+    id: "oauth_profile.pkce_exemption"
+    message: "a PKCE exemption needs declared endpoints and a confidential client"
+    expression: "this.pkce != 2 || (has(this.declared) && this.client_authentication_methods.all(m, m != 1))"
+  };
+  option (buf.validate.message).cel = {
+    id: "oauth_profile.scopes_unique"
+    message: "required and optional scopes must be unique and disjoint"
+    expression: "(this.required_scopes + this.optional_scopes).map(s, s.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "oauth_profile.documented_fallback_requires_declared_endpoints"
+    message: "documented expiry or bearer fallbacks require declared endpoints"
+    expression: "has(this.declared) || ((!has(this.omitted_access_expiry) || (!has(this.omitted_access_expiry.documented_lifetime) && !has(this.omitted_access_expiry.non_expiring))) && (!has(this.response_mapping) || !has(this.response_mapping.bearer_type.documented_bearer)))"
+  };
+  option (buf.validate.message).cel = {
+    id: "oauth_profile.discovered_refresh"
+    message: "discovered OAuth uses rotating refresh without reuse grace and treats an omitted replacement as consumed"
+    expression: "!has(this.discovered) || !has(this.refresh) || (this.refresh.rotates_on_refresh && !has(this.refresh.reuse_grace) && this.refresh.omission_semantics == 2)"
+  };
+
+  oneof endpoints {
+    option (buf.validate.oneof).required = true;
+    // Endpoints written and reviewed in the release.
+    OAuthEndpoints declared = 1;
+    // Endpoints read from the authorization server metadata snapshot pinned
+    // on the ProviderApp, never from a fresh fetch. Only a release with a
+    // per-connection MCP server discovers (ADR#0094 Decisions 9 and 10).
+    google.protobuf.Empty discovered = 2;
+  }
+  PkceRequirement pkce = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The methods the provider accepts at its token endpoint. The ProviderApp
+  // records the one its client uses, which must be listed here.
+  repeated trogonai.connections.types.v1alpha1.ClientAuthenticationMethod client_authentication_methods = 4 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  ScopeSeparator scope_separator = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // How granted scope is compared with requested scope; never substring
+  // matching (ADR#0094 Decision 12).
+  ScopeNormalization scope_normalization = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // A grant lacking any of these fails the attempt and nothing activates.
+  repeated trogonai.connections.types.v1alpha1.ProviderScope required_scopes = 7;
+  // A grant lacking only these activates with the health reason
+  // SCOPES_REDUCED (ADR#0094 Decision 12).
+  repeated trogonai.connections.types.v1alpha1.ProviderScope optional_scopes = 8;
+  // What a token response without a scope means.
+  ScopeOmission scope_omission = 9 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Absent means strict rotation with no reuse grace and an omitted replacement
+  // consumed. Discovered endpoints cannot weaken those defaults; an explicit
+  // refresh policy may still allow the provider to issue no refresh credential.
+  RefreshBehaviour refresh = 10;
+  // The provider's documented limit on concurrent token endpoint calls per
+  // client. It only lowers the platform's working cap of 8 per ProviderApp
+  // (ADR#0095 Decision 8); absent keeps that cap.
+  uint32 exchange_concurrency_limit = 11 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 8
+  }];
+  // No policy means expiry is unknown when the response omits its lifetime.
+  OmittedAccessExpiry omitted_access_expiry = 12;
+  // No mapping means the RFC 6749 field names and types, never heuristic
+  // probing of alternate nested fields.
+  OAuthResponseMapping response_mapping = 13;
+  OAuthRequestParameters request_parameters = 14;
+}
+
+// Endpoints a release declares. Each is an HTTPS URL with no user info, query
+// or fragment, and each host must be among the release's egress hosts.
+message OAuthEndpoints {
+  // The issuer a ProviderApp for this release records, compared whole.
+  trogonai.connections.types.v1alpha1.Issuer issuer = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The authorization endpoint. Absent only when the release offers no
+  // authorization code method.
+  string authorization_url = 2 [(buf.validate.field).string.pattern = "^https://[^/?#@]+(/[^?#]*)?$"];
+  // The RFC 6749 token endpoint, used for the code exchange and for refresh.
+  // Named for its use so the ADR#0092 Decision 8 field-name check needs no
+  // allow-list entry.
+  string exchange_url = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^https://[^/?#@]+(/[^?#]*)?$"
+  ];
+  // The RFC 7009 revocation endpoint. Present exactly when the release's
+  // revocation support is DECLARED.
+  string revocation_url = 4 [(buf.validate.field).string.pattern = "^https://[^/?#@]+(/[^?#]*)?$"];
+}
+
+// PKCE S256 is always used. The single exception is a reviewed confidential
+// client declared in the release; a generic MCP server without S256 is refused
+// without exception (ADR#0094 Decisions 3 and 9). Unspecified and unknown
+// values are invalid.
+enum PkceRequirement {
+  PKCE_REQUIREMENT_UNSPECIFIED = 0;
+  PKCE_REQUIREMENT_S256 = 1;
+  // The provider cannot do PKCE. Valid only with declared endpoints and a
+  // client that authenticates; the platform never downgrades silently.
+  PKCE_REQUIREMENT_CONFIDENTIAL_CLIENT_EXEMPTION = 2;
+}
+
+// How a scope list is joined on the wire. Unspecified and unknown values are
+// invalid.
+enum ScopeSeparator {
+  SCOPE_SEPARATOR_UNSPECIFIED = 0;
+  // RFC 6749 Section 3.3.
+  SCOPE_SEPARATOR_SPACE = 1;
+  SCOPE_SEPARATOR_COMMA = 2;
+}
+
+// How two scope values are compared. Unspecified and unknown values are
+// invalid.
+enum ScopeNormalization {
+  SCOPE_NORMALIZATION_UNSPECIFIED = 0;
+  // Exact string equality, the RFC 6749 rule.
+  SCOPE_NORMALIZATION_EXACT = 1;
+  // Equality after ASCII lowercasing, for providers that document it.
+  SCOPE_NORMALIZATION_ASCII_CASE_INSENSITIVE = 2;
+}
+
+// What a token response without a scope means, at exchange and at refresh.
+// Unspecified and unknown values are invalid.
+enum ScopeOmission {
+  SCOPE_OMISSION_UNSPECIFIED = 0;
+  // At code exchange, grant equals the consent request. At refresh without
+  // an explicitly narrower scope request, retain the current committed grant,
+  // never the older original consent. Evidence is DOCUMENTED_OMISSION.
+  SCOPE_OMISSION_GRANT_EQUALS_REQUEST = 1;
+  // The omission proves nothing; the identity probe reads the granted scope,
+  // recorded with evidence PROBED.
+  SCOPE_OMISSION_PROBE = 2;
+}
+
+// How the provider treats refresh (ADR#0092 Decision 2, ADR#0095 Decision 3).
+// Discovered profiles are checked by OAuthProfile: rotation, no reuse grace
+// and CONSUMED omission semantics. Reviewed declared-endpoint profiles may
+// specify documented stable refresh, grace or KEEP_CURRENT behavior instead.
+message RefreshBehaviour {
+  option (buf.validate.message).cel = {
+    id: "refresh_behaviour.grace_needs_rotation"
+    message: "a reuse grace applies only to a provider that rotates"
+    expression: "!has(this.reuse_grace) || this.rotates_on_refresh"
+  };
+
+  // True when every refresh returns a new refresh credential and invalidates
+  // the old one. False documents stable refresh, which lets recovery start a
+  // new operation after a lost response.
+  bool rotates_on_refresh = 1 [features.field_presence = LEGACY_REQUIRED];
+  // How long the provider still accepts a rotated-away refresh credential.
+  // Absent means no grace. An open grace lets recovery start a new operation.
+  google.protobuf.Duration reuse_grace = 2 [(buf.validate.field).duration.gt = {}];
+  // True when the provider may issue no refresh credential at all, so a
+  // connection without one is valid and is never refreshed.
+  bool refresh_optional = 3 [features.field_presence = LEGACY_REQUIRED];
+  RefreshOmissionSemantics omission_semantics = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// What a refresh response without a new refresh credential means. Unspecified
+// and unknown values are invalid.
+enum RefreshOmissionSemantics {
+  REFRESH_OMISSION_SEMANTICS_UNSPECIFIED = 0;
+  // The current refresh credential stays valid, as RFC 6749 Section 6 allows.
+  REFRESH_OMISSION_SEMANTICS_KEEP_CURRENT = 1;
+  // The current refresh credential was consumed and no further refresh is
+  // possible; the connection needs a reconnect once access expires.
+  REFRESH_OMISSION_SEMANTICS_CONSUMED = 2;
+}

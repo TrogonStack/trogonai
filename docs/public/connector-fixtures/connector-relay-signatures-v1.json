@@ -1,0 +1,1583 @@
+{
+  "profile": "connector-relay-signatures-v1",
+  "notice": "Public synthetic identifiers and public verification keys only. Signing keys were generated ephemerally in memory and were never serialized. These vectors exercise a fixture-specific RFC9421 subset, not a production HTTP parser or runtime authorization. Each vector is independent; repeated fixture invocation ids do not share a replay store.",
+  "sources": [
+    "https://datatracker.ietf.org/doc/html/rfc9421#section-2.5",
+    "https://datatracker.ietf.org/doc/html/rfc9421#section-3.3.6",
+    "https://www.rfc-editor.org/rfc/rfc9530.html#section-2",
+    "https://www.rfc-editor.org/rfc/rfc7638.html",
+    "https://www.rfc-editor.org/rfc/rfc8037.html#section-2"
+  ],
+  "public_jwk": {
+    "crv": "Ed25519",
+    "kty": "OKP",
+    "x": "zBayj7ZY8D915MPFYlRUj-r0rBl-syqAR1Boxti-MqQ"
+  },
+  "key_id_profile": "RFC7638 SHA-256 public OKP JWK thumbprint using RFC8037 required public members crv,kty,x; unpadded base64url. No prehash is applied to the Ed25519 signature base.",
+  "attested_binding": {
+    "grant_project": "fixture-session-project",
+    "grant_id": "fixture-grant",
+    "binding_id": "fixture-binding"
+  },
+  "standards_control": {
+    "source": "https://datatracker.ietf.org/doc/html/rfc9421#appendix-B.2.6",
+    "public_key_base64url": "JrQLj5P_89iXES9-vFgrIy29clF9CC_oPPsw3c5D0bs",
+    "signature_base_utf8": "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"@method\": POST\n\"@path\": /foo\n\"@authority\": example.com\n\"content-type\": application/json\n\"content-length\": 18\n\"@signature-params\": (\"date\" \"@method\" \"@path\" \"@authority\" \"content-type\" \"content-length\");created=1618884473;keyid=\"test-key-ed25519\"",
+    "signature_base64": "wqcAqbmYJ2ji2glfAMaRy4gruYYnx2nEFN2HN6jrnDnQCK1u02Gb04v9EDgwUPiu4A0w6vuQv5lIp5WPpBKRCw=="
+  },
+  "vectors": [
+    {
+      "name": "valid-buffered-json-request",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "accept",
+        "reason": null,
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "valid-empty-content-digest",
+      "request": {
+        "method": "GET",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEg8KDWZpeHR1cmUtZW1wdHk"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-empty\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:yBP0UgtxcuUMDdE3QpI3fQ+0lItFU8IK4vgCI2vlwIeuyVV302NKGv664t6URJpg2PLsLmouIRHbKUuF6hKxDQ==:"
+          ]
+        ],
+        "body_base64": ""
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": GET\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEg8KDWZpeHR1cmUtZW1wdHk\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-empty\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": GET\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEg8KDWZpeHR1cmUtZW1wdHk\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-empty\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "accept",
+        "reason": null,
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "valid-reordered-protobuf-context",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "EhQKEmZpeHR1cmUtaW52b2NhdGlvbgpDCi4SDwoNZml4dHVyZS1ncmFudBobChkKF2ZpeHR1cmUtc2Vzc2lvbi1wcm9qZWN0EhEKD2ZpeHR1cmUtYmluZGluZw"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:UbgJZ7eH809DcWozU3ozoccr17ubR0jZdVwaZSi3q5Q3f+ngIEl/YxIWoFFDfrOAvs4ZxtPSHnSMpC9Zm3wWBQ==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": EhQKEmZpeHR1cmUtaW52b2NhdGlvbgpDCi4SDwoNZml4dHVyZS1ncmFudBobChkKF2ZpeHR1cmUtc2Vzc2lvbi1wcm9qZWN0EhEKD2ZpeHR1cmUtYmluZGluZw\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": EhQKEmZpeHR1cmUtaW52b2NhdGlvbgpDCi4SDwoNZml4dHVyZS1ncmFudBobChkKF2ZpeHR1cmUtc2Vzc2lvbi1wcm9qZWN0EhEKD2ZpeHR1cmUtYmluZGluZw\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "accept",
+        "reason": null,
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "valid-reordered-nested-context",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhobChkKF2ZpeHR1cmUtc2Vzc2lvbi1wcm9qZWN0Eg8KDWZpeHR1cmUtZ3JhbnQSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:OYV/KtDZ5UvYgRd3qNAPki1dul9S7C7xsAdI9xJt1Xqzz+X2M4pbj0EtBFOTajnHhq95/G7+frxAZ/OrLrdAAw==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhobChkKF2ZpeHR1cmUtc2Vzc2lvbi1wcm9qZWN0Eg8KDWZpeHR1cmUtZ3JhbnQSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhobChkKF2ZpeHR1cmUtc2Vzc2lvbi1wcm9qZWN0Eg8KDWZpeHR1cmUtZ3JhbnQSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "accept",
+        "reason": null,
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "valid-nonminimal-varint-spelling",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CsMACi4SDwoNZml4dHVyZS1ncmFudBobChkKF2ZpeHR1cmUtc2Vzc2lvbi1wcm9qZWN0EhEKD2ZpeHR1cmUtYmluZGluZxIUChJmaXh0dXJlLWludm9jYXRpb24"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:8jMRggm73vtHUIKzWZw3EC5ouX54mYwGh9Hr1x9CGGnt8wICfZ5kD+Iji/rHmu1Xs7B0X1n/1vuDp66dWCTXBw==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CsMACi4SDwoNZml4dHVyZS1ncmFudBobChkKF2ZpeHR1cmUtc2Vzc2lvbi1wcm9qZWN0EhEKD2ZpeHR1cmUtYmluZGluZxIUChJmaXh0dXJlLWludm9jYXRpb24\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CsMACi4SDwoNZml4dHVyZS1ncmFudBobChkKF2ZpeHR1cmUtc2Vzc2lvbi1wcm9qZWN0EhEKD2ZpeHR1cmUtYmluZGluZxIUChJmaXh0dXJlLWludm9jYXRpb24\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "accept",
+        "reason": null,
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "body-tampered-under-unchanged-digest",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiY2hhbmdlZCJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "BODY_DIGEST_MISMATCH",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "method-tampered",
+      "request": {
+        "method": "DELETE",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": DELETE\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "SIGNATURE_INVALID",
+        "signature_valid": false
+      }
+    },
+    {
+      "name": "provider-path-tampered",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/accounts?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/accounts?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "SIGNATURE_INVALID",
+        "signature_valid": false
+      }
+    },
+    {
+      "name": "query-tampered",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=11&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=11&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "SIGNATURE_INVALID",
+        "signature_valid": false
+      }
+    },
+    {
+      "name": "query-reordered",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?cursor=fixture&limit=10",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?cursor=fixture&limit=10\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "SIGNATURE_INVALID",
+        "signature_valid": false
+      }
+    },
+    {
+      "name": "content-type-tampered",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "text/plain"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": text/plain\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "SIGNATURE_INVALID",
+        "signature_valid": false
+      }
+    },
+    {
+      "name": "accept-encoding-tampered",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "gzip"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": gzip\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "SIGNATURE_INVALID",
+        "signature_valid": false
+      }
+    },
+    {
+      "name": "context-identity-tampered",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhEKD2ZpeHR1cmUtY2hhbmdlZA"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhEKD2ZpeHR1cmUtY2hhbmdlZA\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "SIGNATURE_INVALID",
+        "signature_valid": false
+      }
+    },
+    {
+      "name": "context-reordered-with-old-signature",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "EhQKEmZpeHR1cmUtaW52b2NhdGlvbgpDCi4SDwoNZml4dHVyZS1ncmFudBobChkKF2ZpeHR1cmUtc2Vzc2lvbi1wcm9qZWN0EhEKD2ZpeHR1cmUtYmluZGluZw"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": EhQKEmZpeHR1cmUtaW52b2NhdGlvbgpDCi4SDwoNZml4dHVyZS1ncmFudBobChkKF2ZpeHR1cmUtc2Vzc2lvbi1wcm9qZWN0EhEKD2ZpeHR1cmUtYmluZGluZw\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "SIGNATURE_INVALID",
+        "signature_valid": false
+      }
+    },
+    {
+      "name": "signature-byte-tampered",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZLCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "SIGNATURE_INVALID",
+        "signature_valid": false
+      }
+    },
+    {
+      "name": "expired-proof",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000061,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "PROOF_EXPIRED",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "proof-expiry-boundary",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000060,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "PROOF_EXPIRED",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "future-created-proof",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000020;expires=1700000080;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:jiPXstwEW58YIky9Xyljy3xQMdqMDhT0TrD69wb3csSMZRQ+d/3Cevi19LdMBZGO6E/HA2E2RUdViFFwVitLCw==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000020;expires=1700000080;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000020;expires=1700000080;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "PROOF_FUTURE",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "proof-lifetime-above-sixty-seconds",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000061;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:AyQVglUX4T6vdXW6oJT4HKtyGreTnlPVARSA3gZbraImVrDCOc2Kg2OeHYvtNg88weBRN1QofMSzS0JTfpv8AA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000061;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000061;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "PROOF_LIFETIME",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "proof-outlives-grant",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000059,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "GRANT_EXPIRY",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-nonce-context-mismatch",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-other\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:7J3JXz6Yy0WibbHKvJ8W7M8Uv3h9SrznMKRgY88A+tOGLQm1dUtupWMjCxpGtO/OoQX5IifmjSnDTjVQ+bN8DA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-other\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-other\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "NONCE_MISMATCH",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-unknown-context-field",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbhoMdW5yZWNvZ25pemVk"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:WHSz9ML4LOpeMVZVvR67vrRpJczHWK0b6lSCbMKiw6qZA/ZkpAXnHDbbNwM3xD/A3eXE15X8p5SCALlJX0ZMDQ==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbhoMdW5yZWNvZ25pemVk\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbhoMdW5yZWNvZ25pemVk\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "CONTEXT_UNKNOWN_FIELD",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-duplicate-context-field",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbhIUChJmaXh0dXJlLWludm9jYXRpb24"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:xPF94CZOVyjwj0MleVwo0cjJOVH1Y0JpE4dkvDeGxJc1gDY/JaLvHzc6mLP/6/AlLK6BvsQbK4xPyUpRliaQDg==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbhIUChJmaXh0dXJlLWludm9jYXRpb24\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbhIUChJmaXh0dXJlLWludm9jYXRpb24\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "CONTEXT_DUPLICATE_FIELD",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-wrong-context-wire-type",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CAESFAoSZml4dHVyZS1pbnZvY2F0aW9u"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:M9sYIS0JMcrvdass8Q7H9RdPl/qds6P/tYfve7g+z5GvUI5s+VBLAJA6poOEo8eAnv/4YJgR5aSR5O1EyRiHAA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CAESFAoSZml4dHVyZS1pbnZvY2F0aW9u\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CAESFAoSZml4dHVyZS1pbnZvY2F0aW9u\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "CONTEXT_WIRE_TYPE",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-truncated-context",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlv"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:CI1JM7y296LNVWT3A7yJgjuIwyJJofZ9ziImafwkQFw/iVeSc1c51NDiHnFmcO1EjB/Qfun5OIXXTtrNYEFgAw==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlv\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlv\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "CONTEXT_TRUNCATED",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-invalid-context-utf8",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEgMKAf8"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:lgUh3REUsbRoUsTwE81YX/Iz+9wMNX8UW2JJxxM5RHwfhWnLEyvj0iJ554dEwPYTPHDr51dJC6METOwc3wXHBQ==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEgMKAf8\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEgMKAf8\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "CONTEXT_STRING",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-missing-context-field",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5n"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:Xsu/uhCMN34ijwZykgC1EuRrGcInjmMy5bG39vmn51dHR9nnQ7eMa42J+OhdBNJUz7L4o7io3LRnabp8SxTaAg==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5n\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5n\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "CONTEXT_MISSING_FIELD",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-context-over-four-kib",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbhqAIHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:96+DZR9rAaiYkSpFEnBaFMXBvgTAdCqk0KhyjdjvLSbiVzD3WMZc+flDBvY7msYWsqHCrzqczYMwTnu1NpvEDg==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbhqAIHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbhqAIHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "CONTEXT_TOO_LARGE",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-wrong-binding-id",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkEKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSDwoNb3RoZXItYmluZGluZxIUChJmaXh0dXJlLWludm9jYXRpb24"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:/q1KdqVeS0RQKOiNDJhwwr9xB0sRcirV/vwQTMeDmIoacjtRAfePSlQFV09Cr5P76E2TLuDWbbNekLYiJEuSDA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkEKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSDwoNb3RoZXItYmluZGluZxIUChJmaXh0dXJlLWludm9jYXRpb24\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkEKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSDwoNb3RoZXItYmluZGluZxIUChJmaXh0dXJlLWludm9jYXRpb24\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "GRANT_BINDING_MISMATCH",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-content-coding-override",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "gzip"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:2cnvZTxLsGcP5l6kArGjFHpBDipMhRHI1PLdOj0re2A7w2xG0qWj1j1axob6FrlwwVZfcv4f5bJXWyBkdZBhBA==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": gzip\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": gzip\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "TRANSPORT_PROFILE_REJECTED",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-wrong-content-digest",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:mbfC3Bq3geHJTsqBwcMq4DOJ0zmLPV8Ac1b/ynOtE/6j9/L245UdIDeEaV5H50PIGCype+R/UomitEYltuHKCQ==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "BODY_DIGEST_MISMATCH",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-unsupported-digest-algorithm",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-512=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:CDJlcbyB9BB6/OuZnSEujL5/soj3QOzQL30LcuZ6MTlApz5aqCIEuLHH7dFuNB/B0kPxB99IlezooB91860bAg==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-512=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-512=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "CONTENT_DIGEST_FORMAT",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-wrong-keyid",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"unattested-key\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:GsRhRDeNph1mFwTbyW7G2eY8E8Ehj9d3eXBBc66Nb0VeZQnJSI2wmFznhfVAPUKYXLQKkzEAP0nIST6AvihiBg==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"unattested-key\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"unattested-key\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "KEY_ID_MISMATCH",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signed-wrong-algorithm-label",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed448\""
+          ],
+          [
+            "Signature",
+            "connection=:da03tR2u7oG8bxH6iezcPr1jmBW2gjXnd6enKa551aIOSRlmDEyIFXsIFpBYlC7BSomOeeSp86aLyG//1nhUBQ==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed448\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed448\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "ALGORITHM_REJECTED",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "unsigned-extra-forwarded-header",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:ZbCsEkNhV+b0rgZUHm8Ip6LuwRoSlakTjGytKAG1cB10D/vVV/28Md35mZiclUxFvdKMXHx2qhWEyrovEu83DA==:"
+          ],
+          [
+            "X-Fixture-Header",
+            "unsigned"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\" \"content-type\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "UNSIGNED_COMPONENT",
+        "signature_valid": true
+      }
+    },
+    {
+      "name": "signature-omits-required-content-type",
+      "request": {
+        "method": "POST",
+        "target_uri": "https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture",
+        "headers": [
+          [
+            "Content-Digest",
+            "sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:"
+          ],
+          [
+            "Trogon-Connection-Context",
+            "CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg"
+          ],
+          [
+            "Accept-Encoding",
+            "identity"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Signature-Input",
+            "connection=(\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\""
+          ],
+          [
+            "Signature",
+            "connection=:1m9jI7gYTYwfY66gVpkeJ98c88RVzXz7TZ+xbvDCEHr/tOh2/QF+xSdNy9a+cOMMsLVEn0EtEDkssXUDBpm+BQ==:"
+          ]
+        ],
+        "body_base64": "eyJtZXNzYWdlIjoiZml4dHVyZSJ9"
+      },
+      "verify_at": 1700000010,
+      "grant_expires_at": 1700000300,
+      "signed_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "verification_base_utf8": "\"@method\": POST\n\"@target-uri\": https://relay.example.invalid/v1/connection-proxy/issues?limit=10&cursor=fixture\n\"content-digest\": sha-256=:3MAs4f6luT26+8gpZAAvyjkmN9AiLVW0OzGDpJT4tB0=:\n\"trogon-connection-context\": CkMKLhIPCg1maXh0dXJlLWdyYW50GhsKGQoXZml4dHVyZS1zZXNzaW9uLXByb2plY3QSEQoPZml4dHVyZS1iaW5kaW5nEhQKEmZpeHR1cmUtaW52b2NhdGlvbg\n\"accept-encoding\": identity\n\"@signature-params\": (\"@method\" \"@target-uri\" \"content-digest\" \"trogon-connection-context\" \"accept-encoding\");created=1700000000;expires=1700000060;nonce=\"fixture-invocation\";keyid=\"AjAfo6JGpFOu6ypZAomDFrwVDPuWZgrkb3u1duxZ8ks\";alg=\"ed25519\"",
+      "expected": {
+        "outcome": "reject",
+        "reason": "UNSIGNED_COMPONENT",
+        "signature_valid": true
+      }
+    }
+  ],
+  "verification_command": "mise exec -- python3 scripts/verify-connector-conformance.py"
+}

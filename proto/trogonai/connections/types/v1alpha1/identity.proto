@@ -1,0 +1,136 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Identities are nonempty, opaque, compared whole, and never reused.
+
+// Equals the provider an Agent declares in ConnectionSelector.provider,
+// matched by exact, case-sensitive equality (ADR#0092 Decision 2, ADR#0063
+// Decision 3). The catalog owns the set of values.
+message ConnectorId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Names one immutable ConnectorRelease. A correction is a new release with a
+// new id (ADR#0092 Decision 2).
+message ConnectorReleaseId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Names one ProviderApp. App identity is the owner, issuer, registration method
+// and client id, so a different issuer or client id is a new app with a new id
+// (ADR#0092 Decision 3).
+message ProviderAppId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Names one Connection. It survives reconnects to the same account; a revoke is
+// terminal and reconnecting after it needs a new id (ADR#0092 Decision 4,
+// ADR#0094 Decision 6).
+message ConnectionId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Names one consent round trip. Custody keys the staged token bundle by it
+// (ADR#0094 Decisions 1 and 5).
+message AuthorizationAttemptId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Names the claim stream for one provider account. Custody derives it from the
+// keyed account fingerprint, so concurrent attempts for the same account name
+// the same stream and the NoStream create admits one. It reveals no provider
+// account id (ADR#0092 Decision 6, ADR#0094 Decision 5).
+message ProviderAccountClaimId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Names one ConnectionGrant. A leaked id is useless without a proof signed by
+// the confirmation key (ADR#0096 Decision 2).
+message ConnectionGrantId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Names one custody refresh or exchange operation. The write-ahead dispatch and
+// its settlement share it, and a token set records the id of the write that
+// produced it (ADR#0095 Decisions 1 and 3).
+message CredentialOperationId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Correlates one request in the Session ledger and its audit facts. Reuse
+// never authorizes another upstream dispatch: a replayed signed request is
+// refused and an unknown provider outcome remains unknown (ADR#0096).
+message InvocationId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Names a credential role a ConnectorRelease declares. A Connection binds one
+// secret per role (ADR#0092 Decisions 2 and 5).
+message CredentialRoleName {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// One exact provider scope, compared by exact equality after the release's
+// declared normalization, never by substring (ADR#0094 Decision 12). The
+// character set is the scope-token of RFC 6749 Section 3.3, so one value never
+// holds a separator or a second scope.
+message ProviderScope {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^[!#-\\[\\]-~]+$"
+  ];
+}
+
+// The exact OAuth issuer identifier, compared as a whole string and never
+// normalized. A different issuer is a different ProviderApp and a different
+// Connection (ADR#0092 Decision 4, ADR#0094 Decision 10).
+message Issuer {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// The stable principal identifier ADR#0069 records for an actor, as the decider
+// runtime carries it: nonempty and free of control characters. It names a
+// principal and never holds a name or an address. Defined here because no
+// shared protobuf principal type exists yet.
+message PrincipalId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^[^\\x00-\\x1f\\x7f]+$"
+  ];
+}

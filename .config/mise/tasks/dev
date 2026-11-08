@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Start development environment"
+
+exec docker compose -f devops/docker/compose/compose.yml up -d "$@"
