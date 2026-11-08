@@ -8,9 +8,24 @@ from pathlib import Path
 
 
 def main():
-    argparse.ArgumentParser().parse_args()
+    argparse.ArgumentParser(
+        description="Keep ordinary coverage runs strict and allow explicitly approved baseline updates.",
+        epilog=(
+            "After approving a new main baseline, run: gh workflow run ci-rust.yml "
+            "--ref main -f coverage_baseline_reset=true. The 95% threshold and source "
+            "integrity checks still apply."
+        ),
+    ).parse_args()
     reset = False
-    if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
+    event_name = os.environ["GITHUB_EVENT_NAME"]
+    if event_name == "workflow_dispatch":
+        requested = os.environ.get("COVERAGE_BASELINE_RESET_REQUESTED") or "false"
+        if requested not in ("true", "false"):
+            raise SystemExit("Coverage baseline reset must be a Boolean.")
+        reset = requested == "true"
+        if reset and os.environ.get("GITHUB_REF") != "refs/heads/main":
+            raise SystemExit("Coverage baseline reset requires refs/heads/main.")
+    elif event_name == "pull_request":
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
         reset = any(
             label["name"] == "rust:coverage-baseline-reset"

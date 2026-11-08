@@ -1,6 +1,13 @@
 name: CI Rust
 
 on:
+  workflow_dispatch:
+    inputs:
+      coverage_baseline_reset:
+        description: Approve a new coverage baseline on main while retaining threshold and integrity checks
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -15,6 +22,7 @@ on:
       - '.config/mise/tasks/**'
       - '.github/actions/setup-rust/**'
       - '.github/workflows/ci-rust.yml'
+      - 'tests/github-actions/**'
 
 concurrency:
   group: ci-rust-${{ github.ref }}
@@ -39,6 +47,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Test coverage policy
+        run: python3 tests/github-actions/test_coverage_policy.py
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -95,6 +106,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Select coverage policy
+        id: coverage-policy
+        run: python3 .config/mise/tasks/github-actions/coverage-policy
+        env:
+          COVERAGE_BASELINE_RESET_REQUESTED: ${{ inputs.coverage_baseline_reset || false }}
+
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
 
@@ -148,9 +165,9 @@ jobs:
           diff: true
           diff-branch: main
           diff-storage: _xml_coverage_reports
-          uncovered-statements-increase-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
-          new-uncovered-statements-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
-          coverage-rate-reduction-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          uncovered-statements-increase-failure: ${{ steps.coverage-policy.outputs.enforce_regressions == 'true' }}
+          new-uncovered-statements-failure: ${{ steps.coverage-policy.outputs.enforce_regressions == 'true' }}
+          coverage-rate-reduction-failure: ${{ steps.coverage-policy.outputs.enforce_regressions == 'true' }}
           togglable-report: true
           report-low-coverage-only: true
 

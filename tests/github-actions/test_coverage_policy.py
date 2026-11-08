@@ -107,6 +107,8 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_workflow_consumes_policy_for_each_regression_gate(self):
         workflow = WORKFLOW.read_text()
+        self.assertIn("run: python3 tests/github-actions/test_coverage_policy.py", workflow)
+        self.assertIn("- 'tests/github-actions/**'", workflow)
         self.assertIn("id: coverage-policy", workflow)
         self.assertIn("run: python3 .config/mise/tasks/github-actions/coverage-policy", workflow)
         self.assertIn("COVERAGE_BASELINE_RESET_REQUESTED: ${{ inputs.coverage_baseline_reset || false }}", workflow)
