@@ -9,7 +9,7 @@ use async_nats::{HeaderMap, Message};
 use buffa::Enumeration as _;
 use buffa_types::google::protobuf::Any;
 use bytes::Bytes;
-use futures_util::StreamExt as _;
+use futures_util::{FutureExt as _, StreamExt as _};
 use grpc_nats_micro::client::{self, RequestError};
 use grpc_nats_micro::constants::{HEADER_CONTENT_TYPE, HEADER_ERROR, HEADER_ERROR_CODE};
 use grpc_nats_micro::server::dispatch_admitted;
@@ -474,6 +474,23 @@ async fn admitted_service_registers_wildcards_and_serves_metadata_scoped_typed_r
     .expect("register admitted service");
     subscription_barrier(&transport).await;
 
+    let denied_subject = "admitted.v1.gamma.AdmissionService.Say";
+    let denied_reply = transport.new_inbox();
+    let mut denied_replies = transport
+        .subscribe(denied_reply.clone())
+        .await
+        .expect("denied reply probe");
+    let mut denied_headers = HeaderMap::new();
+    denied_headers.insert(HEADER_CONTENT_TYPE, "application/unsafe");
+    transport
+        .publish_with_reply_and_headers(
+            denied_subject,
+            denied_reply.clone(),
+            denied_headers,
+            Bytes::from_static(&[255]),
+        )
+        .await
+        .expect("publish rejected caller probe");
     let mut expected = Vec::new();
     for caller in ["alpha", "beta"] {
         let concrete = binding(caller);
@@ -517,8 +534,20 @@ async fn admitted_service_registers_wildcards_and_serves_metadata_scoped_typed_r
         }
     }
     let observed = trace.calls();
-    assert_eq!(observed.len(), expected.len() * 2);
-    for (pair, (subject, content_type, payload)) in observed.chunks_exact(2).zip(expected) {
+    assert_eq!(observed.len(), expected.len() * 2 + 1);
+    assert_eq!(
+        observed[0],
+        Call::Admission {
+            subject: denied_subject.to_owned(),
+            reply: Some(denied_reply.to_string()),
+        }
+    );
+    assert!(
+        denied_replies.next().now_or_never().is_none(),
+        "denied traffic must not receive even an encoding-error reply"
+    );
+    denied_replies.unsubscribe().await.expect("close denied reply probe");
+    for (pair, (subject, content_type, payload)) in observed[1..].chunks_exact(2).zip(expected) {
         match &pair[0] {
             Call::Admission {
                 subject: admitted_subject,
