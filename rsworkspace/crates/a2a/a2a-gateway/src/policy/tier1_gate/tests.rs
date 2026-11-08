@@ -173,7 +173,7 @@ fn gateway_tier1_layer_noop_has_disabled_gates() {
 
 #[test]
 fn owner_emit_error_carries_its_message() {
-    let error = OwnerEmitError::new("backend unavailable");
+    let error = OwnerEmitError::new(std::io::Error::other("backend unavailable"));
     assert_eq!(error.to_string(), "owner tuple emit failed: backend unavailable");
 }
 

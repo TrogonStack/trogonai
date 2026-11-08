@@ -137,19 +137,6 @@ impl X509MtlsVerifier {
             ));
         }
 
-        // Refuse to mint for a CA or intermediate that someone presented as
-        // an "end entity" — only certs explicitly marked non-CA can be the
-        // client identity. RFC 5280 §4.2.1.9: basicConstraints.cA=false (or
-        // absent) means end-entity. We treat "absent" as end-entity since
-        // it's the common shape for client certs.
-        if let Ok(Some(bc)) = leaf.basic_constraints()
-            && bc.value.ca
-        {
-            return Err(AuthCalloutError::CredentialVerification(
-                CredentialError::InvalidCredentials("client certificate is a CA, expected end-entity".into()),
-            ));
-        }
-
         let expires_at = Self::verify_client_chain(&chain_ders, &chain, &anchor_pems, &cas, now)
             .map_err(CredentialError::MtlsCertificate)?;
         let expires_at =

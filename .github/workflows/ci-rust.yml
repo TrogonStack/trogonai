@@ -7,11 +7,13 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     paths:
       - 'rsworkspace/**'
+      - 'devops/docker/compose/compose.yml'
+      - 'devops/docker/compose/services/a2a-gateway/**'
+      - 'devops/docker/compose/services/nats/**'
       - 'LICENSE'
       - '.mise.toml'
       - '.config/mise/tasks/**'
       - '.github/actions/setup-rust/**'
-      - '.github/actions/coverage-report/**'
       - '.github/workflows/ci-rust.yml'
 
 concurrency:
@@ -127,16 +129,16 @@ jobs:
         run: cargo test -p a2a-gateway
         working-directory: rsworkspace
 
+      - name: Test gateway bootstrap identity
+        run: sh devops/docker/compose/services/nats/gateway-env.test.sh
+
       - name: Run tests with coverage
         run: mise run --skip-tools github-actions:rust-coverage
-
-      - name: Verify coverage storage publication
-        run: python3 .github/actions/coverage-report/test_publish.py -v
 
       - name: Coverage report and gate
         # TODO: Add a fork-safe read-only coverage comparison path; this action writes to
         # _xml_coverage_reports, but fork PR tokens cannot push to the base repo.
-        uses: ./.github/actions/coverage-report
+        uses: TrogonStack/github-actions/actions/coverage-report@a59443a52b461ef2647e3f4ffca5f59b5e44599f
         with:
           path: rsworkspace/coverage.xml
           threshold: 95
