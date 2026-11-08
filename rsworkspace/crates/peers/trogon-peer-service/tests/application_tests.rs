@@ -287,10 +287,7 @@ async fn preparation_accepts_absent_and_empty_optional_prompt_correlation() -> T
         request.prompt_id = prompt;
         let prepared = f.app().prepare_batch(&f.bob, request.clone()).await?;
         assert_eq!(prepared.messages.len(), 1);
-        assert_eq!(
-            prepared.messages[0].text.as_deref(),
-            Some("retained context")
-        );
+        assert_eq!(prepared.messages[0].text.as_deref(), Some("retained context"));
         assert_eq!(f.app().prepare_batch(&f.bob, request).await?, prepared);
     }
     Ok(())
@@ -341,8 +338,7 @@ impl trogon_peer_service::PresentationRead for ConcurrentPreparationCache {
     async fn read(
         &self,
         key: &trogon_peer_service::PresentationKey,
-    ) -> Result<Option<trogon_peer_service::PreparedPresentation>, trogon_peer_service::PeerPortError>
-    {
+    ) -> Result<Option<trogon_peer_service::PreparedPresentation>, trogon_peer_service::PeerPortError> {
         trogon_peer_service::PresentationRead::read(&self.inner, key).await
     }
 }
@@ -372,18 +368,16 @@ impl trogon_peer_service::PresentationInsert for ConcurrentPreparationCache {
         self.inner.insert(key, record).await?;
         let batch_id = match self.mode {
             WinningPresentationKey::Candidate => key.batch().clone(),
-            WinningPresentationKey::Distinct => trogon_peer::BatchId::new("competing-winner")
-                .map_err(|_| PeerPortError::Integrity)?,
+            WinningPresentationKey::Distinct => {
+                trogon_peer::BatchId::new("competing-winner").map_err(|_| PeerPortError::Integrity)?
+            }
         };
         let mut batch = record.batch().clone();
         batch.batch_id = Some(batch_id.as_str().to_owned());
         let frame = trogon_peer_context::PeerContext::render(&batch, record.messages())
             .map_err(|_| PeerPortError::Integrity)?;
-        let winning_key = trogon_peer_service::PresentationKey::new(
-            key.tenant().clone(),
-            key.peer().clone(),
-            batch_id.clone(),
-        );
+        let winning_key =
+            trogon_peer_service::PresentationKey::new(key.tenant().clone(), key.peer().clone(), batch_id.clone());
         let winning_record = trogon_peer_service::PreparedPresentation::from_port(
             batch.clone(),
             record.messages().to_vec(),
@@ -402,19 +396,10 @@ impl trogon_peer_service::PresentationInsert for ConcurrentPreparationCache {
         )
         .map_err(|_| PeerPortError::Integrity)?;
         let now = trogonai_proto::convert::datetime_from_timestamp(
-            batch
-                .prepared_at
-                .as_option()
-                .ok_or(PeerPortError::Integrity)?,
+            batch.prepared_at.as_option().ok_or(PeerPortError::Integrity)?,
         )
         .map_err(|_| PeerPortError::Integrity)?;
-        let command = trogon_peer::PrepareBatch::new(
-            self.owner.clone(),
-            self.attachment.clone(),
-            batch_id,
-            plan,
-            now,
-        );
+        let command = trogon_peer::PrepareBatch::new(self.owner.clone(), self.attachment.clone(), batch_id, plan, now);
         let principal = trogon_decider_runtime::CommandPrincipal::new(
             trogon_decider_runtime::PrincipalKind::Agent,
             trogon_decider_runtime::PrincipalId::new(self.owner.caller().as_str())
@@ -424,8 +409,7 @@ impl trogon_peer_service::PresentationInsert for ConcurrentPreparationCache {
             .with_principal(principal)
             .with_authorizer(&self.policy)
             .with_replay_limit(
-                trogon_decider_runtime::ReplayLimit::try_new(4096)
-                    .map_err(|_| PeerPortError::Integrity)?,
+                trogon_decider_runtime::ReplayLimit::try_new(4096).map_err(|_| PeerPortError::Integrity)?,
             )
             .execute()
             .await
@@ -436,10 +420,7 @@ impl trogon_peer_service::PresentationInsert for ConcurrentPreparationCache {
 
 #[tokio::test]
 async fn preparation_race_retains_the_durable_winning_presentation() -> TestResult {
-    for mode in [
-        WinningPresentationKey::Candidate,
-        WinningPresentationKey::Distinct,
-    ] {
+    for mode in [WinningPresentationKey::Candidate, WinningPresentationKey::Distinct] {
         let f = Fixture::new().await?;
         f.intake("cache-race", "winning context").await?;
         let attachment = trogon_peer::AttachmentRef::new(
@@ -453,8 +434,7 @@ async fn preparation_race_retains_the_durable_winning_presentation() -> TestResu
                     .clone()
                     .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
             )?,
-            f.b.generation
-                .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+            f.b.generation.ok_or(trogon_peer_service::PeerPortError::Integrity)?,
         )?;
         let cache = ConcurrentPreparationCache {
             inner: f.cache.clone(),
@@ -480,10 +460,7 @@ async fn preparation_race_retains_the_durable_winning_presentation() -> TestResu
             1,
             "the real winning command's cache must survive a competing preparation"
         );
-        assert_eq!(
-            prepared.messages[0].text.as_deref(),
-            Some("winning context")
-        );
+        assert_eq!(prepared.messages[0].text.as_deref(), Some("winning context"));
         let batch_id = prepared
             .batch
             .batch_id
@@ -497,23 +474,21 @@ async fn preparation_race_retains_the_durable_winning_presentation() -> TestResu
                 .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
             batch_id
         );
-        let orphans = f
-            .cache
-            .orphans
-            .lock()
-            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
-        assert!(
-            !orphans.contains(&key),
-            "a durable winning key cannot be orphaned"
-        );
-        assert_eq!(
-            orphans.len(),
-            match mode {
-                WinningPresentationKey::Candidate => 0,
-                WinningPresentationKey::Distinct => 1,
-            }
-        );
-        drop(orphans);
+        {
+            let orphans = f
+                .cache
+                .orphans
+                .lock()
+                .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
+            assert!(!orphans.contains(&key), "a durable winning key cannot be orphaned");
+            assert_eq!(
+                orphans.len(),
+                match mode {
+                    WinningPresentationKey::Candidate => 0,
+                    WinningPresentationKey::Distinct => 1,
+                }
+            );
+        }
         assert_eq!(f.app().prepare_batch(&f.bob, f.prepare()).await?, prepared);
     }
     Ok(())
@@ -569,10 +544,7 @@ impl trogon_decider_runtime::StreamAppend<PeerId> for CommitThenLoseReplyStore {
         }
         Ok(result)
     }
-    fn classify_append_failure(
-        &self,
-        error: &Self::Error,
-    ) -> trogon_decider_runtime::AppendFailure {
+    fn classify_append_failure(&self, error: &Self::Error) -> trogon_decider_runtime::AppendFailure {
         match error {
             LostPreparationReply::Committed => trogon_decider_runtime::AppendFailure::Fatal,
             LostPreparationReply::Inner(error) => {
@@ -585,8 +557,7 @@ impl trogon_decider_runtime::StreamAppend<PeerId> for CommitThenLoseReplyStore {
 #[tokio::test]
 async fn uncertain_preparation_append_retains_context_for_durable_retry() -> TestResult {
     let f = Fixture::new().await?;
-    f.intake("lost-prepare-reply", "durably prepared context")
-        .await?;
+    f.intake("lost-prepare-reply", "durably prepared context").await?;
     let app = trogon_peer_service::PeerApplication::new(
         CommitThenLoseReplyStore {
             inner: f.store.clone(),
@@ -613,10 +584,7 @@ async fn uncertain_preparation_append_retains_context_for_durable_retry() -> Tes
     );
     let replay = f.app().prepare_batch(&f.bob, f.prepare()).await?;
     assert_eq!(replay.messages.len(), 1);
-    assert_eq!(
-        replay.messages[0].text.as_deref(),
-        Some("durably prepared context")
-    );
+    assert_eq!(replay.messages[0].text.as_deref(), Some("durably prepared context"));
     let before = f.store.appends.load(Ordering::SeqCst);
     assert_eq!(f.app().prepare_batch(&f.bob, f.prepare()).await?, replay);
     assert_eq!(

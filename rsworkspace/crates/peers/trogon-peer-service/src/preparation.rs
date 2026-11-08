@@ -38,7 +38,11 @@ where
         request: proto::PrepareBatchRequest,
     ) -> ApplicationResult<proto::PrepareBatchResponse, S> {
         let reference = attachment(request.attachment.as_option().ok_or(PeerApplicationError::Input)?)?;
-        let _prompt = PromptId::new(request.prompt_id.ok_or(PeerApplicationError::Input)?)?;
+        let _prompt = request
+            .prompt_id
+            .filter(|value| !value.is_empty())
+            .map(PromptId::new)
+            .transpose()?;
         let scope = self.authorize(owner, reference.peer_id(), PeerOperation::Prepare)?;
         let state = self.load(owner, reference.peer_id()).await?;
         self.live(owner, &reference, &state)?;
@@ -140,8 +144,15 @@ where
                     .ok_or(PeerApplicationError::Scope)?;
                 self.replay(owner, reference.peer_id(), &winner, batch).await
             }
-            Err(CommandError::Decide(MessageError::AlreadyPrepared(_))) => {
-                self.cache.orphan(&key).await?;
+            Err(CommandError::Decide(MessageError::AlreadyPrepared(prepared))) => {
+                let winning_key = PresentationKey::new(
+                    owner.tenant().clone(),
+                    reference.peer_id().clone(),
+                    BatchId::new(prepared.batch_id.ok_or(PeerApplicationError::Scope)?)?,
+                );
+                if key != winning_key {
+                    self.cache.orphan(&key).await?;
+                }
                 let winner = self.load(owner, reference.peer_id()).await?;
                 self.live(owner, &reference, &winner)?;
                 let batch = winner
@@ -151,10 +162,11 @@ where
                     .ok_or(PeerApplicationError::Scope)?;
                 self.replay(owner, reference.peer_id(), &winner, batch).await
             }
-            Err(error) => {
+            Err(CommandError::Decide(error)) => {
                 self.cache.orphan(&key).await?;
-                Err(PeerApplicationError::Message(error))
+                Err(PeerApplicationError::Message(CommandError::Decide(error)))
             }
+            Err(error) => Err(PeerApplicationError::Message(error)),
         }
     }
     async fn replay(
