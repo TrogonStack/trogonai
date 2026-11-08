@@ -2898,3 +2898,109 @@ async fn an_empty_inbox_returns_available_without_allocating_or_persisting_a_pre
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn public_preparation_rejects_a_leap_clock_before_allocating_or_opening_content() -> TestResult {
+    use chrono::{Duration, TimeZone};
+    use trogon_decider_runtime::{CommandError, CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind, ReplayLimit};
+    use trogon_peer::{AttachmentRef, BatchId, ConnectorId, EvolveError, MessageError, PrepareBatch, TrustedBatchPlan};
+    use trogon_peer_service::{PeerApplicationError, PeerClock, PeerPortError, PeerService};
+    let mut f = Fixture::new().await?;
+    let sent = f.intake("prepared_at_leap", "pending").await?;
+    let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let ordinary = f.clock.now() + Duration::seconds(58);
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = ordinary;
+    f.b = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone())
+        .enroll(&f.bob, Fixture::enrollment("bob"))
+        .await?
+        .attachment
+        .attachment_ref
+        .clone()
+        .into_option()
+        .ok_or(PeerPortError::Integrity)?;
+    let recipient = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let reference = AttachmentRef::new(
+        recipient.clone(),
+        ConnectorId::new(f.b.connector_id.clone().ok_or(PeerPortError::Integrity)?)?,
+        f.b.generation.ok_or(PeerPortError::Integrity)?,
+    )?;
+    let batch_id = BatchId::new("leap_domain_control")?;
+    let draft = proto::PeerBatch {
+        batch_id: Some(batch_id.as_str().to_owned()),
+        message_ids: vec![id.as_str().to_owned()],
+        prepared_at: trogonai_proto::convert::timestamp_from_datetime(&ordinary).into(),
+        ..Default::default()
+    };
+    let rendered = trogon_peer_context::PeerContext::render(
+        &draft,
+        &[proto::PreparedMessage {
+            metadata: sent.message.clone(),
+            text: Some("pending".into()),
+        }],
+    )?;
+    let plan = TrustedBatchPlan::from_renderer(vec![id.clone()], rendered.as_str().len())?;
+    let leap = chrono::Utc
+        .timestamp_opt((ordinary + Duration::seconds(1)).timestamp(), 1_500_000_000)
+        .single()
+        .ok_or(PeerPortError::Integrity)?;
+    assert_eq!(leap.timestamp_subsec_nanos(), 1_500_000_000);
+    let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(f.bob.caller().as_str())?);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        CommandExecution::new(&f.store, &PrepareBatch::new(f.bob.clone(), reference, batch_id, plan, leap))
+            .with_principal(principal)
+            .with_authorizer(&f.policy)
+            .with_replay_limit(ReplayLimit::try_new(4096)?)
+            .execute()
+            .await,
+        Err(CommandError::Decide(MessageError::InvalidState(EvolveError::TimestampRange {
+            field: "receipt.decided_at"
+        })))
+    ));
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = leap;
+    let ids = f.ids.0.load(Ordering::SeqCst);
+    let content_calls = f.content.calls.load(Ordering::SeqCst);
+    let cache_calls = f.cache.calls.load(Ordering::SeqCst);
+    let app = f.app();
+    let owner = f.bob.clone();
+    let request = f.prepare();
+    let joined = tokio::spawn(async move { app.prepare_batch(&owner, request).await }).await;
+    assert!(joined.is_ok(), "public preparation must reject an unrepresentable clock without panicking");
+    assert!(matches!(
+        joined?,
+        Err(PeerApplicationError::Evidence(MessageError::InvalidState(EvolveError::TimestampRange {
+            field: "batch.prepared_at"
+        })))
+    ));
+    assert_eq!(f.ids.0.load(Ordering::SeqCst), ids);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), cache_calls);
+    assert!(f.cache.records.lock().map_err(|_| PeerPortError::Unavailable)?.is_empty());
+    assert!(f.cache.orphans.lock().map_err(|_| PeerPortError::Unavailable)?.is_empty());
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    let target = service_coverage_public_history(&f, &recipient).await?;
+    assert_eq!(target.inbox.len(), 1);
+    assert!(!target.inbox[0].disposition.is_set());
+    assert!(target.dispositions.is_empty());
+    assert!(target.batches.is_empty());
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = ordinary;
+    let prepared = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(prepared.batch.message_ids, vec![id.as_str().to_owned()]);
+    assert_eq!(
+        prepared.batch.prepared_at,
+        buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&ordinary))
+    );
+    assert_eq!(prepared.messages.len(), 1);
+    assert_eq!(prepared.messages[0].metadata, sent.message);
+    assert_eq!(prepared.messages[0].text.as_deref(), Some("pending"));
+    assert_eq!(
+        prepared.content_availability.and_then(|value| value.as_known()),
+        Some(proto::ContentAvailability::CONTENT_AVAILABILITY_AVAILABLE)
+    );
+    assert_eq!(f.ids.0.load(Ordering::SeqCst), ids + 1);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls + 1);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
+    assert!(f.cache.orphans.lock().map_err(|_| PeerPortError::Unavailable)?.is_empty());
+    Ok(())
+}
