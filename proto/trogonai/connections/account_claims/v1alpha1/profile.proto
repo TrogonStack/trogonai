@@ -1,0 +1,61 @@
+edition = "2024";
+
+package trogonai.connections.account_claims.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/types/v1alpha1/account.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// The erasable provider account profile of ADR#0093 Decision 11: the one place
+// the display name and the raw provider ids of a USER subject are kept. It is
+// a mutable KV record keyed by tenant, custody project and ConnectionId, purged
+// with its revisions on offboarding, disconnect or an erasure request (ADR#0093
+// Decision 12), and never an event, a snapshot, a projection row, an audit
+// record, a subject, a header, a log field or a metric label (ADR#0092
+// Decision 9). Streams, claims and audit reference it by the fingerprint only.
+// The connections service writes it after GrantedAuthorityCaptured and before
+// ActivateConnection, and replaces it at a reconnect, never on a timer. A
+// record left by an attempt that never activated is an orphan, and the
+// PROFILE_UNPURGED cleanup obligation purges it.
+message ProviderAccountProfile {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The keyed fingerprint the Connection stream and the claim carry for this
+  // account; the join from a stream to this record.
+  trogonai.connections.types.v1alpha1.ProviderAccountFingerprint fingerprint = 2 [features.field_presence = LEGACY_REQUIRED];
+  // One bounded display name as the identity probe returned it, for any
+  // subject kind. Absent when the probe yields none. ADR#0092 Decision 9 bounds
+  // it without a number; 256 characters is the chosen bound.
+  string display_name = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  // Present only for a USER subject. The ids of a non-person subject are
+  // opaque provider ids on the stream's ProviderAccount, not here.
+  ProviderUserSubjectIds user_subject = 4;
+  // When the probe that produced this record ran: activation or reconnect.
+  google.protobuf.Timestamp captured_at = 5 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The raw provider ids of a USER subject, exactly the response fields the
+// release's identity probe is reviewed to read (ADR#0092 Decision 9). Email
+// addresses, avatar and profile URLs, phone numbers and free-text fields are
+// never captured. Each id is opaque and compared whole. ADR#0093 Decision 11
+// names "the raw provider ids of a user subject" without a shape; these are the
+// inputs of the fingerprint of ADR#0092 Decision 6 that belong to a person.
+message ProviderUserSubjectIds {
+  // The provider's id for the user account.
+  string account_id = 1 [(buf.validate.field).string.min_len = 1];
+  // The stable subject, such as an OIDC sub, where the provider exposes one.
+  // Subject continuity on reconnect is checked through the fingerprint
+  // (ADR#0094 Decision 6).
+  string subject_id = 2 [(buf.validate.field).string.min_len = 1];
+  // The organization, workspace or installation the user consented within,
+  // when the provider scopes a user account by one.
+  string organization_id = 3 [(buf.validate.field).string.min_len = 1];
+  string workspace_id = 4 [(buf.validate.field).string.min_len = 1];
+  string installation_id = 5 [(buf.validate.field).string.min_len = 1];
+}

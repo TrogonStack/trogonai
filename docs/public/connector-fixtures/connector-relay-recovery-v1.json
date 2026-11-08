@@ -1,0 +1,1177 @@
+{
+  "profile": "connector-relay-recovery-v1",
+  "notice": "Selected deterministic reference-state traces, not proof of atomic distributed claims, store durability, audit-adapter deduplication or running HTTP effects. Provider sends are counted separately from body-free audit/outbox publication. Fresh-grant switching archives old terminal receipts instead of restoring their authority. Capacity traces use explicit synthetic reserved metadata charges and lower operator limits; real adapters must account actual bytes and share durable reservations across every replica.",
+  "sources": [
+    "docs/reference/connector-relay-recovery.md",
+    "https://www.rfc-editor.org/rfc/rfc9110.html#section-9.2.2",
+    "https://docs.nats.io/using-nats/developer/develop_jetstream/model_deep_dive"
+  ],
+  "constants": {
+    "replay_safety_margin_seconds": 60,
+    "maximum_completion_slots_per_tenant": 1024,
+    "maximum_completion_metadata_bytes_per_tenant": 8388608,
+    "maximum_undelivered_completion_age_seconds": 60
+  },
+  "traces": [
+    {
+      "name": "concurrent-claim-one-winner",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "expected": "REPLAY"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "PHASE_REJECTED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "SEND_INTENT"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "PROVIDER_SENT"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "NO_SEND_PERMIT"
+        },
+        {
+          "op": "complete",
+          "worker": "worker-a",
+          "expected": "COMPLETED"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "expected": "REPLAY"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 1,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "COMPLETED",
+            "fence": 1,
+            "sends": 1,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "audit-lost-ack-must-confirm-before-send",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "acknowledged": false,
+          "worker": "worker-a",
+          "expected": "AUDIT_ACK_LOST"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "PHASE_REJECTED"
+        },
+        {
+          "op": "reconcile_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "SEND_INTENT"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "PROVIDER_SENT"
+        },
+        {
+          "op": "complete",
+          "worker": "worker-a",
+          "expected": "COMPLETED"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 1,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "COMPLETED",
+            "fence": 1,
+            "sends": 1,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "crash-after-claim-is-not-sent-and-nonce-stays-spent",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "crash",
+          "expected": "OWNER_CRASHED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "expected": "REPLAY"
+        },
+        {
+          "op": "recover",
+          "expected": "NOT_SENT"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "FENCED"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "expected": "REPLAY"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 0,
+        "acceptance_events": 0,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "NOT_SENT",
+            "fence": 2,
+            "sends": 0,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "crash-after-audit-before-intent-is-not-sent",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "crash",
+          "expected": "OWNER_CRASHED"
+        },
+        {
+          "op": "recover",
+          "expected": "NOT_SENT"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 0,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "NOT_SENT",
+            "fence": 2,
+            "sends": 0,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "intent-ack-lost-never-grants-send-permit",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "send_intent",
+          "acknowledged": false,
+          "worker": "worker-a",
+          "expected": "INTENT_ACK_LOST"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "NO_SEND_PERMIT"
+        },
+        {
+          "op": "recover",
+          "expected": "OUTCOME_UNKNOWN"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 0,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "OUTCOME_UNKNOWN",
+            "fence": 2,
+            "sends": 0,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "crash-after-send-remains-unknown-without-resend",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "SEND_INTENT"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "PROVIDER_SENT"
+        },
+        {
+          "op": "crash",
+          "expected": "OWNER_CRASHED"
+        },
+        {
+          "op": "recover",
+          "expected": "OUTCOME_UNKNOWN"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "expected": "REPLAY"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "FENCED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 1,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "OUTCOME_UNKNOWN",
+            "fence": 2,
+            "sends": 1,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "completion-outbox-retries-audit-only",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "SEND_INTENT"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "PROVIDER_SENT"
+        },
+        {
+          "op": "complete",
+          "worker": "worker-a",
+          "expected": "COMPLETED"
+        },
+        {
+          "op": "publish_completion",
+          "audit_available": false,
+          "expected": "AUDIT_UNAVAILABLE"
+        },
+        {
+          "op": "publish_completion",
+          "acknowledged": false,
+          "expected": "AUDIT_ACK_LOST"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "NO_SEND_PERMIT"
+        },
+        {
+          "op": "complete",
+          "worker": "worker-a",
+          "expected": "PHASE_REJECTED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "expected": "REPLAY"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 1,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "COMPLETED",
+            "fence": 1,
+            "sends": 1,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "renewal-extends-replay-retention-before-pruning",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "SEND_INTENT"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "PROVIDER_SENT"
+        },
+        {
+          "op": "complete",
+          "worker": "worker-a",
+          "expected": "COMPLETED"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        },
+        {
+          "op": "renew",
+          "expires_at": 200,
+          "now": 50,
+          "expected": "RENEWED"
+        },
+        {
+          "op": "expire",
+          "now": 100,
+          "expected": "NOT_EXPIRED"
+        },
+        {
+          "op": "prune",
+          "now": 161,
+          "expected": "RETENTION_REQUIRED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "now": 161,
+          "expected": "REPLAY"
+        },
+        {
+          "op": "revoke",
+          "now": 180,
+          "expected": "GRANT_CLOSED"
+        },
+        {
+          "op": "renew",
+          "expires_at": 300,
+          "now": 180,
+          "expected": "GRANT_CLOSED"
+        },
+        {
+          "op": "prune",
+          "now": 259,
+          "expected": "RETENTION_REQUIRED"
+        },
+        {
+          "op": "prune",
+          "now": 260,
+          "expected": "PRUNED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "now": 261,
+          "expected": "GRANT_CLOSED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 200,
+        "closed": true,
+        "provider_sends": 1,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {}
+      }
+    },
+    {
+      "name": "restore-requires-fresh-grant-key-and-independent-epoch",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "SEND_INTENT"
+        },
+        {
+          "op": "restore",
+          "epoch": 1,
+          "expected": "EPOCH_NOT_ADVANCING"
+        },
+        {
+          "op": "restore",
+          "epoch": 2,
+          "expected": "RESTORE_FENCED"
+        },
+        {
+          "op": "send",
+          "epoch": 1,
+          "worker": "worker-a",
+          "expected": "FENCED"
+        },
+        {
+          "op": "claim",
+          "invocation": "request-new",
+          "worker": "worker-b",
+          "epoch": 1,
+          "expected": "EPOCH_MISMATCH"
+        },
+        {
+          "op": "renew",
+          "expires_at": 200,
+          "epoch": 1,
+          "expected": "GRANT_CLOSED"
+        },
+        {
+          "op": "fresh_grant",
+          "grant_id": "fixture-grant",
+          "key_id": "fixture-key",
+          "epoch": 2,
+          "expires_at": 300,
+          "expected": "FRESH_AUTHORITY_REQUIRED"
+        },
+        {
+          "op": "fresh_grant",
+          "grant_id": "fixture-grant-new",
+          "key_id": "fixture-key-new",
+          "epoch": 2,
+          "expires_at": 300,
+          "expected": "RECOVERY_REQUIRED"
+        },
+        {
+          "op": "recover",
+          "expected": "OUTCOME_UNKNOWN"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        },
+        {
+          "op": "fresh_grant",
+          "grant_id": "fixture-grant-new",
+          "key_id": "fixture-key-new",
+          "epoch": 2,
+          "expires_at": 300,
+          "expected": "FRESH_GRANT_INSTALLED"
+        },
+        {
+          "op": "claim",
+          "invocation": "request-new",
+          "worker": "worker-b",
+          "grant_id": "fixture-grant-new",
+          "key_id": "fixture-key",
+          "epoch": 2,
+          "expected": "KEY_MISMATCH"
+        },
+        {
+          "op": "claim",
+          "invocation": "request-new",
+          "worker": "worker-b",
+          "grant_id": "fixture-grant",
+          "key_id": "fixture-key",
+          "epoch": 2,
+          "expected": "GRANT_MISMATCH"
+        },
+        {
+          "op": "claim",
+          "invocation": "request-new",
+          "worker": "worker-b",
+          "grant_id": "fixture-grant-new",
+          "key_id": "fixture-key-new",
+          "epoch": 2,
+          "expected": "CLAIMED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 2,
+        "expires_at": 300,
+        "closed": false,
+        "provider_sends": 0,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 1,
+        "receipts": {
+          "request-new": {
+            "phase": "CLAIMED",
+            "fence": 1,
+            "sends": 0,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "journal-unavailability-fails-closed",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "availability",
+          "available": false,
+          "expected": "UNAVAILABLE"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "STORE_UNAVAILABLE"
+        },
+        {
+          "op": "renew",
+          "expires_at": 200,
+          "expected": "STORE_UNAVAILABLE"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "invocation": "request-new",
+          "expected": "STORE_UNAVAILABLE"
+        },
+        {
+          "op": "availability",
+          "available": true,
+          "expected": "AVAILABLE"
+        },
+        {
+          "op": "crash",
+          "expected": "OWNER_CRASHED"
+        },
+        {
+          "op": "recover",
+          "expected": "NOT_SENT"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 0,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "NOT_SENT",
+            "fence": 2,
+            "sends": 0,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "terminal-commit-lost-ack-preserves-completion",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "SEND_INTENT"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "PROVIDER_SENT"
+        },
+        {
+          "op": "complete",
+          "acknowledged": false,
+          "worker": "worker-a",
+          "expected": "TERMINAL_ACK_LOST"
+        },
+        {
+          "op": "crash",
+          "expected": "OWNER_CRASHED"
+        },
+        {
+          "op": "recover",
+          "expected": "TERMINAL_PRESERVED"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "expected": "REPLAY"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 1,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "COMPLETED",
+            "fence": 1,
+            "sends": 1,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "missing-terminal-commit-recovers-unknown",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "SEND_INTENT"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "PROVIDER_SENT"
+        },
+        {
+          "op": "complete",
+          "committed": false,
+          "worker": "worker-a",
+          "expected": "TERMINAL_ACK_LOST"
+        },
+        {
+          "op": "crash",
+          "expected": "OWNER_CRASHED"
+        },
+        {
+          "op": "recover",
+          "expected": "OUTCOME_UNKNOWN"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 1,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "OUTCOME_UNKNOWN",
+            "fence": 2,
+            "sends": 1,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "lost-audit-ack-and-pre-intent-crash-is-still-not-sent",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "acknowledged": false,
+          "worker": "worker-a",
+          "expected": "AUDIT_ACK_LOST"
+        },
+        {
+          "op": "crash",
+          "expected": "OWNER_CRASHED"
+        },
+        {
+          "op": "recover",
+          "expected": "NOT_SENT"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 0,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "NOT_SENT",
+            "fence": 2,
+            "sends": 0,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "pruning-never-drops-undelivered-completion",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "SEND_INTENT"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "PROVIDER_SENT"
+        },
+        {
+          "op": "complete",
+          "worker": "worker-a",
+          "expected": "COMPLETED"
+        },
+        {
+          "op": "expire",
+          "now": 100,
+          "expected": "GRANT_CLOSED"
+        },
+        {
+          "op": "prune",
+          "now": 161,
+          "expected": "RETENTION_REQUIRED"
+        },
+        {
+          "op": "publish_completion",
+          "audit_available": false,
+          "expected": "AUDIT_UNAVAILABLE"
+        },
+        {
+          "op": "prune",
+          "now": 161,
+          "expected": "RETENTION_REQUIRED"
+        },
+        {
+          "op": "publish_completion",
+          "expected": "COMPLETION_RECORDED"
+        },
+        {
+          "op": "prune",
+          "now": 162,
+          "expected": "PRUNED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": true,
+        "provider_sends": 1,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {}
+      }
+    },
+    {
+      "name": "tenant-slot-reservation-survives-worker-crash-and-new-replica",
+      "initial": {
+        "completion_slot_limit": 1
+      },
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "crash",
+          "expected": "OWNER_CRASHED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-a-restarted",
+          "invocation": "request-b",
+          "now": 2,
+          "expected": "TENANT_BACKLOG_FULL"
+        },
+        {
+          "op": "recover",
+          "now": 2,
+          "expected": "NOT_SENT"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "invocation": "request-b",
+          "now": 3,
+          "expected": "TENANT_BACKLOG_FULL"
+        },
+        {
+          "op": "publish_completion",
+          "now": 4,
+          "expected": "COMPLETION_RECORDED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "invocation": "request-b",
+          "now": 5,
+          "expected": "CLAIMED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 0,
+        "acceptance_events": 0,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "NOT_SENT",
+            "fence": 2,
+            "sends": 0,
+            "outbox_pending": false
+          },
+          "request-b": {
+            "phase": "CLAIMED",
+            "fence": 1,
+            "sends": 0,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "tenant-metadata-reservation-is-shared-across-workers",
+      "initial": {
+        "completion_metadata_limit": 384
+      },
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "invocation": "request-b",
+          "metadata_bytes": 256,
+          "now": 2,
+          "expected": "TENANT_METADATA_FULL"
+        },
+        {
+          "op": "crash",
+          "expected": "OWNER_CRASHED"
+        },
+        {
+          "op": "recover",
+          "now": 3,
+          "expected": "NOT_SENT"
+        },
+        {
+          "op": "publish_completion",
+          "now": 4,
+          "expected": "COMPLETION_RECORDED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-b",
+          "invocation": "request-b",
+          "metadata_bytes": 256,
+          "now": 5,
+          "expected": "CLAIMED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 0,
+        "acceptance_events": 0,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "NOT_SENT",
+            "fence": 2,
+            "sends": 0,
+            "outbox_pending": false
+          },
+          "request-b": {
+            "phase": "CLAIMED",
+            "fence": 1,
+            "sends": 0,
+            "outbox_pending": false
+          }
+        }
+      }
+    },
+    {
+      "name": "oldest-undelivered-completion-blocks-new-replica",
+      "events": [
+        {
+          "op": "claim",
+          "worker": "worker-a",
+          "expected": "CLAIMED"
+        },
+        {
+          "op": "accept_audit",
+          "worker": "worker-a",
+          "expected": "AUDITED"
+        },
+        {
+          "op": "send_intent",
+          "worker": "worker-a",
+          "expected": "SEND_INTENT"
+        },
+        {
+          "op": "send",
+          "worker": "worker-a",
+          "expected": "PROVIDER_SENT"
+        },
+        {
+          "op": "complete",
+          "now": 2,
+          "worker": "worker-a",
+          "expected": "COMPLETED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-new-replica",
+          "invocation": "request-b",
+          "now": 62,
+          "expected": "TENANT_BACKLOG_STALE"
+        },
+        {
+          "op": "publish_completion",
+          "now": 63,
+          "expected": "COMPLETION_RECORDED"
+        },
+        {
+          "op": "claim",
+          "worker": "worker-new-replica",
+          "invocation": "request-b",
+          "now": 64,
+          "expected": "CLAIMED"
+        }
+      ],
+      "expected_final": {
+        "epoch": 1,
+        "expires_at": 100,
+        "closed": false,
+        "provider_sends": 1,
+        "acceptance_events": 1,
+        "completion_events": 1,
+        "retired_receipts": 0,
+        "receipts": {
+          "request-a": {
+            "phase": "COMPLETED",
+            "fence": 1,
+            "sends": 1,
+            "outbox_pending": false
+          },
+          "request-b": {
+            "phase": "CLAIMED",
+            "fence": 1,
+            "sends": 0,
+            "outbox_pending": false
+          }
+        }
+      }
+    }
+  ],
+  "verification_command": "mise exec -- python3 scripts/verify-connector-conformance.py"
+}

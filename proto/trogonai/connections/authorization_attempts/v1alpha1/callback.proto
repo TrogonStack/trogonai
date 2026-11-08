@@ -1,0 +1,70 @@
+edition = "2024";
+
+package trogonai.connections.authorization_attempts.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// The facts ClaimOAuthCallback is checked against (ADR#0094 Decisions 2 and
+// 7). None of them is material: the signed state, its signature and the
+// browser cookie value never reach the attempt.
+message CallbackBinding {
+  // The nonce id inside the signed state minted for this attempt.
+  StateNonceId state_nonce_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The version of the platform state signing key that signed the state.
+  StateSigningKeyVersion state_signing_version = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Keyed digest of the short-lived __Host- browser binding cookie set at
+  // BeginAuthorization. A link forwarded to another browser fails the claim.
+  BrowserBindingDigest browser_binding_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  reserved 4;
+  reserved initiating_principal;
+
+  // Derived only by trusted dispatch from the authenticated initiator.
+  SessionInitiatorBinding initiator_binding = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Names the nonce carried in the signed state. Single use comes from the
+// attempt stream, not from the nonce (ADR#0094 Decision 2).
+message StateNonceId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// A version of the per-environment platform state signing key the secrets
+// service holds. It is platform control-plane state, outside KeyManagement, and
+// never a tenant KeyRef (ADR#0094 Decision 2). A version revoked for compromise
+// fails the attempts that still depend on it.
+message StateSigningKeyVersion {
+  uint32 value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+}
+
+// HMAC-SHA256 of the random browser binding cookie value (ADR#0094 Decision 7).
+// The cookie value itself is never stored.
+message BrowserBindingDigest {
+  bytes value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}
+
+// HMAC-SHA256 under a versioned platform callback-binding key, with domain
+// "connection-oauth-initiator-v1" and length-prefixed UTF-8 tenant account id,
+// attempt id and verified session principal id. The key is distinct from state
+// signing and retained for open attempts. Each length is a four-byte unsigned
+// big-endian byte count. Dispatch derives this at begin and
+// claim using the pinned key version; it never accepts a caller-supplied digest.
+// No raw principal or actor metadata enters the command or event payload.
+message SessionInitiatorBinding {
+  uint32 key_version = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  bytes digest = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}
