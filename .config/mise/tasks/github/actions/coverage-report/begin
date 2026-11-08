@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+rm -f -- .coverage-comparison-status .coverage-total .coverage-total.diff-branch
