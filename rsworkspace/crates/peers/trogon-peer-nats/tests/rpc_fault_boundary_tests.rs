@@ -63,7 +63,7 @@ impl StreamRead<PeerId> for FaultStore {
     type Error = InjectedStoreError;
     async fn read_stream(&self, request: ReadStreamRequest<'_, PeerId>) -> Result<ReadStreamResponse, Self::Error> {
         let call = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
-        if matches!(self.failure, StoreFailure::Read) || (matches!(self.failure, StoreFailure::ResumeRead) && call == 2)
+        if matches!(self.failure, StoreFailure::Read) || (matches!(self.failure, StoreFailure::ResumeRead) && call == 3)
         {
             self.injected.fetch_add(1, Ordering::SeqCst);
             return Err(InjectedStoreError::Unavailable);
@@ -83,7 +83,7 @@ impl StreamRead<PeerId> for FaultStore {
         ) || (matches!(
             self.failure,
             StoreFailure::ResumeMalformed | StoreFailure::ResumeExpired
-        ) && call == 2)
+        ) && call == 3)
         {
             self.injected.fetch_add(1, Ordering::SeqCst);
         }
@@ -92,8 +92,8 @@ impl StreamRead<PeerId> for FaultStore {
             StoreFailure::MalformedEvent => read.events[0].event.content = vec![255],
             StoreFailure::InvalidHistory => read.events.push(first),
             StoreFailure::HistoryLimit => read.events = vec![first; 4097],
-            StoreFailure::ResumeMalformed if call == 2 => read.events[0].event.content = vec![255],
-            StoreFailure::ResumeExpired if call == 2 => {
+            StoreFailure::ResumeMalformed if call == 3 => read.events[0].event.content = vec![255],
+            StoreFailure::ResumeExpired if call == 3 => {
                 let mut time = self.clock.time.lock().map_err(|_| InjectedStoreError::Unavailable)?;
                 let advanced = *time + std::time::Duration::from_secs(11);
                 *time = advanced;
