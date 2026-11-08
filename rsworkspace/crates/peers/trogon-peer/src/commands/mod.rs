@@ -50,3 +50,9 @@ pub use domain::EnrollmentFacts;
 
 mod peer_history;
 pub use peer_history::PeerHistory;
+
+mod heartbeat_error;
+
+mod accepted_outbox;
+
+mod message_values;

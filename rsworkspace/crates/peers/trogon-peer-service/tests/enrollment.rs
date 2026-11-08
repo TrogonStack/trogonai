@@ -10,10 +10,12 @@ use trogon_decider_runtime::{
     StreamAppend, StreamRead, UnauthorizedError,
 };
 use trogon_peer::{
-    CallerId, CollaborationRef, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId, PeerId, TenantId,
-    TrustedPeerOwner,
+    CallerId, CollaborationRef, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId, PeerId, PeerValueError,
+    TenantId, TrustedPeerOwner,
 };
-use trogon_peer_service::{EnrollServiceError, PeerApplicationError, PeerClock, PeerOperation, PeerService};
+use trogon_peer_service::{
+    EnrollServiceError, EnrollmentField, PeerApplicationError, PeerClock, PeerOperation, PeerService,
+};
 use trogonai_proto::convert::timestamp_from_datetime;
 use trogonai_proto::peers::{PeerEventCase, v1alpha1 as proto};
 
@@ -215,8 +217,6 @@ async fn collaboration_denial_precedes_every_store_read_and_write() {
 
 #[tokio::test]
 async fn malformed_enrollment_reports_the_field_before_authorization_or_storage() {
-    use trogon_peer::PeerValueError;
-    use trogon_peer_service::EnrollmentField;
     let valid = request("collaboration_alpha");
     let cases = [
         (
@@ -274,9 +274,10 @@ async fn malformed_enrollment_reports_the_field_before_authorization_or_storage(
             .enroll(&owner(), invalid)
             .await
             .expect_err("malformed enrollment must fail");
-        assert!(
-            error.to_string().contains(diagnostic_field),
-            "the caller must be able to correct the rejected field"
+        assert_eq!(
+            error.to_string(),
+            format!("invalid peer enrollment field {diagnostic_field}: {expected_source}"),
+            "the caller must receive the precise rejected field and source"
         );
         assert!(
             matches!(error, EnrollServiceError::InvalidInput { field, source } if field == expected_field && source == expected_source)
@@ -289,7 +290,6 @@ async fn malformed_enrollment_reports_the_field_before_authorization_or_storage(
 
 #[tokio::test]
 async fn absent_enrollment_fields_report_missing_input_without_authorizing_a_partial_identity() {
-    use trogon_peer_service::EnrollmentField;
     let valid = request("collaboration_alpha");
     let cases = [
         (
