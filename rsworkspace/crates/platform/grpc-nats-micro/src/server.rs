@@ -128,8 +128,8 @@ async fn serve_registered(
                         dispatch(&client, &request, &content_type_policy, handler.as_ref()).await
                     }
                     RegisteredHandler::Admitted(endpoint) => {
-                        if let Some(handler) = admitted_handler(&request.message, endpoint.admission.as_ref()) {
-                            dispatch(&client, &request, &content_type_policy, handler.as_ref()).await;
+                        if let Some(admitted) = admit_request(&request.message, endpoint.admission.as_ref()) {
+                            dispatch(&client, &request, &content_type_policy, admitted.handler.as_ref()).await;
                         }
                     }
                 }
@@ -147,10 +147,7 @@ pub async fn dispatch_admitted<P: PublishClient>(
     policy: &ServiceOptions,
     admission: &dyn crate::EndpointAdmission,
 ) {
-    let Some(handler) = admitted_handler(message, admission) else {
-        return;
-    };
-    let Some(reply) = message.reply.clone() else {
+    let Some(AdmittedRequest { handler, reply }) = admit_request(message, admission) else {
         return;
     };
     let (content_type, outcome) = resolve(message.headers.as_ref(), &message.payload, policy, handler.as_ref()).await;
@@ -168,15 +165,21 @@ pub async fn dispatch_admitted<P: PublishClient>(
     }
 }
 
-fn admitted_handler<'a>(
+struct AdmittedRequest<'a> {
+    handler: Box<dyn EndpointHandler + 'a>,
+    reply: async_nats::Subject,
+}
+
+fn admit_request<'a>(
     message: &async_nats::Message,
     admission: &'a dyn crate::EndpointAdmission,
-) -> Option<Box<dyn EndpointHandler + 'a>> {
-    let reply = message.reply.as_ref()?;
-    admission.admit(crate::RequestMetadata {
+) -> Option<AdmittedRequest<'a>> {
+    let reply = message.reply.clone()?;
+    let handler = admission.admit(crate::RequestMetadata {
         subject: message.subject.as_str(),
         reply: Some(reply.as_str()),
-    })
+    })?;
+    Some(AdmittedRequest { handler, reply })
 }
 
 async fn dispatch<P: PublishClient>(

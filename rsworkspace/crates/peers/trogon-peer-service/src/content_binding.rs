@@ -5,16 +5,17 @@ pub struct ContentBinding {
     content: TrustedContent,
 }
 impl ContentBinding {
+    pub fn from_content(tenant: TenantId, content: TrustedContent) -> Self {
+        Self { tenant, content }
+    }
     pub fn from_port(
         tenant: TenantId,
         reference: SealedContentRef,
         size: u32,
         semantic_fingerprint: Vec<u8>,
     ) -> Result<Self, PeerValueError> {
-        Ok(Self {
-            tenant,
-            content: TrustedContent::from_sealed_port(reference, size, semantic_fingerprint)?,
-        })
+        let content = TrustedContent::from_sealed_port(reference, size, semantic_fingerprint)?;
+        Ok(Self::from_content(tenant, content))
     }
     pub fn tenant(&self) -> &TenantId {
         &self.tenant

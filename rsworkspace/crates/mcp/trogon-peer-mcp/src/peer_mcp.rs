@@ -13,6 +13,7 @@ use trogon_peer_context::{PeerContext, PeerContextError};
 use trogonai_proto::peers::v1alpha1 as v1;
 
 use crate::connector_config::ConnectorConfig;
+use crate::model_operation::ModelOperation;
 use crate::model_tool_definitions::model_tool;
 use crate::model_tools;
 use crate::native_binding::NativeBinding;
@@ -52,31 +53,32 @@ where
     }
 
     pub async fn invoke(&self, request: CallToolRequestParams) -> Result<CallToolResult, PeerMcpError> {
-        match request.name.as_ref() {
+        let operation = match request.name.as_ref() {
             "peer_prompt_hook" => {
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-                tokio::time::timeout_at(deadline, self.prompt_hook(request))
+                return tokio::time::timeout_at(deadline, self.prompt_hook(request))
                     .await
-                    .map_err(|_| PeerMcpError::PromptDeadline)?
+                    .map_err(|_| PeerMcpError::PromptDeadline)?;
             }
-            "peer_roster" | "peer_send" | "peer_status" | "peer_acknowledge_batch" => {
-                let attachment = self
-                    .binding
-                    .lock()
-                    .await
-                    .as_ref()
-                    .and_then(NativeBinding::attachment)
-                    .cloned()
-                    .ok_or(PeerMcpError::Unbound)?;
-                match request.name.as_ref() {
-                    "peer_roster" => model_tools::roster(&self.backend, request, &attachment).await,
-                    "peer_send" => model_tools::send(&self.backend, request, &attachment, &self.config).await,
-                    "peer_status" => model_tools::status(&self.backend, request, &attachment, &self.config).await,
-                    "peer_acknowledge_batch" => model_tools::acknowledge(&self.backend, request, &attachment).await,
-                    _ => Err(PeerMcpError::UnsupportedTool),
-                }
-            }
-            _ => Err(PeerMcpError::UnsupportedTool),
+            "peer_roster" => ModelOperation::Roster,
+            "peer_send" => ModelOperation::Send,
+            "peer_status" => ModelOperation::Status,
+            "peer_acknowledge_batch" => ModelOperation::Acknowledge,
+            _ => return Err(PeerMcpError::UnsupportedTool),
+        };
+        let attachment = self
+            .binding
+            .lock()
+            .await
+            .as_ref()
+            .and_then(NativeBinding::attachment)
+            .cloned()
+            .ok_or(PeerMcpError::Unbound)?;
+        match operation {
+            ModelOperation::Roster => model_tools::roster(&self.backend, request, &attachment).await,
+            ModelOperation::Send => model_tools::send(&self.backend, request, &attachment, &self.config).await,
+            ModelOperation::Status => model_tools::status(&self.backend, request, &attachment, &self.config).await,
+            ModelOperation::Acknowledge => model_tools::acknowledge(&self.backend, request, &attachment).await,
         }
     }
 
