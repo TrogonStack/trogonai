@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+git switch "${COVERAGE_STORAGE_BRANCH}"
+cp ../coverage-action/verified/coverage.xml ./data/"${COVERAGE_REPORT_BRANCH}"/"${COVERAGE_STORAGE_SUBDIRECTORY}"/coverage.xml
+cp ../coverage-action/verified/sources.json ./data/"${COVERAGE_REPORT_BRANCH}"/"${COVERAGE_STORAGE_SUBDIRECTORY}"/sources.json
+git add -f "./data/${COVERAGE_REPORT_BRANCH}/${COVERAGE_STORAGE_SUBDIRECTORY}/coverage.xml" \
+  "./data/${COVERAGE_REPORT_BRANCH}/${COVERAGE_STORAGE_SUBDIRECTORY}/sources.json"
+if ! git diff --cached --quiet; then
+  git commit -m "Coverage report for ${GITHUB_SHA}"
+fi
