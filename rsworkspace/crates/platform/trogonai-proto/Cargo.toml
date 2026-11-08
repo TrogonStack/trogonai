@@ -33,6 +33,11 @@ model-access = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:ser
 # like `policy`. A record names policy by `PolicyRuleRef`, so it enables `policy` for a
 # writer to name that type and the agent, tenant and project identifiers.
 audit = ["policy"]
+# Generated types for the evaluation bindings stream (ADR 0072). Types only, like `policy`.
+# A binding names its subject by `PolicySubject` and its judge by `AgentId`, and a result
+# points at a `SessionPositionRef` and a `CandidateRef`, so the generated tree carries the
+# policy subjects, agents, hierarchy and session packages those imports reach.
+evaluation = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:serde"]
 
 [dependencies]
 thiserror = { workspace = true }
