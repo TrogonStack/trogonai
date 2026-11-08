@@ -100,6 +100,11 @@ impl Decider for Heartbeat {
             .checked_add_signed(chrono::Duration::seconds(10))
             .filter(|at| (-62_135_596_800..=253_402_300_799).contains(&at.timestamp()))
             .ok_or(HeartbeatError::LeaseDeadlineOverflow)?;
+        if command.now.timestamp_subsec_nanos() >= 1_000_000_000 {
+            return Err(HeartbeatError::InvalidState(EvolveError::TimestampRange {
+                field: "attachment.observed_at",
+            }));
+        }
         let attachment = proto::PeerAttachment {
             attachment_ref: previous.attachment_ref.clone(),
             status: previous.status,
