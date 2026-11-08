@@ -8,6 +8,12 @@ license = "Apache-2.0"
 workspace = true
 
 [dependencies]
+buffa = { workspace = true }
+serde = { workspace = true }
+grpc-nats-micro = { workspace = true }
+trogon-peer-service = { path = "../trogon-peer-service" }
+trogon-decider-runtime = { workspace = true }
+trogonai-proto = { workspace = true, features = ["peers"] }
 async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
@@ -18,7 +24,6 @@ trogon-peer = { path = "../trogon-peer" }
 [dev-dependencies]
 futures = { workspace = true }
 serde_json = { workspace = true }
-buffa = { workspace = true }
 buffa-types = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 trogon-decider-runtime = { workspace = true }
