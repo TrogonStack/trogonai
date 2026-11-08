@@ -1,4 +1,6 @@
 #![allow(clippy::unwrap_used)]
+use chrono::TimeZone as _;
+use trogon_decider::evaluate_decision;
 mod support;
 use support::*;
 use trogon_decider::{Decider, testing::TestCase};
@@ -139,8 +141,6 @@ fn malformed_intake_and_receipt_history_is_refused() {
 
 #[test]
 fn core759_accepted_metadata_routes_intake_and_disposal_replay_to_recipient() {
-    use trogon_decider::evaluate_decision;
-
     let sender = run(enrolled("sender", 0), &send(0, 1, 7));
     let accepted = AcceptedMessage::from_sender_history(&sender, &MessageId::new("message_0").unwrap()).unwrap();
     assert_eq!(accepted.tenant(), identity("sender").owner().tenant());
@@ -267,8 +267,6 @@ fn core759_foreign_tenant_sender_evidence_cannot_authorize_intake_or_disposal() 
 
 #[test]
 fn core759_intake_clock_and_replayed_capacity_do_not_bypass_guards() {
-    use trogon_decider::evaluate_decision;
-
     for at in [time(0), chrono::DateTime::<chrono::Utc>::MAX_UTC] {
         assert_eq!(
             error(enrolled("recipient", 0), &IntakeMessage::new(evidence(0, 1), at)),
@@ -299,7 +297,6 @@ fn core759_intake_clock_and_replayed_capacity_do_not_bypass_guards() {
 
 #[test]
 fn core759_disposal_replay_cannot_forge_preparation_or_rewrite_existing_disposition() {
-    use trogon_decider::evaluate_decision;
     let before = run(enrolled("recipient", 0), &intake(0, 1));
     let command = DisposeMessage::new(evidence(0, 1), TerminalDisposition::Unavailable, time(3));
     let (disposed, events) = evaluate_decision(before.clone(), &command).unwrap();
@@ -572,8 +569,6 @@ fn receipt_replay_detects_missing_recipient_and_an_unindexed_inbox_disposition()
 
 #[test]
 fn disposal_replay_requires_receipt_identity_and_rejects_unowned_preparation() {
-    use trogon_decider::evaluate_decision;
-
     let initial = enrolled("recipient", 0);
     let intaken = run(initial.clone(), &intake(0, 1));
     let (_, events) = evaluate_decision(
@@ -634,7 +629,6 @@ fn disposal_replay_requires_receipt_identity_and_rejects_unowned_preparation() {
 
 #[test]
 fn disposal_cannot_emit_a_receipt_with_a_non_protobuf_leap_timestamp() {
-    use chrono::TimeZone as _;
     let at = chrono::Utc
         .timestamp_opt(time(59).timestamp(), 1_500_000_000)
         .single()
