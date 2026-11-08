@@ -43,7 +43,8 @@ fn peer_metadata_and_state_fields_reject_wrong_wire_types_and_truncated_nested_v
     field_contract::<proto::PeerEnrollment>(&[1, 2, 3, 4, 5, 6, 7, 8], &[], &[8]);
     field_contract::<proto::PeerAttachment>(&[1, 3, 4], &[2], &[1, 3, 4]);
     field_contract::<proto::PeerPresence>(&[1, 2, 6, 7, 8], &[3, 4, 5], &[6, 7, 8]);
-    field_contract::<proto::MessageMetadata>(&[1, 2, 3, 4, 8, 9, 10, 11], &[6], &[8, 9, 11]);
+    field_contract::<proto::MessageMetadata>(&[1, 2, 3, 4, 8, 9, 10, 11, 12], &[6], &[8, 9, 11, 12]);
+    field_contract::<proto::ContentSemanticFingerprint>(&[1], &[], &[]);
     field_contract::<proto::StorageLocator>(&[1], &[], &[]);
     field_contract::<proto::Digest>(&[1, 2], &[], &[]);
     field_contract::<proto::ClaimCheck>(&[1, 2], &[], &[1, 2]);
