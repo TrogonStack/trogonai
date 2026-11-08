@@ -150,12 +150,8 @@ async fn fails_on_a_payload_that_claims_the_binding_event_set() {
         .await
         .unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .starts_with("failed to decode an evaluation binding event")
-    );
-    assert!(std::error::Error::source(&error).is_some());
+    let source = std::error::Error::source(&error).expect("the decode failure is the source");
+    assert!(source.downcast_ref::<buffa::DecodeError>().is_some());
 }
 
 #[tokio::test]
