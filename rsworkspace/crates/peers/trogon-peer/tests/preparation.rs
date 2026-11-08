@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 mod support;
 use support::*;
-use trogon_decider::{Decider, WritePrecondition, evaluate_decision};
+use trogon_decider::{Decider, WritePrecondition, evaluate_decision, testing::TestCase};
 use trogon_peer::*;
 use trogonai_proto::peers::{PeerEventCase, v1alpha1 as proto};
 
@@ -253,4 +253,128 @@ fn core760_replay_requires_live_attachment_valid_ordinals_and_batch_identity() {
         commands::state::evolve(damaged, &original),
         Err(EvolveError::InvalidValue { field: "content", .. })
     ));
+}
+
+#[test]
+fn renderer_plan_and_command_binding_match_the_persisted_batch() {
+    let command = prepare(&[3, 1], 73, 3);
+    assert_eq!(command.owner(), identity("recipient").owner());
+    assert_eq!(command.attachment(), &reference("recipient", 1));
+    assert_eq!(command.stream_id(), command.attachment().peer_id());
+    assert_eq!(command.batch_id().as_str(), "batch");
+    assert_eq!(command.plan().rendered_utf8_bytes(), 73);
+    let state = run(inbox(&[3, 1], 2), &command);
+    assert_eq!(
+        state.batches[0].message_ids,
+        command
+            .plan()
+            .message_ids()
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect::<Vec<_>>()
+    );
+    TestCase::<PrepareBatch>::new()
+        .given_no_history()
+        .when(command)
+        .then_error(MessageError::Guard(HeartbeatError::MissingEnrollment));
+}
+
+#[test]
+fn preparation_replay_rejects_missing_selection_bad_batch_identity_and_expired_lease() {
+    let before = inbox(&[0], 1);
+    let (_, events) = evaluate_decision(before.clone(), &prepare(&[0], 20, 3)).unwrap();
+    for mutation in 0..4 {
+        let mut event = events.iter().next().unwrap().clone();
+        if let Some(PeerEventCase::PeerBatchPrepared(prepared)) = event.event.as_mut() {
+            let mut batch = prepared.batch.as_option().unwrap().clone();
+            match mutation {
+                0 => batch.batch_id = Some("invalid batch".to_owned()),
+                1 => {
+                    batch.message_ids.clear();
+                    prepared.receipts.clear();
+                }
+                2 => {
+                    batch.prepared_at =
+                        buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&time(10)));
+                    prepared.receipts[0].decided_at = batch.prepared_at.clone();
+                }
+                _ => {
+                    prepared.receipts[0].recipient_peer_id = Some("not_a_peer".to_owned());
+                }
+            }
+            prepared.batch = buffa::MessageField::some(batch);
+        }
+        assert!(commands::state::evolve(before.clone(), &event).is_err());
+    }
+    let prepared = run(before.clone(), &prepare(&[0], 20, 3));
+    assert_eq!(
+        commands::state::evolve(prepared, events.iter().next().unwrap()),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let mut inconsistent = before;
+    inconsistent.inbox[0].disposition = buffa::MessageField::some(proto::RecipientReceipt::default());
+    assert_eq!(
+        commands::state::evolve(inconsistent, events.iter().next().unwrap()),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+}
+
+#[test]
+fn preparation_refuses_a_receipt_with_invalid_batch_id_before_committing_it() {
+    let state = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    let mut receipt = state.dispositions[0].clone();
+    receipt.batch_id = Some("invalid batch".to_owned());
+    let event = proto::PeerEvent {
+        event: Some(
+            proto::PeerMessageDisposed {
+                receipt: buffa::MessageField::some(receipt),
+            }
+            .into(),
+        ),
+    };
+    assert!(matches!(
+        commands::state::evolve(inbox(&[0], 1), &event),
+        Err(EvolveError::InvalidValue {
+            field: "receipt.batch_id",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn prepared_outcome_cannot_arrive_through_a_terminal_disposal_event() {
+    let before = inbox(&[0], 1);
+    let prepared = run(before.clone(), &prepare(&[0], 20, 3));
+    let event = proto::PeerEvent {
+        event: Some(
+            proto::PeerMessageDisposed {
+                receipt: buffa::MessageField::some(prepared.dispositions[0].clone()),
+            }
+            .into(),
+        ),
+    };
+    assert_eq!(
+        commands::state::evolve(before, &event),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+}
+
+#[test]
+fn preparation_rejects_corrupted_inbox_metadata_and_ambiguous_order() {
+    for mutation in 0..3 {
+        let mut state = inbox(&[0, 1], 1);
+        match mutation {
+            0 => {
+                let mut metadata = state.inbox[0].message.as_option().unwrap().clone();
+                metadata.content_size_bytes = Some(0);
+                state.inbox[0].message = buffa::MessageField::some(metadata);
+            }
+            1 => state.inbox[0].intake_ordinal = Some(0),
+            _ => state.inbox[1].intake_ordinal = state.inbox[0].intake_ordinal,
+        }
+        assert!(matches!(
+            error(state, &prepare(&[0, 1], 20, 3)),
+            MessageError::InvalidState(_)
+        ));
+    }
 }
