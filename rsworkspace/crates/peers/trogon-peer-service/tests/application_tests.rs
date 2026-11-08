@@ -41,6 +41,7 @@ use trogon_peer_service::PreparedPresentation;
 use trogon_peer_service::PresentationInsert;
 use trogon_peer_service::PresentationKey;
 use trogon_peer_service::PresentationRead;
+use trogon_peer_service::ScopedPeerStore;
 use trogon_peer_service::{PeerPortError, WorkLimit};
 use trogonai_proto::peers::PeerEventCase;
 mod support;
@@ -3293,7 +3294,6 @@ async fn public_preparation_rejects_a_leap_clock_before_allocating_or_opening_co
 
 impl Fixture {
     pub async fn history(&self, peer: &PeerId) -> TestResult<trogonai_proto::peers::state_v1alpha1::PeerState> {
-        use trogon_decider_runtime::{ReadFrom, ReadStreamRequest, StreamRead};
         let read = self
             .store
             .read_stream(ReadStreamRequest {
@@ -3426,9 +3426,6 @@ async fn public_status_rejects_out_of_profile_seconds_after_its_live_attachment_
 
 #[tokio::test]
 async fn public_roster_rejects_a_leap_clock_without_emitting_invalid_presence() -> TestResult {
-    use chrono::{Duration, TimeZone};
-    use trogon_peer::{EvolveError, MessageError};
-    use trogon_peer_service::{PeerApplicationError, PeerClock, PeerPortError, PeerService};
     let mut f = Fixture::new().await?;
     let renewed_at = f.clock.now() + Duration::seconds(58);
     *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = renewed_at;
@@ -3525,9 +3522,6 @@ impl trogon_peer_service::PeerCatalog for RosterObservationCatalog {
 
 #[tokio::test]
 async fn public_roster_rejects_out_of_profile_seconds_after_its_live_attachment_check() -> TestResult {
-    use chrono::TimeZone;
-    use trogon_peer::{EvolveError, MessageError};
-    use trogon_peer_service::{PeerApplication, PeerApplicationError, PeerPortError};
     for seconds in [-62_135_596_801, 253_402_300_800] {
         let f = Fixture::new().await?;
         let observed_at = chrono::Utc
@@ -3575,8 +3569,6 @@ async fn public_roster_rejects_out_of_profile_seconds_after_its_live_attachment_
 
 #[tokio::test]
 async fn public_roster_preserves_empty_and_denied_pages_without_emitting_a_clock_observation() -> TestResult {
-    use chrono::TimeZone;
-    use trogon_peer_service::{PeerApplication, PeerPortError};
     for deny_member in [false, true] {
         let f = Fixture::new().await?;
         let bob = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
@@ -3732,7 +3724,6 @@ impl trogon_peer_service::PeerCatalog for AuthorityChangingRosterCatalog {
 
 #[tokio::test]
 async fn a_denied_roster_member_is_omitted_without_loading_its_history() -> TestResult {
-    use trogon_peer_service::{PeerApplication, PeerPortError};
     let f = Fixture::new().await?;
     let requester = PeerId::parse(f.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
     let member = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
@@ -3814,7 +3805,6 @@ async fn a_denied_roster_member_is_omitted_without_loading_its_history() -> Test
 
 #[tokio::test]
 async fn roster_rechecks_store_tenant_after_catalog_await_before_loading_a_member() -> TestResult {
-    use trogon_peer_service::{PeerApplication, PeerApplicationError, PeerPortError, ScopedPeerStore};
     let f = Fixture::new().await?;
     let member = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
     let authority_changed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
