@@ -6,10 +6,10 @@ use super::{CredentialRef, StorageBackend, StorageBackendError};
 
 /// Where an adapter put a credential's material.
 ///
-/// Recorded in the aggregate when the credential is activated, so the
-/// ADR#0046 path a credential was written under stays on record after its id
-/// stopped naming it. For OpenBao it is the leaf of that path. Adapter-private:
-/// it never crosses a contract, and nothing outside the adapters parses it.
+/// Recorded in activation events and aggregate state separately from the
+/// opaque credential identity. For OpenBao it is the leaf of the ADR#0046
+/// path. It is internal storage metadata, absent from the public credential
+/// metadata contract.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct StorageLocator {
     value: Arc<str>,
@@ -42,9 +42,6 @@ impl StorageLocator {
     }
 
     /// The leaf of the ADR#0046 path an OpenBao credential is written under.
-    ///
-    /// The text is what the credential id was before the id turned opaque, kept
-    /// verbatim so already-written paths still resolve.
     pub fn openbao(credential: &CredentialRef) -> Result<Self, StorageLocatorError> {
         Self::new(format!(
             "openbao:{}:{}:{}",
