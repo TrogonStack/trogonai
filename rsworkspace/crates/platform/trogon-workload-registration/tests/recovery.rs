@@ -68,7 +68,7 @@ fn audit() -> AuditWriter<MemorySink> {
 #[tokio::test]
 async fn malformed_durable_heads_refuse_and_independent_denials_and_incarnations_fence_old_owners() {
     let key = SigningKey::from_bytes(&[7; 32]);
-    let configs: Vec<_> = (1..=3)
+    let configs: Vec<_> = (1..=4)
         .map(|fence| {
             ProducerConfig::new(
                 "acme",
@@ -157,7 +157,16 @@ async fn malformed_durable_heads_refuse_and_independent_denials_and_incarnations
     invalid.bindings.push(base.bindings[0].clone());
     vectors.push((invalid, HeadFailure::Scope));
     invalid = base.clone();
+    invalid.bindings.push(RegistrationBinding {
+        spiffe_id: "spiffe://identity.example.org/service/alpha".into(),
+        ..base.bindings[0].clone()
+    });
+    vectors.push((invalid, HeadFailure::Scope));
+    invalid = base.clone();
     invalid.approved_root_sha256 = vec![vec![1; 32], vec![1; 32]];
+    vectors.push((invalid, HeadFailure::Bounds));
+    invalid = base.clone();
+    invalid.approved_root_sha256 = vec![vec![2; 32], vec![1; 32]];
     vectors.push((invalid, HeadFailure::Bounds));
     invalid = base.clone();
     invalid.issued_at = MessageField::some(Timestamp::from(issued + Duration::from_secs(3)));
@@ -346,4 +355,41 @@ async fn malformed_durable_heads_refuse_and_independent_denials_and_incarnations
             .last_sequence,
         0
     );
+
+    let config = &configs[3];
+    let profile = StreamProfile::new(config);
+    let expired = document(config, SystemTime::now() - Duration::from_secs(600), 9);
+    let payload = expired.encode_to_vec();
+    let signature = key.sign(&approval_signing_bytes(config, &payload)).to_bytes();
+    assert!(matches!(
+        ApprovedRegistration::verify(config, &payload, &signature),
+        Err(RegistrationError::Lease)
+    ));
+    writer
+        .publish(profile.control_subject(), payload.into())
+        .await
+        .expect("enqueue expired durable head")
+        .await
+        .expect("persist expired durable head");
+    let mut denial = document(config, SystemTime::now() - Duration::from_secs(1), 9);
+    denial.bindings.clear();
+    assert!(matches!(
+        emergency_withdrawal(&emergency, config, approved(config, &denial), &audit()).await,
+        Err(RegistrationError::Revision)
+    ));
+    denial.registration_revision = 10;
+    emergency_withdrawal(&emergency, config, approved(config, &denial), &audit())
+        .await
+        .expect("expired historical head still fences a strictly newer withdrawal");
+    let live = writer
+        .get_key_value(profile.live_bucket())
+        .await
+        .expect("native live bucket")
+        .entry(config.scope().key())
+        .await
+        .expect("live read")
+        .expect("durable newer withdrawal");
+    let live = RegistrationSnapshot::decode_from_slice(&live.value).expect("native withdrawal wire");
+    assert_eq!(live.registration_revision, 10);
+    assert!(live.bindings.is_empty());
 }

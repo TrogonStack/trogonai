@@ -1,5 +1,5 @@
 use std::num::NonZeroU64;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Instant, SystemTime};
 
 use buffa::{EnumValue, Message, MessageField};
 use buffa_types::google::protobuf::Timestamp;
@@ -11,6 +11,8 @@ use trogonai_proto::platform::workload_identity::v1alpha1::{
     RegistrationBinding as WireBinding, RegistrationSnapshot, WorkloadRole as WireRole,
 };
 
+use crate::registration_timestamp::RegistrationTimestamp;
+use crate::scoped_registration_binding::ScopedRegistrationBinding;
 use crate::{
     ApprovalLease, AuthorityVersion, MAX_SNAPSHOT_BYTES, ProducerConfig, RegistrationError, Sha256Digest,
     approval_signing_bytes,
@@ -53,8 +55,8 @@ impl ApprovedRegistration {
             NonZeroU64::new(message.trust_revision).ok_or(RegistrationError::Revision)?,
         );
         let lease = ApprovalLease::new(
-            timestamp(message.issued_at.as_option())?,
-            timestamp(message.expires_at.as_option())?,
+            RegistrationTimestamp::decode(message.issued_at.as_option())?.into_system_time(),
+            RegistrationTimestamp::decode(message.expires_at.as_option())?.into_system_time(),
             started,
             now,
         )?;
@@ -63,35 +65,7 @@ impl ApprovedRegistration {
         }
         let mut bindings = Vec::with_capacity(message.bindings.len());
         for binding in message.bindings {
-            let role = match binding.role.as_known() {
-                Some(WireRole::WORKLOAD_ROLE_EGRESS_PROXY) => WorkloadRole::EgressProxy,
-                Some(WireRole::WORKLOAD_ROLE_AGENT) => WorkloadRole::Agent,
-                Some(WireRole::WORKLOAD_ROLE_SUPERVISOR) => WorkloadRole::Supervisor,
-                _ => return Err(RegistrationError::Scope),
-            };
-            if role == WorkloadRole::Agent {
-                crate::CanonicalAgentId::new(
-                    binding
-                        .application_id
-                        .as_deref()
-                        .ok_or(RegistrationError::ApplicationIdentity)?,
-                )?;
-            }
-            let binding = RegistrationBinding::new(
-                &binding.spiffe_id,
-                &binding.tenant,
-                &binding.project,
-                role,
-                binding.application_id.as_deref(),
-            )
-            .map_err(RegistrationError::Binding)?;
-            if binding.tenant() != config.scope().tenant().as_str()
-                || binding.project() != config.scope().project().as_str()
-                || binding.spiffe_id().trust_domain() != config.scope().trust_domain()
-            {
-                return Err(RegistrationError::Scope);
-            }
-            bindings.push(binding);
+            bindings.push(ScopedRegistrationBinding::decode(config, &binding)?.into_binding());
         }
         bindings.sort_by(|a, b| a.spiffe_id().cmp(b.spiffe_id()));
         if bindings
@@ -189,14 +163,4 @@ impl ApprovedRegistration {
         }
         self.check_current()
     }
-}
-
-fn timestamp(value: Option<&Timestamp>) -> Result<SystemTime, RegistrationError> {
-    let value = value.ok_or(RegistrationError::Lease)?;
-    if value.seconds <= 0 || !(0..1_000_000_000).contains(&value.nanos) {
-        return Err(RegistrationError::Lease);
-    }
-    SystemTime::UNIX_EPOCH
-        .checked_add(Duration::new(value.seconds as u64, value.nanos as u32))
-        .ok_or(RegistrationError::Lease)
 }
