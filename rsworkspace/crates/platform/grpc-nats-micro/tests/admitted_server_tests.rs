@@ -15,9 +15,10 @@ use grpc_nats_micro::constants::{HEADER_CONTENT_TYPE, HEADER_ERROR, HEADER_ERROR
 use grpc_nats_micro::server::dispatch_admitted;
 use grpc_nats_micro::status_codec::{self, ReplyError};
 use grpc_nats_micro::{
-    AdmittedEndpoint, ContentType, DiscoveryMetadata, EndpointAdmission, EndpointHandler, MethodName, MethodNameInput,
-    RequestMetadata, ServeError, ServerSubjectPattern, ServiceBinding, ServiceFault, ServiceName, ServiceNameInput,
-    ServiceVersion, ServiceVersionInput, SubjectPrefix, SubjectPrefixInput,
+    AdmittedEndpoint, ContentType, DiscoveryMetadata, DiscoveryMetadataInput, EndpointAdmission, EndpointHandler,
+    MethodName, MethodNameInput, NamedAdmittedEndpoint, RequestMetadata, ServeError, ServerSubjectPattern,
+    ServiceBinding, ServiceDescriptor, ServiceFault, ServiceName, ServiceNameInput, ServiceVersion,
+    ServiceVersionInput, SubjectPrefix, SubjectPrefixInput,
 };
 use trogon_nats::test_support::CoreTestServer;
 use trogon_nats::{AdvancedMockNatsClient, NatsConfig, NatsTls};
@@ -412,14 +413,81 @@ async fn subscription_barrier(client: &async_nats::Client) {
     .expect("broker registration barrier stayed bounded");
 }
 
-#[tokio::test]
-async fn admitted_service_registers_wildcards_and_serves_metadata_scoped_typed_round_trips() {
+#[derive(Clone, Copy)]
+enum AdmissionRegistration {
+    Legacy,
+    Named,
+}
+
+#[derive(Clone, Copy)]
+enum DiscoveryMetadataMode {
+    Empty,
+    Populated,
+}
+
+fn discovery_metadata(key: &str, value: &str) -> DiscoveryMetadata {
+    DiscoveryMetadata::from_input(&DiscoveryMetadataInput::new([(key, value)])).expect("valid discovery metadata")
+}
+
+fn populated_binding(caller: &str) -> ServiceBinding {
+    ServiceBinding::new(
+        ServiceName::from_input(&ServiceNameInput::new("AdmissionService")).expect("service name"),
+        ServiceVersion::from_input(&ServiceVersionInput::new("1.0.0")).expect("service version"),
+        SubjectPrefix::from_input(&SubjectPrefixInput::new(format!("admitted.v1.{caller}"))).expect("subject prefix"),
+    )
+    .with_description("Admission contract")
+    .with_metadata(discovery_metadata("contract", "admitted"))
+    .with_method(
+        MethodName::from_input(&MethodNameInput::new("Say")).expect("Say method"),
+        discovery_metadata("operation", "say"),
+    )
+    .expect("Say endpoint")
+    .with_method(
+        MethodName::from_input(&MethodNameInput::new("Fail")).expect("Fail method"),
+        discovery_metadata("operation", "fail"),
+    )
+    .expect("Fail endpoint")
+}
+
+fn endpoint_metadata(mode: DiscoveryMetadataMode, operation: &str) -> DiscoveryMetadata {
+    match mode {
+        DiscoveryMetadataMode::Empty => DiscoveryMetadata::default(),
+        DiscoveryMetadataMode::Populated => discovery_metadata("operation", operation),
+    }
+}
+
+async fn assert_admitted_service_contract(registration: AdmissionRegistration, metadata_mode: DiscoveryMetadataMode) {
     let server = CoreTestServer::start().await;
     let config = NatsConfig::from_url(server.address()).with_tls(NatsTls::Disabled);
     let transport = trogon_nats::connect(&config, BOUND)
         .await
         .expect("connect to isolated broker");
-    let declared = binding("declaration");
+    let declared = match metadata_mode {
+        DiscoveryMetadataMode::Empty => binding("declaration"),
+        DiscoveryMetadataMode::Populated => populated_binding("declaration"),
+    };
+    assert_eq!(declared.name().as_str(), "AdmissionService");
+    assert_eq!(declared.version().as_str(), "1.0.0");
+    assert_eq!(declared.subject_prefix().as_str(), "admitted.v1.declaration");
+    match metadata_mode {
+        DiscoveryMetadataMode::Empty => {
+            assert_eq!(declared.description(), None);
+            assert!(declared.metadata().is_empty());
+            assert!(
+                declared
+                    .endpoints()
+                    .iter()
+                    .all(|endpoint| endpoint.metadata().is_empty())
+            );
+        }
+        DiscoveryMetadataMode::Populated => {
+            assert_eq!(declared.description(), Some("Admission contract"));
+            assert_eq!(
+                declared.metadata().entries().get("contract").map(String::as_str),
+                Some("admitted")
+            );
+        }
+    }
     let trace = Trace::default();
     let say_pattern = ServerSubjectPattern::new(SAY_PATTERN).expect("valid Say wildcard");
     let fail_pattern = ServerSubjectPattern::new(FAIL_PATTERN).expect("valid Fail wildcard");
@@ -451,28 +519,96 @@ async fn admitted_service_registers_wildcards_and_serves_metadata_scoped_typed_r
     ));
     assert!(trace.calls().is_empty());
 
-    let service = tokio::time::timeout(
-        BOUND,
-        grpc_nats_micro::serve_admitted(
-            &transport,
-            &declared,
-            ServiceOptions::default(),
-            vec![
-                AdmittedEndpoint {
-                    subject: say_pattern,
-                    admission: Box::new(admission(ReplyMode::Say, trace.clone())),
-                },
-                AdmittedEndpoint {
-                    subject: fail_pattern,
-                    admission: Box::new(admission(ReplyMode::Fail, trace.clone())),
-                },
-            ],
-        ),
-    )
+    let service = tokio::time::timeout(BOUND, async {
+        match registration {
+            AdmissionRegistration::Legacy => {
+                grpc_nats_micro::serve_admitted(
+                    &transport,
+                    &declared,
+                    ServiceOptions::default(),
+                    vec![
+                        AdmittedEndpoint {
+                            subject: say_pattern,
+                            admission: Box::new(admission(ReplyMode::Say, trace.clone())),
+                        },
+                        AdmittedEndpoint {
+                            subject: fail_pattern,
+                            admission: Box::new(admission(ReplyMode::Fail, trace.clone())),
+                        },
+                    ],
+                )
+                .await
+            }
+            AdmissionRegistration::Named => {
+                let descriptor = ServiceDescriptor::new(
+                    ServiceName::from_input(&ServiceNameInput::new("AdmissionService")).expect("service name"),
+                    ServiceVersion::from_input(&ServiceVersionInput::new("1.0.0")).expect("service version"),
+                );
+                let descriptor = match metadata_mode {
+                    DiscoveryMetadataMode::Empty => descriptor,
+                    DiscoveryMetadataMode::Populated => descriptor
+                        .with_description("Admission contract")
+                        .with_metadata(discovery_metadata("contract", "admitted")),
+                };
+                grpc_nats_micro::serve_named_admitted(
+                    &transport,
+                    &descriptor,
+                    ServiceOptions::default(),
+                    vec![
+                        NamedAdmittedEndpoint {
+                            method_name: MethodName::from_input(&MethodNameInput::new("Say")).expect("Say method"),
+                            metadata: endpoint_metadata(metadata_mode, "say"),
+                            subject: say_pattern,
+                            admission: Box::new(admission(ReplyMode::Say, trace.clone())),
+                        },
+                        NamedAdmittedEndpoint {
+                            method_name: MethodName::from_input(&MethodNameInput::new("Fail")).expect("Fail method"),
+                            metadata: endpoint_metadata(metadata_mode, "fail"),
+                            subject: fail_pattern,
+                            admission: Box::new(admission(ReplyMode::Fail, trace.clone())),
+                        },
+                    ],
+                )
+                .await
+            }
+        }
+    })
     .await
     .expect("registration stayed bounded")
     .expect("register admitted service");
     subscription_barrier(&transport).await;
+    let info = tokio::time::timeout(BOUND, transport.request("$SRV.INFO.AdmissionService", Bytes::new()))
+        .await
+        .expect("discovery query stayed bounded")
+        .expect("discovery response");
+    let info: serde_json::Value = serde_json::from_slice(&info.payload).expect("discovery JSON");
+    assert_eq!(info["name"], "AdmissionService");
+    assert_eq!(info["version"], "1.0.0");
+    match metadata_mode {
+        DiscoveryMetadataMode::Empty => assert_eq!(info["metadata"], serde_json::json!({})),
+        DiscoveryMetadataMode::Populated => {
+            assert_eq!(info["description"], "Admission contract");
+            assert_eq!(info["metadata"]["contract"], "admitted");
+        }
+    }
+    let endpoints = info["endpoints"].as_array().expect("endpoint discovery");
+    assert_eq!(endpoints.len(), 2);
+    for (name, pattern, operation) in [("Say", SAY_PATTERN, "say"), ("Fail", FAIL_PATTERN, "fail")] {
+        let endpoint = endpoints
+            .iter()
+            .find(|endpoint| endpoint["name"] == name)
+            .expect("named endpoint");
+        assert_eq!(endpoint["subject"], pattern);
+        assert_eq!(endpoint["queue_group"], "q");
+        match metadata_mode {
+            DiscoveryMetadataMode::Empty => assert_eq!(endpoint["metadata"], serde_json::json!({})),
+            DiscoveryMetadataMode::Populated => assert_eq!(endpoint["metadata"]["operation"], operation),
+        }
+    }
+    transport
+        .publish(ALPHA_SAY, Bytes::from_static(&[255]))
+        .await
+        .expect("publish no-reply request that cannot run admission or decode");
 
     let denied_subject = "admitted.v1.gamma.AdmissionService.Say";
     let denied_reply = transport.new_inbox();
@@ -587,4 +723,37 @@ async fn admitted_service_registers_wildcards_and_serves_metadata_scoped_typed_r
         .await
         .expect("service stop stayed bounded")
         .expect("stop admitted service");
+}
+
+#[tokio::test]
+async fn admitted_service_registers_wildcards_and_serves_metadata_scoped_typed_round_trips() {
+    assert_admitted_service_contract(AdmissionRegistration::Legacy, DiscoveryMetadataMode::Empty).await;
+}
+
+#[tokio::test]
+async fn named_admitted_service_preserves_discovery_scoped_dispatch_faults_and_stats() {
+    assert_admitted_service_contract(AdmissionRegistration::Named, DiscoveryMetadataMode::Empty).await;
+}
+
+#[test]
+fn service_binding_debug_preserves_the_existing_public_diagnostic_shape() {
+    let binding = ServiceBinding::new(
+        ServiceName::from_input(&ServiceNameInput::new("AdmissionService")).expect("service name"),
+        ServiceVersion::from_input(&ServiceVersionInput::new("1.0.0")).expect("service version"),
+        SubjectPrefix::from_input(&SubjectPrefixInput::new("admitted.v1")).expect("subject prefix"),
+    );
+    assert_eq!(
+        format!("{binding:?}"),
+        r#"ServiceBinding { name: ServiceName(NatsToken("AdmissionService")), version: ServiceVersion("1.0.0"), description: None, metadata: DiscoveryMetadata({}), subject_prefix: SubjectPrefix(DottedNatsToken("admitted.v1")), endpoints: [] }"#
+    );
+}
+
+#[tokio::test]
+async fn admitted_service_preserves_populated_service_and_endpoint_metadata() {
+    assert_admitted_service_contract(AdmissionRegistration::Legacy, DiscoveryMetadataMode::Populated).await;
+}
+
+#[tokio::test]
+async fn named_admitted_service_preserves_populated_service_and_endpoint_metadata() {
+    assert_admitted_service_contract(AdmissionRegistration::Named, DiscoveryMetadataMode::Populated).await;
 }
