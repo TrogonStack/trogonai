@@ -1,7 +1,9 @@
 use std::convert::Infallible;
 
+use crate::execution_error::ExecutionError;
+use crate::history_error::HistoryError;
 use trogon_decider_runtime::{CommandError, PrincipalIdError};
-use trogon_peer::{EnrollError, EvolveError, PeerValueError};
+use trogon_peer::{AttachError, EnrollError, EvolveError, PeerValueError};
 use trogonai_proto::peers::{PeerEventPayloadError, v1alpha1};
 
 use crate::EnrollmentField;
@@ -29,6 +31,10 @@ pub enum EnrollServiceError<ReadError, AppendError> {
     },
     #[error("trusted peer owner cannot form a command principal: {0}")]
     Principal(#[from] PrincipalIdError),
+    #[error("peer attachment execution failed: {0}")]
+    Attach(#[source] ExecutionError<AttachError, ReadError, AppendError>),
+    #[error("peer history read failed: {0}")]
+    History(#[source] HistoryError<ReadError>),
     #[error("peer enrollment execution failed: {0}")]
     Execution(#[source] EnrollExecutionError<ReadError, AppendError>),
 }

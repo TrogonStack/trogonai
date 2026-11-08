@@ -337,3 +337,247 @@ async fn absent_enrollment_fields_report_missing_input_without_authorizing_a_par
         assert_eq!(store.appends.load(Ordering::SeqCst), 0);
     }
 }
+
+#[tokio::test]
+async fn repeated_prompt_resumes_same_live_connector_without_replacing_attachment() {
+    let store = ObservedStore::default();
+    let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+    let first = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let resumed = service.enroll(&owner(), request("collaboration_alpha")).await;
+    assert!(resumed.is_ok(), "same live connector must resume: {resumed:?}");
+    assert_eq!(first, resumed.unwrap());
+    assert_eq!(store.appends.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn expired_connector_replacement_fences_generation_and_preserves_peer_identity() {
+    let store = ObservedStore::default();
+    let first = PeerService::new(store.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let mut replacement = request("collaboration_alpha");
+    replacement.connector_id = Some("replacement".into());
+    let resumed = PeerService::new(
+        store.clone(),
+        policy(),
+        FixedClock(now() + chrono::Duration::seconds(10)),
+    )
+    .enroll(&owner(), replacement)
+    .await;
+    assert!(resumed.is_ok(), "expired connector must allow replacement: {resumed:?}");
+    let resumed = resumed.unwrap();
+    assert_eq!(resumed.peer_id, first.peer_id);
+    assert_eq!(resumed.attachment.attachment_ref.generation, Some(2));
+    assert_eq!(
+        resumed.attachment.attachment_ref.connector_id.as_deref(),
+        Some("replacement")
+    );
+}
+
+impl CommandAuthorizer<trogon_peer::Attach> for EnrollmentPolicy {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        command: &trogon_peer::Attach,
+    ) -> Result<(), AuthorizationDeniedError> {
+        if command.identity().owner() != &self.owner
+            || command.collaboration() != &self.collaboration
+            || principal.kind() != PrincipalKind::Agent
+            || principal.id().as_str() != self.owner.caller().as_str()
+        {
+            return Err(AuthorizationDeniedError::new("resume outside configured grant"));
+        }
+        Ok(())
+    }
+}
+
+struct ServiceCoverageHeartbeatGrant {
+    owner: TrustedPeerOwner,
+    reference: trogon_peer::AttachmentRef,
+}
+
+impl CommandAuthorizer<trogon_peer::Heartbeat> for ServiceCoverageHeartbeatGrant {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        command: &trogon_peer::Heartbeat,
+    ) -> Result<(), AuthorizationDeniedError> {
+        if command.owner() != &self.owner
+            || command.attachment() != &self.reference
+            || principal.kind() != PrincipalKind::Agent
+            || principal.id().as_str() != self.owner.caller().as_str()
+        {
+            return Err(AuthorizationDeniedError::new("heartbeat outside exact enrolled grant"));
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn live_connector_resume_refuses_valid_history_beyond_the_4096_event_ceiling() {
+    let store = ObservedStore::default();
+    let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+    let enrolled = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let wire_reference = enrolled.attachment.attachment_ref.as_option().unwrap();
+    let peer = PeerId::parse(wire_reference.peer_id.clone().unwrap()).unwrap();
+    let reference = trogon_peer::AttachmentRef::new(
+        peer.clone(),
+        trogon_peer::ConnectorId::new(wire_reference.connector_id.clone().unwrap()).unwrap(),
+        wire_reference.generation.unwrap(),
+    )
+    .unwrap();
+    let grant = ServiceCoverageHeartbeatGrant {
+        owner: owner(),
+        reference: reference.clone(),
+    };
+    let heartbeat = trogon_peer::Heartbeat::new(
+        owner(),
+        reference,
+        trogon_peer::PeerObservation::new(proto::PeerAvailability::PEER_AVAILABILITY_READY, None, None).unwrap(),
+        now(),
+    );
+    trogon_decider_runtime::CommandExecution::new(&store, &heartbeat)
+        .with_principal(CommandPrincipal::new(
+            PrincipalKind::Agent,
+            trogon_decider_runtime::PrincipalId::new(owner().caller().as_str()).unwrap(),
+        ))
+        .with_authorizer(&grant)
+        .execute()
+        .await
+        .unwrap();
+    let before = store
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    let real_heartbeat = before.events.last().unwrap();
+    assert!(matches!(
+        real_heartbeat
+            .decode::<proto::PeerEvent>()
+            .unwrap()
+            .into_decoded()
+            .unwrap()
+            .event,
+        Some(PeerEventCase::PeerHeartbeatRecorded(_))
+    ));
+    let padding = 4097usize.checked_sub(before.events.len()).unwrap();
+    let events = (0..padding)
+        .map(|index| {
+            let mut event = real_heartbeat.event.clone();
+            event.id = format!("00000000-0000-4000-8000-{index:012x}").parse().unwrap();
+            event
+        })
+        .collect();
+    store
+        .append_stream(AppendStreamRequest {
+            stream_id: &peer,
+            stream_write_precondition: before.current_position.into(),
+            events,
+        })
+        .await
+        .unwrap();
+    let full = store
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    assert_eq!(full.events.len(), 4097);
+    let mut valid_state = trogon_peer::commands::state::initial_state();
+    for event in &full.events {
+        let decoded = event.decode::<proto::PeerEvent>().unwrap().into_decoded().unwrap();
+        valid_state = trogon_peer::commands::state::evolve(valid_state, &decoded).unwrap();
+    }
+    assert_eq!(valid_state.enrollment.peer_id, enrolled.peer_id);
+    assert_eq!(valid_state.attachment, enrolled.attachment);
+    let appends = store.appends.load(Ordering::SeqCst);
+    let result = service.enroll(&owner(), request("collaboration_alpha")).await;
+    assert!(
+        match &result {
+            Err(EnrollServiceError::History(trogon_peer_service::HistoryError::Limit)) => true,
+            Err(EnrollServiceError::Execution(CommandError::ReplayLimitExceeded(detail))) => {
+                assert_eq!(detail.limit.as_u64(), 4096);
+                assert_eq!(detail.replayed_event_count, 4097);
+                true
+            }
+            _ => false,
+        },
+        "resume must enforce the typed replay ceiling: {result:?}"
+    );
+    assert_eq!(store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(
+        store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning
+            })
+            .await
+            .unwrap(),
+        full
+    );
+}
+
+#[tokio::test]
+async fn live_connector_resume_refuses_an_unknown_authority_event_without_appending() {
+    let store = ObservedStore::default();
+    let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+    let enrolled = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let peer = PeerId::parse(enrolled.peer_id.clone().unwrap()).unwrap();
+    let before = store
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    let mut future_authority = before.events[0].event.clone();
+    future_authority.id = "00000000-0000-4000-8000-ffffffffffff".parse().unwrap();
+    future_authority.r#type = "trogonai.peers.future.PeerAuthorityTransferred".into();
+    store
+        .append_stream(AppendStreamRequest {
+            stream_id: &peer,
+            stream_write_precondition: before.current_position.into(),
+            events: vec![future_authority],
+        })
+        .await
+        .unwrap();
+    let full = store
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    assert_eq!(full.events.len(), before.events.len() + 1);
+    assert!(
+        full.events
+            .last()
+            .unwrap()
+            .decode::<proto::PeerEvent>()
+            .unwrap()
+            .into_decoded()
+            .is_none()
+    );
+    let appends = store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        service.enroll(&owner(), request("collaboration_alpha")).await,
+        Err(EnrollServiceError::History(
+            trogon_peer_service::HistoryError::UnknownEvent
+        ))
+    ));
+    assert_eq!(store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(
+        store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning
+            })
+            .await
+            .unwrap(),
+        full
+    );
+}
