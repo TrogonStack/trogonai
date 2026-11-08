@@ -1603,7 +1603,7 @@ async fn preparation_race_retains_the_durable_winning_presentation() -> TestResu
 }
 
 #[derive(Debug, thiserror::Error)]
-enum LostPreparationReply {
+enum LostPreparationReplyError {
     #[error("append committed but its response was lost")]
     Committed,
     #[error("fixture append failed")]
@@ -1639,23 +1639,23 @@ impl trogon_decider_runtime::StreamRead<PeerId> for CommitThenLoseReplyStore {
 }
 
 impl trogon_decider_runtime::StreamAppend<PeerId> for CommitThenLoseReplyStore {
-    type Error = LostPreparationReply;
+    type Error = LostPreparationReplyError;
     async fn append_stream(
         &self,
         request: trogon_decider_runtime::AppendStreamRequest<'_, PeerId>,
     ) -> Result<trogon_decider_runtime::AppendStreamResponse, Self::Error> {
         let result = trogon_decider_runtime::StreamAppend::append_stream(&self.inner, request)
             .await
-            .map_err(LostPreparationReply::Inner)?;
+            .map_err(LostPreparationReplyError::Inner)?;
         if self.lose_reply.swap(false, Ordering::SeqCst) {
-            return Err(LostPreparationReply::Committed);
+            return Err(LostPreparationReplyError::Committed);
         }
         Ok(result)
     }
     fn classify_append_failure(&self, error: &Self::Error) -> trogon_decider_runtime::AppendFailure {
         match error {
-            LostPreparationReply::Committed => trogon_decider_runtime::AppendFailure::Fatal,
-            LostPreparationReply::Inner(error) => {
+            LostPreparationReplyError::Committed => trogon_decider_runtime::AppendFailure::Fatal,
+            LostPreparationReplyError::Inner(error) => {
                 trogon_decider_runtime::StreamAppend::classify_append_failure(&self.inner, error)
             }
         }
