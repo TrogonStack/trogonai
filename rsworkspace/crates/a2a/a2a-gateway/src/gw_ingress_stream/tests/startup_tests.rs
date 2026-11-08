@@ -198,8 +198,11 @@ impl trogon_nats::jetstream::traits::JetStreamCreateConsumer for ClosingConsumer
 }
 
 impl trogon_nats::jetstream::traits::JetStreamDeleteConsumer for ClosingConsumerStream {
-    async fn delete_consumer(&self, name: &str) -> Result<(), stream::ConsumerError> {
-        self.cleanup.delete_consumer(name).await.map(|_| ())
+    type Error = stream::ConsumerError;
+    type Response = stream::DeleteStatus;
+
+    async fn delete_consumer(&self, name: &str) -> Result<Self::Response, Self::Error> {
+        self.cleanup.delete_consumer(name).await
     }
 }
 
