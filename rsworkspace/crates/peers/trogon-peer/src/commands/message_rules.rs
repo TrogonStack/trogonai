@@ -194,6 +194,11 @@ pub(super) fn make_receipt(
     batch_id: Option<String>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<proto::RecipientReceipt, EvolveError> {
+    if !state_values::timestamp_seconds_supported(now.timestamp()) || now.timestamp_subsec_nanos() >= 1_000_000_000 {
+        return Err(EvolveError::TimestampRange {
+            field: "receipt.decided_at",
+        });
+    }
     let revision = u64::try_from(state.dispositions.len())
         .ok()
         .and_then(|n| n.checked_add(1))
@@ -308,8 +313,6 @@ pub(super) fn fold_receipt(state: &mut PeerState, receipt: &proto::RecipientRece
             return Err(EvolveError::InvalidMessageTransition);
         }
         entry.disposition = buffa::MessageField::some(receipt.clone());
-    } else if outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED {
-        return Err(EvolveError::InvalidMessageTransition);
     }
     state.dispositions.push(receipt.clone());
     Ok(())
@@ -329,9 +332,6 @@ pub(super) fn eligible_inbox(
     state: &PeerState,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<Vec<&proto::InboxEntry>, EvolveError> {
-    if !(-62_135_596_800..=253_402_300_799).contains(&now.timestamp()) {
-        return Err(EvolveError::InvalidMessageTransition);
-    }
     let mut eligible = Vec::new();
     for entry in &state.inbox {
         metadata(
