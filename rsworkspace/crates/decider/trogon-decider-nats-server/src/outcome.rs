@@ -81,6 +81,12 @@ impl CommandReply {
         Self::faulted(FaultClass::Internal, error)
     }
 
+    /// The subject named no principal, so the request was refused before
+    /// anything in it was read.
+    pub fn unauthenticated(error: &dyn StdError) -> Self {
+        Self::service_error(DecisionOutcome::Denied, status::unauthenticated(error))
+    }
+
     /// Maps the runtime's error taxonomy onto the reply, per ADR#0057 section 5.
     ///
     /// The module is named because a rejection's code space belongs to it: the

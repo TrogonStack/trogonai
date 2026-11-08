@@ -101,7 +101,7 @@ impl Decider for Heartbeat {
             .filter(|at| (-62_135_596_800..=253_402_300_799).contains(&at.timestamp()))
             .ok_or(HeartbeatError::LeaseDeadlineOverflow)?;
         let attachment = proto::PeerAttachment {
-            attachment: previous.attachment.clone(),
+            attachment_ref: previous.attachment_ref.clone(),
             status: previous.status,
             observed_at: MessageField::some(timestamp_from_datetime(&command.now)),
             expires_at: MessageField::some(timestamp_from_datetime(&deadline)),
@@ -140,8 +140,8 @@ pub(super) fn guard_live_attachment<'a>(
     let previous = state.attachment.as_option().ok_or(HeartbeatError::Inactive)?;
     state::validate_attachment(enrollment, previous)?;
     if reference.peer_id() != identity.peer_id()
-        || previous.attachment.connector_id.as_deref() != Some(reference.connector_id().as_str())
-        || previous.attachment.generation != Some(reference.generation())
+        || previous.attachment_ref.connector_id.as_deref() != Some(reference.connector_id().as_str())
+        || previous.attachment_ref.generation != Some(reference.generation())
     {
         return Err(HeartbeatError::Fenced);
     }

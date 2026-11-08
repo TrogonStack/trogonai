@@ -12,12 +12,8 @@ pub struct MessageMetadataView<'a> {
     pub recipient_peer_id: ::core::option::Option<&'a str>,
     /// Field 4: `collaboration_ref`
     pub collaboration_ref: ::core::option::Option<&'a str>,
-    /// Field 5: `content_ref`
-    pub content_ref: ::core::option::Option<&'a str>,
     /// Field 6: `content_size_bytes`
     pub content_size_bytes: ::core::option::Option<u32>,
-    /// Field 7: `content_digest`
-    pub content_digest: ::core::option::Option<&'a [u8]>,
     /// Field 8: `accepted_at`
     pub accepted_at: ::buffa::MessageFieldView<
         ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
@@ -28,6 +24,14 @@ pub struct MessageMetadataView<'a> {
     >,
     /// Field 10: `reply_to_message_id`
     pub reply_to_message_id: ::core::option::Option<&'a str>,
+    /// Field 11: `content_ref`
+    pub content_ref: ::buffa::MessageFieldView<
+        super::super::__buffa::view::ClaimCheckView<'a>,
+    >,
+    /// Field 12: `semantic_fingerprint`
+    pub semantic_fingerprint: ::buffa::MessageFieldView<
+        super::super::__buffa::view::ContentSemanticFingerprintView<'a>,
+    >,
 }
 impl<'a> ::buffa::MessageView<'a> for MessageMetadataView<'a> {
     type Owned = super::super::MessageMetadata;
@@ -85,26 +89,12 @@ impl<'a> ::buffa::MessageView<'a> for MessageMetadataView<'a> {
                 )?;
                 view.collaboration_ref = Some(::buffa::types::borrow_str(&mut cur)?);
             }
-            5u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                view.content_ref = Some(::buffa::types::borrow_str(&mut cur)?);
-            }
             6u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
                     ::buffa::encoding::WireType::Varint,
                 )?;
                 view.content_size_bytes = Some(::buffa::types::decode_uint32(&mut cur)?);
-            }
-            7u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                view.content_digest = Some(::buffa::types::borrow_bytes(&mut cur)?);
             }
             8u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -155,6 +145,48 @@ impl<'a> ::buffa::MessageView<'a> for MessageMetadataView<'a> {
                 )?;
                 view.reply_to_message_id = Some(::buffa::types::borrow_str(&mut cur)?);
             }
+            11u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.content_ref.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.content_ref = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::ClaimCheckView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            12u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.semantic_fingerprint.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.semantic_fingerprint = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::ContentSemanticFingerprintView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -179,9 +211,7 @@ impl<'a> ::buffa::MessageView<'a> for MessageMetadataView<'a> {
             sender_peer_id: self.sender_peer_id.map(|s| s.to_string()),
             recipient_peer_id: self.recipient_peer_id.map(|s| s.to_string()),
             collaboration_ref: self.collaboration_ref.map(|s| s.to_string()),
-            content_ref: self.content_ref.map(|s| s.to_string()),
             content_size_bytes: self.content_size_bytes,
-            content_digest: self.content_digest.map(|b| (b).to_vec()),
             accepted_at: match self.accepted_at.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
@@ -201,6 +231,24 @@ impl<'a> ::buffa::MessageView<'a> for MessageMetadataView<'a> {
                 None => ::buffa::MessageField::none(),
             },
             reply_to_message_id: self.reply_to_message_id.map(|s| s.to_string()),
+            content_ref: match self.content_ref.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::ClaimCheck,
+                        ::buffa::Inline<super::super::ClaimCheck>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            semantic_fingerprint: match self.semantic_fingerprint.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::ContentSemanticFingerprint,
+                        ::buffa::Inline<super::super::ContentSemanticFingerprint>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
@@ -223,14 +271,8 @@ impl<'a> ::buffa::ViewEncode<'a> for MessageMetadataView<'a> {
         if let Some(ref v) = self.collaboration_ref {
             size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
-        if let Some(ref v) = self.content_ref {
-            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
-        }
         if let Some(v) = self.content_size_bytes {
             size += 1u64 + ::buffa::types::uint32_encoded_len(v) as u64;
-        }
-        if let Some(ref v) = self.content_digest {
-            size += 1u64 + ::buffa::types::bytes_encoded_len(v) as u64;
         }
         if self.accepted_at.is_set() {
             let __slot = __cache.reserve();
@@ -250,6 +292,22 @@ impl<'a> ::buffa::ViewEncode<'a> for MessageMetadataView<'a> {
         }
         if let Some(ref v) = self.reply_to_message_id {
             size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
+        }
+        if self.content_ref.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.content_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.semantic_fingerprint.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.semantic_fingerprint.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         ::buffa::saturate_size(size)
     }
@@ -273,14 +331,8 @@ impl<'a> ::buffa::ViewEncode<'a> for MessageMetadataView<'a> {
         if let Some(ref v) = self.collaboration_ref {
             ::buffa::types::put_string_field(4u32, v, buf);
         }
-        if let Some(ref v) = self.content_ref {
-            ::buffa::types::put_string_field(5u32, v, buf);
-        }
         if let Some(v) = self.content_size_bytes {
             ::buffa::types::put_uint32_field(6u32, v, buf);
-        }
-        if let Some(ref v) = self.content_digest {
-            ::buffa::types::put_shared_bytes_field(7u32, v, buf);
         }
         if self.accepted_at.is_set() {
             ::buffa::types::put_len_delimited_header(
@@ -300,6 +352,22 @@ impl<'a> ::buffa::ViewEncode<'a> for MessageMetadataView<'a> {
         }
         if let Some(ref v) = self.reply_to_message_id {
             ::buffa::types::put_string_field(10u32, v, buf);
+        }
+        if self.content_ref.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                11u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.content_ref.write_to(__cache, buf);
+        }
+        if self.semantic_fingerprint.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                12u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.semantic_fingerprint.write_to(__cache, buf);
         }
     }
 }
@@ -333,21 +401,11 @@ impl<'__a> ::serde::Serialize for MessageMetadataView<'__a> {
         if let ::core::option::Option::Some(__v) = self.collaboration_ref {
             __map.serialize_entry("collaborationRef", __v)?;
         }
-        if let ::core::option::Option::Some(__v) = self.content_ref {
-            __map.serialize_entry("contentRef", __v)?;
-        }
         if let ::core::option::Option::Some(__v) = self.content_size_bytes {
             __map
                 .serialize_entry(
                     "contentSizeBytes",
                     &::buffa::json_helpers::ProtoJson(&__v),
-                )?;
-        }
-        if let ::core::option::Option::Some(__v) = self.content_digest {
-            __map
-                .serialize_entry(
-                    "contentDigest",
-                    &::buffa::json_helpers::BytesJson(__v),
                 )?;
         }
         {
@@ -362,6 +420,19 @@ impl<'__a> ::serde::Serialize for MessageMetadataView<'__a> {
         }
         if let ::core::option::Option::Some(__v) = self.reply_to_message_id {
             __map.serialize_entry("replyToMessageId", __v)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.content_ref.as_option() {
+                __map.serialize_entry("contentRef", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self
+                .semantic_fingerprint
+                .as_option()
+            {
+                __map.serialize_entry("semanticFingerprint", __v)?;
+            }
         }
         __map.end()
     }
@@ -476,20 +547,10 @@ impl MessageMetadataOwnedView {
     pub fn collaboration_ref(&self) -> ::core::option::Option<&'_ str> {
         self.0.reborrow().collaboration_ref
     }
-    /// Field 5: `content_ref`
-    #[must_use]
-    pub fn content_ref(&self) -> ::core::option::Option<&'_ str> {
-        self.0.reborrow().content_ref
-    }
     /// Field 6: `content_size_bytes`
     #[must_use]
     pub fn content_size_bytes(&self) -> ::core::option::Option<u32> {
         self.0.reborrow().content_size_bytes
-    }
-    /// Field 7: `content_digest`
-    #[must_use]
-    pub fn content_digest(&self) -> ::core::option::Option<&'_ [u8]> {
-        self.0.reborrow().content_digest
     }
     /// Field 8: `accepted_at`
     #[must_use]
@@ -513,6 +574,22 @@ impl MessageMetadataOwnedView {
     #[must_use]
     pub fn reply_to_message_id(&self) -> ::core::option::Option<&'_ str> {
         self.0.reborrow().reply_to_message_id
+    }
+    /// Field 11: `content_ref`
+    #[must_use]
+    pub fn content_ref(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::ClaimCheckView<'_>> {
+        &self.0.reborrow().content_ref
+    }
+    /// Field 12: `semantic_fingerprint`
+    #[must_use]
+    pub fn semantic_fingerprint(
+        &self,
+    ) -> &::buffa::MessageFieldView<
+        super::super::__buffa::view::ContentSemanticFingerprintView<'_>,
+    > {
+        &self.0.reborrow().semantic_fingerprint
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<MessageMetadataView<'static>>>

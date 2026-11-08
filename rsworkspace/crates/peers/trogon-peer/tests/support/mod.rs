@@ -53,8 +53,32 @@ where
     }
     .unwrap()
 }
-pub fn content(size: u32, digest: u8) -> TrustedContent {
-    TrustedContent::from_sealed_port(SealedContentRef::new("sealed_ref").unwrap(), size, vec![digest; 32]).unwrap()
+pub fn claim_check(locator: &str, stored: &[u8]) -> proto::ClaimCheck {
+    use sha2::Digest as _;
+    proto::ClaimCheck {
+        storage_ref: proto::StorageLocator {
+            value: Some(locator.into()),
+        }
+        .into(),
+        digest: proto::Digest {
+            algorithm: Some("sha256".into()),
+            value: Some(sha2::Sha256::digest(stored).to_vec()),
+        }
+        .into(),
+    }
+}
+pub fn content(size: u32, fingerprint: u8) -> TrustedContent {
+    assert!(
+        (1..=2048).contains(&size),
+        "fixture content size must remain within the real contract"
+    );
+    let stored = vec![b'x'; usize::try_from(size).unwrap()];
+    TrustedContent::from_sealed_port(
+        SealedContentRef::new(claim_check("sealed_ref", &stored)).unwrap(),
+        size,
+        vec![fingerprint; 32],
+    )
+    .unwrap()
 }
 pub fn send(index: usize, seconds: i64, size: u32) -> SendMessage {
     SendMessage::new(

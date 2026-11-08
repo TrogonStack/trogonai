@@ -23,7 +23,13 @@ pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<(), EvolveErr
         "collaboration_ref",
     )?;
     let reference = value(
-        SealedContentRef::new(state_values::required(&message.content_ref, "content_ref")?),
+        SealedContentRef::new(
+            message
+                .content_ref
+                .as_option()
+                .ok_or(EvolveError::MissingField { field: "content_ref" })?
+                .clone(),
+        ),
         "content_ref",
     )?;
     value(
@@ -32,9 +38,7 @@ pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<(), EvolveErr
             message.content_size_bytes.ok_or(EvolveError::MissingField {
                 field: "content_size_bytes",
             })?,
-            message.content_digest.clone().ok_or(EvolveError::MissingField {
-                field: "content_digest",
-            })?,
+            semantic_fingerprint(message)?.as_bytes().to_vec(),
         ),
         "content",
     )?;
@@ -49,21 +53,37 @@ pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<(), EvolveErr
     Ok(())
 }
 
-pub(super) fn semantic_digest(message: &proto::MessageMetadata) -> Vec<u8> {
+fn semantic_fingerprint(message: &proto::MessageMetadata) -> Result<ContentSemanticFingerprint, EvolveError> {
+    let fingerprint = message
+        .semantic_fingerprint
+        .as_option()
+        .ok_or(EvolveError::MissingField {
+            field: "semantic_fingerprint",
+        })?;
+    value(
+        ContentSemanticFingerprint::new(fingerprint.value.clone().ok_or(EvolveError::MissingField {
+            field: "semantic_fingerprint.value",
+        })?),
+        "semantic_fingerprint",
+    )
+}
+
+pub(super) fn semantic_digest(message: &proto::MessageMetadata) -> Result<Vec<u8>, EvolveError> {
+    let fingerprint = semantic_fingerprint(message)?;
     let mut hash = Sha256::new();
     for bytes in [
         b"peer-message-contract-v1".as_slice(),
         message.sender_peer_id.as_deref().unwrap_or_default().as_bytes(),
         message.recipient_peer_id.as_deref().unwrap_or_default().as_bytes(),
         message.collaboration_ref.as_deref().unwrap_or_default().as_bytes(),
-        message.content_digest.as_deref().unwrap_or_default(),
+        fingerprint.as_bytes(),
         &message.content_size_bytes.unwrap_or(0).to_be_bytes(),
         message.reply_to_message_id.as_deref().unwrap_or_default().as_bytes(),
     ] {
         hash.update((bytes.len() as u64).to_be_bytes());
         hash.update(bytes);
     }
-    hash.finalize().to_vec()
+    Ok(hash.finalize().to_vec())
 }
 pub(super) fn outbox_entry(entry: &proto::OutboxEntry) -> Result<(), EvolveError> {
     value(
@@ -75,7 +95,7 @@ pub(super) fn outbox_entry(entry: &proto::OutboxEntry) -> Result<(), EvolveError
         .as_option()
         .ok_or(EvolveError::MissingField { field: "message" })?;
     metadata(message)?;
-    if entry.semantic_digest.as_deref() != Some(semantic_digest(message).as_slice()) {
+    if entry.semantic_digest.as_deref() != Some(semantic_digest(message)?.as_slice()) {
         return Err(EvolveError::InvalidMessageTransition);
     }
     if let Some(receipt) = entry.settlement.as_option() {

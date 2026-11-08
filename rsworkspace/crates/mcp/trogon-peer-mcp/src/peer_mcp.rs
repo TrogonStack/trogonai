@@ -84,7 +84,7 @@ impl<B: EnrollPeer + PreparePeerBatch> PeerMcp<B> {
         let response = self
             .backend
             .prepare_batch(v1::PrepareBatchRequest {
-                attachment: v1::AttachmentRef {
+                attachment_ref: v1::AttachmentRef {
                     peer_id: Some(attachment.peer_id().as_str().to_owned()),
                     connector_id: Some(attachment.connector_id().as_str().to_owned()),
                     generation: Some(attachment.generation()),
@@ -163,7 +163,7 @@ impl<B: EnrollPeer + PreparePeerBatch> ServerHandler for PeerMcp<B> {
     ) -> Result<CallToolResponse, ErrorData> {
         let result = match self.invoke(request).await {
             Ok(result) => result,
-            Err(error) => CallToolResult::error(vec![ContentBlock::text(error.public_message())]),
+            Err(error) => CallToolResult::error(vec![ContentBlock::text(error.to_string())]),
         };
         Ok(CallToolResponse::Complete(result))
     }

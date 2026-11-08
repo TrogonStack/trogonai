@@ -40,7 +40,7 @@ async fn wait_for_acknowledged(stream: &async_nats::jetstream::stream::Stream, e
 }
 
 #[tokio::test]
-async fn pull_routes_by_caller_and_principal_and_terminates_unroutable_records() {
+async fn pull_routes_by_subject_principal_and_terminates_unroutable_records() {
     let server = JetStreamTestServer::start().await;
     let client = server.client().await;
     let js = jetstream::new(client.clone());
@@ -48,31 +48,26 @@ async fn pull_routes_by_caller_and_principal_and_terminates_unroutable_records()
     let mut egress = client.subscribe("a2a.v1.gateway.>").await.unwrap();
     client.flush().await.unwrap();
 
-    for (routing, payload) in [
+    let alice = caller();
+    let bob = SubjectPrincipal::from_tokens("service", "bob").unwrap();
+    let task_id = A2aTaskId::new("task-1").unwrap();
+    for (principal, routing, payload) in [
+        (&alice, headers(&[(REQ_ID_HEADER, "request-1")]), "event-1"),
         (
-            headers(&[(GATEWAY_CALLER_ID_HEADER, "alice"), (REQ_ID_HEADER, "request-1")]),
-            "event-1",
-        ),
-        (
-            headers(&[(GATEWAY_CALLER_ID_HEADER, "alice"), (REQ_ID_HEADER, "request-2")]),
+            &alice,
+            headers(&[(GATEWAY_CALLER_ID_HEADER, "bob"), (REQ_ID_HEADER, "request-2")]),
             "event-2",
         ),
         (
-            headers(&[(GATEWAY_PRINCIPAL_HEADER, "bob"), (REQ_ID_HEADER, "request-3")]),
+            &bob,
+            headers(&[(GATEWAY_PRINCIPAL_HEADER, "alice"), (REQ_ID_HEADER, "request-3")]),
             "event-3",
         ),
-        (headers(&[(REQ_ID_HEADER, "missing-caller")]), "unroutable-1"),
-        (
-            headers(&[(GATEWAY_CALLER_ID_HEADER, "*"), (REQ_ID_HEADER, "wildcard-caller")]),
-            "unroutable-2",
-        ),
-        (
-            headers(&[(GATEWAY_CALLER_ID_HEADER, "alice"), (REQ_ID_HEADER, " ")]),
-            "unroutable-3",
-        ),
+        (&alice, headers(&[(GATEWAY_CALLER_ID_HEADER, "alice")]), "unroutable-1"),
+        (&bob, headers(&[(REQ_ID_HEADER, " ")]), "unroutable-2"),
     ] {
         js.publish_with_headers(
-            "a2a.v1.tasks.task-1.events",
+            TaskEventsSubject::new(&prefix(), &task_id, principal),
             routing,
             Bytes::from_static(payload.as_bytes()),
         )
@@ -105,23 +100,23 @@ async fn pull_routes_by_caller_and_principal_and_terminates_unroutable_records()
         delivered,
         vec![
             (
-                "a2a.v1.gateway.alice.events".to_owned(),
+                "a2a.v1.gateway.person.alice.events".to_owned(),
                 "request-1".to_owned(),
                 "event-1".to_owned()
             ),
             (
-                "a2a.v1.gateway.alice.events".to_owned(),
+                "a2a.v1.gateway.person.alice.events".to_owned(),
                 "request-2".to_owned(),
                 "event-2".to_owned()
             ),
             (
-                "a2a.v1.gateway.bob.events".to_owned(),
+                "a2a.v1.gateway.service.bob.events".to_owned(),
                 "request-3".to_owned(),
                 "event-3".to_owned()
             ),
         ]
     );
-    wait_for_acknowledged(&stream, 6).await;
+    wait_for_acknowledged(&stream, 5).await;
     shutdown.cancel();
     tokio::time::timeout(Duration::from_secs(1), worker)
         .await
@@ -141,7 +136,7 @@ async fn pull_recovers_when_the_events_stream_is_provisioned_after_startup() {
     let client = server.client().await;
     let js = jetstream::new(client.clone());
     let mut attempts = client.subscribe("$JS.API.STREAM.INFO.A2A_EVENTS").await.unwrap();
-    let mut egress = client.subscribe("a2a.v1.gateway.alice.events").await.unwrap();
+    let mut egress = client.subscribe("a2a.v1.gateway.person.alice.events").await.unwrap();
     client.flush().await.unwrap();
     let shutdown = CancellationToken::new();
     let worker = tokio::spawn(run_gateway_events_pull(client, prefix(), config(), shutdown.clone()));
@@ -150,11 +145,8 @@ async fn pull_recovers_when_the_events_stream_is_provisioned_after_startup() {
     next_message(&mut attempts).await;
     let stream = js.create_stream(A2aStream::Events.config(&prefix())).await.unwrap();
     js.publish_with_headers(
-        "a2a.v1.tasks.task-recovery.events",
-        headers(&[
-            (GATEWAY_CALLER_ID_HEADER, "alice"),
-            (REQ_ID_HEADER, "recovered-request"),
-        ]),
+        TaskEventsSubject::new(&prefix(), &A2aTaskId::new("task-recovery").unwrap(), &caller()),
+        headers(&[(REQ_ID_HEADER, "recovered-request")]),
         Bytes::from_static(b"recovered-event"),
     )
     .await

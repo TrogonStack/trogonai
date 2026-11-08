@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Generate Rust semconv bindings from the Weaver registry"
+#MISE depends_post=["semconv:format:rust"]
+
+exec weaver registry generate --registry otel/semconv/registry --templates otel/semconv/templates rust rsworkspace/crates/platform/trogon-semconv/src/gen "$@"

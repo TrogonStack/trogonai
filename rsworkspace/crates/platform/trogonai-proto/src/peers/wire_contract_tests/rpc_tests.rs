@@ -26,10 +26,13 @@ fn enrollment_requests_keep_native_correlation_separate_from_service_identity() 
         |handle| {
             assert_eq!(handle.peer_id(), Some("peer_alpha"));
             assert_eq!(
-                handle.attachment().as_option().unwrap().attachment.peer_id,
+                handle.attachment().as_option().unwrap().attachment_ref.peer_id,
                 handle.peer_id()
             );
-            assert_eq!(handle.attachment().as_option().unwrap().attachment.generation, Some(7));
+            assert_eq!(
+                handle.attachment().as_option().unwrap().attachment_ref.generation,
+                Some(7)
+            );
         }
     );
 }
@@ -39,10 +42,10 @@ fn heartbeat_and_detach_request_pairs_preserve_attachment_fencing() {
     retained_message!(
         proto::HeartbeatRequest,
         proto::HeartbeatRequestOwnedView,
-        json!({"attachment": fixtures::attachment_ref(), "availability": "PEER_AVAILABILITY_BLOCKED", "condition": "PEER_CONDITION_INPUT", "activeAt": fixtures::OBSERVED}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "availability": "PEER_AVAILABILITY_BLOCKED", "condition": "PEER_CONDITION_INPUT", "activeAt": fixtures::OBSERVED}),
         |handle| {
             assert_eq!(
-                handle.attachment().as_option().unwrap().connector_id,
+                handle.attachment_ref().as_option().unwrap().connector_id,
                 Some("connector_alpha")
             );
             assert_eq!(
@@ -61,17 +64,20 @@ fn heartbeat_and_detach_request_pairs_preserve_attachment_fencing() {
         proto::HeartbeatResponseOwnedView,
         json!({"attachment": fixtures::attachment()}),
         |handle| {
-            assert_eq!(handle.attachment().as_option().unwrap().attachment.generation, Some(7));
+            assert_eq!(
+                handle.attachment().as_option().unwrap().attachment_ref.generation,
+                Some(7)
+            );
             assert!(handle.attachment().as_option().unwrap().expires_at.is_set());
         }
     );
     retained_message!(
         proto::DetachRequest,
         proto::DetachRequestOwnedView,
-        json!({"attachment": fixtures::attachment_ref()}),
+        json!({"attachmentRef": fixtures::attachment_ref()}),
         |handle| {
-            assert_eq!(handle.attachment().as_option().unwrap().peer_id, Some("peer_alpha"));
-            assert_eq!(handle.attachment().as_option().unwrap().generation, Some(7));
+            assert_eq!(handle.attachment_ref().as_option().unwrap().peer_id, Some("peer_alpha"));
+            assert_eq!(handle.attachment_ref().as_option().unwrap().generation, Some(7));
         }
     );
     retained_message!(
@@ -89,9 +95,9 @@ fn roster_wire_keeps_page_cursor_and_each_rows_liveness_observation() {
     retained_message!(
         proto::RosterRequest,
         proto::RosterRequestOwnedView,
-        json!({"attachment": fixtures::attachment_ref(), "pageSize": 16, "pageToken": "cursor_current"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "pageSize": 16, "pageToken": "cursor_current"}),
         |handle| {
-            assert_eq!(handle.attachment().as_option().unwrap().peer_id, Some("peer_alpha"));
+            assert_eq!(handle.attachment_ref().as_option().unwrap().peer_id, Some("peer_alpha"));
             assert_eq!(handle.page_size(), Some(16));
             assert_eq!(handle.page_token(), Some("cursor_current"));
         }
@@ -123,9 +129,9 @@ fn send_and_status_pairs_preserve_original_message_and_retry_key() {
     retained_message!(
         proto::SendRequest,
         proto::SendRequestOwnedView,
-        json!({"attachment": fixtures::attachment_ref(), "recipientPeerId": "peer_beta", "idempotencyKey": "send_outgoing", "text": "hello peer", "replyToMessageId": "message_previous"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "recipientPeerId": "peer_beta", "idempotencyKey": "send_outgoing", "text": "hello peer", "replyToMessageId": "message_previous"}),
         |handle| {
-            assert_eq!(handle.attachment().as_option().unwrap().peer_id, Some("peer_alpha"));
+            assert_eq!(handle.attachment_ref().as_option().unwrap().peer_id, Some("peer_alpha"));
             assert_eq!(handle.recipient_peer_id(), Some("peer_beta"));
             assert_eq!(handle.idempotency_key(), Some("send_outgoing"));
             assert_eq!(handle.text(), Some("hello peer"));
@@ -152,9 +158,9 @@ fn send_and_status_pairs_preserve_original_message_and_retry_key() {
     retained_message!(
         proto::StatusRequest,
         proto::StatusRequestOwnedView,
-        json!({"attachment": fixtures::attachment_ref(), "idempotencyKey": "send_outgoing"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "idempotencyKey": "send_outgoing"}),
         |handle| {
-            assert_eq!(handle.attachment().as_option().unwrap().generation, Some(7));
+            assert_eq!(handle.attachment_ref().as_option().unwrap().generation, Some(7));
             assert_eq!(handle.idempotency_key(), Some("send_outgoing"));
         }
     );
@@ -181,9 +187,9 @@ fn delivery_pairs_keep_preparation_and_application_acknowledgment_distinct() {
     retained_message!(
         proto::PrepareBatchRequest,
         proto::PrepareBatchRequestOwnedView,
-        json!({"attachment": fixtures::attachment_ref(), "promptId": "prompt_alpha"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "promptId": "prompt_alpha"}),
         |handle| {
-            assert_eq!(handle.attachment().as_option().unwrap().peer_id, Some("peer_alpha"));
+            assert_eq!(handle.attachment_ref().as_option().unwrap().peer_id, Some("peer_alpha"));
             assert_eq!(handle.prompt_id(), Some("prompt_alpha"));
         }
     );
@@ -209,9 +215,9 @@ fn delivery_pairs_keep_preparation_and_application_acknowledgment_distinct() {
     retained_message!(
         proto::AcknowledgeBatchRequest,
         proto::AcknowledgeBatchRequestOwnedView,
-        json!({"attachment": fixtures::attachment_ref(), "batchId": "batch_local"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "batchId": "batch_local"}),
         |handle| {
-            assert_eq!(handle.attachment().as_option().unwrap().peer_id, Some("peer_alpha"));
+            assert_eq!(handle.attachment_ref().as_option().unwrap().peer_id, Some("peer_alpha"));
             assert_eq!(handle.batch_id(), Some("batch_local"));
         }
     );

@@ -112,6 +112,18 @@ fn registered_identity_and_presence_messages_keep_diagnostic_identity_and_proto_
 #[test]
 fn registered_mailbox_messages_keep_provenance_and_order_in_diagnostics_and_proto_json() {
     let registry = registry();
+    public_contract::<proto::ContentSemanticFingerprint>(&registry, fixtures::semantic_fingerprint(), &["value"]);
+    public_contract::<proto::StorageLocator>(&registry, json!({"value": "content_outgoing"}), &["content_outgoing"]);
+    public_contract::<proto::Digest>(
+        &registry,
+        json!({"algorithm": "sha256", "value": fixtures::DIGEST}),
+        &["sha256"],
+    );
+    public_contract::<proto::ClaimCheck>(
+        &registry,
+        fixtures::content_ref(),
+        &["content_outgoing", "sha256", "storage_ref"],
+    );
     public_contract::<proto::MessageMetadata>(
         &registry,
         fixtures::metadata(),
@@ -255,7 +267,7 @@ fn registered_rpc_pairs_keep_correlation_and_application_evidence_in_proto_json(
     );
     public_contract::<proto::HeartbeatRequest>(
         &registry,
-        json!({"attachment": fixtures::attachment_ref(), "availability": "PEER_AVAILABILITY_BLOCKED", "condition": "PEER_CONDITION_INPUT", "activeAt": fixtures::OBSERVED}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "availability": "PEER_AVAILABILITY_BLOCKED", "condition": "PEER_CONDITION_INPUT", "activeAt": fixtures::OBSERVED}),
         &["connector_alpha", "active_at"],
     );
     public_contract::<proto::HeartbeatResponse>(
@@ -265,13 +277,13 @@ fn registered_rpc_pairs_keep_correlation_and_application_evidence_in_proto_json(
     );
     public_contract::<proto::DetachRequest>(
         &registry,
-        json!({"attachment": fixtures::attachment_ref()}),
+        json!({"attachmentRef": fixtures::attachment_ref()}),
         &["peer_alpha", "generation"],
     );
     public_contract::<proto::DetachResponse>(&registry, json!({}), &[]);
     public_contract::<proto::RosterRequest>(
         &registry,
-        json!({"attachment": fixtures::attachment_ref(), "pageSize": 16, "pageToken": "cursor_current"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "pageSize": 16, "pageToken": "cursor_current"}),
         &["cursor_current", "page_size"],
     );
     public_contract::<proto::RosterResponse>(
@@ -281,7 +293,7 @@ fn registered_rpc_pairs_keep_correlation_and_application_evidence_in_proto_json(
     );
     public_contract::<proto::SendRequest>(
         &registry,
-        json!({"attachment": fixtures::attachment_ref(), "recipientPeerId": "peer_beta", "idempotencyKey": "send_outgoing", "text": "hello peer", "replyToMessageId": "message_previous"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "recipientPeerId": "peer_beta", "idempotencyKey": "send_outgoing", "text": "hello peer", "replyToMessageId": "message_previous"}),
         &["peer_beta", "send_outgoing", "message_previous"],
     );
     public_contract::<proto::SendResponse>(
@@ -291,7 +303,7 @@ fn registered_rpc_pairs_keep_correlation_and_application_evidence_in_proto_json(
     );
     public_contract::<proto::StatusRequest>(
         &registry,
-        json!({"attachment": fixtures::attachment_ref(), "idempotencyKey": "send_outgoing"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "idempotencyKey": "send_outgoing"}),
         &["send_outgoing", "generation"],
     );
     public_contract::<proto::StatusResponse>(
@@ -301,7 +313,7 @@ fn registered_rpc_pairs_keep_correlation_and_application_evidence_in_proto_json(
     );
     public_contract::<proto::PrepareBatchRequest>(
         &registry,
-        json!({"attachment": fixtures::attachment_ref(), "promptId": "prompt_alpha"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "promptId": "prompt_alpha"}),
         &["peer_alpha", "prompt_alpha"],
     );
     public_contract::<proto::PrepareBatchResponse>(
@@ -311,7 +323,7 @@ fn registered_rpc_pairs_keep_correlation_and_application_evidence_in_proto_json(
     );
     public_contract::<proto::AcknowledgeBatchRequest>(
         &registry,
-        json!({"attachment": fixtures::attachment_ref(), "batchId": "batch_local"}),
+        json!({"attachmentRef": fixtures::attachment_ref(), "batchId": "batch_local"}),
         &["connector_alpha", "batch_local"],
     );
     public_contract::<proto::AcknowledgeBatchResponse>(
@@ -394,7 +406,7 @@ fn malformed_or_duplicate_fields_inside_each_oneof_payload_propagate_as_json_dat
         ("peerEnrolled", "enrollment", "{}"),
         ("peerAttached", "attachment", "{}"),
         ("peerHeartbeatRecorded", "attachment", "{}"),
-        ("peerDetached", "attachment", "{}"),
+        ("peerDetached", "attachmentRef", "{}"),
         ("peerMessageAccepted", "entry", "{}"),
         ("peerMessageIntakeRecorded", "entry", "{}"),
         ("peerBatchPrepared", "batch", "{}"),

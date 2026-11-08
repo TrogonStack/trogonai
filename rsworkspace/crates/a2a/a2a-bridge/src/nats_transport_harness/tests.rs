@@ -10,6 +10,7 @@ use trogon_std::env::{ReadEnv, SystemEnv};
 use a2a_nats::constants::GATEWAY_CALLER_ID_HTTP;
 
 use super::*;
+use crate::edge_signing_harness::post;
 use crate::inbound::handle_jsonrpc;
 
 fn caller_headers(agent_id: &str, caller_id: Option<&str>) -> HeaderMap {
@@ -51,12 +52,24 @@ async fn nats_transport_callout_mint_per_request_and_jwt_caller_id() {
         .to_string(),
     );
 
-    let response = handle_jsonrpc(caller_headers("planner", None), body, &state)
+    let response = handle_jsonrpc(post(caller_headers("planner", None), body), &state)
         .await
         .expect("message/send should succeed");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(mint_wire.mint_count(), 1);
     assert!(harness.last_caller_jwt_present());
+}
+
+#[tokio::test]
+async fn nats_transport_harness_refuses_a_subject_outside_gateway_ingress() {
+    let nats = AdvancedMockNatsClient::new();
+    let (_state, harness, _mint_wire) = build_nats_transport_app_state(nats, "planner");
+    let caller = BridgeUserJwt::new("fixture.user.jwt").expect("fixture jwt");
+    let error = harness
+        .unary_request_gateway(&caller, "invalid.*", async_nats::HeaderMap::new(), Bytes::new())
+        .await
+        .expect_err("invalid subject refused");
+    assert!(matches!(error, BridgeError::NatsPublish(_)), "got {error:?}");
 }
 
 #[tokio::test]
@@ -73,7 +86,7 @@ async fn nats_transport_message_send_round_trips_caller_jwt_and_audit() {
         .to_string(),
     );
 
-    let response = handle_jsonrpc(caller_headers("planner", Some("caller-abc")), body, &state)
+    let response = handle_jsonrpc(post(caller_headers("planner", Some("caller-abc")), body), &state)
         .await
         .expect("message/send should succeed");
     assert_eq!(response.status(), StatusCode::OK);
@@ -86,7 +99,7 @@ async fn nats_transport_message_send_round_trips_caller_jwt_and_audit() {
     assert!(harness.last_caller_jwt_present());
     assert_eq!(
         harness.last_subject().as_deref(),
-        Some("a2a.v1.gateway.planner.message.send")
+        Some("a2a.v1.gateway.planner.person.bridge-harness-caller.message.send")
     );
 
     let audit_subject = nats
@@ -110,7 +123,7 @@ async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
         .to_string(),
     );
 
-    let response = handle_jsonrpc(caller_headers("planner", Some("caller-sse")), body, &state)
+    let response = handle_jsonrpc(post(caller_headers("planner", Some("caller-sse")), body), &state)
         .await
         .expect("tasks/resubscribe should succeed");
     assert_eq!(response.status(), StatusCode::OK);
@@ -123,7 +136,7 @@ async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
     assert!(harness.last_caller_jwt_present());
     assert_eq!(
         harness.last_subject().as_deref(),
-        Some("a2a.v1.gateway.planner.tasks.resubscribe")
+        Some("a2a.v1.gateway.planner.person.bridge-harness-caller.tasks.resubscribe")
     );
 
     let mut stream = response.into_body().into_data_stream();
@@ -157,9 +170,9 @@ async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
     assert!(audit_subject.is_some(), "expected resubscribe audit publish");
 }
 
-/// Live NATS smoke — run with `A2A_SMOKE_COMPOSE=1 cargo test -p a2a-bridge -- --ignored nats_transport_live`.
+/// Live NATS smoke against the `devops/docker/compose/compose.yml` stack. Run with `A2A_SMOKE_COMPOSE=1 cargo test -p a2a-bridge -- --ignored nats_transport_live`.
 #[tokio::test]
-#[ignore = "requires compose stack: A2A_SMOKE_COMPOSE=1 and NATS_URL (see devops/docker/compose/compose.a2a.smoke.yml)"]
+#[ignore = "requires the devops/docker/compose/compose.yml stack: A2A_SMOKE_COMPOSE=1, the NATS_* host variables from devops/docker/compose/.env.example, and a bridge listening on BRIDGE_LISTEN_ADDR"]
 async fn nats_transport_live_requires_nats_server() {
     let env = SystemEnv;
     if env.var("A2A_SMOKE_COMPOSE").as_deref() != Ok("1") {
@@ -180,4 +193,22 @@ async fn nats_transport_live_requires_nats_server() {
         response.status().is_client_error() || response.status().is_success(),
         "bridge HTTP should respond on {bridge_addr}"
     );
+}
+
+#[tokio::test]
+async fn the_harness_gateway_rejects_a_subject_that_is_not_gateway_ingress() {
+    let harness = HarnessGatewayUnary::new(
+        AdvancedMockNatsClient::new(),
+        default_a2a_prefix(),
+        A2aAgentId::new("planner").unwrap(),
+    );
+    let jwt = BridgeUserJwt::new("h.p.s").expect("valid shape");
+
+    let error = harness
+        .unary_request_gateway(&jwt, "a2a.v1.not.ingress", async_nats::HeaderMap::new(), Bytes::new())
+        .await
+        .expect_err("non-ingress subject");
+
+    assert!(matches!(error, BridgeError::NatsPublish(_)));
+    assert_eq!(harness.last_subject().as_deref(), Some("a2a.v1.not.ingress"));
 }

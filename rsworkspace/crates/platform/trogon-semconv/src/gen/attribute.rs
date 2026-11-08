@@ -6,6 +6,9 @@
 //! Each attribute is exposed as its dotted key string. Enumerated attributes
 //! additionally expose a typed value object for their allowed values.
 
+/// Admission scope, either global or caller. Never contains an identity
+pub const A2A_GATEWAY_RELAY_LIMIT: &str = "a2a.gateway.relay.limit";
+
 /// ACP NATS subject prefix for the service instance. Resource attribute in acp-nats-server / acp-nats-stdio
 pub const ACP_PREFIX: &str = "acp.prefix";
 

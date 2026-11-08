@@ -7,6 +7,9 @@ date: 2026-10-30
 
 # ADR#0083: Credential Material, Claim-Check Blobs, and Sensitive Tenant Streams Under a Customer Managed Key Are Sealed in an Owned AEAD Envelope, and Nothing Else Is
 
+> **Proposed connector refinement:** [ADR#0092](./0092-third-party-connection-model.md) remains a draft. Connector drafts name their sensitive streams and keep token material sealed for every tenant within the existing custody scope. This note does not change either ADR's status.
+
+
 ## Context
 
 [ADR#0081](./0081-nats-tls-by-default-and-operator-mode-admission.md) puts TLS

@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+// AuditClass is how durably a record must be written before the action it
+// describes may take effect.
+//
+// The class is fixed by the record's kind, its terminal outcome, and whether
+// its surface declared the method read-only. A writer never chooses it per
+// call, and the default for a surface that declares nothing is MUST. The field
+// records the outcome of that table so a reader does not have to recompute it.
+// Unspecified and unknown values are invalid.
+enum AuditClass {
+  AUDIT_CLASS_UNSPECIFIED = 0;
+  // Written durably and acknowledged before the action takes effect. A point
+  // that cannot write it refuses the action as an operational fault, never as a
+  // security denial.
+  AUDIT_CLASS_MUST = 1;
+  // Written through a bounded in-memory queue. A full queue drops the newest
+  // record and counts the drop; dropping never refuses a request.
+  AUDIT_CLASS_BEST_EFFORT = 2;
+}

@@ -3,8 +3,8 @@
 
 #[derive(Clone, Debug, Default)]
 pub struct DetachRequestView<'a> {
-    /// Field 1: `attachment`
-    pub attachment: ::buffa::MessageFieldView<
+    /// Field 1: `attachment_ref`
+    pub attachment_ref: ::buffa::MessageFieldView<
         super::super::__buffa::view::AttachmentRefView<'a>,
     >,
 }
@@ -43,12 +43,12 @@ impl<'a> ::buffa::MessageView<'a> for DetachRequestView<'a> {
                 )?;
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                match view.attachment.as_mut() {
+                match view.attachment_ref.as_mut() {
                     Some(existing) => {
                         ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
                     }
                     None => {
-                        view.attachment = ::buffa::MessageFieldView::set(
+                        view.attachment_ref = ::buffa::MessageFieldView::set(
                             <super::super::__buffa::view::AttachmentRefView as ::buffa::MessageView>::decode_view_ctx(
                                 sub,
                                 __sub_ctx,
@@ -77,7 +77,7 @@ impl<'a> ::buffa::MessageView<'a> for DetachRequestView<'a> {
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
         ::core::result::Result::Ok(super::super::DetachRequest {
-            attachment: match self.attachment.as_option() {
+            attachment_ref: match self.attachment_ref.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::AttachmentRef,
@@ -96,9 +96,9 @@ impl<'a> ::buffa::ViewEncode<'a> for DetachRequestView<'a> {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        if self.attachment.is_set() {
+        if self.attachment_ref.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.attachment.compute_size(__cache);
+            let inner_size = self.attachment_ref.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
@@ -114,13 +114,13 @@ impl<'a> ::buffa::ViewEncode<'a> for DetachRequestView<'a> {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        if self.attachment.is_set() {
+        if self.attachment_ref.is_set() {
             ::buffa::types::put_len_delimited_header(
                 1u32,
                 u64::from(__cache.consume_next()),
                 buf,
             );
-            self.attachment.write_to(__cache, buf);
+            self.attachment_ref.write_to(__cache, buf);
         }
     }
 }
@@ -143,8 +143,8 @@ impl<'__a> ::serde::Serialize for DetachRequestView<'__a> {
         use ::serde::ser::SerializeMap as _;
         let mut __map = __s.serialize_map(::core::option::Option::None)?;
         {
-            if let ::core::option::Option::Some(__v) = self.attachment.as_option() {
-                __map.serialize_entry("attachment", __v)?;
+            if let ::core::option::Option::Some(__v) = self.attachment_ref.as_option() {
+                __map.serialize_entry("attachmentRef", __v)?;
             }
         }
         __map.end()
@@ -238,12 +238,12 @@ impl DetachRequestOwnedView {
     pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
         self.0.into_bytes()
     }
-    /// Field 1: `attachment`
+    /// Field 1: `attachment_ref`
     #[must_use]
-    pub fn attachment(
+    pub fn attachment_ref(
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::AttachmentRefView<'_>> {
-        &self.0.reborrow().attachment
+        &self.0.reborrow().attachment_ref
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<DetachRequestView<'static>>>

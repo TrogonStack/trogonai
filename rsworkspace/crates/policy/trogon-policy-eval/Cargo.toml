@@ -1,0 +1,24 @@
+[package]
+name = "trogon-policy-eval"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Pure, synchronous evaluation of policy bindings: permits, ceilings, holds, and request-rule narrowing"
+
+[lints]
+workspace = true
+
+[features]
+# Adds `PolicyAuthorizer`, which plugs the evaluator into the decider
+# `CommandAuthorizer` seam. Off by default so the core carries neither the
+# decider runtime nor a clock abstraction.
+decider = ["dep:trogon-decider-runtime", "dep:trogon-std"]
+
+[dependencies]
+thiserror = { workspace = true }
+trogon-decider-runtime = { workspace = true, optional = true }
+trogon-std = { workspace = true, optional = true }
+
+[[test]]
+name = "decider_adapter"
+required-features = ["decider"]
