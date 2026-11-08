@@ -10,6 +10,7 @@ pub(super) struct ParsedMetadata<'a> {
     pub(super) sender: PeerId,
     pub(super) recipient: PeerId,
     pub(super) collaboration: CollaborationRef,
+    pub(super) content: TrustedContent,
 }
 
 pub(super) struct ParsedOutbox<'a> {
@@ -44,7 +45,7 @@ pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<ParsedMetadat
         ),
         "content_ref",
     )?;
-    value(
+    let content = value(
         TrustedContent::from_sealed_port(
             reference,
             message.content_size_bytes.ok_or(EvolveError::MissingField {
@@ -67,6 +68,7 @@ pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<ParsedMetadat
         sender,
         recipient,
         collaboration,
+        content,
     })
 }
 
@@ -175,6 +177,7 @@ pub(super) fn fold_accepted(
         tenant: facts.identity().owner().tenant().clone(),
         recipient: parsed.metadata.recipient,
         message: parsed.metadata.message.clone(),
+        content: parsed.metadata.content,
     };
     state.outbox.push(entry.clone());
     Ok(AcceptedOutbox {

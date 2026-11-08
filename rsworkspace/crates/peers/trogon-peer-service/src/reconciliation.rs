@@ -12,9 +12,9 @@ use crate::{
 use trogon_decider_runtime::{CommandAuthorizer, CommandError, StreamAppend, StreamRead};
 use trogon_peer::{
     AcceptedMessage, AuthoritativeReceipt, DisposeMessage, IntakeMessage, MessageError, MessageId, PeerId,
-    SealedContentRef, SettleMessage, TerminalDisposition, TrustedPeerOwner,
+    SettleMessage, TerminalDisposition, TrustedContent, TrustedPeerOwner,
 };
-use trogonai_proto::{convert::datetime_from_timestamp, peers::v1alpha1 as proto};
+use trogonai_proto::convert::datetime_from_timestamp;
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
     S: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
@@ -76,7 +76,7 @@ where
                 let disposition = if observed_at >= expiry {
                     Some(TerminalDisposition::Expired)
                 } else {
-                    let binding = binding(owner, evidence.metadata())?;
+                    let binding = binding(owner, evidence.content());
                     let opened = self.content.open(&scope, &binding).await?;
                     observed_at = self.clock.now();
                     if observed_at >= expiry {
@@ -134,26 +134,6 @@ where
     }
 }
 
-pub(crate) fn binding<R, A>(
-    owner: &TrustedPeerOwner,
-    metadata: &proto::MessageMetadata,
-) -> Result<ContentBinding, PeerApplicationError<R, A>> {
-    Ok(ContentBinding::from_port(
-        owner.tenant().clone(),
-        SealedContentRef::new(
-            metadata
-                .content_ref
-                .as_option()
-                .ok_or(PeerApplicationError::Scope)?
-                .clone(),
-        )?,
-        metadata.content_size_bytes.ok_or(PeerApplicationError::Scope)?,
-        metadata
-            .semantic_fingerprint
-            .as_option()
-            .ok_or(PeerApplicationError::Scope)?
-            .value
-            .clone()
-            .ok_or(PeerApplicationError::Scope)?,
-    )?)
+pub(crate) fn binding(owner: &TrustedPeerOwner, content: &TrustedContent) -> ContentBinding {
+    ContentBinding::from_content(owner.tenant().clone(), content.clone())
 }
