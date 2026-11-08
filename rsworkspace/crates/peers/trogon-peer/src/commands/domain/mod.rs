@@ -41,3 +41,6 @@ pub use sealed_content_ref::SealedContentRef;
 
 mod trusted_content;
 pub use trusted_content::TrustedContent;
+
+mod content_semantic_fingerprint;
+pub use content_semantic_fingerprint::ContentSemanticFingerprint;

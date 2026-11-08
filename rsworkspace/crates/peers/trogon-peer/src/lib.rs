@@ -15,3 +15,5 @@ pub use commands::{Detach, DetachError};
 
 pub use commands::domain::{BatchId, IdempotencyKey, MessageId, SealedContentRef, TrustedContent};
 pub use commands::{MessageError, SendMessage};
+
+pub use commands::domain::ContentSemanticFingerprint;

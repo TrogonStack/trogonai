@@ -2,7 +2,9 @@ use buffa::MessageField;
 use trogonai_proto::peers::{PeerEventCase, state_v1alpha1::PeerState, v1alpha1 as proto};
 
 pub use super::evolve_error::EvolveError;
-pub(super) use super::state_values::{parse_enrollment, read_time, required, timestamp_seconds_supported, validate_attachment};
+pub(super) use super::state_values::{
+    parse_enrollment, read_time, required, timestamp_seconds_supported, validate_attachment,
+};
 
 pub fn initial_state() -> PeerState {
     PeerState {

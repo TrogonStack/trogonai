@@ -27,7 +27,12 @@ fn retry_ignores_proposed_identity_time_and_content_location() {
         MessageId::new("new_identity").unwrap(),
         identity("recipient").peer_id().clone(),
         CollaborationRef::new("collaboration").unwrap(),
-        TrustedContent::from_sealed_port(SealedContentRef::new("other_location").unwrap(), 3, vec![1; 32]).unwrap(),
+        TrustedContent::from_sealed_port(
+            SealedContentRef::new(claim_check("other_location", b"new stored representation")).unwrap(),
+            3,
+            vec![1; 32],
+        )
+        .unwrap(),
         None,
         time(2),
     );
@@ -128,13 +133,27 @@ fn owner_and_live_attachment_guard_even_exact_retries() {
 #[test]
 fn invalid_content_and_identifiers_are_refused_without_body_debug() {
     for size in [0, 2049, u32::MAX] {
-        assert!(TrustedContent::from_sealed_port(SealedContentRef::new("sealed").unwrap(), size, vec![1; 32]).is_err());
+        assert!(
+            TrustedContent::from_sealed_port(
+                SealedContentRef::new(claim_check("sealed", b"stored fixture")).unwrap(),
+                size,
+                vec![1; 32]
+            )
+            .is_err()
+        );
     }
-    assert!(TrustedContent::from_sealed_port(SealedContentRef::new("sealed").unwrap(), 1, vec![1; 31]).is_err());
+    assert!(
+        TrustedContent::from_sealed_port(
+            SealedContentRef::new(claim_check("sealed", b"stored fixture")).unwrap(),
+            1,
+            vec![1; 31]
+        )
+        .is_err()
+    );
     for value in ["", "contains space", "line\nbreak"] {
         assert!(MessageId::new(value).is_err());
         assert!(IdempotencyKey::new(value).is_err());
-        assert!(SealedContentRef::new(value).is_err());
+        assert!(SealedContentRef::new(claim_check(value, b"stored fixture")).is_err());
     }
 }
 #[test]
@@ -147,7 +166,7 @@ fn malformed_acceptance_events_are_rejected_on_replay() {
             0 => entry.idempotency_key = None,
             1 => entry.semantic_digest = Some(vec![0; 31]),
             2 => metadata.content_size_bytes = Some(2049),
-            3 => metadata.content_digest = Some(vec![]),
+            3 => metadata.semantic_fingerprint = proto::ContentSemanticFingerprint { value: Some(vec![]) }.into(),
             4 => metadata.expires_at = metadata.accepted_at.clone(),
             5 => metadata.sender_peer_id = Some(identity("foreign").peer_id().to_string()),
             6 => metadata.recipient_peer_id = Some("bad".into()),

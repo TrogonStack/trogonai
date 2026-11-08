@@ -22,7 +22,7 @@ fn message(id: &str, text: &str) -> PreparedMessage {
         "metadata": {
             "messageId":id,"senderPeerId":sender_peer_id(),"recipientPeerId":recipient_peer_id(),
             "collaborationRef":"collaboration_a","acceptedAt":"2026-11-02T11:59:00Z",
-            "expiresAt":"2026-11-02T12:59:00Z","contentRef":{"storageRef":{"value":"content_1"},"digest":{"algorithm":"sha256","value":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}},"contentSizeBytes":text.len()
+            "expiresAt":"2026-11-02T12:59:00Z","contentRef":{"storageRef":{"value":"content_1"},"digest":{"algorithm":"sha256","value":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}},"semanticFingerprint":{"value":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="},"contentSizeBytes":text.len()
         },
         "text":text
     }))

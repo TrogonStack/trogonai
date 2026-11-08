@@ -65,13 +65,13 @@ impl Decider for SendMessage {
             sender_peer_id: Some(command.attachment.peer_id().to_string()),
             recipient_peer_id: Some(command.recipient.to_string()),
             collaboration_ref: Some(command.collaboration.as_str().to_owned()),
-            content_ref: Some(command.content.reference.as_str().to_owned()),
+            content_ref: command.content.reference.to_claim_check().into(),
             content_size_bytes: Some(command.content.size),
-            content_digest: Some(command.content.digest.clone()),
+            semantic_fingerprint: command.content.semantic_fingerprint.to_wire().into(),
             reply_to_message_id: command.reply_to.as_ref().map(|id| id.as_str().to_owned()),
             ..Default::default()
         };
-        let digest = super::message_rules::semantic_digest(&message);
+        let digest = super::message_rules::semantic_digest(&message)?;
         for old in &state.outbox {
             super::message_rules::outbox_entry(old)?;
             if old.idempotency_key.as_deref() == Some(command.key.as_str()) {

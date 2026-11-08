@@ -3,12 +3,12 @@ use chrono::{DateTime, Utc};
 use trogonai_proto::convert::datetime_from_timestamp;
 use trogonai_proto::peers::v1alpha1 as proto;
 
+use super::constants::ATTACHMENT_LEASE;
 use super::domain::{
     CallerId, CollaborationRef, ConnectorId, EnrollmentIdentity, InstallationId, NativeSessionId, PeerDisplayName,
     TenantId, TrustedPeerOwner,
 };
 use super::evolve_error::EvolveError;
-use super::constants::ATTACHMENT_LEASE;
 
 pub(super) fn parse_enrollment(enrollment: &proto::PeerEnrollment) -> Result<EnrollmentIdentity, EvolveError> {
     let tenant = TenantId::new(required(&enrollment.tenant_id, "enrollment.tenant_id")?).map_err(|source| {
