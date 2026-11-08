@@ -919,3 +919,48 @@ async fn expired_replacement_cannot_append_after_authority_changes_past_its_vali
         .unwrap();
     assert_same_durable_history(&actual, &injected);
 }
+
+#[tokio::test]
+async fn live_resume_rechecks_unknown_authority_that_raced_its_validated_history() {
+    let inner = ObservedStore::default();
+    let first = PeerService::new(inner.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let peer = PeerId::parse(first.peer_id.clone().unwrap()).unwrap();
+    let store = UnknownAuthorityAfterHistoryRead {
+        inner: inner.clone(),
+        armed: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        injected_history: Arc::new(Mutex::new(None)),
+    };
+    let appends = inner.appends.load(Ordering::SeqCst);
+    let result = PeerService::new(store.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await;
+    assert!(matches!(
+        result,
+        Err(EnrollServiceError::History(
+            trogon_peer_service::HistoryError::UnknownEvent
+        ))
+    ));
+    assert!(!store.armed.load(Ordering::SeqCst));
+    assert_eq!(
+        inner.appends.load(Ordering::SeqCst),
+        appends + 2,
+        "only the rejected create and competing authority envelope may append"
+    );
+    let injected = store
+        .injected_history
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("persisted competing envelope");
+    let actual = inner
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    assert_same_durable_history(&actual, &injected);
+}
