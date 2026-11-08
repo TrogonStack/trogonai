@@ -5,12 +5,16 @@ use trogonai_proto::peers::v1alpha1 as proto;
 
 use super::constants::ATTACHMENT_LEASE;
 use super::domain::{
-    CallerId, CollaborationRef, ConnectorId, EnrollmentIdentity, InstallationId, NativeSessionId, PeerDisplayName,
-    TenantId, TrustedPeerOwner,
+    CallerId, CollaborationRef, ConnectorId, EnrollmentFacts, EnrollmentIdentity, InstallationId, NativeSessionId,
+    PeerDisplayName, TenantId, TrustedPeerOwner,
 };
 use super::evolve_error::EvolveError;
 
 pub(super) fn parse_enrollment(enrollment: &proto::PeerEnrollment) -> Result<EnrollmentIdentity, EvolveError> {
+    Ok(parse_enrollment_facts(enrollment)?.identity)
+}
+
+pub(super) fn parse_enrollment_facts(enrollment: &proto::PeerEnrollment) -> Result<EnrollmentFacts, EvolveError> {
     let tenant = TenantId::new(required(&enrollment.tenant_id, "enrollment.tenant_id")?).map_err(|source| {
         EvolveError::InvalidValue {
             field: "enrollment.tenant_id",
@@ -37,12 +41,11 @@ pub(super) fn parse_enrollment(enrollment: &proto::PeerEnrollment) -> Result<Enr
     if required(&enrollment.peer_id, "enrollment.peer_id")? != identity.peer_id().as_str() {
         return Err(EvolveError::IdentityMismatch);
     }
-    CollaborationRef::new(required(&enrollment.collaboration_ref, "enrollment.collaboration_ref")?).map_err(
-        |source| EvolveError::InvalidValue {
+    let collaboration = CollaborationRef::new(required(&enrollment.collaboration_ref, "enrollment.collaboration_ref")?)
+        .map_err(|source| EvolveError::InvalidValue {
             field: "enrollment.collaboration_ref",
             source,
-        },
-    )?;
+        })?;
     PeerDisplayName::new(required(&enrollment.display_name, "enrollment.display_name")?).map_err(|source| {
         EvolveError::InvalidValue {
             field: "enrollment.display_name",
@@ -50,7 +53,10 @@ pub(super) fn parse_enrollment(enrollment: &proto::PeerEnrollment) -> Result<Enr
         }
     })?;
     read_time(enrollment.enrolled_at.as_option(), "enrollment.enrolled_at")?;
-    Ok(identity)
+    Ok(EnrollmentFacts {
+        identity,
+        collaboration,
+    })
 }
 
 pub(super) fn required<'a>(value: &'a Option<String>, field: &'static str) -> Result<&'a str, EvolveError> {

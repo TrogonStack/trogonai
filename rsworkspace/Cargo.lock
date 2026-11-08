@@ -7597,6 +7597,7 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "buffa",
+ "buffa-types",
  "futures",
  "grpc-nats-micro",
  "rmcp",
