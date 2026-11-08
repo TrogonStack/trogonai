@@ -4221,9 +4221,6 @@ impl trogon_peer_service::PeerCatalog for RosterObservationCatalog {
 
 #[tokio::test]
 async fn public_roster_validates_only_emitted_observations_after_a_clock_change() -> TestResult {
-    use chrono::TimeZone;
-    use trogon_peer::{EvolveError, MessageError};
-    use trogon_peer_service::{PeerApplication, PeerApplicationError, PeerPortError};
     for seconds in [-62_135_596_801, 253_402_300_800] {
         let f = Fixture::new().await?;
         let observed_at = chrono::Utc
