@@ -544,6 +544,22 @@ async fn admitted_service_registers_wildcards_and_serves_metadata_scoped_typed_r
             }
         );
     }
+    let stats = tokio::time::timeout(BOUND, transport.request("$SRV.STATS.AdmissionService", Bytes::new()))
+        .await
+        .expect("micro statistics query stayed bounded")
+        .expect("micro statistics response");
+    let stats: serde_json::Value = serde_json::from_slice(&stats.payload).expect("micro statistics JSON");
+    let say = stats["endpoints"]
+        .as_array()
+        .expect("endpoint statistics")
+        .iter()
+        .find(|endpoint| endpoint["name"] == "Say")
+        .expect("admitted Say endpoint statistics");
+    assert_eq!(
+        say["num_requests"], 4,
+        "all four successful admitted calls must remain observable"
+    );
+    assert!(say["processing_time"].as_u64().is_some_and(|elapsed| elapsed > 0));
     tokio::time::timeout(BOUND, service.stop())
         .await
         .expect("service stop stayed bounded")
