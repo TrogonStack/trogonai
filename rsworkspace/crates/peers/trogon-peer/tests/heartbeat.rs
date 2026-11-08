@@ -378,3 +378,53 @@ fn observation_rejects_activity_outside_the_wire_timestamp_range() {
         ));
     }
 }
+
+#[test]
+fn heartbeat_cannot_renew_a_valid_detached_attachment_even_with_the_matching_fence() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let now = start + chrono::Duration::seconds(2);
+    let mut before = state(start);
+    let detached = before.attachment.as_option_mut().unwrap();
+    detached.status = Some(proto::AttachmentStatus::ATTACHMENT_STATUS_DETACHED.into());
+    detached.observed_at = MessageField::some(timestamp_from_datetime(&now));
+    detached.expires_at = detached.observed_at.clone();
+    TestCase::<Heartbeat>::new()
+        .given_state(before)
+        .when(heartbeat("old_connector", 1, now, None))
+        .then_error(HeartbeatError::Inactive);
+}
+
+#[test]
+fn heartbeat_rejects_a_leap_clock_before_serializing_attachment_observation() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 59).unwrap();
+    let leap = Utc.timestamp_opt(start.timestamp(), 1_500_000_000).single().unwrap();
+    TestCase::<Heartbeat>::new()
+        .given_state(state(start))
+        .when(heartbeat("old_connector", 1, leap, None))
+        .then_error(HeartbeatError::InvalidState(trogon_peer::EvolveError::TimestampRange {
+            field: "attachment.observed_at",
+        }));
+    TestCase::<Heartbeat>::new()
+        .given_state(state(start))
+        .when(heartbeat(
+            "old_connector",
+            1,
+            start + chrono::Duration::seconds(2),
+            None,
+        ))
+        .then(vec![proto::PeerEvent {
+            event: Some(
+                proto::PeerHeartbeatRecorded {
+                    attachment: MessageField::some(attachment(
+                        &identity(),
+                        "old_connector",
+                        1,
+                        start + chrono::Duration::seconds(2),
+                    )),
+                    availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+                    ..Default::default()
+                }
+                .into(),
+            ),
+        }]);
+}

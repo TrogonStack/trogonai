@@ -86,24 +86,25 @@ impl Decider for PrepareBatch {
         if bytes > command.plan.rendered_utf8_bytes as u64 {
             return Err(MessageError::InvalidPlan);
         }
-        let batch = trogonai_proto::peers::v1alpha1::PeerBatch {
-            batch_id: Some(command.batch_id.as_str().to_owned()),
-            message_ids: ids,
-            prepared_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&command.now)),
-            ..Default::default()
-        };
+        let batch_id = Some(command.batch_id.as_str().to_owned());
         let mut receipts = Vec::new();
-        for (index, entry) in eligible.iter().take(batch.message_ids.len()).enumerate() {
+        for (index, entry) in eligible.iter().take(ids.len()).enumerate() {
             let mut receipt = super::message_rules::make_receipt(
                 state,
                 &entry.message,
                 trogonai_proto::peers::v1alpha1::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED,
-                batch.batch_id.clone(),
+                batch_id.clone(),
                 command.now,
             )?;
             receipt.recipient_revision = receipt.recipient_revision.and_then(|n| n.checked_add(index as u64));
             receipts.push(receipt);
         }
+        let batch = trogonai_proto::peers::v1alpha1::PeerBatch {
+            batch_id,
+            message_ids: ids,
+            prepared_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&command.now)),
+            ..Default::default()
+        };
         Ok(Decision::event(PeerEvent {
             event: Some(
                 trogonai_proto::peers::v1alpha1::PeerBatchPrepared {
