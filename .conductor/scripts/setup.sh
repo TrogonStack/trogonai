@@ -7,7 +7,7 @@ set -euo pipefail
 worktree_root="$(cd "$CONDUCTOR_WORKSPACE_PATH" && pwd -P)"
 source_root="$(cd "$CONDUCTOR_ROOT_PATH" && pwd -P)"
 
-mise trust "$worktree_root/.mise.toml"
+mise trust "$worktree_root/mise.toml"
 
 if [[ -f "$source_root/mise.local.toml" && "$source_root" != "$worktree_root" ]]; then
   ln -sf "$source_root/mise.local.toml" "$worktree_root/mise.local.toml"

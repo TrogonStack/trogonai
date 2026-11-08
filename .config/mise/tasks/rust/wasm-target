@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Ensure the wasm32-unknown-unknown Rust target is installed"
+
+exec rustup target add wasm32-unknown-unknown "$@"
