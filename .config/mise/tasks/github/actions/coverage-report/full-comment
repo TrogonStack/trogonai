@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+if [[ "${COVERAGE_VISIBILITY}" == "public" && "${COVERAGE_SKIP_STORAGE}" != "true" ]]
+then {
+  # URL encoding for branch name
+  URL_ENCODED_BRANCH=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote_plus(os.environ["COVERAGE_REPORT_BRANCH"]))')
+  echo -e "![badge](https://raw.githubusercontent.com/${GITHUB_REPOSITORY_OWNER}/${COVERAGE_REPOSITORY_NAME}/${COVERAGE_STORAGE_BRANCH}/data/${URL_ENCODED_BRANCH}/${COVERAGE_STORAGE_SUBDIRECTORY}/badge.svg)\n\n" > .coverage-output.final
+}
+else {
+  echo -e "🧪 Test coverage: ${COVERAGE_TOTAL}%\n\n" > .coverage-output.final
+}
+fi
+echo -e "## ${COVERAGE_SUMMARY_TITLE}\n" >> .coverage-output.final
+if [[ "${COVERAGE_EXCLUDE_DETAIL}" == "false" ]]
+then {
+  if [[ "${COVERAGE_TOGGLE}" == "true" ]]
+  then {
+    echo -e "<details>\n\n" >> .coverage-output.final
+  }
+  fi
+  {
+    echo -e "\`\`\`"
+    cat .coverage-output
+    echo -e "\n\`\`\`\n"
+  } >> .coverage-output.final
+  if [[ "${COVERAGE_TOGGLE}" == "true" ]]
+  then {
+    echo -e "</details>\n\n" >> .coverage-output.final
+  }
+  fi
+}
+else {
+  echo -e "\n" >> .coverage-output.final
+}
+fi
+if [[ "${COVERAGE_DIFF_ENABLED}" == "true" && -f .coverage-output.diff ]]
+then {
+  {
+    echo -e "### Diff against ${COVERAGE_DIFF_BRANCH}\n"
+    echo -e "\`\`\`"
+    cat .coverage-output.diff
+    echo -e "\n\`\`\`\n"
+  } >> .coverage-output.final
+}
+fi
+COMMIT_SHA="${GITHUB_SHA}"
+if [ "${GITHUB_EVENT_NAME}" == "pull_request" ]
+then {
+  COMMIT_SHA="${COVERAGE_HEAD_SHA}"
+}
+fi
+echo -e "\nResults for commit: $COMMIT_SHA\n" >> .coverage-output.final
+echo -e "\n_Minimum allowed coverage is \`${COVERAGE_THRESHOLD}%\`_\n" >> .coverage-output.final
+if [[ "${COVERAGE_PUBLISH}" == "true" ]]
+then {
+  echo -e "\n:recycle: This comment has been updated with latest results\n" >> .coverage-output.final
+}
+fi

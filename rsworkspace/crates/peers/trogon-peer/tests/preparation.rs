@@ -144,3 +144,113 @@ fn malformed_prepared_batch_cannot_rewrite_winners() {
         assert!(commands::state::evolve(before.clone(), &event).is_err());
     }
 }
+
+#[test]
+fn core760_renderer_plan_routes_and_replays_the_exact_ordered_batch() {
+    let plan = TrustedBatchPlan::from_renderer(
+        vec![
+            MessageId::new("message_0").unwrap(),
+            MessageId::new("message_1").unwrap(),
+        ],
+        40,
+    )
+    .unwrap();
+    let expected_ids: Vec<_> = plan.message_ids().iter().map(|id| id.as_str().to_owned()).collect();
+    let budget = plan.rendered_utf8_bytes();
+    assert_eq!(budget, 40);
+    let command = PrepareBatch::new(
+        identity("recipient").owner().clone(),
+        reference("recipient", 1),
+        BatchId::new("rendered_batch").unwrap(),
+        plan,
+        time(3),
+    );
+    assert_eq!(command.stream_id(), identity("recipient").peer_id());
+    let initial = PrepareBatch::initial_state();
+    assert_eq!(initial, commands::state::initial_state());
+    let enroll = Enroll::new(
+        identity("recipient"),
+        ConnectorId::new("connector").unwrap(),
+        CollaborationRef::new("collaboration").unwrap(),
+        PeerDisplayName::new("Peer").unwrap(),
+        time(0),
+    );
+    let (_, events) = evaluate_decision(initial.clone(), &enroll).unwrap();
+    let mut replayed = initial;
+    for event in events.iter() {
+        replayed = commands::state::evolve(replayed, event).unwrap();
+    }
+    for index in 0..2 {
+        let (_, events) = evaluate_decision(replayed.clone(), &intake(index, 7)).unwrap();
+        for event in events.iter() {
+            replayed = commands::state::evolve(replayed, event).unwrap();
+        }
+    }
+    assert_eq!(
+        error(replayed.clone(), &prepare(&[0, 1], 13, 3)),
+        MessageError::InvalidPlan
+    );
+    let (prepared, events) = evaluate_decision(replayed.clone(), &command).unwrap();
+    for event in events.iter() {
+        replayed = commands::state::evolve(replayed, event).unwrap();
+    }
+    assert_eq!(replayed, prepared);
+    assert_eq!(prepared.batches[0].message_ids, expected_ids);
+    assert!(
+        prepared
+            .inbox
+            .iter()
+            .map(|entry| entry.message.content_size_bytes.unwrap() as usize)
+            .sum::<usize>()
+            <= budget
+    );
+    assert!(
+        matches!(error(prepared.clone(), &command), MessageError::AlreadyPrepared(batch) if *batch == prepared.batches[0])
+    );
+}
+
+#[test]
+fn core760_replay_requires_live_attachment_valid_ordinals_and_batch_identity() {
+    let before = inbox(&[0, 1], 1);
+    let (_, events) = evaluate_decision(before.clone(), &prepare(&[0, 1], 20, 3)).unwrap();
+    let original = events.iter().next().unwrap().clone();
+    let mut invalid_id = original.clone();
+    if let Some(PeerEventCase::PeerBatchPrepared(ref mut event)) = invalid_id.event {
+        event.batch.as_option_mut().unwrap().batch_id = Some("invalid.batch".into());
+    }
+    assert!(matches!(
+        commands::state::evolve(before.clone(), &invalid_id),
+        Err(EvolveError::InvalidValue {
+            field: "batch_id",
+            source: PeerValueError::InvalidCharacter
+        })
+    ));
+    let detached = run(
+        before.clone(),
+        &Detach::new(
+            identity("recipient").owner().clone(),
+            reference("recipient", 1),
+            time(2),
+        ),
+    );
+    assert_eq!(
+        commands::state::evolve(detached, &original),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    for ordinals in [[Some(0), Some(2)], [Some(1), Some(1)]] {
+        let mut history = before.clone();
+        for (entry, ordinal) in history.inbox.iter_mut().zip(ordinals) {
+            entry.intake_ordinal = ordinal;
+        }
+        assert_eq!(
+            commands::state::evolve(history, &original),
+            Err(EvolveError::InvalidMessageTransition)
+        );
+    }
+    let mut damaged = before;
+    damaged.inbox[0].message.as_option_mut().unwrap().content_size_bytes = Some(0);
+    assert!(matches!(
+        commands::state::evolve(damaged, &original),
+        Err(EvolveError::InvalidValue { field: "content", .. })
+    ));
+}
