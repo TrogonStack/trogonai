@@ -121,10 +121,20 @@ where
             }
             _ => proto::MessageStatus::MESSAGE_STATUS_ACCEPTED,
         };
+        let observed_at = self.clock.now();
+        if !(-62_135_596_800..=253_402_300_799).contains(&observed_at.timestamp())
+            || observed_at.timestamp_subsec_nanos() >= 1_000_000_000
+        {
+            return Err(PeerApplicationError::Evidence(trogon_peer::MessageError::InvalidState(
+                trogon_peer::EvolveError::TimestampRange {
+                    field: "status.observed_at",
+                },
+            )));
+        }
         Ok(proto::StatusResponse {
             message: MessageField::some(evidence.metadata().clone()),
             status: Some(status.into()),
-            observed_at: MessageField::some(timestamp_from_datetime(&self.clock.now())),
+            observed_at: MessageField::some(timestamp_from_datetime(&observed_at)),
         })
     }
 }
