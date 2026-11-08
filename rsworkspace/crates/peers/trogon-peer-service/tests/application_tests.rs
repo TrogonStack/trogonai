@@ -1,4 +1,6 @@
 use std::sync::atomic::Ordering;
+use trogon_peer::{MessageId, PeerId};
+use trogon_peer_service::WorkLimit;
 mod support;
 use support::*;
 use trogonai_proto::peers::v1alpha1 as proto;
@@ -699,5 +701,417 @@ async fn independently_accepted_cross_collaboration_obligations_cannot_leak_stat
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
     assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
     assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn explicit_reconciliation_intakes_from_trusted_history_without_settling_early() -> TestResult {
+    let f = Fixture::new().await?;
+    let sent = f.app().send(&f.alice, f.send("key", "pending")).await?;
+    let id = MessageId::new(
+        sent.message
+            .message_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    f.app()
+        .reconcile(&f.alice, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
+        .await?;
+    f.app().reconcile(&f.alice, &sender, &[id], WorkLimit::new(1)?).await?;
+    let status = f
+        .app()
+        .status(
+            &f.alice,
+            proto::StatusRequest {
+                attachment_ref: f.a.clone().into(),
+                idempotency_key: Some("key".into()),
+            },
+        )
+        .await?;
+    assert_eq!(
+        status.status.and_then(|v| v.as_known()),
+        Some(proto::MessageStatus::MESSAGE_STATUS_INTAKE_RECORDED)
+    );
+    Ok(())
+}
+
+struct ExpireDuringContentOpen {
+    inner: DisposableContentFixture,
+    clock: ClockFixture,
+    expiry: chrono::DateTime<chrono::Utc>,
+}
+
+impl trogon_peer_service::ContentOpen for ExpireDuringContentOpen {
+    async fn open(
+        &self,
+        scope: &trogon_peer_service::PeerAccess,
+        binding: &trogon_peer_service::ContentBinding,
+    ) -> Result<Option<trogon_peer_service::MessageText>, trogon_peer_service::PeerPortError> {
+        let text = trogon_peer_service::ContentOpen::open(&self.inner, scope, binding).await?;
+        tokio::task::yield_now().await;
+        *self
+            .clock
+            .time
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)? = self.expiry;
+        Ok(text)
+    }
+}
+
+async fn replay_reconciliation_receipt(
+    store: &StoreFixture,
+    peer: &PeerId,
+) -> TestResult<trogonai_proto::peers::state_v1alpha1::PeerState> {
+    use trogon_decider_runtime::StreamRead;
+    let history = store
+        .read_stream(trogon_decider_runtime::ReadStreamRequest {
+            stream_id: peer,
+            from: trogon_decider_runtime::ReadFrom::Beginning,
+        })
+        .await?;
+    let mut state = trogon_peer::commands::state::initial_state();
+    for event in history.events {
+        let event = event
+            .decode::<proto::PeerEvent>()?
+            .into_decoded()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+        state = trogon_peer::commands::state::evolve(state, &event)?;
+    }
+    Ok(state)
+}
+
+#[tokio::test]
+async fn reconciliation_crossing_expiry_during_content_open_records_terminal_receipt() -> TestResult {
+    let f = Fixture::new().await?;
+    let sent = f.app().send(&f.alice, f.send("expiry-race", "pending")).await?;
+    let id = MessageId::new(
+        sent.message
+            .message_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let recipient = PeerId::parse(
+        f.b.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let expiry = trogonai_proto::convert::datetime_from_timestamp(
+        sent.message
+            .expires_at
+            .as_option()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let content = ExpireDuringContentOpen {
+        inner: f.content.clone(),
+        clock: f.clock.clone(),
+        expiry,
+    };
+    let app = trogon_peer_service::PeerApplication::new(
+        f.store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        content,
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+
+    assert_eq!(
+        app.reconcile(&f.alice, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
+            .await?,
+        1
+    );
+    let target = replay_reconciliation_receipt(&f.store, &recipient).await?;
+    assert!(target.inbox.is_empty(), "expired content must not be intaken");
+    assert_eq!(target.dispositions.len(), 1);
+    let receipt = target
+        .dispositions
+        .first()
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    assert_eq!(receipt.message_id.as_deref(), Some(id.as_str()));
+    assert_eq!(
+        receipt.outcome.and_then(|value| value.as_known()),
+        Some(proto::PreparationOutcome::PREPARATION_OUTCOME_EXPIRED)
+    );
+    let source = replay_reconciliation_receipt(&f.store, &sender).await?;
+    let settled = source
+        .outbox
+        .first()
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    assert_eq!(settled.settlement.as_option(), Some(receipt));
+    Ok(())
+}
+
+struct RevokeCommandGrantDuringOpen<'a>(&'a Fixture);
+
+impl trogon_peer_service::ContentOpen for RevokeCommandGrantDuringOpen<'_> {
+    async fn open(
+        &self,
+        scope: &trogon_peer_service::PeerAccess,
+        binding: &trogon_peer_service::ContentBinding,
+    ) -> Result<Option<trogon_peer_service::MessageText>, trogon_peer_service::PeerPortError> {
+        let opened = trogon_peer_service::ContentOpen::open(&self.0.content, scope, binding).await?;
+        self.0.policy.deny.store(true, Ordering::SeqCst);
+        Ok(opened)
+    }
+}
+
+#[tokio::test]
+async fn policy_revocation_while_opening_content_prevents_both_intake_and_terminal_disposition() -> TestResult {
+    for content_available in [true, false] {
+        let f = Fixture::new().await?;
+        let sent = f.app().send(&f.alice, f.send("revoked-open", "pending")).await?;
+        let id = trogon_peer::MessageId::new(
+            sent.message
+                .message_id
+                .clone()
+                .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+        )?;
+        let sender = trogon_peer::PeerId::parse(
+            f.a.peer_id
+                .clone()
+                .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+        )?;
+        let recipient = trogon_peer::PeerId::parse(
+            f.b.peer_id
+                .clone()
+                .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+        )?;
+        if !content_available {
+            f.content
+                .bodies
+                .lock()
+                .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+                .clear();
+        }
+        let app = trogon_peer_service::PeerApplication::new(
+            f.store.clone(),
+            f.policy.clone(),
+            f.clock.clone(),
+            RevokeCommandGrantDuringOpen(&f),
+            f.cache.clone(),
+            f.ids.clone(),
+            f.catalog.clone(),
+        );
+        let appends = f.store.appends.load(Ordering::SeqCst);
+        assert!(matches!(
+            app.reconcile(
+                &f.alice,
+                &sender,
+                std::slice::from_ref(&id),
+                trogon_peer_service::WorkLimit::new(1)?
+            )
+            .await,
+            Err(trogon_peer_service::PeerApplicationError::Message(
+                trogon_decider_runtime::CommandError::Unauthorized(_)
+            ))
+        ));
+        assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+        let target = service_coverage_public_history(&f, &recipient).await?;
+        assert!(target.inbox.is_empty());
+        assert!(target.dispositions.is_empty());
+        let source = service_coverage_public_history(&f, &sender).await?;
+        assert!(
+            !source
+                .outbox
+                .first()
+                .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                .settlement
+                .is_set()
+        );
+        f.policy.deny.store(false, Ordering::SeqCst);
+        assert_eq!(
+            f.app()
+                .reconcile(&f.alice, &sender, &[id], trogon_peer_service::WorkLimit::new(1)?)
+                .await?,
+            1
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_incorrect_policy_grant_cannot_transfer_the_durable_sender_identity() -> TestResult {
+    let f = Fixture::new().await?;
+    let sender = trogon_peer::PeerId::parse(
+        f.b.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    f.policy
+        .grants
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .insert(sender.as_str().to_owned(), f.alice.clone());
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app()
+            .reconcile(
+                &f.alice,
+                &sender,
+                &[trogon_peer::MessageId::new("not-an-obligation")?],
+                trogon_peer_service::WorkLimit::new(1)?
+            )
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Scope)
+    ));
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.catalog.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn independently_accepted_cross_collaboration_obligations_cannot_reconcile() -> TestResult {
+    let (f, sender, message_id) = independent_cross_collaboration_fixture().await?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let content_calls = f.content.calls.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app()
+            .reconcile(
+                &f.alice,
+                &sender,
+                &[message_id],
+                trogon_peer_service::WorkLimit::new(1)?
+            )
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Scope)
+    ));
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+struct ServiceCoverageRejectSettlement(PolicyFixture);
+
+impl trogon_decider_runtime::CommandAuthorizer<trogon_peer_service::PeerAccess> for ServiceCoverageRejectSettlement {
+    fn authorize(
+        &self,
+        principal: &trogon_decider_runtime::CommandPrincipal,
+        command: &trogon_peer_service::PeerAccess,
+    ) -> Result<(), trogon_decider_runtime::AuthorizationDeniedError> {
+        trogon_decider_runtime::CommandAuthorizer::authorize(&self.0, principal, command)
+    }
+}
+
+impl trogon_decider_runtime::CommandAuthorizer<trogon_peer::IntakeMessage> for ServiceCoverageRejectSettlement {
+    fn authorize(
+        &self,
+        principal: &trogon_decider_runtime::CommandPrincipal,
+        command: &trogon_peer::IntakeMessage,
+    ) -> Result<(), trogon_decider_runtime::AuthorizationDeniedError> {
+        trogon_decider_runtime::CommandAuthorizer::authorize(&self.0, principal, command)
+    }
+}
+
+impl trogon_decider_runtime::CommandAuthorizer<trogon_peer::DisposeMessage> for ServiceCoverageRejectSettlement {
+    fn authorize(
+        &self,
+        principal: &trogon_decider_runtime::CommandPrincipal,
+        command: &trogon_peer::DisposeMessage,
+    ) -> Result<(), trogon_decider_runtime::AuthorizationDeniedError> {
+        trogon_decider_runtime::CommandAuthorizer::authorize(&self.0, principal, command)
+    }
+}
+
+impl trogon_decider_runtime::CommandAuthorizer<trogon_peer::SettleMessage> for ServiceCoverageRejectSettlement {
+    fn authorize(
+        &self,
+        principal: &trogon_decider_runtime::CommandPrincipal,
+        command: &trogon_peer::SettleMessage,
+    ) -> Result<(), trogon_decider_runtime::AuthorizationDeniedError> {
+        trogon_decider_runtime::CommandAuthorizer::authorize(&self.0, principal, command)?;
+        Err(trogon_decider_runtime::AuthorizationDeniedError::new(
+            "settlement grant withdrawn",
+        ))
+    }
+}
+
+#[tokio::test]
+async fn rejected_settlement_preserves_the_authoritative_receipt_for_a_later_authorized_attempt() -> TestResult {
+    let f = Fixture::new().await?;
+    let sent = f.app().send(&f.alice, f.send("settlement-denied", "pending")).await?;
+    let id = trogon_peer::MessageId::new(
+        sent.message
+            .message_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let sender = trogon_peer::PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let recipient = trogon_peer::PeerId::parse(
+        f.b.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    f.content
+        .bodies
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .clear();
+    let app = trogon_peer_service::PeerApplication::new(
+        f.store.clone(),
+        ServiceCoverageRejectSettlement(f.policy.clone()),
+        f.clock.clone(),
+        f.content.clone(),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        app.reconcile(
+            &f.alice,
+            &sender,
+            std::slice::from_ref(&id),
+            trogon_peer_service::WorkLimit::new(1)?
+        )
+        .await,
+        Err(trogon_peer_service::PeerApplicationError::Message(
+            trogon_decider_runtime::CommandError::Unauthorized(trogon_decider_runtime::UnauthorizedError::Denied(_))
+        ))
+    ));
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
+    let disposed = service_coverage_public_history(&f, &recipient).await?;
+    assert_eq!(disposed.dispositions.len(), 1);
+    assert_eq!(disposed.dispositions[0].message_id.as_deref(), Some(id.as_str()));
+    assert_eq!(
+        disposed.dispositions[0].outcome.and_then(|outcome| outcome.as_known()),
+        Some(proto::PreparationOutcome::PREPARATION_OUTCOME_UNAVAILABLE)
+    );
+    let pending = service_coverage_public_history(&f, &sender).await?;
+    assert_eq!(pending.outbox.len(), 1);
+    assert!(!pending.outbox[0].settlement.is_set());
+    assert_eq!(
+        f.app()
+            .reconcile(
+                &f.alice,
+                &sender,
+                std::slice::from_ref(&id),
+                trogon_peer_service::WorkLimit::new(1)?
+            )
+            .await?,
+        1
+    );
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 2);
+    let settled = service_coverage_public_history(&f, &sender).await?;
+    assert!(settled.outbox[0].settlement.is_set());
+    let recovered = service_coverage_public_history(&f, &recipient).await?;
+    assert_eq!(recovered.dispositions, disposed.dispositions);
     Ok(())
 }
