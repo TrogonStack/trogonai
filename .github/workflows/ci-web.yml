@@ -7,7 +7,7 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     paths:
       - 'tsworkspace/**'
-      - '.mise.toml'
+      - 'mise.toml'
       - '.github/workflows/ci-web.yml'
 
 concurrency:
