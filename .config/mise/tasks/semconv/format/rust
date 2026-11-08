@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Format generated Rust semconv bindings"
+#MISE dir="rsworkspace"
+
+exec cargo fmt -p trogon-semconv "$@"
