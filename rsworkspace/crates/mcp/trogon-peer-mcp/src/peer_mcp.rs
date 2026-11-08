@@ -55,13 +55,9 @@ where
         match request.name.as_ref() {
             "peer_prompt_hook" => {
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-                let result = tokio::time::timeout_at(deadline, self.prompt_hook(request))
+                tokio::time::timeout_at(deadline, self.prompt_hook(request))
                     .await
-                    .map_err(|_| PeerMcpError::PromptDeadline)?;
-                if tokio::time::Instant::now() >= deadline {
-                    return Err(PeerMcpError::PromptDeadline);
-                }
-                result
+                    .map_err(|_| PeerMcpError::PromptDeadline)?
             }
             "peer_roster" | "peer_send" | "peer_status" | "peer_acknowledge_batch" => {
                 let attachment = self
