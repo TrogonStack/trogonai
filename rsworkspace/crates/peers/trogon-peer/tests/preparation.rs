@@ -254,3 +254,27 @@ fn core760_replay_requires_live_attachment_valid_ordinals_and_batch_identity() {
         Err(EvolveError::InvalidValue { field: "content", .. })
     ));
 }
+
+#[test]
+fn preparation_replay_cannot_create_receipts_for_messages_absent_from_intake() {
+    let before = inbox(&[0], 1);
+    let (prepared, events) = evaluate_decision(before.clone(), &prepare(&[0], 20, 3)).unwrap();
+    let original = events.iter().next().unwrap();
+    assert_eq!(commands::state::evolve(before.clone(), original).unwrap(), prepared);
+    let mut absent = before.clone();
+    absent.inbox.clear();
+    assert_eq!(
+        commands::state::evolve(absent, original),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let mut forged = original.clone();
+    assert!(matches!(forged.event, Some(PeerEventCase::PeerBatchPrepared(_))));
+    if let Some(PeerEventCase::PeerBatchPrepared(event)) = forged.event.as_mut() {
+        event.batch.as_option_mut().unwrap().message_ids[0] = "absent_message".to_owned();
+        event.receipts[0].message_id = Some("absent_message".to_owned());
+    }
+    assert_eq!(
+        commands::state::evolve(before, &forged),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+}
