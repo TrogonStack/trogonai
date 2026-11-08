@@ -132,7 +132,7 @@ jobs:
       - name: Coverage report and gate
         # TODO: Add a fork-safe read-only coverage comparison path; this action writes to
         # _xml_coverage_reports, but fork PR tokens cannot push to the base repo.
-        uses: TrogonStack/github-actions/actions/coverage-report@c149ac2be2b4fb2610b84c0f6ef35951365e06fe
+        uses: TrogonStack/github-actions/actions/coverage-report@a59443a52b461ef2647e3f4ffca5f59b5e44599f
         with:
           path: rsworkspace/coverage.xml
           threshold: 95
