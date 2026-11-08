@@ -351,12 +351,25 @@ fn heartbeat_rejects_a_leap_clock_before_serializing_attachment_observation() {
         }));
     TestCase::<Heartbeat>::new()
         .given_state(state(start))
-        .when(heartbeat("old_connector", 1, start + chrono::Duration::seconds(2), None))
+        .when(heartbeat(
+            "old_connector",
+            1,
+            start + chrono::Duration::seconds(2),
+            None,
+        ))
         .then(vec![proto::PeerEvent {
-            event: Some(proto::PeerHeartbeatRecorded {
-                attachment: MessageField::some(attachment(&identity(), "old_connector", 1, start + chrono::Duration::seconds(2))),
-                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
-                ..Default::default()
-            }.into()),
+            event: Some(
+                proto::PeerHeartbeatRecorded {
+                    attachment: MessageField::some(attachment(
+                        &identity(),
+                        "old_connector",
+                        1,
+                        start + chrono::Duration::seconds(2),
+                    )),
+                    availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+                    ..Default::default()
+                }
+                .into(),
+            ),
         }]);
 }
