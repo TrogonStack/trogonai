@@ -121,6 +121,20 @@ mod contract_tests {
     }
 
     #[tokio::test]
+    async fn native_pipe_read_from_a_write_only_descriptor_preserves_the_os_error() -> TestResult {
+        let (reader, writer) = std::io::pipe()?;
+        let mut pipe = NativePipe::new(&writer)?;
+        drop(reader);
+        let mut bytes = [0; 1];
+        let error = tokio::time::timeout(Duration::from_secs(1), pipe.read(&mut bytes))
+            .await?
+            .err()
+            .ok_or("a write-only descriptor must not become a readable transport")?;
+        assert_eq!(error.raw_os_error(), Some(rustix::io::Errno::BADF.raw_os_error()));
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn native_pipe_preserves_bytes_through_bounded_backpressure_and_eof() -> TestResult {
         let (original, peer) = UnixStream::pair()?;
         peer.set_nonblocking(true)?;

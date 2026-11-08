@@ -102,3 +102,42 @@ async fn configured_request_preserves_explicit_headers_and_reports_no_responders
     served?;
     Ok(())
 }
+
+#[tokio::test]
+async fn silent_request_expires_at_its_configured_whole_operation_deadline() -> TestResult {
+    let broker = JetStreamTestServer::start_with_atomic_batches().await;
+    let service = broker.client().await;
+    let _silent = service.subscribe("peer.v1.alice.PeerService.Status").await?;
+    service.flush().await?;
+    let timeout = Duration::from_millis(50);
+    let requester = PeerRequester::new(
+        broker.client().await,
+        PeerRequesterConfig::new(
+            PeerAccount::TenantAccount {
+                tenant: PeerTenant::new("tenant")?,
+            },
+            PeerCaller::new("alice")?,
+            PeerConnectionId::new("one")?,
+            PeerRequestTimeout::new(timeout)?,
+        ),
+    );
+    tokio::time::pause();
+    let request = async {
+        let result = requester.request(PeerMethod::Status, Vec::new()).await;
+        (result, tokio::time::Instant::now())
+    };
+    let reference = async {
+        assert!(
+            tokio::time::timeout(timeout, std::future::pending::<()>())
+                .await
+                .is_err()
+        );
+        tokio::time::Instant::now()
+    };
+    let ((response, completed), deadline) = tokio::join!(request, reference);
+    tokio::time::resume();
+    assert_eq!(completed, deadline);
+    assert!(matches!(response,
+        Err(PeerRequestError::Transport(error)) if error.kind() == async_nats::RequestErrorKind::TimedOut));
+    Ok(())
+}

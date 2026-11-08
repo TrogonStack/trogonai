@@ -136,3 +136,77 @@ async fn service_discovery_registers_the_annotated_methods_and_queue() -> TestRe
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn named_peer_registration_preserves_the_existing_shared_prefix_boundary() -> TestResult {
+    use futures::StreamExt as _;
+    use grpc_nats_micro::SubjectPrefixError;
+    use std::sync::{Arc, atomic::Ordering};
+    use std::time::Duration;
+    use trogon_peer_nats::{PeerAccount, PeerRpcServeError, PeerTenant, serve_peer_rpc};
+
+    let fixture = Fixture::new().await?;
+    let backend = Arc::new(PeerRpcApplication::new(
+        PeerService::new(fixture.store.clone(), fixture.policy.clone(), fixture.clock.clone()),
+        fixture.app(),
+    ));
+    let broker = trogon_nats::test_support::JetStreamTestServer::start_with_atomic_batches().await;
+    let client = broker.client().await;
+    let reads = fixture.store.reads.load(Ordering::SeqCst);
+    let appends = fixture.store.appends.load(Ordering::SeqCst);
+    let accepted = "a".repeat(120);
+    let service = tokio::time::timeout(
+        Duration::from_secs(2),
+        serve_peer_rpc(
+            &client,
+            PeerAccount::SharedFixture {
+                tenant: PeerTenant::new(accepted.clone())?,
+            },
+            Arc::clone(&backend),
+        ),
+    )
+    .await??;
+    let barrier = client.new_inbox();
+    let mut observed = client.subscribe(barrier.clone()).await?;
+    client.publish(barrier, vec![0].into()).await?;
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), observed.next())
+            .await?
+            .ok_or("peer registration barrier was not observed")?
+            .payload
+            .as_ref(),
+        &[0]
+    );
+    let response = tokio::time::timeout(
+        Duration::from_secs(2),
+        client.request("$SRV.INFO.PeerService", Vec::new().into()),
+    )
+    .await??;
+    let info: serde_json::Value = serde_json::from_slice(&response.payload)?;
+    let endpoints = info["endpoints"].as_array().ok_or("missing peer endpoints")?;
+    assert_eq!(endpoints.len(), 8);
+    for endpoint in endpoints {
+        let method = endpoint["name"].as_str().ok_or("missing peer method")?;
+        assert_eq!(
+            endpoint["subject"],
+            format!("{accepted}.peer.v1.*.PeerService.{method}")
+        );
+        assert_eq!(endpoint["queue_group"], "q");
+    }
+    tokio::time::timeout(Duration::from_secs(2), service.stop()).await??;
+    for length in 121..=128 {
+        let tenant = PeerTenant::new("a".repeat(length))?;
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            serve_peer_rpc(&client, PeerAccount::SharedFixture { tenant }, Arc::clone(&backend)),
+        )
+        .await?;
+        let error = result.err().ok_or("oversized shared prefix registered")?;
+        assert!(
+            matches!(error, PeerRpcServeError::Prefix(SubjectPrefixError::TooLong(bytes)) if bytes == length + ".peer.v1".len())
+        );
+    }
+    assert_eq!(fixture.store.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(fixture.store.appends.load(Ordering::SeqCst), appends);
+    Ok(())
+}
