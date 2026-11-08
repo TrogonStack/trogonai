@@ -7,6 +7,7 @@ use std::{
 
 use trogon_claude_agent_sdk::{ClaudeAgentOptions, ClaudeSdkClient, Error};
 
+/// The API draft must not pretend that a connection was established.
 #[test]
 fn connect_reports_unimplemented_runtime() {
     let mut connection = pin!(ClaudeSdkClient::connect(ClaudeAgentOptions::default()));
@@ -17,6 +18,7 @@ fn connect_reports_unimplemented_runtime() {
     ));
 }
 
+/// Preserve upstream configuration values for the future runtime to interpret.
 #[test]
 fn configuration_preserves_upstream_optional_values() {
     let defaults = ClaudeAgentOptions::default();
