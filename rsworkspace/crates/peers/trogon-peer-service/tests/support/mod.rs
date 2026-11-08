@@ -16,6 +16,7 @@ pub struct StoreFixture {
     pub tenant: TenantId,
     pub reads: Arc<AtomicUsize>,
     pub appends: Arc<AtomicUsize>,
+    pub append_barrier: Arc<Mutex<Option<Arc<tokio::sync::Barrier>>>>,
 }
 impl StoreFixture {
     pub fn new(tenant: TenantId) -> Self {
@@ -24,6 +25,7 @@ impl StoreFixture {
             tenant,
             reads: Arc::default(),
             appends: Arc::default(),
+            append_barrier: Arc::default(),
         }
     }
 }
@@ -65,6 +67,10 @@ impl StreamRead<PeerId> for StoreFixture {
 impl StreamAppend<PeerId> for StoreFixture {
     type Error = <InMemoryStore as StreamAppend<str>>::Error;
     async fn append_stream(&self, r: AppendStreamRequest<'_, PeerId>) -> Result<AppendStreamResponse, Self::Error> {
+        let barrier = self.append_barrier.lock().map(|v| v.clone()).unwrap_or_default();
+        if let Some(barrier) = barrier {
+            barrier.wait().await;
+        }
         self.appends.fetch_add(1, Ordering::SeqCst);
         let key = format!("{}:{}", self.tenant.as_str(), r.stream_id.as_str());
         self.inner

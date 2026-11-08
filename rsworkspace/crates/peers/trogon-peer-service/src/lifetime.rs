@@ -1,3 +1,4 @@
+use crate::constants::{CONFLICT_RETRY_LIMIT, PEER_REPLAY_LIMIT};
 use crate::{
     attachment_input::attachment, peer_application_error::PeerApplicationError, peer_clock::PeerClock,
     peer_service::PeerService,
@@ -46,6 +47,8 @@ where
         let result = CommandExecution::new(&self.store, &command)
             .with_principal(principal)
             .with_authorizer(&self.authorizer)
+            .with_replay_limit(PEER_REPLAY_LIMIT)
+            .with_conflict_retry(CONFLICT_RETRY_LIMIT)
             .execute()
             .await
             .map_err(PeerApplicationError::Heartbeat)?;
@@ -70,6 +73,8 @@ where
         match CommandExecution::new(&self.store, &command)
             .with_principal(principal)
             .with_authorizer(&self.authorizer)
+            .with_replay_limit(PEER_REPLAY_LIMIT)
+            .with_conflict_retry(CONFLICT_RETRY_LIMIT)
             .execute()
             .await
         {

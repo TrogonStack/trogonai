@@ -521,7 +521,8 @@ async fn live_connector_resume_refuses_valid_history_beyond_the_4096_event_ceili
     assert!(
         match &result {
             Err(EnrollServiceError::History(trogon_peer_service::HistoryError::Limit)) => true,
-            Err(EnrollServiceError::Execution(CommandError::ReplayLimitExceeded(detail))) => {
+            Err(EnrollServiceError::Execution(CommandError::ReplayLimitExceeded(detail)))
+            | Err(EnrollServiceError::Attach(CommandError::ReplayLimitExceeded(detail))) => {
                 assert_eq!(detail.limit.as_u64(), 4096);
                 assert_eq!(detail.replayed_event_count, 4097);
                 true
