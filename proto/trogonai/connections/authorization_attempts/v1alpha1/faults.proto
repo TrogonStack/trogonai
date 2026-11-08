@@ -1,0 +1,129 @@
+edition = "2024";
+
+package trogonai.connections.authorization_attempts.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only Decider error templates, never encoded. Callback checks that
+// dispatch and the decider make against the recorded binding are distinguished
+// from fold lifecycle rejections. The authorization code, the PKCE verifier,
+// the signed state, the authorize URL, a token and provider error text are
+// never copied into error detail (ADR#0094 Decision 1). Concurrency faults,
+// the lost NoStream race included, use the Decider channel.
+message AuthorizationAttemptCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.authorization_attempts"
+    reason: "AUTHORIZATION_ATTEMPT_COMMAND_INVALID"
+    message: "The command violates the authorization attempt contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AuthorizationAttemptAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.authorization_attempts"
+    reason: "AUTHORIZATION_ATTEMPT_ALREADY_EXISTS"
+    message: "The attempt identity has already been begun."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message AuthorizationAttemptNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.authorization_attempts"
+    reason: "AUTHORIZATION_ATTEMPT_NOT_FOUND"
+    message: "The attempt must be begun before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The phase does not admit the command: a terminal attempt, a claim on an
+// attempt that is not AwaitingConsent, or an exchange started before the claim.
+// A replayed callback meets this fault, and the callback edge answers it with
+// the same neutral response as an unknown state (ADR#0094 Decision 2).
+message AuthorizationAttemptLifecycleConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.authorization_attempts"
+    reason: "AUTHORIZATION_ATTEMPT_LIFECYCLE_CONFLICT"
+    message: "The attempt's phase does not admit this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The state nonce id, the signing key version, the session principal, the
+// browser binding digest or the response issuer differs from what
+// BeginAuthorization recorded. Which one differs is never stated, so the edge
+// can answer every failed claim alike (ADR#0094 Decisions 2 and 7).
+message AuthorizationAttemptCallbackRejectedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.authorization_attempts"
+    reason: "AUTHORIZATION_ATTEMPT_CALLBACK_REJECTED"
+    message: "The callback does not match the attempt's recorded binding."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// CancelAuthorization or ExpireAuthorization once the attempt is Exchanging or
+// later. A sent exchange cannot be un-sent (ADR#0094 Decision 1).
+message AuthorizationAttemptExchangeSentError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.authorization_attempts"
+    reason: "AUTHORIZATION_ATTEMPT_EXCHANGE_SENT"
+    message: "The exchange has been sent; the attempt resolves only to Completed, Failed or OutcomeUnknown."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// CaptureGrantedAuthority a second time. The staged bundle, the account and the
+// granted authority are recorded once per attempt (ADR#0094 Decision 5).
+message AuthorizationAttemptAuthorityAlreadyCapturedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.authorization_attempts"
+    reason: "AUTHORIZATION_ATTEMPT_AUTHORITY_ALREADY_CAPTURED"
+    message: "The granted authority has already been captured for this attempt."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// CompleteAuthorization, or a failure reason that follows capture, before
+// CaptureGrantedAuthority was recorded.
+message AuthorizationAttemptAuthorityNotCapturedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.authorization_attempts"
+    reason: "AUTHORIZATION_ATTEMPT_AUTHORITY_NOT_CAPTURED"
+    message: "The granted authority must be captured before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The failure reason is not valid from the attempt's phase, or is one that only
+// CaptureGrantedAuthority decides (see AuthorizationFailureReason).
+message AuthorizationAttemptFailureReasonNotAdmittedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.authorization_attempts"
+    reason: "AUTHORIZATION_ATTEMPT_FAILURE_REASON_NOT_ADMITTED"
+    message: "The failure reason is not valid from the attempt's phase."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// CompleteAuthorization with a generation other than 1 for a fresh target or
+// the expected generation plus one for a reconnect (ADR#0094 Decision 6).
+message AuthorizationAttemptGenerationMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.authorization_attempts"
+    reason: "AUTHORIZATION_ATTEMPT_GENERATION_MISMATCH"
+    message: "The authorization_generation is not the one this attempt's target expects."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

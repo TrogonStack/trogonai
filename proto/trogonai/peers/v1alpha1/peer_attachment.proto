@@ -8,7 +8,9 @@ import "trogonai/peers/v1alpha1/attachment_status.proto";
 
 // A lease describes connector connectivity, not model progress.
 message PeerAttachment {
-  AttachmentRef attachment = 1;
+  reserved attachment;
+
+  AttachmentRef attachment_ref = 1;
   AttachmentStatus status = 2;
   google.protobuf.Timestamp observed_at = 3;
   google.protobuf.Timestamp expires_at = 4;

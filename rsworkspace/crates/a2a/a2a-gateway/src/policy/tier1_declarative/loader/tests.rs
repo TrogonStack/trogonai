@@ -129,12 +129,11 @@ pattern = "x"
 }
 
 #[test]
-fn missing_directory_returns_empty_bundle() {
-    // Operators may set the bundle dir before populating it; the loader
-    // tolerates a missing path by returning an empty bundle rather than
-    // failing the gateway boot.
-    let bundle = Tier1DeclarativeBundle::load_from_dir("/nonexistent/path").expect("missing dir tolerated");
-    assert!(bundle.is_empty());
+fn missing_directory_is_a_typed_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("does-not-exist");
+    let err = Tier1DeclarativeBundle::load_from_dir(&missing).expect_err("missing dir rejected");
+    assert!(matches!(&err, Tier1DeclarativeLoadError::BundleDirMissing { path } if *path == missing));
 }
 
 #[test]

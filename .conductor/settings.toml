@@ -1,4 +1,0 @@
-"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
-
-[scripts]
-setup = "bash ./.conductor/scripts/setup.sh"

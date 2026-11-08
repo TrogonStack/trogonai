@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use trogonai_proto::convert::{TimestampConversionError, datetime_from_timestamp};
 use trogonai_proto::peers::{PeerEventCase, state_v1alpha1::PeerState, v1alpha1 as proto};
 
+use super::constants::ATTACHMENT_LEASE;
 use super::domain::{
     CallerId, CollaborationRef, ConnectorId, EnrollmentIdentity, InstallationId, NativeSessionId, PeerDisplayName,
     PeerValueError, TenantId, TrustedPeerOwner,
@@ -77,12 +78,18 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
                 return Err(EvolveError::InvalidAttachment);
             }
             let observed = read_time(attachment.observed_at.as_option(), "attachment.observed_at")?;
-            let generation = attachment.attachment.generation.ok_or(EvolveError::InvalidAttachment)?;
+            let generation = attachment
+                .attachment_ref
+                .generation
+                .ok_or(EvolveError::InvalidAttachment)?;
             if let Some(previous) = state.attachment.as_option() {
                 validate_attachment(enrollment, previous)?;
                 let previous_observed = read_time(previous.observed_at.as_option(), "attachment.observed_at")?;
                 let previous_expires = read_time(previous.expires_at.as_option(), "attachment.expires_at")?;
-                let previous_generation = previous.attachment.generation.ok_or(EvolveError::InvalidAttachment)?;
+                let previous_generation = previous
+                    .attachment_ref
+                    .generation
+                    .ok_or(EvolveError::InvalidAttachment)?;
                 if previous_generation.checked_add(1) != Some(generation) || observed < previous_observed {
                     return Err(EvolveError::InvalidAttachment);
                 }
@@ -108,7 +115,7 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
             let observed = read_time(attachment.observed_at.as_option(), "attachment.observed_at")?;
             let previous_observed = read_time(previous.observed_at.as_option(), "attachment.observed_at")?;
             let previous_expires = read_time(previous.expires_at.as_option(), "attachment.expires_at")?;
-            if previous.attachment != attachment.attachment
+            if previous.attachment_ref != attachment.attachment_ref
                 || previous.status.and_then(|status| status.as_known())
                     != Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
                 || attachment.status != previous.status
@@ -155,13 +162,13 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
             let observed = read_time(previous.observed_at.as_option(), "attachment.observed_at")?;
             if previous.status.and_then(|status| status.as_known())
                 != Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
-                || event.attachment != previous.attachment
+                || event.attachment_ref != previous.attachment_ref
                 || at < observed
             {
                 return Err(EvolveError::InvalidAttachment);
             }
             state.attachment = MessageField::some(proto::PeerAttachment {
-                attachment: previous.attachment.clone(),
+                attachment_ref: previous.attachment_ref.clone(),
                 status: Some(proto::AttachmentStatus::ATTACHMENT_STATUS_DETACHED.into()),
                 observed_at: event.detached_at.clone(),
                 expires_at: event.detached_at.clone(),
@@ -219,9 +226,13 @@ pub(super) fn required<'a>(value: &'a Option<String>, field: &'static str) -> Re
     value.as_deref().ok_or(EvolveError::MissingField { field })
 }
 
+pub(super) fn timestamp_seconds_supported(seconds: i64) -> bool {
+    (-62_135_596_800..=253_402_300_799).contains(&seconds)
+}
+
 pub(super) fn read_time(value: Option<&Timestamp>, field: &'static str) -> Result<DateTime<Utc>, EvolveError> {
     let value = value.ok_or(EvolveError::MissingField { field })?;
-    if !(-62_135_596_800..=253_402_300_799).contains(&value.seconds) || !(0..1_000_000_000).contains(&value.nanos) {
+    if !timestamp_seconds_supported(value.seconds) || !(0..1_000_000_000).contains(&value.nanos) {
         return Err(EvolveError::TimestampRange { field });
     }
     datetime_from_timestamp(value).map_err(|source| EvolveError::InvalidTimestamp { field, source })
@@ -231,7 +242,7 @@ pub(super) fn validate_attachment(
     enrollment: &proto::PeerEnrollment,
     attachment: &proto::PeerAttachment,
 ) -> Result<(), EvolveError> {
-    let reference = attachment.attachment.as_option().ok_or(EvolveError::MissingField {
+    let reference = attachment.attachment_ref.as_option().ok_or(EvolveError::MissingField {
         field: "attachment.ref",
     })?;
     if required(&reference.peer_id, "attachment.peer_id")? != required(&enrollment.peer_id, "enrollment.peer_id")? {
@@ -254,7 +265,7 @@ pub(super) fn validate_attachment(
     }
     match attachment.status.and_then(|status| status.as_known()) {
         Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
-            if expires.signed_duration_since(observed) == chrono::Duration::seconds(10) =>
+            if expires.signed_duration_since(observed) == ATTACHMENT_LEASE =>
         {
             Ok(())
         }

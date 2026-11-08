@@ -1,0 +1,159 @@
+edition = "2024";
+
+package trogonai.connections.connections.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the connections.connections module's
+// DeciderService refusals. These messages are never encoded. Admission,
+// invocation and the authorization attempt keep their own failure contracts;
+// this fold only owns the Connection's lifecycle and configuration.
+message ConnectionCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_COMMAND_INVALID"
+    message: "The command violates the connection contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_NOT_FOUND"
+    message: "The connection must be reserved before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionAlreadyReservedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_ALREADY_RESERVED"
+    message: "The connection has already been reserved."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionNotPendingError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_NOT_PENDING"
+    message: "The command applies only to a pending connection."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionNotLiveError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_NOT_LIVE"
+    message: "The command applies only to an activated connection that has not ended."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionEndedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_ENDED"
+    message: "The connection has been revoked or aborted and accepts no further change."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionPinMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_PIN_MISMATCH"
+    message: "The configuration does not pin the connection's reserved release and provider app, or the upgrade changes more than the release and its scopes."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionAccountMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_ACCOUNT_MISMATCH"
+    message: "A reconnect must authorize the same provider account."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionAuthorizationGenerationStaleError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_AUTHORIZATION_GENERATION_STALE"
+    message: "A reconnect must record the current authorization generation plus one."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionAcknowledgementRequiredError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_ACKNOWLEDGEMENT_REQUIRED"
+    message: "The set of endpoint origins changed and needs the owner's acknowledgement."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionHealthReasonNotHeldError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_HEALTH_REASON_NOT_HELD"
+    message: "The connection does not hold the health reason being cleared."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionSuspensionReasonConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_SUSPENSION_REASON_CONFLICT"
+    message: "The suspension reason is already held, or is not held and cannot be lifted."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionBindingRolesMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_BINDING_ROLES_MISMATCH"
+    message: "The replacement must bind exactly the recorded credential roles with correctly advanced generations."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionNotRevokedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_NOT_REVOKED"
+    message: "A provider revoke outcome is recorded only on a revoked connection without a terminal outcome."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionCleanupObligationConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.connections"
+    reason: "CONNECTION_CLEANUP_OBLIGATION_CONFLICT"
+    message: "An obligation of this kind is already open, or none is open to discharge."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
