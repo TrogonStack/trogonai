@@ -55,3 +55,7 @@ mod intaken_message;
 pub use intaken_message::IntakenMessage;
 
 mod inbox_replacement;
+
+mod heartbeat_error;
+mod accepted_outbox;
+mod message_values;
