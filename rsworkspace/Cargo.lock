@@ -7596,6 +7596,7 @@ name = "trogon-peer-mcp"
 version = "0.1.0"
 dependencies = [
  "buffa",
+ "buffa-types",
  "rmcp",
  "schemars 1.2.1",
  "serde",
