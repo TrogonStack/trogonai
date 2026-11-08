@@ -48,6 +48,9 @@ impl StdioPeer {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+            command.env("LLVM_PROFILE_FILE", profile);
+        }
         let mut child = command.spawn()?;
         let output = child.stdout.take().ok_or("missing stdout")?;
         let input = child.stdin.take().ok_or("missing stdin")?;
