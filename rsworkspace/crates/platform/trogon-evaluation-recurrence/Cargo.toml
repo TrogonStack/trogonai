@@ -1,0 +1,22 @@
+[package]
+name = "trogon-evaluation-recurrence"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Finding recurrence projection over the evaluation bindings stream, serving GetFindingRecurrence (ADR 0072)"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+buffa = { workspace = true }
+thiserror = { workspace = true }
+trogon-decider-nats = { workspace = true }
+trogon-decider-runtime = { workspace = true }
+trogonai-proto = { workspace = true, features = ["evaluation"] }
+
+[dev-dependencies]
+chrono = { version = "0.4" }
+tokio = { workspace = true, features = ["macros", "rt"] }
+uuid = { workspace = true }
