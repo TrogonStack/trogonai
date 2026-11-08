@@ -4,8 +4,8 @@ use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use rmcp::ServerHandler;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
+use rmcp::{ServerHandler, ServiceExt};
 use serde_json::{Value, json};
 use trogon_peer_mcp::{
     AcknowledgePeerBatch, ConnectorConfigInput, EnrollPeer, PeerMcp, PeerMcpError, PreparePeerBatch,
@@ -31,6 +31,7 @@ struct UnknownBatchError;
 struct Backend {
     calls: Arc<Mutex<Vec<ObservedCall>>>,
     acknowledged: Arc<AtomicBool>,
+    roster_response: v1::RosterResponse,
     send_response: v1::SendResponse,
     status_response: v1::StatusResponse,
     acknowledge_response: v1::AcknowledgeBatchResponse,
@@ -73,6 +74,13 @@ fn backend() -> Backend {
     Backend {
         calls: Arc::new(Mutex::new(Vec::new())),
         acknowledged: Arc::new(AtomicBool::new(false)),
+        roster_response: serde_json::from_value(json!({
+            "peers":[{"peerId":remote_peer(),"displayName":"builder","availability":"PEER_AVAILABILITY_READY",
+                "deliveryCapability":"DELIVERY_CAPABILITY_ON_USER_PROMPT",
+                "observedAt":"2026-11-03T12:00:00Z","expiresAt":"2026-11-03T12:00:10Z"}],
+            "nextPageToken":"next_cursor"
+        }))
+        .expect("generated roster fixture"),
         send_response: v1::SendResponse {
             message: metadata().into(),
         },
@@ -132,13 +140,7 @@ impl ReadPeerRoster for Backend {
 
     async fn roster(&self, request: v1::RosterRequest) -> Result<v1::RosterResponse, Self::Error> {
         self.calls.lock().expect("recorder").push(ObservedCall::Roster(request));
-        Ok(serde_json::from_value(json!({
-            "peers":[{"peerId":remote_peer(),"displayName":"builder","availability":"PEER_AVAILABILITY_READY",
-                "deliveryCapability":"DELIVERY_CAPABILITY_ON_USER_PROMPT",
-                "observedAt":"2026-11-03T12:00:00Z","expiresAt":"2026-11-03T12:00:10Z"}],
-            "nextPageToken":"next_cursor"
-        }))
-        .expect("generated roster fixture"))
+        Ok(self.roster_response.clone())
     }
 }
 
@@ -561,5 +563,158 @@ async fn send_text_limit_counts_utf8_bytes_before_any_backend_effect() {
             before,
             "invalid text must not reach the send port"
         );
+    }
+}
+
+#[tokio::test]
+async fn sent_metadata_must_match_requested_recipient_size_and_expiry_window() {
+    for (path, replacement) in [
+        ("/message/recipientPeerId", json!("c".repeat(64))),
+        ("/message/contentSizeBytes", json!(12)),
+        ("/message/expiresAt", json!("2026-11-03T12:00:00Z")),
+    ] {
+        let mut backend = backend();
+        let mut response = serde_json::to_value(&backend.send_response).expect("send response");
+        *response.pointer_mut(path).expect("fixture field") = replacement;
+        backend.send_response = serde_json::from_value(response).expect("wire response");
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        bind(&adapter).await;
+        assert!(
+            matches!(
+                adapter.invoke(request("peer_send", model_calls().remove(1).1)).await,
+                Err(PeerMcpError::InvalidMetadata)
+            ),
+            "accepted {path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn roster_rejects_unknown_observations_and_nonpositive_lease_windows() {
+    for (path, replacement) in [
+        ("/peers/0/availability", json!("PEER_AVAILABILITY_UNSPECIFIED")),
+        ("/peers/0/availability", json!(999)),
+        ("/peers/0/deliveryCapability", json!("DELIVERY_CAPABILITY_UNSPECIFIED")),
+        ("/peers/0/expiresAt", json!("2026-11-03T12:00:00Z")),
+    ] {
+        let mut backend = backend();
+        let mut response = serde_json::to_value(&backend.roster_response).expect("roster response");
+        *response.pointer_mut(path).expect("field") = replacement;
+        backend.roster_response = serde_json::from_value(response).expect("wire response");
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        bind(&adapter).await;
+        assert!(
+            matches!(
+                adapter.invoke(request("peer_roster", json!({}))).await,
+                Err(PeerMcpError::InvalidMetadata)
+            ),
+            "accepted {path}"
+        );
+    }
+    for condition in [json!("PEER_CONDITION_UNSPECIFIED"), json!(999)] {
+        let mut backend = backend();
+        let mut response = serde_json::to_value(&backend.roster_response).expect("roster response");
+        response["peers"][0]["condition"] = condition;
+        backend.roster_response = serde_json::from_value(response).expect("wire response");
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        bind(&adapter).await;
+        assert!(matches!(
+            adapter.invoke(request("peer_roster", json!({}))).await,
+            Err(PeerMcpError::InvalidMetadata)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn roster_preserves_explicit_activity_without_inventing_progress() {
+    let mut backend = backend();
+    let mut response = serde_json::to_value(&backend.roster_response).expect("roster response");
+    response["peers"][0]["activeAt"] = json!("2026-11-03T11:59:00Z");
+    backend.roster_response = serde_json::from_value(response).expect("wire response");
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    bind(&adapter).await;
+    let value = result_json(adapter.invoke(request("peer_roster", json!({}))).await.expect("roster"));
+    assert_eq!(value["peers"][0]["activeAt"], "2026-11-03T11:59:00Z");
+    assert_eq!(value["peers"][0]["observedAt"], "2026-11-03T12:00:00Z");
+}
+
+#[tokio::test]
+async fn acknowledgment_rejects_duplicate_ids_and_time_before_preparation() {
+    for (path, replacement) in [
+        ("/batch/messageIds", json!(["incoming_1", "incoming_1"])),
+        ("/batch/acknowledgedAt", json!("2026-11-03T11:59:59Z")),
+    ] {
+        let mut backend = backend();
+        let mut response = serde_json::to_value(&backend.acknowledge_response).expect("ack response");
+        *response.pointer_mut(path).expect("field") = replacement;
+        backend.acknowledge_response = serde_json::from_value(response).expect("wire response");
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        bind(&adapter).await;
+        assert!(
+            matches!(
+                adapter
+                    .invoke(request("peer_acknowledge_batch", json!({"batch_id":"batch_1"})))
+                    .await,
+                Err(PeerMcpError::InvalidMetadata)
+            ),
+            "accepted {path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn unspecified_or_unknown_message_status_is_not_presented_as_a_known_outcome() {
+    for status in [json!("MESSAGE_STATUS_UNSPECIFIED"), json!(999)] {
+        let mut backend = backend();
+        let mut response = serde_json::to_value(&backend.status_response).expect("status response");
+        response["status"] = status;
+        backend.status_response = serde_json::from_value(response).expect("wire response");
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        bind(&adapter).await;
+        assert!(matches!(
+            adapter
+                .invoke(request("peer_status", json!({"idempotency_key":"send_1"})))
+                .await,
+            Err(PeerMcpError::InvalidMetadata)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn malformed_service_metadata_has_a_safe_public_jsonrpc_diagnostic() {
+    for invalid_encoding in [false, true] {
+        let mut backend = backend();
+        let metadata = backend.send_response.message.as_option_mut().expect("metadata");
+        if invalid_encoding {
+            metadata.accepted_at.as_option_mut().expect("accepted timestamp").nanos = -1;
+        } else {
+            metadata.sender_peer_id = Some("c".repeat(64));
+        }
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        bind(&adapter).await;
+        let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+        let server = tokio::spawn(async move {
+            adapter
+                .serve(server_transport)
+                .await
+                .expect("server handshake")
+                .waiting()
+                .await
+                .expect("server shutdown")
+        });
+        let client = ().serve(client_transport).await.expect("client handshake");
+        let result = client
+            .call_tool(request("peer_send", model_calls().remove(1).1))
+            .await
+            .expect("tool result");
+        client.cancel().await.expect("close client");
+        server.await.expect("server task");
+        let result = serde_json::to_value(result).expect("result JSON");
+        assert_eq!(result["isError"], true);
+        assert_eq!(
+            result["content"][0]["text"],
+            "Peer service returned invalid operation metadata."
+        );
+        assert!(!result.to_string().contains("internal_blob_ref"));
     }
 }
