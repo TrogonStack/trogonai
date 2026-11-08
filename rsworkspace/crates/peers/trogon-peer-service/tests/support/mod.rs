@@ -500,43 +500,6 @@ impl Fixture {
         }
     }
 }
-impl Fixture {
-    pub fn prepare(&self) -> proto::PrepareBatchRequest {
-        proto::PrepareBatchRequest {
-            attachment_ref: self.b.clone().into(),
-            prompt_id: Some("prompt".into()),
-        }
-    }
-    pub async fn intake(&self, key: &str, text: &str) -> TestResult<proto::SendResponse> {
-        let sent = self.app().send(&self.alice, self.send(key, text)).await?;
-        let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
-        let sender = PeerId::parse(self.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
-        self.app()
-            .reconcile(&self.alice, &sender, &[id], WorkLimit::new(1)?)
-            .await?;
-        Ok(sent)
-    }
-}
-impl Fixture {
-    pub async fn history(&self, peer: &PeerId) -> TestResult<trogonai_proto::peers::state_v1alpha1::PeerState> {
-        let read = self
-            .store
-            .read_stream(ReadStreamRequest {
-                stream_id: peer,
-                from: ReadFrom::Beginning,
-            })
-            .await?;
-        let mut state = trogon_peer::commands::state::initial_state();
-        for event in read.events {
-            let event = event
-                .decode::<proto::PeerEvent>()?
-                .into_decoded()
-                .ok_or(PeerPortError::Integrity)?;
-            state = trogon_peer::commands::state::evolve(state, &event)?;
-        }
-        Ok(state)
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppendFixtureError {
