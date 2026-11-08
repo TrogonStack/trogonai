@@ -73,16 +73,17 @@ where
         service = adapter.clone().serve_with_ct(transport, cancellation.clone()) => service.map_err(|error| RuntimeError::Initialize(Box::new(error)))?,
     };
     let waiting = service.waiting();
-    let heartbeat = async {
-        adapter.run_heartbeat(availability).await;
-        std::future::pending::<std::convert::Infallible>().await
-    };
+    let heartbeat = adapter.run_heartbeat(availability);
     tokio::pin!(waiting, heartbeat);
     let completed = tokio::select! {
         biased;
         _ = &mut shutdown => None,
         result = &mut waiting => Some(result),
-        never = &mut heartbeat => match never {},
+        _ = &mut heartbeat => tokio::select! {
+            biased;
+            _ = &mut shutdown => None,
+            result = &mut waiting => Some(result),
+        },
     };
     cancellation.cancel();
     let detached = adapter.shutdown().await;
