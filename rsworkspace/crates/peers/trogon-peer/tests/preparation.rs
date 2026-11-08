@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+use chrono::TimeZone as _;
 mod support;
 use support::*;
 use trogon_decider::{Decider, WritePrecondition, evaluate_decision};
@@ -319,7 +320,6 @@ fn incomplete_settlement_cannot_be_admitted_as_an_authority_event() {
 
 #[test]
 fn preparation_cannot_emit_a_receipt_with_non_protobuf_leap_nanoseconds() {
-    use chrono::TimeZone as _;
     let state = run(enrolled("recipient", 55), &IntakeMessage::new(evidence(0, 1), time(56)));
     let make = |now| {
         PrepareBatch::new(
