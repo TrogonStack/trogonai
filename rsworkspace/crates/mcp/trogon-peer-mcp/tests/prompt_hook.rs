@@ -1,6 +1,10 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+use std::future::Future as _;
+use std::future::poll_fn;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
+use trogon_peer_mcp::AvailabilityObservation;
 
 use buffa::MessageField;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
@@ -1471,8 +1475,6 @@ async fn detach_cannot_confirm_a_cancelled_remotely_committed_enrollment() {
 
 #[tokio::test(start_paused = true)]
 async fn lifecycle_preserves_every_explicit_availability_without_inventing_activity() {
-    use trogon_peer_mcp::AvailabilityObservation;
-
     for (observation, expected) in [
         (
             AvailabilityObservation::Ready,
@@ -1622,9 +1624,6 @@ async fn shutdown_without_a_reserved_native_session_never_contacts_the_backend()
 
 #[tokio::test(start_paused = true)]
 async fn a_model_operation_queued_behind_uncertain_enrollment_observes_terminal_shutdown() {
-    use std::future::{Future as _, poll_fn};
-    use std::task::Poll;
-
     let mut backend = backend(Default::default());
     backend.enroll_delay = std::time::Duration::from_secs(3);
     let calls = backend.calls.clone();
@@ -1763,9 +1762,6 @@ async fn heartbeat_uses_the_latest_valid_attachment_after_same_native_session_re
 
 #[tokio::test(start_paused = true)]
 async fn heartbeat_waits_for_a_confirmed_attachment_when_the_native_session_is_only_reserved() {
-    use std::future::{Future as _, poll_fn};
-    use std::task::Poll;
-
     let mut backend = backend(Default::default());
     backend.enroll_delay = std::time::Duration::from_secs(3);
     let calls = backend.calls.clone();
