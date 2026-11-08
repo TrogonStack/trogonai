@@ -13,10 +13,12 @@ use thiserror::Error;
 use trogon_nats::PublishClient;
 use trogonai_proto::nats::micro::v1alpha1::ServiceOptions;
 
-use crate::binding::ServiceBinding;
+use crate::binding::{ServiceBinding, ServiceDescriptor};
 use crate::constants::HEADER_CONTENT_TYPE;
 use crate::content_type::{ContentType, EncodeError};
 use crate::content_type_input::ContentTypeInput;
+use crate::discovery_metadata::DiscoveryMetadata;
+use crate::method_name::MethodName;
 use crate::service_fault::ServiceFault;
 use crate::status_codec::{self, Outcome};
 
@@ -59,6 +61,20 @@ pub struct AdmittedEndpoint {
     pub admission: Box<dyn crate::EndpointAdmission>,
 }
 
+pub struct NamedAdmittedEndpoint {
+    pub method_name: MethodName,
+    pub metadata: DiscoveryMetadata,
+    pub subject: crate::ServerSubjectPattern,
+    pub admission: Box<dyn crate::EndpointAdmission>,
+}
+
+struct RegisteredEndpoint {
+    method_name: MethodName,
+    metadata: DiscoveryMetadata,
+    subject: String,
+    handler: RegisteredHandler,
+}
+
 enum RegisteredHandler {
     Legacy(Box<dyn EndpointHandler>),
     Admitted(AdmittedEndpoint),
@@ -74,6 +90,29 @@ pub async fn serve_admitted(
     serve_registered(client, binding, content_type_policy, handlers).await
 }
 
+/// Register named admitted endpoints on their validated subscription patterns.
+/// Each entry owns its method metadata and admission, so no unused concrete address is derived.
+pub async fn serve_named_admitted(
+    client: &Client,
+    descriptor: &ServiceDescriptor,
+    content_type_policy: ServiceOptions,
+    endpoints: Vec<NamedAdmittedEndpoint>,
+) -> Result<async_nats::service::Service, ServeError> {
+    let endpoints = endpoints
+        .into_iter()
+        .map(|endpoint| RegisteredEndpoint {
+            method_name: endpoint.method_name,
+            metadata: endpoint.metadata,
+            subject: endpoint.subject.as_str().to_owned(),
+            handler: RegisteredHandler::Admitted(AdmittedEndpoint {
+                subject: endpoint.subject,
+                admission: endpoint.admission,
+            }),
+        })
+        .collect();
+    serve_endpoints(client, descriptor, content_type_policy, endpoints).await
+}
+
 async fn serve_registered(
     client: &Client,
     binding: &ServiceBinding,
@@ -86,35 +125,57 @@ async fn serve_registered(
             handlers: handlers.len(),
         });
     }
+    let endpoints = binding
+        .endpoints()
+        .iter()
+        .zip(handlers)
+        .map(|(endpoint, handler)| RegisteredEndpoint {
+            method_name: endpoint.method_name().clone(),
+            metadata: endpoint.metadata().clone(),
+            subject: match &handler {
+                RegisteredHandler::Legacy(_) => endpoint.subject().as_str(),
+                RegisteredHandler::Admitted(endpoint) => endpoint.subject.as_str(),
+            }
+            .to_owned(),
+            handler,
+        })
+        .collect();
+    serve_endpoints(client, binding.descriptor(), content_type_policy, endpoints).await
+}
+
+async fn serve_endpoints(
+    client: &Client,
+    descriptor: &ServiceDescriptor,
+    content_type_policy: ServiceOptions,
+    endpoints: Vec<RegisteredEndpoint>,
+) -> Result<async_nats::service::Service, ServeError> {
     let mut builder = client.service_builder();
-    if let Some(description) = binding.description() {
+    if let Some(description) = descriptor.description() {
         builder = builder.description(description);
     }
-    // Only when there is something to report: micro omits the field entirely
-    // when it is unset, so setting an empty map would publish `metadata: {}`
-    // into every discovery record that declares none.
-    if !binding.metadata().is_empty() {
-        builder = builder.metadata(binding.metadata().entries().clone());
+    if !descriptor.metadata().is_empty() {
+        builder = builder.metadata(descriptor.metadata().entries().clone());
     }
     let service = builder
-        .start(binding.name().as_str(), binding.version().as_str())
+        .start(descriptor.name().as_str(), descriptor.version().as_str())
         .await
         .map_err(ServeError::Start)?;
 
     let content_type_policy = Arc::new(content_type_policy);
-    for (endpoint, handler) in binding.endpoints().iter().zip(handlers) {
-        let subject = match &handler {
-            RegisteredHandler::Legacy(_) => endpoint.subject().as_str(),
-            RegisteredHandler::Admitted(endpoint) => endpoint.subject.as_str(),
-        }
-        .to_owned();
+    for endpoint in endpoints {
+        let RegisteredEndpoint {
+            method_name,
+            metadata,
+            subject,
+            handler,
+        } = endpoint;
         // Name the endpoint after the rpc method (ADR 0016 §2). Micro
         // otherwise derives the name from the full subject, so `$SRV.INFO`
         // and `$SRV.STATS` would report the dotted subject instead of the
         // method the binding declared.
-        let mut endpoint_builder = service.endpoint_builder().name(endpoint.method_name().as_str());
-        if !endpoint.metadata().is_empty() {
-            endpoint_builder = endpoint_builder.metadata(endpoint.metadata().entries().clone());
+        let mut endpoint_builder = service.endpoint_builder().name(method_name.as_str());
+        if !metadata.is_empty() {
+            endpoint_builder = endpoint_builder.metadata(metadata.entries().clone());
         }
         let registration = endpoint_builder.add(subject.clone()).await;
         let mut micro_endpoint = registration.map_err(|source| ServeError::Endpoint { subject, source })?;
@@ -128,8 +189,8 @@ async fn serve_registered(
                         dispatch(&client, &request, &content_type_policy, handler.as_ref()).await
                     }
                     RegisteredHandler::Admitted(endpoint) => {
-                        if let Some(handler) = admitted_handler(&request.message, endpoint.admission.as_ref()) {
-                            dispatch(&client, &request, &content_type_policy, handler.as_ref()).await;
+                        if let Some(admitted) = admit_request(&request.message, endpoint.admission.as_ref()) {
+                            dispatch(&client, &request, &content_type_policy, admitted.handler.as_ref()).await;
                         }
                     }
                 }
@@ -147,10 +208,7 @@ pub async fn dispatch_admitted<P: PublishClient>(
     policy: &ServiceOptions,
     admission: &dyn crate::EndpointAdmission,
 ) {
-    let Some(handler) = admitted_handler(message, admission) else {
-        return;
-    };
-    let Some(reply) = message.reply.clone() else {
+    let Some(AdmittedRequest { handler, reply }) = admit_request(message, admission) else {
         return;
     };
     let (content_type, outcome) = resolve(message.headers.as_ref(), &message.payload, policy, handler.as_ref()).await;
@@ -168,15 +226,21 @@ pub async fn dispatch_admitted<P: PublishClient>(
     }
 }
 
-fn admitted_handler<'a>(
+struct AdmittedRequest<'a> {
+    handler: Box<dyn EndpointHandler + 'a>,
+    reply: async_nats::Subject,
+}
+
+fn admit_request<'a>(
     message: &async_nats::Message,
     admission: &'a dyn crate::EndpointAdmission,
-) -> Option<Box<dyn EndpointHandler + 'a>> {
-    let reply = message.reply.as_ref()?;
-    admission.admit(crate::RequestMetadata {
+) -> Option<AdmittedRequest<'a>> {
+    let reply = message.reply.clone()?;
+    let handler = admission.admit(crate::RequestMetadata {
         subject: message.subject.as_str(),
         reply: Some(reply.as_str()),
-    })
+    })?;
+    Some(AdmittedRequest { handler, reply })
 }
 
 async fn dispatch<P: PublishClient>(
