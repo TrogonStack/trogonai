@@ -1,12 +1,11 @@
 use std::{
     future::Future,
+    path::PathBuf,
     pin::pin,
     task::{Context, Poll, Waker},
 };
 
-use trogon_claude_agent_sdk::{
-    ClaudeAgentOptions, ClaudeSdkClient, CliExecutable, CliExecutableError, Error, ModelName, ModelNameError,
-};
+use trogon_claude_agent_sdk::{ClaudeAgentOptions, ClaudeSdkClient, Error};
 
 #[test]
 fn connect_reports_unimplemented_runtime() {
@@ -19,8 +18,20 @@ fn connect_reports_unimplemented_runtime() {
 }
 
 #[test]
-fn configuration_rejects_invalid_field_values() {
-    assert!(matches!(CliExecutable::new(""), Err(CliExecutableError::Empty)));
-    assert!(matches!(ModelName::new(""), Err(ModelNameError)));
-    assert!(matches!(ModelName::new("model\nname"), Err(ModelNameError)));
+fn configuration_preserves_upstream_optional_values() {
+    let defaults = ClaudeAgentOptions::default();
+    assert_eq!(defaults.cli_path, None);
+    assert_eq!(defaults.cwd, None);
+    assert_eq!(defaults.model, None);
+
+    for (model, cli_path) in [("", ""), ("model\nname", "tools/claude")] {
+        let options = ClaudeAgentOptions {
+            cli_path: Some(PathBuf::from(cli_path)),
+            cwd: Some(PathBuf::from("workspace")),
+            model: Some(model.into()),
+        };
+        assert_eq!(options.cli_path, Some(PathBuf::from(cli_path)));
+        assert_eq!(options.cwd, Some(PathBuf::from("workspace")));
+        assert_eq!(options.model.as_deref(), Some(model));
+    }
 }

@@ -10,7 +10,7 @@ impl ClaudeSdkClient {
         Err(Error::NotImplemented)
     }
 
-    pub async fn close(self) -> Result<(), Error> {
+    pub async fn disconnect(self) -> Result<(), Error> {
         Err(Error::NotImplemented)
     }
 }
