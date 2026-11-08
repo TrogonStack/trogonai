@@ -128,13 +128,9 @@ async fn serve_registered(
                         dispatch(&client, &request, &content_type_policy, handler.as_ref()).await
                     }
                     RegisteredHandler::Admitted(endpoint) => {
-                        dispatch_admitted(
-                            &client,
-                            &request.message,
-                            &content_type_policy,
-                            endpoint.admission.as_ref(),
-                        )
-                        .await
+                        if let Some(admitted) = admit_request(&request.message, endpoint.admission.as_ref()) {
+                            dispatch(&client, &request, &content_type_policy, admitted.handler.as_ref()).await;
+                        }
                     }
                 }
             }
@@ -151,14 +147,7 @@ pub async fn dispatch_admitted<P: PublishClient>(
     policy: &ServiceOptions,
     admission: &dyn crate::EndpointAdmission,
 ) {
-    let metadata = crate::RequestMetadata {
-        subject: message.subject.as_str(),
-        reply: message.reply.as_ref().map(|reply| reply.as_str()),
-    };
-    let Some(handler) = admission.admit(metadata) else {
-        return;
-    };
-    let Some(reply) = message.reply.clone() else {
+    let Some(AdmittedRequest { handler, reply }) = admit_request(message, admission) else {
         return;
     };
     let (content_type, outcome) = resolve(message.headers.as_ref(), &message.payload, policy, handler.as_ref()).await;
@@ -174,6 +163,23 @@ pub async fn dispatch_admitted<P: PublishClient>(
             let _ = published.inspect_err(warn_unencodable);
         }
     }
+}
+
+struct AdmittedRequest<'a> {
+    handler: Box<dyn EndpointHandler + 'a>,
+    reply: async_nats::Subject,
+}
+
+fn admit_request<'a>(
+    message: &async_nats::Message,
+    admission: &'a dyn crate::EndpointAdmission,
+) -> Option<AdmittedRequest<'a>> {
+    let reply = message.reply.clone()?;
+    let handler = admission.admit(crate::RequestMetadata {
+        subject: message.subject.as_str(),
+        reply: Some(reply.as_str()),
+    })?;
+    Some(AdmittedRequest { handler, reply })
 }
 
 async fn dispatch<P: PublishClient>(
