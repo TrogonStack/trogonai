@@ -3,8 +3,8 @@
 use std::sync::{Arc, Mutex};
 
 use buffa::MessageField;
-use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
+use rmcp::{ServerHandler, ServiceExt};
 use serde_json::{Value, json};
 use trogon_peer_mcp::{
     AcknowledgePeerBatch, ConnectorConfigInput, EnrollPeer, PeerMcp, PeerMcpError, PreparePeerBatch,
@@ -888,4 +888,283 @@ fn direct_server_tool_lookup_exposes_only_the_bound_prompt_hook() {
     assert_eq!(tool.name, "peer_prompt_hook");
     assert!(adapter.get_tool("unknown").is_none());
     assert!(adapter.get_tool("peer_prompt_hook.extra").is_none());
+}
+
+#[test]
+fn native_hook_schema_exposes_only_bounded_host_identifiers_and_event() {
+    let adapter = PeerMcp::new(backend(Default::default()), config()).expect("config");
+    let tool = ServerHandler::get_tool(&adapter, "peer_prompt_hook").expect("native hook");
+    assert_eq!(tool.name, "peer_prompt_hook");
+    assert!(tool.description.as_deref().is_some_and(|value| !value.is_empty()));
+    let schema = serde_json::to_value(&tool.input_schema).expect("schema");
+    assert_eq!(schema["additionalProperties"], false);
+    assert_eq!(schema["properties"]["session_id"]["minLength"], 1);
+    assert_eq!(schema["properties"]["session_id"]["maxLength"], 256);
+    let properties = schema["properties"].as_object().expect("properties");
+    assert_eq!(properties.len(), 3);
+    for name in ["session_id", "prompt_id", "hook_event_name"] {
+        assert!(properties.contains_key(name));
+    }
+    let encoded = serde_json::to_string(&schema).expect("schema JSON");
+    assert!(encoded.contains("UserPromptSubmit"));
+    assert!(!encoded.contains("SessionStart"));
+    assert_eq!(format!("{adapter:?}"), "PeerMcp { .. }");
+}
+
+#[tokio::test]
+async fn host_identity_bounds_are_enforced_before_enrollment_and_empty_prompt_is_absent() {
+    let backend = backend(Default::default());
+    let calls = backend.calls.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    for (session, prompt_id) in [
+        (String::new(), "prompt_1".into()),
+        ("x".repeat(257), "prompt_1".into()),
+        ("native\ninvalid".into(), "prompt_1".into()),
+        ("native_b".into(), "x".repeat(257)),
+        ("native_b".into(), "prompt\ninvalid".into()),
+    ] {
+        assert!(matches!(
+            adapter.invoke(prompt(&session, &prompt_id)).await,
+            Err(PeerMcpError::InvalidHostIdentity(_))
+        ));
+    }
+    assert!(calls.lock().expect("calls").is_empty());
+    adapter
+        .invoke(prompt("native_b", ""))
+        .await
+        .expect("empty optional prompt");
+    let calls = calls.lock().expect("calls");
+    let ObservedCall::Prepare(request) = &calls[1] else {
+        panic!("prepare call")
+    };
+    assert_eq!(request.prompt_id, None);
+}
+
+#[tokio::test]
+async fn malformed_enrollment_never_reaches_batch_preparation() {
+    let valid = serde_json::to_value(enrollment()).expect("enrollment JSON");
+    let mutations = [
+        ("/peerId", json!(null)),
+        ("/peerId", json!("display_alias")),
+        ("/attachment", json!(null)),
+        ("/attachment/status", json!("ATTACHMENT_STATUS_DETACHED")),
+        ("/attachment/observedAt", json!(null)),
+        ("/attachment/expiresAt", json!("2026-11-02T12:00:00Z")),
+        ("/attachment/attachmentRef", json!(null)),
+        ("/attachment/attachmentRef/peerId", json!(sender_peer_id())),
+        ("/attachment/attachmentRef/connectorId", json!("connector_other")),
+        ("/attachment/attachmentRef/generation", json!(0)),
+    ];
+    for (pointer, value) in mutations {
+        let mut changed = valid.clone();
+        *changed.pointer_mut(pointer).expect("fixture path") = value;
+        let response: v1::EnrollResponse = serde_json::from_value(changed).expect("wire fixture");
+        let backend = backend(Default::default());
+        *backend.enrollment.lock().expect("response") = response;
+        let calls = backend.calls.clone();
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        assert!(
+            matches!(
+                adapter.invoke(prompt("native_b", "prompt_1")).await,
+                Err(PeerMcpError::InvalidEnrollment | PeerMcpError::InvalidEnrollmentIdentity(_))
+            ),
+            "accepted {pointer}"
+        );
+        assert_eq!(calls.lock().expect("calls").len(), 1);
+    }
+    for (seconds, nanos) in [(253_402_300_800, 0), (0, -1), (0, 1_000_000_000)] {
+        let backend = backend(Default::default());
+        let mut response = enrollment();
+        let timestamp = response
+            .attachment
+            .as_option_mut()
+            .expect("lease")
+            .observed_at
+            .as_option_mut()
+            .expect("observed");
+        timestamp.seconds = seconds;
+        timestamp.nanos = nanos;
+        *backend.enrollment.lock().expect("response") = response;
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        assert!(matches!(
+            adapter.invoke(prompt("native_b", "prompt_1")).await,
+            Err(PeerMcpError::InvalidEnrollment)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn reenrollment_cannot_replace_a_bound_peer_identity() {
+    let backend = backend(Default::default());
+    let response = backend.enrollment.clone();
+    let calls = backend.calls.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    adapter.invoke(prompt("native_b", "prompt_1")).await.expect("bind");
+    {
+        let mut response = response.lock().expect("response");
+        response.peer_id = Some(sender_peer_id());
+        response
+            .attachment
+            .as_option_mut()
+            .expect("lease")
+            .attachment_ref
+            .as_option_mut()
+            .expect("reference")
+            .peer_id = Some(sender_peer_id());
+    }
+    assert!(matches!(
+        adapter.invoke(prompt("native_b", "prompt_2")).await,
+        Err(PeerMcpError::InvalidEnrollment)
+    ));
+    assert_eq!(calls.lock().expect("calls").len(), 3);
+}
+
+#[tokio::test]
+async fn incomplete_assignment_and_unknown_content_availability_are_rejected() {
+    let original = prepared("review result");
+    let mut no_batch = original.clone();
+    no_batch.batch = Default::default();
+    let mut no_metadata = original.clone();
+    no_metadata.messages[0].metadata = Default::default();
+    let mut unspecified = original.clone();
+    unspecified.content_availability = Some(v1::ContentAvailability::CONTENT_AVAILABILITY_UNSPECIFIED.into());
+    let mut missing = original.clone();
+    missing.content_availability = None;
+    for response in [no_batch, no_metadata, unspecified, missing] {
+        let adapter = PeerMcp::new(backend(response), config()).expect("config");
+        assert!(matches!(
+            adapter.invoke(prompt("native_b", "prompt_1")).await,
+            Err(PeerMcpError::InvalidBatch(_))
+        ));
+    }
+    let mut response = original;
+    response.content_availability = Some(v1::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE.into());
+    let adapter = PeerMcp::new(backend(response), config()).expect("config");
+    assert!(matches!(
+        adapter.invoke(prompt("native_b", "prompt_1")).await,
+        Err(PeerMcpError::RetryContentUnavailable)
+    ));
+}
+
+async fn wire_results(adapter: PeerMcp<Backend>, requests: Vec<CallToolRequestParams>) -> Vec<Value> {
+    let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+    let server = tokio::spawn(async move {
+        adapter
+            .serve(server_transport)
+            .await
+            .expect("server handshake")
+            .waiting()
+            .await
+            .expect("server shutdown")
+    });
+    let client = ().serve(client_transport).await.expect("client handshake");
+    let tools = client.list_all_tools().await.expect("list tools");
+    assert_eq!(tools.len(), 5);
+    assert!(tools.iter().any(|tool| tool.name == "peer_prompt_hook"));
+    let mut results = Vec::new();
+    for request in requests {
+        results.push(serde_json::to_value(client.call_tool(request).await.expect("tool result")).expect("JSON"));
+    }
+    client.cancel().await.expect("close client");
+    server.await.expect("server task");
+    results
+}
+
+fn assert_wire_error(result: &Value, diagnostic: &str) {
+    assert_eq!(result["isError"], true);
+    assert_eq!(result["content"][0]["text"], diagnostic);
+    assert!(!result.to_string().contains("fixture"));
+}
+
+#[tokio::test]
+async fn jsonrpc_errors_expose_actionable_diagnostics_without_backend_details() {
+    let adapter = PeerMcp::new(backend(Default::default()), config()).expect("config");
+    let results = wire_results(
+        adapter,
+        vec![
+            request("peer_roster", json!({})),
+            request("peer_unknown", json!({})),
+            request("peer_prompt_hook", json!({})),
+            prompt("", "prompt_1"),
+            prompt("native_b", "prompt_1"),
+            prompt("native_c", "prompt_2"),
+            request(
+                "peer_send",
+                json!({"recipient_peer_id":"alias","idempotency_key":"send_1","text":"body"}),
+            ),
+            request("peer_roster", json!({})),
+            request(
+                "peer_send",
+                json!({"recipient_peer_id":sender_peer_id(),"idempotency_key":"send_1","text":"body"}),
+            ),
+            request("peer_status", json!({"idempotency_key":"send_1"})),
+            request("peer_acknowledge_batch", json!({"batch_id":"batch_1"})),
+        ],
+    )
+    .await;
+    for (index, diagnostic) in [
+        (0, "Peer connector has not enrolled a native session."),
+        (1, "Peer operation is not available in this adapter layer."),
+        (2, "Peer tool arguments are invalid."),
+        (3, "Peer tool arguments are invalid."),
+        (
+            5,
+            "This connector belongs to another native session; reconnect it for this session.",
+        ),
+        (6, "Peer tool arguments are invalid."),
+        (7, "Peer metadata is unavailable."),
+        (
+            8,
+            "Peer send outcome was not confirmed; retry with the same idempotency key.",
+        ),
+        (9, "Peer metadata is unavailable."),
+        (
+            10,
+            "Peer application acknowledgment was not confirmed; retry the same batch.",
+        ),
+    ] {
+        assert_wire_error(&results[index], diagnostic);
+    }
+}
+
+#[tokio::test]
+async fn jsonrpc_hook_failures_keep_pending_delivery_queued_and_validate_assignments() {
+    let mut enrollment_failure = backend(Default::default());
+    enrollment_failure.fail_enroll = true;
+    let preparation_failure = backend(Default::default());
+    preparation_failure
+        .fail_prepare
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let invalid_enrollment = backend(Default::default());
+    invalid_enrollment.enrollment.lock().expect("response").peer_id = None;
+    let invalid_identity = backend(Default::default());
+    invalid_identity.enrollment.lock().expect("response").peer_id = Some("alias".into());
+    let mut malformed = prepared("body");
+    malformed.batch = Default::default();
+    let mut unavailable = prepared("body");
+    unavailable.content_availability = Some(v1::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE.into());
+    for (backend, diagnostic) in [
+        (
+            enrollment_failure,
+            "Peer service is unavailable; pending delivery remains queued.",
+        ),
+        (
+            preparation_failure,
+            "Peer service is unavailable; pending delivery remains queued.",
+        ),
+        (invalid_enrollment, "Peer service returned an invalid enrollment."),
+        (invalid_identity, "Peer service returned an invalid enrollment."),
+        (
+            backend(malformed),
+            "Peer service returned an invalid delivery assignment.",
+        ),
+        (
+            backend(unavailable),
+            "Peer batch retry content is unavailable; its original preparation record is retained.",
+        ),
+    ] {
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        let results = wire_results(adapter, vec![prompt("native_b", "prompt_1")]).await;
+        assert_wire_error(&results[0], diagnostic);
+    }
 }
