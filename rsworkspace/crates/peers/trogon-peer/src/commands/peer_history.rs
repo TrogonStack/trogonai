@@ -1,13 +1,8 @@
+use super::accepted_outbox::AcceptedOutbox;
 use super::domain::IdempotencyKey;
 use super::state::{self, ProjectionUpdate};
 use super::{AcceptedMessage, EnrollmentFacts, EvolveError, IntakenMessage};
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1::PeerEvent};
-
-#[derive(Debug, Clone)]
-pub(super) struct AcceptedOutbox {
-    pub(super) key: IdempotencyKey,
-    pub(super) evidence: AcceptedMessage,
-}
 
 #[derive(Debug, Clone)]
 pub struct PeerHistory {
