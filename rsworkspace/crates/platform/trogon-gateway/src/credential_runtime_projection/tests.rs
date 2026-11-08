@@ -20,8 +20,8 @@ use crate::secret_store::{
 use chrono::Utc;
 use trogon_decider_nats::{StreamSubject, append_stream};
 use trogon_decider_runtime::{
-    Event, EventEncode, EventId, EventType, Headers, ReadFrom, ReadStreamRequest, ReadStreamResponse, StreamEvent,
-    StreamPosition, StreamRead,
+    Event, EventData, EventDecode, EventEncode, EventId, EventType, Headers, ReadFrom, ReadStreamRequest,
+    ReadStreamResponse, StreamEvent, StreamPosition, StreamRead,
 };
 use trogon_nats::jetstream::MockJetStreamPublishMessage;
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
@@ -159,18 +159,24 @@ fn runtime_event(id: u64, event: v1::CredentialEvent) -> Event {
 
 async fn raw_stream(events: impl IntoIterator<Item = Event>) -> MockJetStreamPublishMessage {
     let stream = MockJetStreamPublishMessage::new();
-    let events = events.into_iter().collect::<Vec<_>>();
-    if events.is_empty() {
-        return stream;
+    for event in events {
+        let subject = match <v1::CredentialEvent as EventDecode>::decode(EventData::new(&event.r#type, &event.content))
+        {
+            Ok(EventDecodeOutcome::Decoded(decoded)) => decoded
+                .event
+                .as_ref()
+                .and_then(|case| event_key(case).ok())
+                .and_then(|key| credential_event_subject(&key).ok())
+                .map(|subject| subject.as_str().to_string()),
+            _ => None,
+        };
+        publish(
+            &stream,
+            subject.as_deref().unwrap_or("credentials.events.v1.raw"),
+            &[event],
+        )
+        .await;
     }
-    append_stream(
-        &stream,
-        StreamSubject::new("credentials.events.v1.raw").unwrap(),
-        None,
-        &events,
-    )
-    .await
-    .unwrap();
     stream
 }
 
@@ -493,7 +499,7 @@ async fn independent_registries_each_observe_a_revocation_regardless_of_the_othe
     event_store.push(&stream_key(&credential), 3, revoked(&credential));
     append_stream(
         &stream,
-        StreamSubject::new("credentials.events.v1.raw").unwrap(),
+        StreamSubject::new(subject_of(&credential)).unwrap(),
         None,
         &[runtime_event(3, revoked(&credential))],
     )
@@ -1759,7 +1765,7 @@ async fn incremental_refresh_invalidates_cache_and_removes_projection_on_revoked
     );
     append_stream(
         &stream,
-        StreamSubject::new("credentials.events.v1.raw").unwrap(),
+        StreamSubject::new(subject_of(&credential)).unwrap(),
         None,
         &[runtime_event(
             3,
@@ -1817,7 +1823,7 @@ async fn incremental_refresh_invalidates_cache_and_removes_projection_when_batch
     event_store.push(&stream_key(&credential), 4, destroy_requested(&credential));
     append_stream(
         &stream,
-        StreamSubject::new("credentials.events.v1.raw").unwrap(),
+        StreamSubject::new(subject_of(&credential)).unwrap(),
         None,
         &[
             runtime_event(3, revoked(&credential)),
@@ -1896,7 +1902,7 @@ async fn incremental_refresh_stops_serving_a_destroyed_credential_once_it_is_rew
         .collect::<Vec<_>>();
     append_stream(
         &stream,
-        StreamSubject::new("credentials.events.v1.raw").unwrap(),
+        StreamSubject::new(subject_of(&credential)).unwrap(),
         None,
         &runtime_events,
     )
@@ -1949,7 +1955,7 @@ async fn incremental_refresh_invalidates_cache_and_removes_projection_when_batch
     event_store.push(&stream_key(&credential), 5, destroy_failed(&credential));
     append_stream(
         &stream,
-        StreamSubject::new("credentials.events.v1.raw").unwrap(),
+        StreamSubject::new(subject_of(&credential)).unwrap(),
         None,
         &[
             runtime_event(3, revoked(&credential)),
@@ -2077,7 +2083,7 @@ async fn incremental_refresh_evicts_a_credential_whose_history_cannot_be_replaye
     event_store.push(&stream_key(&credential), 3, rotated.clone());
     append_stream(
         &stream,
-        StreamSubject::new("credentials.events.v1.raw").unwrap(),
+        StreamSubject::new(subject_of(&credential)).unwrap(),
         None,
         &[runtime_event(3, rotated)],
     )
@@ -2140,6 +2146,69 @@ async fn incremental_refresh_evicts_a_served_credential_whose_new_event_cannot_b
         resolver.resolve(&key(), CredentialKind::BotToken).await,
         Err(RuntimeCredentialError::IntegrationNotFound { .. })
     ));
+}
+
+#[tokio::test]
+async fn incremental_refresh_evicts_the_subject_owner_of_a_misfiled_event() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "Bot token").await;
+    let other = put_source_bot_token(&store, "Other bot token").await;
+    let event_store = ProjectionTestEventStore::default();
+    let stream = MockJetStreamPublishMessage::new();
+    for (reference, start) in [(&credential, 1), (&other, 3)] {
+        let metadata = store.metadata(reference).await.unwrap();
+        event_store.push(&stream_key(reference), start, write_requested(reference));
+        event_store.push(&stream_key(reference), start + 1, activated(&metadata));
+        publish(
+            &stream,
+            &subject_of(reference),
+            &[
+                runtime_event(start, write_requested(reference)),
+                runtime_event(start + 1, activated(&metadata)),
+            ],
+        )
+        .await;
+    }
+    let registry = RuntimeCredentialRegistry::default();
+    let resolver = registry.resolver(store);
+    registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 1)
+        .await
+        .unwrap();
+    resolver.resolve(&key(), CredentialKind::BotToken).await.unwrap();
+    resolver.resolve(&source_key(), CredentialKind::BotToken).await.unwrap();
+    assert!(registry.cache().get(&credential).await.is_some());
+    assert!(registry.cache().get(&other).await.is_some());
+
+    let misfiled = v1::CredentialEvent {
+        event: Some(revoked_to_proto(&other).into()),
+    };
+    event_store.push(&stream_key(&credential), 5, misfiled.clone());
+    publish(&stream, &subject_of(&credential), &[runtime_event(5, misfiled)]).await;
+
+    let report = registry
+        .refresh_from_credential_stream_incremental(&stream, &event_store, 5)
+        .await
+        .unwrap();
+
+    assert_eq!(report.poisoned_events(), 1);
+    assert_eq!(report.poisoned_credentials(), 1);
+    assert_eq!(report.changed_credentials(), 0);
+    assert_eq!(report.checkpoint_advanced_to(), Some(5));
+    assert!(registry.cache().get(&credential).await.is_none());
+    assert!(registry.cache().get(&other).await.is_some());
+    assert!(matches!(
+        resolver.resolve(&key(), CredentialKind::BotToken).await,
+        Err(RuntimeCredentialError::IntegrationNotFound { .. })
+    ));
+    assert_eq!(
+        resolver
+            .resolve_plaintext(&source_key(), CredentialKind::BotToken)
+            .await
+            .unwrap()
+            .as_str(),
+        "Other bot token"
+    );
 }
 
 #[tokio::test]

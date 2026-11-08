@@ -957,17 +957,9 @@ where
             }
         };
         report.decoded_events += 1;
-        let credential_id = match decoded
-            .event
-            .as_ref()
-            .ok_or(RuntimeProjectionRefreshError::MissingEvent)
-            .and_then(|case| {
-                event_key(case)
-                    .map(|id| (id, matches!(case, CredentialEventCase::Revoked(_))))
-                    .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })
-            }) {
-            Ok((credential_id, revoked)) => {
-                if revoked {
+        let credential_id = match subject_stream(event.stream_id(), stream_position, &decoded) {
+            Ok(credential_id) => {
+                if matches!(decoded.event.as_ref(), Some(CredentialEventCase::Revoked(_))) {
                     revoked_recorded_at.insert(credential_id.clone(), recorded_at);
                 }
                 credential_id
@@ -1116,7 +1108,7 @@ where
 
 /// The credential whose stream `subject` is, named by an event read from it.
 ///
-/// A full rebuild reads the whole event stream at once, so the subject is the
+/// A stream-wide scan reads every credential together, so the subject is the
 /// only record of which credential stream an event was read from. The event
 /// must name the credential whose subject that is.
 fn subject_stream(
