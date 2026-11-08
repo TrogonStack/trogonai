@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+python3 "$MISE_PROJECT_ROOT/.config/mise/lib/coverage-report/test_publish.py"
+python3 "$MISE_PROJECT_ROOT/.config/mise/lib/coverage-report/test_provenance.py"
+python3 "$MISE_PROJECT_ROOT/.config/mise/lib/coverage-report/test_comment.py"
