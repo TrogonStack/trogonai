@@ -2,11 +2,13 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_nats::HeaderMap;
 use async_nats::header::NATS_MESSAGE_ID;
 use buffa::Message;
 use bytes::Bytes;
+use ed25519_dalek::{Signer, SigningKey};
 use trogon_nats::NatsToken;
 use trogon_std::NowV7;
 use trogon_std::time::FixedEpochClock;
@@ -16,20 +18,28 @@ use uuid::{Builder, Uuid};
 use crate::actor::Actor;
 use crate::audit_name::AuditName;
 use crate::chain_builder::ChainBuilder;
+use crate::chain_head::ChainHead;
 use crate::chain_id::ChainId;
+use crate::chain_key::ChainKey;
 use crate::change_facts::ChangeFacts;
 use crate::change_terminal::ChangeTerminal;
-use crate::constants::{HEADER_CHAIN, HEADER_SEQUENCE, HEADER_WRITER};
+use crate::checkpoint_draft::CheckpointDraft;
+use crate::checkpoint_id::CheckpointId;
+use crate::checkpoint_signature::CheckpointSignature;
+use crate::constants::{HEADER_CHAIN, HEADER_SEQUENCE, HEADER_WRITER, STREAM_AUDIT};
 use crate::credential_facts::CredentialFacts;
 use crate::credential_terminal::CredentialTerminal;
 use crate::decision_facts::DecisionFacts;
 use crate::decision_outcome::DecisionOutcome;
 use crate::enforcement::Enforcement;
+use crate::key_id::KeyId;
 use crate::read_only::ReadOnly;
 use crate::record::Record;
+use crate::record_hash::RecordHash;
 use crate::record_scope::RecordScope;
 use crate::record_seal;
 use crate::sealed_record::SealedRecord;
+use crate::signed_checkpoint::SignedCheckpoint;
 use crate::stamper::Stamper;
 use crate::stored_audit_record::StoredAuditRecord;
 use crate::surface::Surface;
@@ -57,6 +67,16 @@ pub(crate) fn token(value: &str) -> NatsToken {
 
 pub(crate) fn writer_id() -> WriterId {
     WriterId::new("gateway-1").unwrap()
+}
+
+/// The time [`stamper`] reads.
+pub(crate) fn now() -> SystemTime {
+    UNIX_EPOCH + Duration::from_secs(1_800_000_000)
+}
+
+/// A fixed Ed25519 key, so a test signs and verifies without randomness.
+pub(crate) fn signing_key(seed: u8) -> SigningKey {
+    SigningKey::from_bytes(&[seed; 32])
 }
 
 pub(crate) fn stamper() -> Stamper<FixedEpochClock, SequentialIds> {
@@ -220,4 +240,33 @@ pub(crate) fn body(record: &StoredAuditRecord) -> AuditRecord {
 pub(crate) fn resealed(record: &StoredAuditRecord, message: &AuditRecord) -> StoredAuditRecord {
     let (_, payload) = record_seal::seal(Bytes::from(message.encode_to_vec()));
     with_payload(record, payload)
+}
+
+/// The chain the unit tests' checkpoints are for: `gateway-1` on [`CHAIN`].
+pub(crate) fn chain_key() -> ChainKey {
+    ChainKey::new(writer_id(), chain_id(CHAIN))
+}
+
+/// A head at `sequence`, stored ten messages further into `AUDIT`.
+pub(crate) fn head_at(sequence: u64) -> ChainHead {
+    ChainHead::new(sequence, RecordHash::of(b"head"), STREAM_AUDIT, sequence + 10)
+}
+
+/// A checkpoint of `head` on [`chain_key`], issued at [`now`].
+pub(crate) fn draft_of(head: ChainHead) -> CheckpointDraft {
+    CheckpointDraft::new(
+        CheckpointId::generate(&SequentialIds::default()),
+        chain_key(),
+        token("egress_proxy"),
+        head,
+        now(),
+    )
+}
+
+/// `draft` signed with [`signing_key`] `seed`.
+pub(crate) fn signed_with(seed: u8, draft: &CheckpointDraft) -> SignedCheckpoint {
+    let key = signing_key(seed);
+    let key_id = KeyId::from_verifying_key(key.verifying_key());
+    let signature = CheckpointSignature::new(key_id, key.sign(&draft.signing_input(&key_id)));
+    SignedCheckpoint::assemble(draft, &signature).unwrap()
 }

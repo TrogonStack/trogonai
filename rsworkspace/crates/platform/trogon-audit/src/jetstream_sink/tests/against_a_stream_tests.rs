@@ -1,23 +1,33 @@
-//! The writer and the sink against a real JetStream server, on the streams
-//! provisioning builds, read back and verified the way an auditor would.
+//! The writer, the checkpoint task and the sink against a real JetStream
+//! server, on the streams provisioning builds, read back and verified the way
+//! an auditor would.
 
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::jetstream;
 use async_nats::jetstream::stream::Stream;
+use tokio_util::sync::CancellationToken;
 use trogon_nats::test_support::JetStreamTestServer;
 
 use super::*;
 use crate::audit_stream::AuditStream;
 use crate::audit_writer::AuditWriter;
 use crate::chain_anchor::ChainAnchor;
-use crate::constants::STREAM_AUDIT;
+use crate::checkpoint_config::CheckpointConfig;
+use crate::checkpoint_writer::CheckpointWriter;
+use crate::constants::{STREAM_AUDIT, STREAM_AUDIT_CHECKPOINT};
 use crate::disposition::Disposition;
 use crate::ensure_audit_stream::ensure_audit_stream;
-use crate::fixtures::{best_effort, change, credential, deny, identity, writer_id};
+use crate::fixtures::{best_effort, change, credential, deny, identity, now, signing_key, writer_id};
+use crate::key_id::KeyId;
+use crate::local_checkpoint_signer::LocalCheckpointSigner;
 use crate::stored_audit_record::StoredAuditRecord;
+use crate::time_bounds::TimeBounds;
+use crate::trusted_keys::TrustedKeys;
 use crate::verify_chain_range::verify_chain_range;
+use crate::verify_checkpoint::verify_checkpoint;
 use crate::writer_config::WriterConfig;
 
 async fn provisioned() -> (JetStreamTestServer, jetstream::Context, Stream) {
@@ -146,4 +156,49 @@ async fn a_stream_that_was_never_provisioned_is_unreachable() {
     let sink = JetStreamSink::with_defaults(server.jetstream().await);
 
     assert_eq!(sink.publish(&sealed()).await, Err(SinkError::Unreachable));
+}
+
+#[tokio::test]
+async fn a_checkpoint_stored_beside_the_chain_reads_back_and_verifies_against_its_head() {
+    let (_server, js, stream) = provisioned().await;
+    ensure_audit_stream(&js, AuditStream::Checkpoint, NonZeroUsize::MIN)
+        .await
+        .unwrap();
+    let checkpoint_stream = js.get_stream(STREAM_AUDIT_CHECKPOINT).await.unwrap();
+    let stamper = stamper();
+    let sink = JetStreamSink::with_defaults(js);
+    let writer = AuditWriter::new(sink.clone(), identity(), WriterConfig::default(), &stamper);
+    let signer = LocalCheckpointSigner::new(signing_key(1));
+    let checkpoints = CheckpointWriter::new(
+        &writer,
+        sink,
+        Arc::new(signer),
+        CheckpointConfig::default(),
+        stamper.clone(),
+    );
+    let shutdown = CancellationToken::new();
+    let drain = writer.spawn_drain(shutdown.clone());
+    let task = checkpoints.spawn();
+
+    assert_eq!(writer.write(allow(&stamper)).await, Ok(Disposition::Stored));
+    assert_eq!(writer.write(deny(&stamper)).await, Ok(Disposition::Stored));
+    shutdown.cancel();
+    drain.await.unwrap();
+    task.await.unwrap();
+
+    let anchor = ChainAnchor::Genesis {
+        writer: writer_id(),
+        chain: writer.chain(),
+    };
+    let head = verify_chain_range(anchor, read_back(&stream).await)
+        .unwrap()
+        .into_head();
+    let last = checkpoint_stream.get_info().await.unwrap().state.last_sequence;
+    let message = checkpoint_stream.get_raw_message(last).await.unwrap();
+    let trusted = TrustedKeys::new([KeyId::from_verifying_key(signing_key(1).verifying_key())]);
+    let bounds = TimeBounds::new(now(), now()).unwrap();
+
+    let verified = verify_checkpoint(&message.payload, &head, &trusted, &bounds).unwrap();
+    assert_eq!(verified.head().sequence(), 3);
+    assert_eq!(checkpoints.stats().written(), last);
 }

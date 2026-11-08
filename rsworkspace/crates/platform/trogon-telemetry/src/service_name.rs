@@ -3,6 +3,7 @@
 /// guarantees the values are path-safe.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServiceName {
+    A2aGateway,
     AcpNatsStdio,
     AcpNatsServer,
     McpNatsStdio,
@@ -22,6 +23,7 @@ pub enum ServiceName {
 impl ServiceName {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::A2aGateway => "a2a-gateway",
             Self::AcpNatsStdio => "acp-nats-stdio",
             Self::AcpNatsServer => "acp-nats-server",
             Self::McpNatsStdio => "mcp-nats-stdio",

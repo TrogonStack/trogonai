@@ -576,8 +576,8 @@ async fn a_new_policy_generation_during_allow_audit_cannot_reuse_the_old_acknowl
         upstream.read_to_end(&mut bytes).await.unwrap();
         bytes
     });
-    let document = altered(envelope(1, "agent-1"), "policy", serde_json::json!(ip_policy(port)));
-    let fixture = Fixture::with_document(|| document).await;
+    let fixture =
+        Fixture::with_document(|| altered(envelope(1, "agent-1"), "policy", serde_json::json!(ip_policy(port)))).await;
     let (entered, mut observed) = mpsc::channel(1);
     let release = Arc::new(Semaphore::new(0));
     let audit = Arc::new(BlockingAudit {
