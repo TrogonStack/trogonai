@@ -1,5 +1,5 @@
 use super::domain::{MessageId, PeerId, TenantId, TrustedContent};
-use super::{evolve_error::EvolveError, message_error::MessageError, message_rules, state_values};
+use super::{evolve_error::EvolveError, message_error::MessageError, message_values, state_values};
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
 #[derive(Debug, Clone)]
 pub struct AcceptedMessage {
@@ -17,7 +17,7 @@ impl AcceptedMessage {
             .iter()
             .find(|entry| entry.message.message_id.as_deref() == Some(id.as_str()))
             .ok_or(MessageError::InvalidTransition)?;
-        let parsed = message_rules::outbox_entry(entry)?;
+        let parsed = message_values::outbox_entry(entry)?;
         if &parsed.metadata.sender != facts.identity().peer_id()
             || &parsed.metadata.collaboration != facts.collaboration()
         {

@@ -1,3 +1,7 @@
+use trogon_nats::CredentialValue;
+use trogon_nats::NatsAuth;
+use trogon_nats::NatsTls;
+use trogon_peer_mcp::AvailabilityObservation;
 use trogon_peer_mcp::RuntimeConfig;
 use trogon_peer_nats::PeerAccount;
 use trogon_std::env::InMemoryEnv;
@@ -87,9 +91,6 @@ fn runtime_config_rejects_invalid_modes_tokens_observations_and_anonymous_auth()
 #[test]
 fn runtime_configuration_preserves_broker_order_tls_and_unresolved_auth_for_each_observation()
 -> Result<(), Box<dyn std::error::Error>> {
-    use trogon_nats::{CredentialValue, NatsAuth, NatsTls};
-    use trogon_peer_mcp::AvailabilityObservation;
-
     for (setting, observation) in [
         ("ready", AvailabilityObservation::Ready),
         ("busy", AvailabilityObservation::Busy),
