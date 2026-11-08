@@ -1469,3 +1469,57 @@ async fn detach_cannot_confirm_a_cancelled_remotely_committed_enrollment() {
         );
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn lifecycle_concurrent_detach_has_one_total_budget_including_binding_wait() {
+    let mut backend = backend(Default::default());
+    backend.detach_delay = std::time::Duration::from_secs(3);
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    let first = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.invoke(detach("native_b")).await })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_millis(100)).await;
+    let started = tokio::time::Instant::now();
+    assert!(adapter.invoke(detach("native_b")).await.is_err());
+    assert!(
+        started.elapsed() <= std::time::Duration::from_secs(1),
+        "binding and operation waits belong to the detach deadline"
+    );
+    assert!(first.await.expect("detach task").is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn runtime_terminal_hook_response_and_repeats_survive_heartbeat_completion() {
+    let mut backend = backend(Default::default());
+    backend.detach_delay = std::time::Duration::from_millis(500);
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(trogon_peer_mcp::serve_connector(
+        adapter.clone(),
+        server_transport,
+        trogon_peer_mcp::AvailabilityObservation::Ready,
+        async move {
+            let _ = stopped.await;
+        },
+    ));
+    let client = ().serve(client_transport).await.expect("handshake");
+    client.call_tool(prompt("native_b", "initial")).await.expect("bind");
+    tokio::task::yield_now().await;
+    let result = client.call_tool(detach("native_b")).await;
+    assert!(
+        result.is_ok(),
+        "SessionEnd must return its MCP result before transport closes"
+    );
+    let result = client
+        .call_tool(detach("native_b"))
+        .await
+        .expect("repeat detach through runtime");
+    assert_ne!(result.is_error, Some(true));
+    let _ = stop.send(());
+    client.cancel().await.expect("close");
+    server.await.expect("runtime task").expect("runtime shutdown");
+}

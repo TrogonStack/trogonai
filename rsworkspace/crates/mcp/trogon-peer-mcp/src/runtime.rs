@@ -65,7 +65,10 @@ where
         service = adapter.clone().serve_with_ct(transport, cancellation.clone()) => service.map_err(|error| RuntimeError::Initialize(Box::new(error)))?,
     };
     let waiting = service.waiting();
-    let heartbeat = adapter.run_heartbeat(availability);
+    let heartbeat = async {
+        adapter.run_heartbeat(availability).await;
+        std::future::pending::<()>().await;
+    };
     tokio::pin!(waiting, heartbeat);
     let completed = tokio::select! {
         biased;

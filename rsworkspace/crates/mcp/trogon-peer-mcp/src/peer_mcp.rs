@@ -158,14 +158,17 @@ where
             if current.detach_confirmed() {
                 return Ok(());
             }
-            let attachment = current.attachment().ok_or(PeerMcpError::EnrollmentUncertain)?;
+            let attachment = current.attachment().cloned().ok_or(PeerMcpError::EnrollmentUncertain)?;
+            drop(binding);
             self.backend
                 .detach(v1::DetachRequest {
-                    attachment_ref: crate::model_tools::wire_attachment(attachment).into(),
+                    attachment_ref: crate::model_tools::wire_attachment(&attachment).into(),
                 })
                 .await
                 .map_err(|error| PeerMcpError::Detach(Box::new(error)))?;
-            current.confirm_detach();
+            if let Some(current) = self.binding.lock().await.as_mut() {
+                current.confirm_detach();
+            }
             Ok(())
         })
         .await
