@@ -13,7 +13,7 @@ use trogon_peer::{
     CallerId, CollaborationRef, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId, PeerId, TenantId,
     TrustedPeerOwner,
 };
-use trogon_peer_service::{EnrollServiceError, PeerClock, PeerService};
+use trogon_peer_service::{EnrollServiceError, PeerApplicationError, PeerClock, PeerOperation, PeerService};
 use trogonai_proto::convert::timestamp_from_datetime;
 use trogonai_proto::peers::{PeerEventCase, v1alpha1 as proto};
 
@@ -74,6 +74,8 @@ struct EnrollmentPolicy {
     owner: TrustedPeerOwner,
     collaboration: CollaborationRef,
     observed_principals: Arc<Mutex<Vec<CommandPrincipal>>>,
+    allowed_peer: Option<PeerId>,
+    allowed_operation: Option<PeerOperation>,
 }
 
 impl CommandAuthorizer<Enroll> for EnrollmentPolicy {
@@ -118,6 +120,8 @@ fn policy() -> EnrollmentPolicy {
         owner: owner(),
         collaboration: CollaborationRef::new("collaboration_alpha").unwrap(),
         observed_principals: Arc::new(Mutex::new(Vec::new())),
+        allowed_peer: None,
+        allowed_operation: None,
     }
 }
 
@@ -684,7 +688,14 @@ impl CommandAuthorizer<trogon_peer_service::PeerAccess> for EnrollmentPolicy {
         principal: &CommandPrincipal,
         access: &trogon_peer_service::PeerAccess,
     ) -> Result<(), AuthorizationDeniedError> {
-        if access.owner() != &self.owner || principal.id().as_str() != self.owner.caller().as_str() {
+        if access.owner() != &self.owner
+            || principal.kind() != PrincipalKind::Agent
+            || principal.id().as_str() != self.owner.caller().as_str()
+            || self.allowed_peer.as_ref().is_some_and(|peer| peer != access.peer())
+            || self
+                .allowed_operation
+                .is_some_and(|operation| operation != access.operation())
+        {
             return Err(AuthorizationDeniedError::new("outside owner grant"));
         }
         Ok(())
@@ -819,4 +830,59 @@ async fn a_future_generation_cannot_detach_the_current_attachment() {
         heartbeat.attachment.status.and_then(|v| v.as_known()),
         Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
     );
+}
+
+#[tokio::test]
+async fn heartbeat_grant_cannot_authorize_another_peer_or_a_detach_operation() {
+    let store = ObservedStore::default();
+    let enrollment = PeerService::new(store.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let reference = enrollment.attachment.attachment_ref.clone();
+    let mut grant = policy();
+    grant.allowed_peer = Some(PeerId::parse(enrollment.peer_id.unwrap()).unwrap());
+    grant.allowed_operation = Some(PeerOperation::Heartbeat);
+    let service = PeerService::new(store.clone(), grant, FixedClock(now() + chrono::Duration::seconds(1)));
+    service
+        .heartbeat(
+            &owner(),
+            proto::HeartbeatRequest {
+                attachment_ref: reference.clone(),
+                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let reads = store.reads.load(Ordering::SeqCst);
+    let appends = store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        service
+            .detach(
+                &owner(),
+                proto::DetachRequest {
+                    attachment_ref: reference.clone()
+                }
+            )
+            .await,
+        Err(PeerApplicationError::Detach(CommandError::Unauthorized(_)))
+    ));
+    let mut foreign = reference;
+    foreign.as_option_mut().unwrap().peer_id = Some("f".repeat(64));
+    assert!(matches!(
+        service
+            .heartbeat(
+                &owner(),
+                proto::HeartbeatRequest {
+                    attachment_ref: foreign,
+                    availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                    ..Default::default()
+                }
+            )
+            .await,
+        Err(PeerApplicationError::Heartbeat(CommandError::Unauthorized(_)))
+    ));
+    assert_eq!(store.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(store.appends.load(Ordering::SeqCst), appends);
 }
