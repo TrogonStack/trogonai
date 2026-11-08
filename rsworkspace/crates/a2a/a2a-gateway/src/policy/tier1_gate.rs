@@ -80,18 +80,7 @@ pub trait SpiceDbTier1Gate: Send + Sync {
     ) -> Vec<AgentViewCheckOutcome>;
 }
 
-/// Transport-neutral failure writing an owner tuple. Carries the
-/// backend's message so the dispatch warning stays diagnosable
-/// without the trait naming a gRPC type.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("owner tuple emit failed: {0}")]
-pub struct OwnerEmitError(String);
-
-impl OwnerEmitError {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
-    }
-}
+pub use super::owner_emit_error::OwnerEmitError;
 
 #[async_trait]
 pub trait OwnerTupleEmitter: Send + Sync {
