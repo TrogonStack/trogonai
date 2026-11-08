@@ -2,19 +2,33 @@
 
 Run this opt-in fixture locally when you need evidence from the installed host.
 It makes model calls and must stay outside ordinary CI. It requires Docker and
-an installed `claude` executable with working existing authentication and native
-`mcp_tool` hook support. Inspect its current help before running the fixture.
-Do not supply a different provider, model, or authentication profile.
+an installed Claude Code executable with working existing authentication and
+native `mcp_tool` hook support. Inspect the selected launcher's current help
+before running the fixture.
 
-If the host reports an expired OAuth session, run `claude auth login` in your
-terminal to restore the existing login before trying again. Use a new evidence
-directory after authentication succeeds. An authentication failure establishes
-no callback or context insertion, even when the plugin connected successfully.
+By default the fixture launches `claude` directly. To use an existing `trg exec`
+profile, explicitly select it with `PEER_ACCEPTANCE_PROFILE`. The fixture then
+launches `trg exec run --name <profile> --` followed by the same Claude arguments.
+Choose a profile already configured to launch Claude Code with the provider,
+authentication and default model you intend to use. The fixture does not choose
+another account, create profiles, or override the model. Profile names are
+passed as literal arguments, without shell evaluation.
+
+Check authentication through the selected launcher rather than inferring its
+state from a different profile. For an explicitly selected profile, use
+`trg exec run --name "$PEER_ACCEPTANCE_PROFILE" -- auth status --json` without
+retaining account details or credentials. Authentication status alone proves no
+model call or peer exchange. If authentication fails in the selected profile,
+preserve the failure and stop. Any login repair or profile change needs separate
+authorization. An authentication failure establishes no callback or context
+insertion, even when the plugin connected successfully.
 
 From the repository root, create an ignored evidence parent and run:
 
 ```sh
 mkdir -p .trogonai/analysis/native-host
+# Optional: set this only to an existing profile you explicitly selected.
+# export PEER_ACCEPTANCE_PROFILE="your-selected-profile"
 cd rsworkspace
 PEER_ACCEPTANCE_EVIDENCE="$PWD/../.trogonai/analysis/native-host/attempt-01" \
   mise exec -- cargo test -p trogon-peer-mcp --test native_host_acceptance \
@@ -35,9 +49,9 @@ and model tool inventories. It deliberately omits `--strict-mcp-config`, whose
 documented restriction to explicit MCP configuration can exclude plugin servers.
 
 The workload is bounded to persistent host processes with at most two prompts
-each and `--max-budget-usd 2` per process. It uses the host's default model and
-existing authentication. Every turn has a fixed deadline. Failure stops the
-flow; repair a demonstrated prerequisite before authorizing another attempt.
+each and `--max-budget-usd 2` per process. It uses the selected launcher's default
+model and existing authentication. Every turn has a fixed deadline. Failure stops
+the flow; repair a demonstrated prerequisite before authorizing another attempt.
 An authentication or broker setup failure is not a behavioral RED.
 
 Initial prompts must bind native identities without model-issued hook calls.

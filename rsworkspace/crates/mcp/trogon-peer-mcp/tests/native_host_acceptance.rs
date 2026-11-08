@@ -17,7 +17,7 @@ use trogon_peer_nats::test_support::{
 };
 use trogon_peer_nats::{PeerAccount, PeerTenant, serve_peer_rpc};
 use trogon_peer_service::{WorkLimit, test_support::Fixture};
-use trogon_std::env::{EnumerateEnv, ReadEnv, SystemEnv};
+use trogon_std::env::{EnumerateEnv, InMemoryEnv, ReadEnv, SystemEnv};
 use trogonai_proto::peers::state_v1alpha1::PeerState;
 use trogonai_proto::peers::v1alpha1 as v1;
 
@@ -26,6 +26,38 @@ const TOOL_PREFIX: &str = "mcp__plugin_trogon-peer_peer__";
 
 fn require(condition: bool, message: &'static str) -> TestResult {
     if condition { Ok(()) } else { Err(message.into()) }
+}
+
+fn host_command(env: &impl ReadEnv) -> Command {
+    match env.var_os("PEER_ACCEPTANCE_PROFILE") {
+        Some(profile) => {
+            let mut command = Command::new("trg");
+            command.args(["exec", "run", "--name"]).arg(profile).arg("--");
+            command
+        }
+        None => Command::new("claude"),
+    }
+}
+
+#[test]
+fn launcher_defaults_to_installed_claude() {
+    let command = host_command(&InMemoryEnv::new());
+    assert_eq!(command.as_std().get_program(), "claude");
+    assert_eq!(command.as_std().get_args().count(), 0);
+}
+
+#[test]
+fn launcher_preserves_explicit_profile_as_one_argument() {
+    let profile = "selected profile; $(literal)";
+    let env = InMemoryEnv::new();
+    env.set("PEER_ACCEPTANCE_PROFILE", profile);
+    let mut command = host_command(&env);
+    command.args(["--print", "--tools", ""]);
+    assert_eq!(command.as_std().get_program(), "trg");
+    assert_eq!(
+        command.as_std().get_args().collect::<Vec<_>>(),
+        ["exec", "run", "--name", profile, "--", "--print", "--tools", ""]
+    );
 }
 
 struct Host {
@@ -41,7 +73,7 @@ struct Host {
 
 impl Host {
     fn start(broker: &Broker, identity: &str, session: &str, cwd: &Path, evidence: &Path) -> TestResult<Self> {
-        Self::start_program(broker, identity, session, cwd, evidence, Path::new("claude"))
+        Self::start_command(broker, identity, session, cwd, evidence, host_command(&SystemEnv))
     }
 
     fn start_program(
@@ -52,7 +84,17 @@ impl Host {
         evidence: &Path,
         program: &Path,
     ) -> TestResult<Self> {
-        let mut command = Command::new(program);
+        Self::start_command(broker, identity, session, cwd, evidence, Command::new(program))
+    }
+
+    fn start_command(
+        broker: &Broker,
+        identity: &str,
+        session: &str,
+        cwd: &Path,
+        evidence: &Path,
+        mut command: Command,
+    ) -> TestResult<Self> {
         command
             .args([
                 "--print",
@@ -512,6 +554,12 @@ async fn installed_host_next_prompt_context() -> TestResult {
         "sender":sender_cleanup.as_ref().map_err(|error|error.to_string()),
         "recipient":recipient_cleanup.as_ref().map_err(|error|error.to_string()),
         "registration":registration_cleanup.as_ref().map_err(|error|error.to_string()),
+        "sender_exit":sender.child.try_wait()?.map(|status|json!({
+            "success":status.success(), "code":status.code(), "status":status.to_string(),
+        })),
+        "recipient_exit":recipient.child.try_wait()?.map(|status|json!({
+            "success":status.success(), "code":status.code(), "status":status.to_string(),
+        })),
     });
     std::fs::write(
         evidence.join("cleanup.internal.trogonai.md"),
