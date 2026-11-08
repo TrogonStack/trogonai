@@ -397,3 +397,28 @@ fn batch_correlation_names_roundtrip_the_wire_carrier_and_reject_invalid_tokens(
         assert_eq!(BatchId::new(invalid), Err(expected));
     }
 }
+
+#[test]
+fn replay_rejects_malformed_retry_keys_before_accepting_the_message() {
+    let accepted = run(enrolled("sender", 0), &send(0, 1, 3)).outbox[0].clone();
+    for key in [None, Some(String::new()), Some("invalid.retry".to_owned())] {
+        let mut entry = accepted.clone();
+        entry.idempotency_key = key.clone();
+        let error = commands::state::evolve(enrolled("sender", 0), &accepted_event(entry)).unwrap_err();
+        match key {
+            None => assert!(matches!(
+                error,
+                EvolveError::MissingField {
+                    field: "idempotency_key"
+                }
+            )),
+            Some(_) => assert!(matches!(
+                error,
+                EvolveError::InvalidValue {
+                    field: "idempotency_key",
+                    ..
+                }
+            )),
+        }
+    }
+}
