@@ -153,6 +153,7 @@ jobs:
           new-uncovered-statements-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
           coverage-rate-reduction-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
           togglable-report: true
+          report-low-coverage-only: true
 
       - name: Prepare nested test targets for cache cleanup
         if: always()
