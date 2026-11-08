@@ -234,3 +234,183 @@ fn malformed_ack_and_settlement_events_or_internal_proofs_are_refused() {
         assert!(commands::state::evolve(sender.clone(), &event).is_err());
     }
 }
+
+#[test]
+fn core761_routed_ack_and_authoritative_settlement_replay_preserve_message() {
+    let before = run(inbox(&[0], 7), &prepare(&[0], 20, 3));
+    let ack = acknowledge("batch", 4);
+    assert_eq!(ack.stream_id(), identity("recipient").peer_id());
+    assert_eq!(AcknowledgeBatch::initial_state(), commands::state::initial_state());
+    let (acknowledged, events) = evaluate_decision(before.clone(), &ack).unwrap();
+    let mut replayed = before;
+    for event in events.iter() {
+        replayed = commands::state::evolve(replayed, event).unwrap();
+    }
+    assert_eq!(replayed, acknowledged);
+    let proof = receipt(&acknowledged, 0);
+    assert_eq!(proof.tenant(), identity("recipient").owner().tenant());
+    assert_eq!(proof.receipt(), &acknowledged.dispositions[0]);
+    let expected = proof.receipt().clone();
+    let settle = SettleMessage::new(identity("sender").peer_id().clone(), proof);
+    assert_eq!(settle.stream_id(), identity("sender").peer_id());
+    let initial = SettleMessage::initial_state();
+    assert_eq!(initial, commands::state::initial_state());
+    let enroll = Enroll::new(
+        identity("sender"),
+        ConnectorId::new("connector").unwrap(),
+        CollaborationRef::new("collaboration").unwrap(),
+        PeerDisplayName::new("Peer").unwrap(),
+        time(0),
+    );
+    let (_, events) = evaluate_decision(initial.clone(), &enroll).unwrap();
+    let mut sender = initial;
+    for event in events.iter() {
+        sender = commands::state::evolve(sender, event).unwrap();
+    }
+    let (_, events) = evaluate_decision(sender.clone(), &send(0, 1, 7)).unwrap();
+    for event in events.iter() {
+        sender = commands::state::evolve(sender, event).unwrap();
+    }
+    let original_message = sender.outbox[0].message.clone();
+    let (settled, events) = evaluate_decision(sender.clone(), &settle).unwrap();
+    for event in events.iter() {
+        sender = commands::state::evolve(sender, event).unwrap();
+    }
+    assert_eq!(sender, settled);
+    assert_eq!(sender.outbox[0].message, original_message);
+    assert_eq!(sender.outbox[0].settlement.as_option(), Some(&expected));
+    assert_eq!(error(sender, &settle), MessageError::AlreadySettled(Box::new(expected)));
+}
+
+#[test]
+fn core761_authority_rejects_missing_batch_membership_or_changed_preparation_clock() {
+    let prepared = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    let id = MessageId::new("message_0").unwrap();
+    let mut missing_member = prepared.clone();
+    missing_member.batches[0].message_ids.clear();
+    assert!(matches!(
+        AuthoritativeReceipt::from_recipient_history(&missing_member, &id),
+        Err(MessageError::InvalidTransition)
+    ));
+    let mut malformed_batch_id = prepared.clone();
+    malformed_batch_id.dispositions[0].batch_id = Some("invalid.batch".into());
+    assert!(matches!(
+        AuthoritativeReceipt::from_recipient_history(&malformed_batch_id, &id),
+        Err(MessageError::InvalidState(EvolveError::InvalidValue {
+            field: "receipt.batch_id",
+            source: PeerValueError::InvalidCharacter
+        }))
+    ));
+    let mut changed_clock = prepared;
+    changed_clock.batches[0].prepared_at = trogonai_proto::convert::timestamp_from_datetime(&time(4)).into();
+    assert!(matches!(
+        AuthoritativeReceipt::from_recipient_history(&changed_clock, &id),
+        Err(MessageError::InvalidTransition)
+    ));
+}
+
+#[test]
+fn core761_settlement_cannot_route_to_other_sender_or_import_foreign_tenant_receipt() {
+    let local_sender = run(enrolled("sender", 0), &send(0, 1, 1));
+    let local_recipient = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    let wrong_route = SettleMessage::new(identity("recipient").peer_id().clone(), receipt(&local_recipient, 0));
+    assert_eq!(
+        error(local_sender.clone(), &wrong_route),
+        MessageError::RecipientMismatch
+    );
+    let foreign_owner = TrustedPeerOwner::new(TenantId::new("foreign").unwrap(), CallerId::new("caller").unwrap());
+    let foreign_sender = EnrollmentIdentity::new(
+        foreign_owner.clone(),
+        InstallationId::new("installation").unwrap(),
+        NativeSessionId::new("sender").unwrap(),
+    );
+    let foreign_recipient = EnrollmentIdentity::new(
+        foreign_owner,
+        InstallationId::new("installation").unwrap(),
+        NativeSessionId::new("recipient").unwrap(),
+    );
+    let enroll = |identity: EnrollmentIdentity| {
+        Enroll::new(
+            identity,
+            ConnectorId::new("connector").unwrap(),
+            CollaborationRef::new("collaboration").unwrap(),
+            PeerDisplayName::new("Peer").unwrap(),
+            time(0),
+        )
+    };
+    let command = SendMessage::new(
+        foreign_sender.owner().clone(),
+        AttachmentRef::new(
+            foreign_sender.peer_id().clone(),
+            ConnectorId::new("connector").unwrap(),
+            1,
+        )
+        .unwrap(),
+        IdempotencyKey::new("foreign_key").unwrap(),
+        MessageId::new("message_0").unwrap(),
+        foreign_recipient.peer_id().clone(),
+        CollaborationRef::new("collaboration").unwrap(),
+        content(1, 1),
+        None,
+        time(1),
+    );
+    let sender = run(run(commands::state::initial_state(), &enroll(foreign_sender)), &command);
+    let accepted = AcceptedMessage::from_sender_history(&sender, &MessageId::new("message_0").unwrap()).unwrap();
+    let recipient = run(
+        run(commands::state::initial_state(), &enroll(foreign_recipient)),
+        &DisposeMessage::new(accepted, TerminalDisposition::Unavailable, time(3)),
+    );
+    let proof = receipt(&recipient, 0);
+    assert_eq!(proof.tenant().as_str(), "foreign");
+    assert_eq!(
+        error(
+            local_sender,
+            &SettleMessage::new(identity("sender").peer_id().clone(), proof)
+        ),
+        MessageError::TenantMismatch
+    );
+}
+
+#[test]
+fn core761_ack_and_settlement_replay_reject_duplicate_or_fenced_effects() {
+    let prepared = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    let (acknowledged, events) = evaluate_decision(prepared.clone(), &acknowledge("batch", 4)).unwrap();
+    let ack = events.iter().next().unwrap();
+    assert_eq!(
+        commands::state::evolve(acknowledged, ack),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let detached = run(
+        prepared.clone(),
+        &Detach::new(
+            identity("recipient").owner().clone(),
+            reference("recipient", 1),
+            time(4),
+        ),
+    );
+    assert_eq!(
+        commands::state::evolve(detached, ack),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let mut early = ack.clone();
+    if let Some(PeerEventCase::PeerBatchAcknowledged(ref mut event)) = early.event {
+        event.acknowledged_at = trogonai_proto::convert::timestamp_from_datetime(&time(2)).into();
+    }
+    assert_eq!(
+        commands::state::evolve(prepared.clone(), &early),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let sender = run(enrolled("sender", 0), &send(0, 1, 1));
+    let (settled, events) = evaluate_decision(sender.clone(), &settle(&prepared, 0)).unwrap();
+    let event = events.iter().next().unwrap();
+    assert_eq!(
+        commands::state::evolve(settled, event),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let mut different_owner = sender;
+    different_owner.enrollment = enrolled("different_sender", 0).enrollment;
+    assert_eq!(
+        commands::state::evolve(different_owner, event),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+}
