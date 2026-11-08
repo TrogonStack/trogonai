@@ -1,9 +1,9 @@
 #[path = "support/advancing_seal.rs"]
 mod advancing_seal;
 
-use chrono::Timelike;
 use chrono::Duration;
 use chrono::TimeZone;
+use chrono::Timelike;
 use std::sync::atomic::Ordering;
 use trogon_decider_runtime::CommandError;
 use trogon_decider_runtime::CommandExecution;
@@ -4922,9 +4922,6 @@ impl trogon_peer_service::PeerClock for SendAdmissionObservationClock {
 
 #[tokio::test]
 async fn public_send_rejects_a_leap_admission_clock_before_sealing_and_keeps_exact_retry() -> TestResult {
-    use chrono::{Duration, TimeZone};
-    use trogon_peer::{EvolveError, MessageError};
-    use trogon_peer_service::{PeerApplication, PeerApplicationError, PeerClock, PeerPortError, PeerService};
     let mut f = Fixture::new().await?;
     let renewed_at = f.clock.now() + Duration::seconds(58);
     *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = renewed_at;
@@ -5013,8 +5010,6 @@ async fn public_send_rejects_a_leap_admission_clock_before_sealing_and_keeps_exa
 
 #[tokio::test]
 async fn public_send_keeps_unsupported_admission_seconds_owned_by_the_renderer() -> TestResult {
-    use chrono::TimeZone;
-    use trogon_peer_service::{PeerApplication, PeerApplicationError, PeerClock, PeerPortError};
     for seconds in [-62_135_596_801, 253_402_300_800] {
         let f = Fixture::new().await?;
         let invalid = chrono::Utc
