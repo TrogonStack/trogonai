@@ -1,14 +1,21 @@
+use trogon_decider_runtime::CommandAuthorizer as _;
+use trogon_decider_runtime::CommandPrincipal;
+use trogon_decider_runtime::PrincipalId;
+use trogon_decider_runtime::PrincipalKind;
+use trogon_peer::PeerId;
+use trogon_peer::SealedContentRef;
+use trogon_peer_service::ContentBinding;
+use trogon_peer_service::ContentOpen as _;
+use trogon_peer_service::ContentSeal as _;
+use trogon_peer_service::MessageText;
+use trogon_peer_service::PeerAccess;
+use trogon_peer_service::PeerOperation;
+use trogon_peer_service::PeerPortError;
 use trogon_peer_service::test_support::Fixture;
 type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 #[tokio::test]
 async fn content_ports_preserve_semantics_but_verify_storage_integrity_and_scope_independently() -> TestResult {
-    use trogon_decider_runtime::{CommandAuthorizer as _, CommandPrincipal, PrincipalId, PrincipalKind};
-    use trogon_peer::{PeerId, SealedContentRef};
-    use trogon_peer_service::{
-        ContentBinding, ContentOpen as _, ContentSeal as _, MessageText, PeerAccess, PeerOperation, PeerPortError,
-    };
-
     let f = Fixture::new().await?;
     let peer = PeerId::parse(f.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
     let scope = PeerAccess::new(f.alice.clone(), peer, PeerOperation::Send);
