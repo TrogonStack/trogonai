@@ -1,0 +1,16 @@
+[package]
+name = "trogon-claude-agent-sdk"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Initial public Rust API for Claude Code"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
