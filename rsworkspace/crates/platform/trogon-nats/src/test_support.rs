@@ -111,6 +111,17 @@ impl CoreTestServer {
         Self(TestServer::start(image(&NatsServerCmd::default())).await)
     }
 
+    /// Starts an isolated server with account and permission boundaries supplied by the test.
+    pub async fn start_with_config(config: &str) -> Self {
+        Self(
+            TestServer::start(
+                image(["--config", "/etc/nats/test.conf"])
+                    .with_copy_to("/etc/nats/test.conf", config.as_bytes().to_vec()),
+            )
+            .await,
+        )
+    }
+
     /// Starts the pinned NATS image so it turns away every client that does not
     /// present `token`.
     pub async fn start_requiring_token(token: &str) -> Self {
