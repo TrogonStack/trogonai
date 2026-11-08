@@ -23,3 +23,6 @@ pub(crate) fn finding_inside_surface(finding: &Finding, surface: &EditableSurfac
         None => false,
     }
 }
+
+#[cfg(test)]
+mod tests;
