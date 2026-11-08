@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 
+[features]
+test-support = ["dep:serde_json", "dep:nkeys", "dep:tempfile", "dep:futures", "trogon-nats/test-support", "trogon-peer-service/test-support"]
+
 [lints]
 workspace = true
 
@@ -21,7 +24,13 @@ trogon-decider-nats = { workspace = true }
 trogon-nats = { path = "../../platform/trogon-nats" }
 trogon-peer = { path = "../trogon-peer" }
 
+serde_json = { workspace = true, optional = true }
+nkeys = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+
 [dev-dependencies]
+trogon-peer-nats = { path = ".", features = ["test-support"] }
 nkeys = { workspace = true }
 tempfile = { workspace = true }
 trogon-peer-service = { path = "../trogon-peer-service", features = ["test-support"] }

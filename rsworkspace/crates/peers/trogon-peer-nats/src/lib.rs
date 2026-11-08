@@ -55,3 +55,6 @@ mod rpc_serve_error;
 mod rpc_server;
 pub use rpc_serve_error::PeerRpcServeError;
 pub use rpc_server::serve_peer_rpc;
+
+#[cfg(feature = "test-support")]
+pub mod test_support;
