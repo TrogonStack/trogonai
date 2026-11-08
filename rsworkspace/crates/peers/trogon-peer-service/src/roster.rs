@@ -77,6 +77,15 @@ where
             let live = state.attachment.status.and_then(|v| v.as_known())
                 == Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
                 && now < expires;
+            if !(-62_135_596_800..=253_402_300_799).contains(&now.timestamp())
+                || now.timestamp_subsec_nanos() >= 1_000_000_000
+            {
+                return Err(PeerApplicationError::Evidence(trogon_peer::MessageError::InvalidState(
+                    trogon_peer::EvolveError::TimestampRange {
+                        field: "presence.observed_at",
+                    },
+                )));
+            }
             peers.push(proto::PeerPresence {
                 peer_id: state.enrollment.peer_id.clone(),
                 display_name: state.enrollment.display_name.clone(),
