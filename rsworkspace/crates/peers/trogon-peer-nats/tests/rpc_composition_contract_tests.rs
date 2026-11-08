@@ -15,6 +15,36 @@ use trogon_peer_service::{PeerService, WorkLimit};
 use trogonai_proto::google::rpc::Code;
 use trogonai_proto::peers::v1alpha1 as proto;
 
+macro_rules! invalid {
+    ($backend:expr, $request:ty, $value:expr, $owner:expr) => {
+        assert_fault(
+            PeerRpcOperation::<$request>::execute($backend, $owner, $value).await,
+            Code::INVALID_ARGUMENT,
+            "invalid peer request",
+        );
+    };
+}
+
+macro_rules! denied {
+    ($backend:expr, $request:ty, $value:expr, $owner:expr) => {
+        assert_fault(
+            PeerRpcOperation::<$request>::execute($backend, $owner, $value).await,
+            Code::PERMISSION_DENIED,
+            "peer operation denied",
+        );
+    };
+}
+
+macro_rules! fenced {
+    ($backend:expr, $request:ty, $value:expr, $owner:expr) => {
+        assert_fault(
+            PeerRpcOperation::<$request>::execute($backend, $owner, $value).await,
+            Code::FAILED_PRECONDITION,
+            "peer precondition failed",
+        );
+    };
+}
+
 type Adapter = PeerRpcApplication<
     StoreFixture,
     PolicyFixture,
@@ -365,28 +395,20 @@ async fn real_rpc_adapters_reject_invalid_values_and_denied_operations_without_p
     invalid_send.idempotency_key = Some(String::new());
     let mut invalid_prepare = prepare(&f.b);
     invalid_prepare.prompt_id = Some("invalid\nprompt".to_owned());
-    macro_rules! invalid {
-        ($request:ty, $value:expr, $owner:expr) => {
-            assert_fault(
-                PeerRpcOperation::<$request>::execute(&backend, $owner, $value).await,
-                Code::INVALID_ARGUMENT,
-                "invalid peer request",
-            );
-        };
-    }
-    invalid!(proto::HeartbeatRequest, invalid_heartbeat, &f.alice);
+    invalid!(&backend, proto::HeartbeatRequest, invalid_heartbeat, &f.alice);
     invalid!(
+        &backend,
         proto::DetachRequest,
         proto::DetachRequest {
             attachment_ref: invalid_reference.into()
         },
         &f.alice
     );
-    invalid!(proto::RosterRequest, invalid_roster, &f.alice);
-    invalid!(proto::SendRequest, invalid_send, &f.alice);
-    invalid!(proto::StatusRequest, status(&f.a, ""), &f.alice);
-    invalid!(proto::PrepareBatchRequest, invalid_prepare, &f.bob);
-    invalid!(proto::AcknowledgeBatchRequest, acknowledge(&f.b, ""), &f.bob);
+    invalid!(&backend, proto::RosterRequest, invalid_roster, &f.alice);
+    invalid!(&backend, proto::SendRequest, invalid_send, &f.alice);
+    invalid!(&backend, proto::StatusRequest, status(&f.a, ""), &f.alice);
+    invalid!(&backend, proto::PrepareBatchRequest, invalid_prepare, &f.bob);
+    invalid!(&backend, proto::AcknowledgeBatchRequest, acknowledge(&f.b, ""), &f.bob);
     let mut oversized_roster = roster(&f.a);
     oversized_roster.page_size = Some(65);
     assert_fault(
@@ -397,28 +419,25 @@ async fn real_rpc_adapters_reject_invalid_values_and_denied_operations_without_p
     assert_eq!(effects(&f), before);
 
     f.policy.deny.store(true, Ordering::SeqCst);
-    macro_rules! denied {
-        ($request:ty, $value:expr, $owner:expr) => {
-            assert_fault(
-                PeerRpcOperation::<$request>::execute(&backend, $owner, $value).await,
-                Code::PERMISSION_DENIED,
-                "peer operation denied",
-            );
-        };
-    }
-    denied!(proto::HeartbeatRequest, heartbeat(&f.a), &f.alice);
+    denied!(&backend, proto::HeartbeatRequest, heartbeat(&f.a), &f.alice);
     denied!(
+        &backend,
         proto::DetachRequest,
         proto::DetachRequest {
             attachment_ref: f.a.clone().into()
         },
         &f.alice
     );
-    denied!(proto::RosterRequest, roster(&f.a), &f.alice);
-    denied!(proto::SendRequest, f.send("denied-send", "body"), &f.alice);
-    denied!(proto::StatusRequest, status(&f.a, "missing"), &f.alice);
-    denied!(proto::PrepareBatchRequest, prepare(&f.b), &f.bob);
-    denied!(proto::AcknowledgeBatchRequest, acknowledge(&f.b, "missing"), &f.bob);
+    denied!(&backend, proto::RosterRequest, roster(&f.a), &f.alice);
+    denied!(&backend, proto::SendRequest, f.send("denied-send", "body"), &f.alice);
+    denied!(&backend, proto::StatusRequest, status(&f.a, "missing"), &f.alice);
+    denied!(&backend, proto::PrepareBatchRequest, prepare(&f.b), &f.bob);
+    denied!(
+        &backend,
+        proto::AcknowledgeBatchRequest,
+        acknowledge(&f.b, "missing"),
+        &f.bob
+    );
     assert_eq!(effects(&f), before);
     f.policy.deny.store(false, Ordering::SeqCst);
     PeerRpcOperation::<proto::HeartbeatRequest>::execute(&backend, &f.alice, heartbeat(&f.a))
@@ -499,32 +518,35 @@ async fn real_replacement_fences_every_rpc_operation_and_preserves_the_pending_a
     let sender_before = f.history(&peer(&f.a)).await?;
     let recipient_before = f.history(&peer(&f.b)).await?;
     let before = effects(&f);
-    macro_rules! fenced {
-        ($request:ty, $value:expr, $owner:expr) => {
-            assert_fault(
-                PeerRpcOperation::<$request>::execute(&backend, $owner, $value).await,
-                Code::FAILED_PRECONDITION,
-                "peer precondition failed",
-            );
-        };
-    }
-    fenced!(proto::HeartbeatRequest, heartbeat(&f.a), &f.alice);
+    fenced!(&backend, proto::HeartbeatRequest, heartbeat(&f.a), &f.alice);
     fenced!(
+        &backend,
         proto::DetachRequest,
         proto::DetachRequest {
             attachment_ref: f.a.clone().into()
         },
         &f.alice
     );
-    fenced!(proto::RosterRequest, roster(&f.a), &f.alice);
+    fenced!(&backend, proto::RosterRequest, roster(&f.a), &f.alice);
     fenced!(
+        &backend,
         proto::SendRequest,
         f.send("fenced-exchange", "retained fenced context"),
         &f.alice
     );
-    fenced!(proto::StatusRequest, status(&f.a, "fenced-exchange"), &f.alice);
-    fenced!(proto::PrepareBatchRequest, prepare(&f.b), &f.bob);
-    fenced!(proto::AcknowledgeBatchRequest, acknowledge(&f.b, &batch_id), &f.bob);
+    fenced!(
+        &backend,
+        proto::StatusRequest,
+        status(&f.a, "fenced-exchange"),
+        &f.alice
+    );
+    fenced!(&backend, proto::PrepareBatchRequest, prepare(&f.b), &f.bob);
+    fenced!(
+        &backend,
+        proto::AcknowledgeBatchRequest,
+        acknowledge(&f.b, &batch_id),
+        &f.bob
+    );
     let after = effects(&f);
     assert_eq!(after.appends, before.appends);
     assert_eq!(after.content, before.content);
