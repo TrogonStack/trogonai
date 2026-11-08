@@ -1115,3 +1115,154 @@ async fn rejected_settlement_preserves_the_authoritative_receipt_for_a_later_aut
     assert_eq!(recovered.dispositions, disposed.dispositions);
     Ok(())
 }
+
+#[tokio::test]
+async fn unimplemented_operations_return_typed_errors_without_calling_ports() -> TestResult {
+    use trogon_peer_service::PeerApplicationError;
+    let f = Fixture::new().await?;
+    let app = f.app();
+    let before = (
+        f.store.reads.load(Ordering::SeqCst),
+        f.store.appends.load(Ordering::SeqCst),
+    );
+    assert!(matches!(
+        app.prepare_batch(&f.bob, Default::default()).await,
+        Err(PeerApplicationError::NotImplemented)
+    ));
+    assert!(matches!(
+        app.acknowledge_batch(&f.bob, Default::default()).await,
+        Err(PeerApplicationError::NotImplemented)
+    ));
+    assert!(matches!(
+        app.roster(&f.bob, Default::default()).await,
+        Err(PeerApplicationError::NotImplemented)
+    ));
+    assert_eq!(
+        (
+            f.store.reads.load(Ordering::SeqCst),
+            f.store.appends.load(Ordering::SeqCst)
+        ),
+        before
+    );
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_preparation_receipts_drive_status_and_preserve_the_exact_presentation_record() -> TestResult {
+    use trogon_decider_runtime::{CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind};
+    use trogon_peer::{
+        AcceptedMessage, AcknowledgeBatch, AttachmentRef, BatchId, ConnectorId, IntakeMessage, MessageId, PeerId,
+        PrepareBatch, TrustedBatchPlan,
+    };
+    use trogon_peer_service::{
+        PeerClock, PeerPortError, PreparedPresentation, PresentationInsert, PresentationKey, PresentationRead,
+    };
+    let f = Fixture::new().await?;
+    let body = "presentation <body>";
+    let sent = f.app().send(&f.alice, f.send("presentation_status", body)).await?;
+    let metadata = sent.message.as_option().ok_or(PeerPortError::Integrity)?.clone();
+    let id = MessageId::new(metadata.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let sender = PeerId::parse(metadata.sender_peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let recipient = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let reference = AttachmentRef::new(
+        recipient.clone(),
+        ConnectorId::new(f.b.connector_id.clone().ok_or(PeerPortError::Integrity)?)?,
+        f.b.generation.ok_or(PeerPortError::Integrity)?,
+    )?;
+    let evidence = AcceptedMessage::from_sender_history(&service_coverage_public_history(&f, &sender).await?, &id)?;
+    let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(f.bob.caller().as_str())?);
+    CommandExecution::new(&f.store, &IntakeMessage::new(evidence, f.clock.now()))
+        .with_principal(principal.clone())
+        .with_authorizer(&f.policy)
+        .execute()
+        .await?;
+    let batch_id = BatchId::new("presentation_batch")?;
+    let draft_batch = proto::PeerBatch {
+        batch_id: Some(batch_id.as_str().to_owned()),
+        message_ids: vec![id.as_str().to_owned()],
+        prepared_at: trogonai_proto::convert::timestamp_from_datetime(&f.clock.now()).into(),
+        ..Default::default()
+    };
+    let messages = vec![proto::PreparedMessage {
+        metadata: metadata.into(),
+        text: Some(body.into()),
+    }];
+    let frame = trogon_peer_context::PeerContext::render(&draft_batch, &messages)?;
+    let plan = TrustedBatchPlan::from_renderer(vec![id], frame.as_str().len())?;
+    let prepared = CommandExecution::new(
+        &f.store,
+        &PrepareBatch::new(f.bob.clone(), reference.clone(), batch_id.clone(), plan, f.clock.now()),
+    )
+    .with_principal(principal.clone())
+    .with_authorizer(&f.policy)
+    .execute()
+    .await?
+    .state;
+    let batch = prepared.batches.first().ok_or(PeerPortError::Integrity)?.clone();
+    let record = PreparedPresentation::from_port(batch.clone(), messages.clone(), frame.as_str().to_owned());
+    let key = PresentationKey::new(f.bob.tenant().clone(), recipient.clone(), batch_id.clone());
+    f.cache.insert(&key, &record).await?;
+    let restored = f.cache.read(&key).await?.ok_or(PeerPortError::Integrity)?;
+    assert_eq!(restored.batch(), &batch);
+    assert_eq!(restored.messages(), messages.as_slice());
+    assert_eq!(restored.frame(), frame.as_str());
+    assert_eq!(key.tenant(), f.bob.tenant());
+    assert_eq!(key.peer(), &recipient);
+    assert_eq!(key.batch(), &batch_id);
+    let foreign_key = PresentationKey::new(f.bob.tenant().clone(), sender.clone(), batch_id.clone());
+    assert!(f.cache.read(&foreign_key).await?.is_none());
+    let status_request = proto::StatusRequest {
+        attachment_ref: f.a.clone().into(),
+        idempotency_key: Some("presentation_status".into()),
+    };
+    let status = f.app().status(&f.alice, status_request.clone()).await?;
+    assert_eq!(
+        status.status.and_then(|status| status.as_known()),
+        Some(proto::MessageStatus::MESSAGE_STATUS_BATCH_PREPARED)
+    );
+    CommandExecution::new(
+        &f.store,
+        &AcknowledgeBatch::new(f.bob.clone(), reference, batch_id, f.clock.now()),
+    )
+    .with_principal(principal)
+    .with_authorizer(&f.policy)
+    .execute()
+    .await?;
+    let status = f.app().status(&f.alice, status_request).await?;
+    assert_eq!(
+        status.status.and_then(|status| status.as_known()),
+        Some(proto::MessageStatus::MESSAGE_STATUS_APPLICATION_ACKNOWLEDGED)
+    );
+    assert!(
+        !service_coverage_public_history(&f, &sender).await?.outbox[0]
+            .settlement
+            .is_set()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_granted_recipient_in_another_collaboration_is_rejected_before_sealing() -> TestResult {
+    let (f, sender, _) = independent_cross_collaboration_fixture().await?;
+    let history = service_coverage_public_history(&f, &sender).await?;
+    let recipient = trogon_peer::PeerId::parse(
+        history.outbox[0]
+            .message
+            .recipient_peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let mut request = f.send("cross_collaboration_send", "private body");
+    request.recipient_peer_id = Some(recipient.as_str().to_owned());
+    let content_calls = f.content.calls.load(Ordering::SeqCst);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app().send(&f.alice, request).await,
+        Err(trogon_peer_service::PeerApplicationError::Scope)
+    ));
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    Ok(())
+}
