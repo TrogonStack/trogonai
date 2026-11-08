@@ -12,7 +12,11 @@ type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 async fn startup_budget_includes_a_delayed_configuration_source() -> TestResult {
     let directory = tempfile::tempdir()?;
     let source = directory.path().join("delayed-source");
-    let created = std::process::Command::new("mkfifo").arg("-m").arg("600").arg(&source).status()?;
+    let created = std::process::Command::new("mkfifo")
+        .arg("-m")
+        .arg("600")
+        .arg(&source)
+        .status()?;
     assert!(created.success(), "could not create bounded delayed source");
     let mut writer = std::fs::OpenOptions::new().read(true).write(true).open(&source)?;
     let env = InMemoryEnv::new();
@@ -38,9 +42,12 @@ async fn startup_budget_includes_a_delayed_configuration_source() -> TestResult 
     };
     let (outcome, released) = tokio::time::timeout(Duration::from_secs(4), async {
         tokio::join!(run_stdio(config, std::future::pending()), release_source)
-    }).await?;
+    })
+    .await?;
     released?;
-    assert!(matches!(outcome, Err(RuntimeError::StartupDeadline)),
-        "configuration loading escaped the two-second startup budget: {outcome:?}");
+    assert!(
+        matches!(outcome, Err(RuntimeError::StartupDeadline)),
+        "configuration loading escaped the two-second startup budget: {outcome:?}"
+    );
     Ok(())
 }
