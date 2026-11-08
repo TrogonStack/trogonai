@@ -1,0 +1,41 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "trogonai/platform/audit/v1/gateway_surface.proto";
+import "trogonai/platform/audit/v1/layer_verdict.proto";
+import "trogonai/platform/audit/v1/tls_mode.proto";
+import "trogonai/session/sessions/v1alpha1/session_id.proto";
+
+// GatewayDecision is the detail of a request an enforcing point admitted or
+// refused.
+//
+// Sizes replace content: nothing here has a type that could hold a prompt, a
+// tool argument, a header value or a body, and a digest of caller-supplied
+// content is not recorded because an unkeyed digest of low-entropy content is a
+// confirmation oracle.
+message GatewayDecision {
+  GatewaySurface surface = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The method or destination as a registry-style name. A name, never a
+  // payload.
+  string target = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  uint64 request_bytes = 3;
+  uint64 response_bytes = 4;
+  google.protobuf.Duration latency = 5 [(buf.validate.field).duration.gte = {}];
+  // Egress only; unspecified on a surface with no TLS leg.
+  TlsMode tls_mode = 6 [(buf.validate.field).enum.defined_only = true];
+  repeated LayerVerdict layer_verdicts = 7;
+  // The Session the decision was made for, taken from the certificate on egress.
+  trogonai.session.sessions.v1alpha1.SessionId session = 8;
+}

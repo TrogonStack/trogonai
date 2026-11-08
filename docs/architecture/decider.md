@@ -302,9 +302,29 @@ nothing else, never the target stream or its replayed state. That is deliberate:
 must read stream state to decide is expressing a domain rule, and a domain rule belongs in
 `decide`.
 
-Only the seam ships. The ingress half of [ADR#0026](../adr/0026-command-authorization-principal.md), which would map a verified AAuth credential
-onto a `CommandPrincipal`, does not exist yet, so nothing in this crate family populates a
-principal on its own.
+The runtime ships only the seam; the NATS host is where a principal comes from. Per
+[ADR#0082](../adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md),
+`trogon-decider-nats-server` subscribes on `{prefix}.*.*.DeciderService.Decide` and
+reads the principal from the `{kind}.{id}` tokens of the subject the server delivered, before it
+decodes the request. A pair of tokens that names no principal is refused with `UNAUTHENTICATED`
+and `PRINCIPAL_MISSING`, and a subject without those tokens matches no subscription at all, so
+no header or payload field can stand in for them. The derived principal carries no claims and no
+directed principal, because the subject has no position for either. A client acting for a
+principal configures a `PrincipalPrefix`, the host's prefix followed by that principal's tokens.
+An id that cannot be one subject token travels in the hashed form every edge maps it to, and that
+hashed token is the id the host derives and an authorizer sees.
+
+A host serves one tenant account until decider state is scoped by tenant. The derived principal
+carries no tenant, and every command a host runs shares its one events stream and snapshot
+bucket, so a host serving several tenants would let one tenant's commands replay and append to
+another tenant's streams. `DeciderHost::start` therefore refuses `DECIDER_TENANT_POSITION=wildcard`
+before it fetches or provisions anything, and nothing overrides that refusal.
+
+Every execution the host runs is built with `with_principal` and `with_authorizer`. A host given
+no policy of its own authorizes with `AdmitAnyPrincipal`, which admits any derived principal and,
+through the trait's default, refuses an execution that has none; `DeciderHost::with_authorizer`
+replaces it, and a denial answers `PERMISSION_DENIED` with `PRINCIPAL_UNAUTHORIZED`. Execution
+paths the host does not serve still populate no principal on their own.
 
 ### Snapshot policy and failure recovery
 
@@ -756,9 +776,10 @@ Accepted and reflected in the platform as built:
 - [ADR#0013: Origin Stream Sequence Header](../adr/0013-origin-stream-sequence-header.md):
   the `Trogon-Origin-Stream-Sequence` header described under Headers above.
 - [ADR#0026: Command Authorization Principal](../adr/0026-command-authorization-principal.md):
-  the `CommandAuthorizer` seam described under Authorization above. Only the seam is built. The
-  ingress half, which would derive a principal from a verified credential, is not, so no
-  principal reaches an execution unless a caller puts one there.
+  the `CommandAuthorizer` seam described under Authorization above. The NATS host derives the
+  principal from the subject, per
+  [ADR#0082](../adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md) below; on
+  every other execution path no principal reaches an execution unless a caller puts one there.
 - [ADR#0028: Decider Admission Control and Backpressure](../adr/0028-decider-admission-control-and-backpressure.md):
   the `CommandAdmission` seam described under Admission control above. The shared crates own
   the seam and one implementation; no bound is chosen anywhere in the decider stack, so a host
@@ -767,6 +788,11 @@ Accepted and reflected in the platform as built:
   the read-only watermark described under Retention watermarks above. The purge that would
   consume it is an explicit Non-Goal there and does not exist; no code in this crate family
   truncates anything.
+- [ADR#0082: Inside the Bus the Principal Is Derived from the Subject, and Proof of Possession Is Enforced Only at the External Edge](../adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md):
+  the decider host's half, described under Authorization above. The host reads the principal
+  from the subject and authorizes every execution it runs. The edge that verifies proof of
+  possession and the grants that confine a caller to its own principal tokens live outside this
+  crate family.
 
 Draft, **not yet implemented**; do not treat these as current behavior:
 

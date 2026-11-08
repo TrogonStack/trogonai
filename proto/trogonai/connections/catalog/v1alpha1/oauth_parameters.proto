@@ -1,0 +1,78 @@
+edition = "2024";
+
+package trogonai.connections.catalog.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Immutable, reviewed public constants supplied by the release, never caller
+// input, secret material or personal data. A release cannot override protocol
+// fields generated from the attempt, app or credential. The broker rejects a
+// collision before building the URL or form and never uses last-value-wins.
+message OAuthRequestParameters {
+  option (buf.validate.message).cel = {
+    id: "oauth_request_parameters.unique_authorization_names"
+    message: "authorization parameter names must be unique"
+    expression: "this.authorization.map(p, p.key).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "oauth_request_parameters.unique_exchange_names"
+    message: "code exchange parameter names must be unique"
+    expression: "this.code_exchange.map(p, p.key).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "oauth_request_parameters.unique_refresh_names"
+    message: "refresh parameter names must be unique"
+    expression: "this.refresh.map(p, p.key).unique()"
+  };
+
+  repeated OAuthFixedParameter authorization = 1 [(buf.validate.field).repeated.max_items = 32];
+  repeated OAuthFixedParameter code_exchange = 2 [(buf.validate.field).repeated.max_items = 32];
+  repeated OAuthFixedParameter refresh = 3 [(buf.validate.field).repeated.max_items = 32];
+}
+
+// Lowercase keys avoid case and duplicate interpretation differences. Values
+// are percent-encoded once as data, never interpolated into a raw URL or form.
+message OAuthFixedParameter {
+  string key = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      pattern: "^[a-z][a-z0-9_]{0,63}$"
+      not_in: [
+        "access_token",
+        "assertion",
+        "authorization_details",
+        "client_assertion",
+        "client_assertion_type",
+        "client_id",
+        "client_secret",
+        "code",
+        "code_challenge",
+        "code_challenge_method",
+        "code_verifier",
+        "grant_type",
+        "id_token_hint",
+        "login_hint",
+        "nonce",
+        "password",
+        "redirect_uri",
+        "refresh_token",
+        "request",
+        "request_uri",
+        "resource",
+        "response_mode",
+        "response_type",
+        "scope",
+        "state",
+        "token",
+        "username"
+      ]
+    }
+  ];
+  string value = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      max_len: 1024
+      pattern: "^[^\\x00-\\x1f\\x7f]*$"
+    }
+  ];
+}
