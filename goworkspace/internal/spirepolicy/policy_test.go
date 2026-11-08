@@ -78,11 +78,45 @@ func admitted(policy map[string]any, pod map[string]any) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if value != types.True {
+		verdict, ok := value.(types.Bool)
+		if !ok {
+			return false, fmt.Errorf("validation expression returned %T, want bool", value)
+		}
+		if verdict != types.True {
 			return false, nil
 		}
 	}
 	return true, nil
+}
+
+func TestAdmissionValidationsRequireBooleanResults(t *testing.T) {
+	for _, example := range []struct {
+		name, expression   string
+		allowed, wantError bool
+	}{
+		{name: "true", expression: "true", allowed: true},
+		{name: "false", expression: "false"},
+		{name: "integer", expression: "1", wantError: true},
+		{name: "double", expression: "1.5", wantError: true},
+		{name: "string", expression: "'denied'", wantError: true},
+		{name: "null", expression: "null", wantError: true},
+		{name: "list", expression: "[]", wantError: true},
+		{name: "map", expression: "{}", wantError: true},
+	} {
+		t.Run(example.name, func(t *testing.T) {
+			policy := map[string]any{"spec": map[string]any{
+				"variables":   []any{},
+				"validations": []any{map[string]any{"expression": example.expression}},
+			}}
+			allowed, err := admitted(policy, map[string]any{})
+			if (err != nil) != example.wantError {
+				t.Fatalf("validation %q: allowed=%v, error=%v; want error=%v", example.expression, allowed, err, example.wantError)
+			}
+			if allowed != example.allowed {
+				t.Fatalf("validation %q: admitted=%v, want %v", example.expression, allowed, example.allowed)
+			}
+		})
+	}
 }
 
 func TestSocketAdmissionBoundaryRequiresCompleteFixture(t *testing.T) {
