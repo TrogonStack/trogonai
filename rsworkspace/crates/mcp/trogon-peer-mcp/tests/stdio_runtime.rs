@@ -58,7 +58,7 @@ impl StdioPeer {
         let request: CallToolRequestParams = serde_json::from_value(json!({"name":name,"arguments":arguments}))?;
         let result: CallToolResult = self.client.call_tool(request).await?;
         let value = serde_json::to_value(result)?;
-        assert_ne!(value["isError"], true, "MCP operation failed");
+        assert_ne!(value["isError"], true, "MCP operation {name} failed: {value}");
         let text = value["content"]
             .as_array()
             .and_then(|values| values.first())
@@ -252,8 +252,12 @@ async fn executable_session_recovers_after_two_failed_authenticated_reconnects()
     observed_barrier(&service).await?;
     let mut proxy = BrokerOutage::start(broker.server.address()).await?;
     let alice = StdioPeer::start_at(&broker, "alice", "one", &proxy.address).await?;
+    let bob = StdioPeer::start(&broker, "bob", "one").await?;
+    bob.prompt("bob", "catalog_member").await?;
     let recovered: TestResult = async {
         alice.prompt("alice", "before_outage").await?;
+        let before = alice.call("peer_roster", json!({})).await?;
+        assert_eq!(before["peers"].as_array().ok_or("roster absent")?.len(), 2);
         for prompt in ["after_first_outage", "after_second_outage"] {
             proxy
                 .disconnect
@@ -262,13 +266,19 @@ async fn executable_session_recovers_after_two_failed_authenticated_reconnects()
                 .map_err(|_| "fixture relay closed before outage")?;
             tokio::time::timeout(Duration::from_secs(12), proxy.recovered.recv())
                 .await
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::TimedOut,
-                    format!("authenticated session stopped reconnecting after a rejected dial: {error}")))?
+                .map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!("authenticated session stopped reconnecting after a rejected dial: {error}"),
+                    )
+                })?
                 .ok_or("session stopped reconnecting before the broker recovered")?;
-            alice.call("peer_roster", json!({})).await?;
+            assert_eq!(alice.call("peer_roster", json!({})).await?, before,
+                "the same authenticated session must retain its roster after recovery");
             alice.prompt("alice", prompt).await?;
         }
         alice.finish().await?;
+        bob.finish().await?;
         Ok(())
     }
     .await;
@@ -280,5 +290,43 @@ async fn executable_session_recovers_after_two_failed_authenticated_reconnects()
     recovered?;
     relay??;
     stopped?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn executable_reports_uncertain_shutdown_when_bound_detach_has_no_service() -> TestResult {
+    let broker = Broker::start().await?;
+    let (service, _) = broker.connect("service").await?;
+    let fixture = Fixture::new().await?;
+    let store = PeerJetStreamStore::open(
+        async_nats::jetstream::new(service.clone()),
+        &PeerStoreConfig::new(PeerTenant::new("tenant")?, PeerStorageBudget::new(16_777_216)?),
+    )
+    .await?;
+    let registration = serve_peer_rpc(&service, account()?, application::compose(store, &fixture)).await?;
+    observed_barrier(&service).await?;
+    let peer = StdioPeer::start(&broker, "alice", "one").await?;
+    peer.prompt("alice", "before_service_stops").await?;
+    registration.stop().await?;
+    observed_barrier(&service).await?;
+    tokio::time::timeout(Duration::from_secs(3), peer.client.cancel()).await??;
+    let output = tokio::time::timeout(Duration::from_secs(3), peer.child.wait_with_output()).await??;
+    assert!(
+        !output.status.success(),
+        "unconfirmed detach was reported as a successful exit"
+    );
+    let diagnostic = String::from_utf8(output.stderr)?;
+    assert!(
+        diagnostic.contains("remote outcomes remain uncertain"),
+        "shutdown uncertainty was not reported"
+    );
+    assert!(
+        !diagnostic.contains("Peer connector could not start."),
+        "bound detach failure was labeled startup"
+    );
+    assert!(
+        !diagnostic.contains("alice"),
+        "shutdown diagnostic exposed caller routing"
+    );
     Ok(())
 }

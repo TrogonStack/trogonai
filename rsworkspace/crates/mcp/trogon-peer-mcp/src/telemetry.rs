@@ -21,3 +21,7 @@ pub(crate) fn invalid_settings() {
 pub(crate) fn unconfirmed_shutdown() {
     tracing::warn!(target: "peer_connector", "Peer connector stopped without confirming clean shutdown; remote outcomes remain uncertain.");
 }
+
+pub(crate) fn startup_failure() {
+    tracing::warn!(target: "peer_connector", "Peer connector could not start.");
+}

@@ -2,7 +2,7 @@ mod telemetry;
 
 use std::process::ExitCode;
 
-use trogon_peer_mcp::{RuntimeConfig, run_stdio};
+use trogon_peer_mcp::{RuntimeConfig, RuntimeError, run_stdio};
 use trogon_std::env::SystemEnv;
 
 #[tokio::main]
@@ -17,8 +17,17 @@ async fn main() -> ExitCode {
     };
     match run_stdio(config, shutdown_signal()).await {
         Ok(()) => ExitCode::SUCCESS,
-        Err(_) => {
-            telemetry::unconfirmed_shutdown();
+        Err(error) => {
+            match error {
+                RuntimeError::StartupDeadline
+                | RuntimeError::Connect(_)
+                | RuntimeError::ConnectReady(_)
+                | RuntimeError::Configure(_)
+                | RuntimeError::Initialize(_) => telemetry::startup_failure(),
+                RuntimeError::Connector(_) | RuntimeError::Shutdown(_) | RuntimeError::ShutdownDeadline => {
+                    telemetry::unconfirmed_shutdown()
+                }
+            }
             ExitCode::FAILURE
         }
     }
