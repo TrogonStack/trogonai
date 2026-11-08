@@ -20,11 +20,13 @@ use crate::runtime_config::RuntimeConfig;
 use crate::runtime_error::RuntimeError;
 
 pub async fn run_stdio<F: Future<Output = ()> + Send>(config: RuntimeConfig, shutdown: F) -> Result<(), RuntimeError> {
-    let connection = trogon_nats::connect_once(config.nats(), config.nats().auth.clone(), Duration::from_secs(2));
-    let client = tokio::time::timeout(Duration::from_secs(2), connection)
+    let client = trogon_nats::connect(config.nats(), Duration::from_secs(2))
+        .await
+        .map_err(RuntimeError::Connect)?;
+    tokio::time::timeout(Duration::from_secs(2), client.flush())
         .await
         .map_err(|_| RuntimeError::StartupDeadline)?
-        .map_err(RuntimeError::Connect)?;
+        .map_err(|error| RuntimeError::ConnectReady(Box::new(error)))?;
     let rpc = PeerRpcClient::new(
         PeerRequester::new(client.clone(), config.requester().clone()),
         ContentType::Protobuf,

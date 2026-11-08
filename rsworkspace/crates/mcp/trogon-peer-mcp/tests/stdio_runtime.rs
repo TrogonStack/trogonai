@@ -273,8 +273,11 @@ async fn executable_session_recovers_after_two_failed_authenticated_reconnects()
                     )
                 })?
                 .ok_or("session stopped reconnecting before the broker recovered")?;
-            assert_eq!(alice.call("peer_roster", json!({})).await?, before,
-                "the same authenticated session must retain its roster after recovery");
+            assert_eq!(
+                alice.call("peer_roster", json!({})).await?,
+                before,
+                "the same authenticated session must retain its roster after recovery"
+            );
             alice.prompt("alice", prompt).await?;
         }
         alice.finish().await?;
