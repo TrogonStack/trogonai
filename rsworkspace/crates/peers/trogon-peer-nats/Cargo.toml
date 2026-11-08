@@ -22,6 +22,8 @@ trogon-nats = { path = "../../platform/trogon-nats" }
 trogon-peer = { path = "../trogon-peer" }
 
 [dev-dependencies]
+nkeys = { workspace = true }
+tempfile = { workspace = true }
 trogon-peer-service = { path = "../trogon-peer-service", features = ["test-support"] }
 futures = { workspace = true }
 serde_json = { workspace = true }
