@@ -24,3 +24,6 @@ impl ClaudeSdkClient {
         Err(Error::NotImplemented)
     }
 }
+
+#[cfg(test)]
+mod tests;
