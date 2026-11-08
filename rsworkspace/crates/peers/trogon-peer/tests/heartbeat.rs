@@ -25,7 +25,7 @@ fn attachment(
     now: DateTime<Utc>,
 ) -> proto::PeerAttachment {
     proto::PeerAttachment {
-        attachment: MessageField::some(proto::AttachmentRef {
+        attachment_ref: MessageField::some(proto::AttachmentRef {
             peer_id: Some(identity.peer_id().to_string()),
             connector_id: Some(connector.to_owned()),
             generation: Some(generation),

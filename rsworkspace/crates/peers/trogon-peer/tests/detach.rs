@@ -25,7 +25,7 @@ fn attachment(
     now: DateTime<Utc>,
 ) -> proto::PeerAttachment {
     proto::PeerAttachment {
-        attachment: MessageField::some(proto::AttachmentRef {
+        attachment_ref: MessageField::some(proto::AttachmentRef {
             peer_id: Some(identity.peer_id().to_string()),
             connector_id: Some(connector.to_owned()),
             generation: Some(generation),
@@ -75,7 +75,7 @@ fn command(connector: &str, generation: u64, now: DateTime<Utc>) -> Detach {
 fn detached_state(mut before: PeerState, now: DateTime<Utc>) -> PeerState {
     let previous = before.attachment.as_option().unwrap();
     before.attachment = MessageField::some(proto::PeerAttachment {
-        attachment: previous.attachment.clone(),
+        attachment_ref: previous.attachment_ref.clone(),
         status: Some(proto::AttachmentStatus::ATTACHMENT_STATUS_DETACHED.into()),
         observed_at: MessageField::some(timestamp_from_datetime(&now)),
         expires_at: MessageField::some(timestamp_from_datetime(&now)),
@@ -94,7 +94,7 @@ fn detach_retires_only_its_attachment_and_preserves_durable_peer_state() {
         .then([proto::PeerEvent {
             event: Some(
                 proto::PeerDetached {
-                    attachment: before.attachment.attachment.clone(),
+                    attachment_ref: before.attachment.attachment_ref.clone(),
                     detached_at: MessageField::some(timestamp_from_datetime(&now)),
                 }
                 .into(),
@@ -136,7 +136,7 @@ fn detached_attachment_can_be_replaced_without_waiting_for_its_old_lease() {
         .then([proto::PeerEvent {
             event: Some(
                 proto::PeerDetached {
-                    attachment: before.attachment.attachment.clone(),
+                    attachment_ref: before.attachment.attachment_ref.clone(),
                     detached_at: MessageField::some(timestamp_from_datetime(&at)),
                 }
                 .into(),
@@ -202,7 +202,7 @@ fn detach_checks_service_time_but_can_retire_its_own_expired_lease() {
         .then([proto::PeerEvent {
             event: Some(
                 proto::PeerDetached {
-                    attachment: before.attachment.attachment.clone(),
+                    attachment_ref: before.attachment.attachment_ref.clone(),
                     detached_at: MessageField::some(timestamp_from_datetime(&now)),
                 }
                 .into(),
@@ -217,12 +217,12 @@ fn detach_replay_rejects_another_generation_or_backwards_time() {
     let before = state(start);
     for mutation in 0..3 {
         let mut event = proto::PeerDetached {
-            attachment: before.attachment.attachment.clone(),
+            attachment_ref: before.attachment.attachment_ref.clone(),
             detached_at: MessageField::some(timestamp_from_datetime(&(start + chrono::Duration::seconds(1)))),
         };
         match mutation {
             0 => {
-                event.attachment = MessageField::some(proto::AttachmentRef {
+                event.attachment_ref = MessageField::some(proto::AttachmentRef {
                     peer_id: Some(identity().peer_id().to_string()),
                     connector_id: Some("old_connector".to_owned()),
                     generation: Some(2),

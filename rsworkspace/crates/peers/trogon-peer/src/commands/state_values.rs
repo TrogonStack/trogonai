@@ -8,6 +8,7 @@ use super::domain::{
     TenantId, TrustedPeerOwner,
 };
 use super::evolve_error::EvolveError;
+use super::constants::ATTACHMENT_LEASE;
 
 pub(super) fn parse_enrollment(enrollment: &proto::PeerEnrollment) -> Result<EnrollmentIdentity, EvolveError> {
     let tenant = TenantId::new(required(&enrollment.tenant_id, "enrollment.tenant_id")?).map_err(|source| {
@@ -56,9 +57,13 @@ pub(super) fn required<'a>(value: &'a Option<String>, field: &'static str) -> Re
     value.as_deref().ok_or(EvolveError::MissingField { field })
 }
 
+pub(super) fn timestamp_seconds_supported(seconds: i64) -> bool {
+    (-62_135_596_800..=253_402_300_799).contains(&seconds)
+}
+
 pub(super) fn read_time(value: Option<&Timestamp>, field: &'static str) -> Result<DateTime<Utc>, EvolveError> {
     let value = value.ok_or(EvolveError::MissingField { field })?;
-    if !(-62_135_596_800..=253_402_300_799).contains(&value.seconds) || !(0..1_000_000_000).contains(&value.nanos) {
+    if !timestamp_seconds_supported(value.seconds) || !(0..1_000_000_000).contains(&value.nanos) {
         return Err(EvolveError::TimestampRange { field });
     }
     datetime_from_timestamp(value).map_err(|source| EvolveError::InvalidTimestamp { field, source })
@@ -68,7 +73,7 @@ pub(super) fn validate_attachment(
     enrollment: &proto::PeerEnrollment,
     attachment: &proto::PeerAttachment,
 ) -> Result<(), EvolveError> {
-    let reference = attachment.attachment.as_option().ok_or(EvolveError::MissingField {
+    let reference = attachment.attachment_ref.as_option().ok_or(EvolveError::MissingField {
         field: "attachment.ref",
     })?;
     if required(&reference.peer_id, "attachment.peer_id")? != required(&enrollment.peer_id, "enrollment.peer_id")? {
@@ -91,7 +96,7 @@ pub(super) fn validate_attachment(
     }
     match attachment.status.and_then(|status| status.as_known()) {
         Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
-            if expires.signed_duration_since(observed) == chrono::Duration::seconds(10) =>
+            if expires.signed_duration_since(observed) == ATTACHMENT_LEASE =>
         {
             Ok(())
         }

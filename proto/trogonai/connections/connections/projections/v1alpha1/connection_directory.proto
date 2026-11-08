@@ -1,0 +1,147 @@
+edition = "2024";
+
+package trogonai.connections.connections.projections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/connections/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/account.proto";
+import "trogonai/connections/types/v1alpha1/authority.proto";
+import "trogonai/connections/types/v1alpha1/discovery.proto";
+import "trogonai/connections/types/v1alpha1/health.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/owner.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+import "trogonai/policy/egress_permissions/v1alpha1/permission_policy.proto";
+
+// ConnectionDirectoryEntry is the read model's own storage shape for the
+// directory that admission, the trusted executor and the trusted MCP executor
+// read on every use (ADR#0096 Decision 4, R7, R13). It is defined here so the
+// read model can evolve independently of the event and state schemas,
+// matching how the scheduler's projections own their shapes. The typed
+// references are kept rather than flattened because admission copies
+// connection_ref and granted_authority into the plan and the grant by exact
+// equality, and the two would drift if the row re-encoded them.
+//
+// One row per connection in its resource_parent project from activation;
+// Pending connections have none, so a selector that matches only a pending
+// one resolves NO_CONNECTION. The row
+// is kept through Revoked, with that lifecycle, so a plan or grant that still
+// names the connection is denied precisely rather than as missing.
+//
+// Standing is deliberately absent: release, provider app and project standing
+// are joined live from their own projections and never copied here (ADR#0092
+// Decision 10, R22). The bindings are absent too: an executor resolves
+// material through its grant, and a SecretRef in a widely read row would
+// serve nothing but a leak. The owner's label and the erasable profile are
+// absent because neither is an admission input and the second is personal
+// data (ADR#0093 Decision 11).
+message ConnectionDirectoryEntry {
+  option (buf.validate.message).cel = {
+    id: "connection_directory_entry.app_parent"
+    message: "a project app must share the connection custody parent"
+    expression: "!has(this.provider_app_ref) || has(this.provider_app_ref.resource_parent.platform) || (has(this.provider_app_ref.resource_parent.project) && this.provider_app_ref.resource_parent.project == this.resource_parent)"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "connection_directory_entry.project_owner_custody"
+    message: "a project-owned connection is in custody of its owner"
+    expression: "!has(this.owner.project) || this.owner.project.project_id == this.resource_parent.project_id"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "connection_directory_entry.resource_parent"
+    message: "the row and its connection reference have the same custody parent"
+    expression: "this.resource_parent == this.connection_ref.resource_parent"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "connection_directory_entry.activated"
+    message: "a row exists only for an activated connection"
+    expression: "!(this.lifecycle in [1, 7])"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_directory_entry.health_reasons_unique"
+    message: "each health reason appears at most once"
+    expression: "this.health_reasons.unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_directory_entry.challenged_with_step_up"
+    message: "challenged scopes accompany SCOPE_STEP_UP and nothing else"
+    expression: "(this.challenged_scopes.size() > 0) == (2 in this.health_reasons)"
+  };
+
+  // The current reference, whose digest moves on UpgradeConnector.
+  trogonai.connections.types.v1alpha1.ConnectionRef connection_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The ConnectorId a ConnectionSelector's provider matches is inside
+  // connection_ref.connector_release_ref.resource_parent.connector_id.
+  trogonai.connections.types.v1alpha1.ConnectionOwner owner = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAppRef provider_app_ref = 3;
+  trogonai.connections.types.v1alpha1.ProviderSubjectKind actor_subject_kind = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.connections.v1alpha1.ConnectionLifecycle lifecycle = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Pinned by every plan and grant; a mismatch on use is
+  // CONNECTION_SUPERSEDED (ADR#0096 Decision 4).
+  uint64 authorization_generation = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  // The current granted authority, reductions and restorations applied, from
+  // which the ceiling is computed (R7, ADR#0096 Decision 1).
+  trogonai.connections.types.v1alpha1.GrantedAuthority granted_authority = 7 [features.field_presence = LEGACY_REQUIRED];
+  // The held reasons. Only SCOPE_STEP_UP changes what an executor does on an
+  // Active connection; the rest are already reflected in lifecycle.
+  repeated trogonai.connections.types.v1alpha1.ConnectionHealthReason health_reasons = 8 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The scopes an insufficient_scope challenge named. Operations that need
+  // any of them fail with PROVIDER_INSUFFICIENT_SCOPE; others keep working
+  // (R8).
+  repeated trogonai.connections.types.v1alpha1.ProviderScope challenged_scopes = 9;
+  // The owner's labels, matched by exact equality by a ConnectionSelector.
+  map<string, string> labels = 10;
+  // Present for an MCP connection: the resource the grant is for, which the
+  // MCP executor sends as the RFC 8707 resource.
+  trogonai.connections.types.v1alpha1.CanonicalResourceUri mcp_resource_uri = 11;
+  // The hosts the owner acknowledged: the endpoint origins of an MCP
+  // connection's pinned metadata, or the hosts successor releases added. The
+  // executor joins them with the pinned release's declared hosts; anything
+  // outside the union is denied (ADR#0092 Decision 10).
+  repeated trogonai.policy.egress_permissions.v1alpha1.EgressHost acknowledged_egress_hosts = 12;
+  // The stream revision this row reflects, so a denial can say what it saw.
+  uint64 stream_revision = 13 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 14 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ConnectionDirectoryHeartbeat is how a reader measures the directory's
+// staleness (R13). The projector writes one heartbeat per resource_parent
+// project's directory each time it has applied every event appended before
+// observed_at was taken, so
+// the directory is current as of that instant. A reader refuses a directory
+// whose observed_at is older than its configured bound, which is at most 330
+// seconds (the ADR#0049 TTL plus jitter), and never falls back to the last
+// row it held. The bound is the reader's configuration, not a field here,
+// because a projector that could lengthen its own bound would defeat it.
+message ConnectionDirectoryHeartbeat {
+  google.protobuf.Timestamp observed_at = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}

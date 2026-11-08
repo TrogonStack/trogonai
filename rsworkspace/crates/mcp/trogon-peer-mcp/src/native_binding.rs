@@ -50,7 +50,10 @@ impl NativeBinding {
         if (expires.seconds, expires.nanos) <= (observed.seconds, observed.nanos) {
             return Err(PeerMcpError::InvalidEnrollment);
         }
-        let raw = lease.attachment.as_option().ok_or(PeerMcpError::InvalidEnrollment)?;
+        let raw = lease
+            .attachment_ref
+            .as_option()
+            .ok_or(PeerMcpError::InvalidEnrollment)?;
         if raw.peer_id.as_deref() != Some(peer_id.as_str())
             || raw.connector_id.as_deref() != Some(config.connector_id().as_str())
         {

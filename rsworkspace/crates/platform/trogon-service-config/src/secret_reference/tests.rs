@@ -126,6 +126,16 @@ fn flag_rejection_never_repeats_the_value() {
 }
 
 #[test]
+fn parser_without_an_argument_still_redacts_the_rejected_value() {
+    let error = SecretReferenceParser
+        .parse_ref(&clap::Command::new("cli"), None, OsStr::new("literal-value"))
+        .expect_err("a literal is not a secret reference");
+
+    assert_eq!(error.kind(), ErrorKind::ValueValidation);
+    assert_eq!(error.get(ContextKind::InvalidValue), None);
+}
+
+#[test]
 fn parser_rejection_without_an_arg_never_repeats_the_value() {
     let parser = <SecretReference as ValueParserFactory>::value_parser();
     let err = parser

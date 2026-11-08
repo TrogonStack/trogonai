@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use buffa::MessageField;
+use buffa_types::google::protobuf::Timestamp;
 use chrono::{DateTime, TimeZone, Utc};
 use trogon_decider::testing::TestCase;
 use trogon_peer::commands::state::{evolve, initial_state};
@@ -133,7 +134,7 @@ fn attachment_replay_rejects_invalid_generation_status_or_lease() {
     let now = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
     let state = evolve(initial_state(), &enrolled(value.clone())).unwrap();
     let valid = proto::PeerAttachment {
-        attachment: MessageField::some(proto::AttachmentRef {
+        attachment_ref: MessageField::some(proto::AttachmentRef {
             peer_id: value.peer_id,
             connector_id: Some("connector".to_owned()),
             generation: Some(1),
@@ -145,11 +146,11 @@ fn attachment_replay_rejects_invalid_generation_status_or_lease() {
     for mutation in 0..5 {
         let mut changed = valid.clone();
         match mutation {
-            0 => changed.attachment = MessageField::default(),
+            0 => changed.attachment_ref = MessageField::default(),
             1 => {
-                let mut reference = changed.attachment.as_option().unwrap().clone();
+                let mut reference = changed.attachment_ref.as_option().unwrap().clone();
                 reference.generation = Some(0);
-                changed.attachment = MessageField::some(reference);
+                changed.attachment_ref = MessageField::some(reference);
             }
             2 => changed.status = Some(buffa::EnumValue::from(77)),
             3 => changed.expires_at = MessageField::some(timestamp_from_datetime(&now)),
@@ -200,4 +201,339 @@ fn replay_rejects_absent_or_unhandled_event_cases() {
         evolve(initial_state(), &unsupported),
         Err(EvolveError::UnsupportedEvent)
     );
+}
+
+fn command(now: DateTime<Utc>) -> Enroll {
+    Enroll::new(
+        identity("tenant", "caller", "installation", "session"),
+        ConnectorId::new("connector").unwrap(),
+        CollaborationRef::new("collaboration").unwrap(),
+        PeerDisplayName::new("Peer").unwrap(),
+        now,
+    )
+}
+
+fn attachment() -> proto::PeerAttachment {
+    let now = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    proto::PeerAttachment {
+        attachment_ref: MessageField::some(proto::AttachmentRef {
+            peer_id: enrollment().peer_id,
+            connector_id: Some("connector".to_owned()),
+            generation: Some(1),
+        }),
+        status: Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED.into()),
+        observed_at: MessageField::some(timestamp_from_datetime(&now)),
+        expires_at: MessageField::some(timestamp_from_datetime(&(now + chrono::Duration::seconds(10)))),
+    }
+}
+
+fn attached(value: proto::PeerAttachment) -> proto::PeerEvent {
+    proto::PeerEvent {
+        event: Some(
+            proto::PeerAttached {
+                attachment: MessageField::some(value),
+            }
+            .into(),
+        ),
+    }
+}
+
+#[test]
+fn enrollment_cannot_be_decided_or_replayed_twice() {
+    let event = enrolled(enrollment());
+    let state = evolve(initial_state(), &event).unwrap();
+    assert_eq!(evolve(state.clone(), &event), Err(EvolveError::AlreadyEnrolled));
+    TestCase::<Enroll>::new()
+        .given([event])
+        .when(command(Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap()))
+        .then_error(EnrollError::AlreadyEnrolled);
+    let attachment_event = attached(attachment());
+    let state = evolve(state, &attachment_event).unwrap();
+    assert_eq!(evolve(state, &attachment_event), Err(EvolveError::InvalidAttachment));
+}
+
+#[test]
+fn enrollment_replay_requires_an_enrollment_payload() {
+    let event = proto::PeerEvent {
+        event: Some(proto::PeerEnrolled::default().into()),
+    };
+    assert_eq!(evolve(initial_state(), &event), Err(EvolveError::MissingEnrollment));
+    assert_eq!(
+        evolve(initial_state(), &attached(attachment())),
+        Err(EvolveError::MissingEnrollment)
+    );
+}
+
+#[test]
+fn enrollment_replay_reports_each_missing_identity_or_presentation_field() {
+    for (field, value) in [
+        (
+            "enrollment.peer_id",
+            proto::PeerEnrollment {
+                peer_id: None,
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.tenant_id",
+            proto::PeerEnrollment {
+                tenant_id: None,
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.caller_id",
+            proto::PeerEnrollment {
+                caller_id: None,
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.installation_id",
+            proto::PeerEnrollment {
+                installation_id: None,
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.native_session_id",
+            proto::PeerEnrollment {
+                native_session_id: None,
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.collaboration_ref",
+            proto::PeerEnrollment {
+                collaboration_ref: None,
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.display_name",
+            proto::PeerEnrollment {
+                display_name: None,
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.enrolled_at",
+            proto::PeerEnrollment {
+                enrolled_at: MessageField::default(),
+                ..enrollment()
+            },
+        ),
+    ] {
+        assert_eq!(
+            evolve(initial_state(), &enrolled(value)),
+            Err(EvolveError::MissingField { field })
+        );
+    }
+}
+
+#[test]
+fn enrollment_replay_validates_every_owner_and_presentation_value() {
+    for (field, value) in [
+        (
+            "enrollment.tenant_id",
+            proto::PeerEnrollment {
+                tenant_id: Some(String::new()),
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.caller_id",
+            proto::PeerEnrollment {
+                caller_id: Some(String::new()),
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.installation_id",
+            proto::PeerEnrollment {
+                installation_id: Some(String::new()),
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.native_session_id",
+            proto::PeerEnrollment {
+                native_session_id: Some(String::new()),
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.collaboration_ref",
+            proto::PeerEnrollment {
+                collaboration_ref: Some(String::new()),
+                ..enrollment()
+            },
+        ),
+        (
+            "enrollment.display_name",
+            proto::PeerEnrollment {
+                display_name: Some(String::new()),
+                ..enrollment()
+            },
+        ),
+    ] {
+        assert_eq!(
+            evolve(initial_state(), &enrolled(value)),
+            Err(EvolveError::InvalidValue {
+                field,
+                source: PeerValueError::Empty
+            })
+        );
+    }
+}
+
+#[test]
+fn attachment_replay_requires_payload_reference_identity_and_connector() {
+    let state = evolve(initial_state(), &enrolled(enrollment())).unwrap();
+    let missing_payload = proto::PeerEvent {
+        event: Some(proto::PeerAttached::default().into()),
+    };
+    assert_eq!(
+        evolve(state.clone(), &missing_payload),
+        Err(EvolveError::MissingField { field: "attachment" })
+    );
+    let mut value = attachment();
+    value.attachment_ref = MessageField::default();
+    assert_eq!(
+        evolve(state.clone(), &attached(value)),
+        Err(EvolveError::MissingField {
+            field: "attachment.ref"
+        })
+    );
+    for (reference, error) in [
+        (
+            proto::AttachmentRef {
+                peer_id: None,
+                ..attachment().attachment_ref.into_option().unwrap()
+            },
+            EvolveError::MissingField {
+                field: "attachment.peer_id",
+            },
+        ),
+        (
+            proto::AttachmentRef {
+                peer_id: Some("other_peer".to_owned()),
+                ..attachment().attachment_ref.into_option().unwrap()
+            },
+            EvolveError::IdentityMismatch,
+        ),
+        (
+            proto::AttachmentRef {
+                connector_id: None,
+                ..attachment().attachment_ref.into_option().unwrap()
+            },
+            EvolveError::MissingField {
+                field: "attachment.connector_id",
+            },
+        ),
+        (
+            proto::AttachmentRef {
+                connector_id: Some("invalid.*".to_owned()),
+                ..attachment().attachment_ref.into_option().unwrap()
+            },
+            EvolveError::InvalidValue {
+                field: "attachment.connector_id",
+                source: PeerValueError::InvalidCharacter,
+            },
+        ),
+    ] {
+        let mut value = attachment();
+        value.attachment_ref = MessageField::some(reference);
+        assert_eq!(evolve(state.clone(), &attached(value)), Err(error));
+    }
+}
+
+#[test]
+fn attachment_replay_cannot_predate_enrollment_or_omit_lease_expiry() {
+    let state = evolve(initial_state(), &enrolled(enrollment())).unwrap();
+    let mut value = attachment();
+    value.expires_at = MessageField::default();
+    assert_eq!(
+        evolve(state.clone(), &attached(value)),
+        Err(EvolveError::MissingField {
+            field: "attachment.expires_at"
+        })
+    );
+    let mut value = attachment();
+    let earlier = Utc.with_ymd_and_hms(2026, 11, 2, 11, 59, 59).unwrap();
+    value.observed_at = MessageField::some(timestamp_from_datetime(&earlier));
+    value.expires_at = MessageField::some(timestamp_from_datetime(&(earlier + chrono::Duration::seconds(10))));
+    assert_eq!(evolve(state, &attached(value)), Err(EvolveError::InvalidAttachment));
+}
+
+#[test]
+fn replay_rejects_timestamp_range_and_nanosecond_violations() {
+    for (seconds, nanos) in [
+        (-62_135_596_801, 0),
+        (253_402_300_800, 0),
+        (i64::MIN, 0),
+        (i64::MAX, 0),
+        (0, -1),
+        (0, 1_000_000_000),
+        (59, 1_000_000_000),
+        (59, i32::MAX),
+    ] {
+        let invalid = Timestamp {
+            seconds,
+            nanos,
+            ..Default::default()
+        };
+        let mut value = enrollment();
+        value.enrolled_at = MessageField::some(invalid.clone());
+        assert_eq!(
+            evolve(initial_state(), &enrolled(value)),
+            Err(EvolveError::TimestampRange {
+                field: "enrollment.enrolled_at"
+            })
+        );
+        let state = evolve(initial_state(), &enrolled(enrollment())).unwrap();
+        let mut value = attachment();
+        value.observed_at = MessageField::some(invalid.clone());
+        assert_eq!(
+            evolve(state.clone(), &attached(value)),
+            Err(EvolveError::TimestampRange {
+                field: "attachment.observed_at"
+            })
+        );
+        let mut value = attachment();
+        value.expires_at = MessageField::some(invalid);
+        assert_eq!(
+            evolve(state, &attached(value)),
+            Err(EvolveError::TimestampRange {
+                field: "attachment.expires_at"
+            })
+        );
+    }
+}
+
+#[test]
+fn enrollment_accepts_replayable_timestamp_boundaries() {
+    for seconds in [-62_135_596_800, 253_402_300_789] {
+        let now = DateTime::<Utc>::from_timestamp(seconds, 999_999_999).unwrap();
+        let mut expected_enrollment = enrollment();
+        expected_enrollment.enrolled_at = MessageField::some(timestamp_from_datetime(&now));
+        let mut expected_attachment = attachment();
+        expected_attachment.observed_at = MessageField::some(timestamp_from_datetime(&now));
+        expected_attachment.expires_at =
+            MessageField::some(timestamp_from_datetime(&(now + chrono::Duration::seconds(10))));
+        let result = TestCase::<Enroll>::new()
+            .given_no_history()
+            .when(command(now))
+            .then([enrolled(expected_enrollment), attached(expected_attachment)]);
+        assert!(result.resulting_state().attachment.is_set());
+    }
+}
+
+#[test]
+fn enrollment_rejects_time_before_the_protobuf_epoch_range_even_if_lease_fits() {
+    let now = DateTime::<Utc>::from_timestamp(-62_135_596_801, 0).unwrap();
+    TestCase::<Enroll>::new()
+        .given_no_history()
+        .when(command(now))
+        .then_error(EnrollError::LeaseDeadlineOverflow);
 }

@@ -7,13 +7,16 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # Source configuration lives in this TOML file. Put secrets in
 # devops/docker/compose/.env and reference them with `{ env = "..." }`.
 #
+# Compose already connects the gateway through NATS_URL, NATS_CREDS, NATS_CA,
+# NATS_CERT and NATS_KEY. A [nats] table here takes precedence over them, and
+# the local server accepts nothing but TLS with a client certificate and creds.
+#
 # [nats]
-# url = "nats://nats:4222"
-# creds = "/path/to/nats.creds"
-# nkey = "SU..."
-# user = "my-user"
-# password = "my-pass"
-# token = "my-token"
+# url = "tls://nats:4222"
+# creds = "/run/secrets/nats/nats.creds"
+# tls_ca = "/run/secrets/nats/ca.pem"
+# tls_cert = "/run/secrets/nats/client.pem"
+# tls_key = "/run/secrets/nats/client-key.pem"
 #
 # [sources.github.integrations.primary]
 # subject_prefix = "github-primary"

@@ -1,17 +1,15 @@
-//! Replay-protection store: dedup `jti` and PoP nonces with TTLs.
+//! Replay-protection store: records with TTLs that admit a `jti` or PoP nonce
+//! once, and record which server nonces were issued.
 //!
-//! This module provides the [`ReplayStore`] trait and [`InMemoryReplayStore`],
-//! its only implementation today. The in-memory store is process-local, so a
-//! multi-replica gateway accepts the same nonce once per replica: replay
-//! protection is complete for a single-process deployment and partial for any
-//! other. A shared backend (NATS JetStream KV, keyed with a per-key TTL, is
-//! the intended one) has not been built yet; [`ReplayError::Backend`] exists
-//! so it can be added without changing this trait, and `AAuthIngress` is
-//! already generic over `S: ReplayStore` so wiring one in is a construction
-//! change rather than a signature change.
+//! [`ReplayStore`] has two implementations. [`InMemoryReplayStore`] is
+//! process-local, so a multi-replica deployment accepts the same record once
+//! per replica: it is complete for a single process and for tests only.
+//! `nats_kv::NatsKvReplayStore`, behind the `nats-kv` feature, keeps the
+//! records in the shared `AAUTH_REPLAY` bucket, so every instance refuses a
+//! record any other instance already accepted.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -21,6 +19,20 @@ pub trait ReplayStore: Send + Sync {
     /// Returns `Ok(true)` if `key` was newly inserted and is fresh, `Ok(false)`
     /// if it was already seen. `ttl_secs` is the maximum lifetime of the record.
     async fn check_and_insert(&self, key: &str, ttl_secs: u32) -> Result<bool, ReplayError>;
+
+    /// Returns whether a live record exists under `key`, without creating one.
+    async fn contains(&self, key: &str) -> Result<bool, ReplayError>;
+}
+
+#[async_trait]
+impl<T: ReplayStore + ?Sized> ReplayStore for Arc<T> {
+    async fn check_and_insert(&self, key: &str, ttl_secs: u32) -> Result<bool, ReplayError> {
+        (**self).check_and_insert(key, ttl_secs).await
+    }
+
+    async fn contains(&self, key: &str) -> Result<bool, ReplayError> {
+        (**self).contains(key).await
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -30,18 +42,15 @@ pub enum ReplayError {
     /// failed-closed.
     #[error("replay store mutex poisoned")]
     MutexPoisoned,
-    /// Reserved for shared backends (NATS JetStream KV, Redis, etc.) so they
-    /// surface their own typed source error here instead of being flattened
-    /// to a String. No such backend ships today.
+    /// A shared backend could not record or check the key. Callers treat the
+    /// request as failed-closed.
     #[error("replay store backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Best-effort in-memory replay protection: complete for a single-process
-/// gateway or unit tests, and partial for a multi-replica deployment, where
-/// each replica keeps its own map and a nonce is therefore accepted once per
-/// replica. There is no shared-store implementation to fall back to yet; see
-/// the module docs.
+/// Best-effort in-memory replay protection: complete for a single process or
+/// unit tests, and partial for a multi-replica deployment, where each replica
+/// keeps its own map and a record is therefore accepted once per replica.
 pub struct InMemoryReplayStore {
     inner: Mutex<HashMap<String, i64>>,
     clock: Box<dyn Fn() -> i64 + Send + Sync>,
@@ -97,7 +106,16 @@ impl ReplayStore for InMemoryReplayStore {
         map.insert(key.to_string(), expires_at);
         Ok(true)
     }
+
+    async fn contains(&self, key: &str) -> Result<bool, ReplayError> {
+        let mut map = self.inner.lock().map_err(|_| ReplayError::MutexPoisoned)?;
+        self.gc(&mut map);
+        Ok(map.contains_key(key))
+    }
 }
+
+#[cfg(feature = "nats-kv")]
+pub mod nats_kv;
 
 #[cfg(test)]
 mod tests;

@@ -7,6 +7,7 @@ use trogonai_proto::peers::{
     v1alpha1::{self as proto, PeerEvent},
 };
 
+use super::constants::ATTACHMENT_LEASE;
 use super::domain::{CollaborationRef, ConnectorId, EnrollmentIdentity, PeerDisplayName, PeerId};
 use super::state::{self, EvolveError};
 
@@ -72,7 +73,7 @@ impl Decider for Enroll {
     type DecideError = EnrollError;
     type EvolveError = EvolveError;
 
-    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.identity.peer_id()
@@ -92,10 +93,12 @@ impl Decider for Enroll {
         }
         let expires_at = command
             .now
-            .checked_add_signed(chrono::Duration::seconds(10))
-            .filter(|at| (-62_135_596_800..=253_402_300_799).contains(&at.timestamp()))
+            .checked_add_signed(ATTACHMENT_LEASE)
+            .filter(|at| state::timestamp_seconds_supported(at.timestamp()))
             .ok_or(EnrollError::LeaseDeadlineOverflow)?;
-        if !(-62_135_596_800..=253_402_300_799).contains(&command.now.timestamp()) {
+        if !state::timestamp_seconds_supported(command.now.timestamp())
+            || command.now.timestamp_subsec_nanos() >= 1_000_000_000
+        {
             return Err(EnrollError::LeaseDeadlineOverflow);
         }
         let identity = &command.identity;
@@ -110,7 +113,7 @@ impl Decider for Enroll {
             enrolled_at: MessageField::some(timestamp_from_datetime(&command.now)),
         };
         let attachment = proto::PeerAttachment {
-            attachment: MessageField::some(proto::AttachmentRef {
+            attachment_ref: MessageField::some(proto::AttachmentRef {
                 peer_id: Some(identity.peer_id().as_str().to_owned()),
                 connector_id: Some(command.connector_id.as_str().to_owned()),
                 generation: Some(1),

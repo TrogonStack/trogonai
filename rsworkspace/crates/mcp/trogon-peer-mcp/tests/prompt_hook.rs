@@ -42,7 +42,7 @@ impl EnrollPeer for Backend {
             peer_id: Some(recipient_peer_id()),
             attachment: MessageField::some(
                 serde_json::from_value(json!({
-                    "attachment": attachment(),
+                    "attachmentRef": attachment(),
                     "status": "ATTACHMENT_STATUS_ATTACHED",
                     "observedAt": "2026-11-02T12:00:00Z",
                     "expiresAt": "2026-11-02T12:00:10Z"
@@ -88,7 +88,7 @@ fn prepared(text: &str) -> v1::PrepareBatchResponse {
         "messages": [{
             "metadata": {
                 "messageId": "message_1", "senderPeerId": sender_peer_id(), "recipientPeerId": recipient_peer_id(),
-                "collaborationRef": "collaboration_a", "contentRef": "content_1",
+                "collaborationRef": "collaboration_a", "contentRef": {"storageRef":{"value":"content_1"},"digest":{"algorithm":"sha256","value":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}},
                 "contentSizeBytes": text.len(), "acceptedAt": "2026-11-02T11:59:00Z",
                 "expiresAt": "2026-11-02T12:59:00Z"
             },
@@ -165,7 +165,7 @@ async fn prompt_hook_enrolls_before_preparing_escaped_untrusted_context() {
     let ObservedCall::Prepare(prepare) = &observed[1] else {
         panic!("preparation must follow enrollment")
     };
-    assert_eq!(prepare.attachment.as_option(), Some(&attachment()));
+    assert_eq!(prepare.attachment_ref.as_option(), Some(&attachment()));
     assert_eq!(prepare.prompt_id.as_deref(), Some("prompt_1"));
 }
 

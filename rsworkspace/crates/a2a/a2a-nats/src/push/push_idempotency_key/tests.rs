@@ -4,6 +4,10 @@ fn task() -> A2aTaskId {
     A2aTaskId::new("task-1").unwrap()
 }
 
+fn caller() -> trogon_identity_types::SubjectPrincipal {
+    trogon_identity_types::SubjectPrincipal::from_tokens("person", "alice").unwrap()
+}
+
 fn cfg() -> PushNotificationConfigId {
     PushNotificationConfigId::new("cfg-1").unwrap()
 }
@@ -18,8 +22,11 @@ fn derive_terminal_uses_length_prefixed_components() {
 #[test]
 fn derive_dlq_uses_length_prefixed_components() {
     let transition = StatusTransitionId::from_terminal(TerminalPushTaskState::Failed);
-    let key = PushIdempotencyKey::derive_dlq(&task(), &transition, "https://example.com/push");
-    assert_eq!(key.as_str(), "3:dlq|6:task-1|6:failed|24:https://example.com/push");
+    let key = PushIdempotencyKey::derive_dlq(&caller(), &task(), &transition, "https://example.com/push");
+    assert_eq!(
+        key.as_str(),
+        "3:dlq|12:person.alice|6:task-1|6:failed|24:https://example.com/push"
+    );
 }
 
 #[test]
@@ -44,7 +51,7 @@ fn terminal_and_dlq_keys_dont_collide_even_with_aligned_components() {
     let cfg = PushNotificationConfigId::new("failed").unwrap();
     let transition = StatusTransitionId::from_terminal(TerminalPushTaskState::Failed);
     let terminal_key = PushIdempotencyKey::derive_terminal(&task, &cfg, TerminalPushTaskState::Completed);
-    let dlq_key = PushIdempotencyKey::derive_dlq(&task, &transition, "completed");
+    let dlq_key = PushIdempotencyKey::derive_dlq(&caller(), &task, &transition, "completed");
     assert_ne!(terminal_key.as_str(), dlq_key.as_str());
 }
 
