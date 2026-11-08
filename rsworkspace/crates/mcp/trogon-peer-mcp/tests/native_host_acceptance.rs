@@ -117,11 +117,15 @@ impl Host {
         let mut child = command.spawn()?;
         let input = child.stdin.take().ok_or("host stdin absent")?;
         let output = BufReader::new(child.stdout.take().ok_or("host stdout absent")?).lines();
-        let mut stderr = child.stderr.take().ok_or("host stderr absent")?.take(65_536);
+        let mut stderr = child.stderr.take().ok_or("host stderr absent")?;
         let error_path = evidence.with_extension("stderr.internal.trogonai.md");
         let stderr = tokio::spawn(async move {
             let mut file = tokio::fs::File::create(error_path).await?;
-            tokio::io::copy(&mut stderr, &mut file).await?;
+            {
+                let mut retained = (&mut stderr).take(65_536);
+                tokio::io::copy(&mut retained, &mut file).await?;
+            }
+            tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await?;
             Ok(())
         });
         Ok(Self {
