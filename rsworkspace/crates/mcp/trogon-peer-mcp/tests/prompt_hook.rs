@@ -88,7 +88,7 @@ fn prepared(text: &str) -> v1::PrepareBatchResponse {
         "messages": [{
             "metadata": {
                 "messageId": "message_1", "senderPeerId": sender_peer_id(), "recipientPeerId": recipient_peer_id(),
-                "collaborationRef": "collaboration_a", "contentRef": {"storageRef":{"value":"content_1"},"digest":{"algorithm":"sha256","value":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}},
+                "collaborationRef": "collaboration_a", "contentRef": {"storageRef":{"value":"content_1"},"digest":{"algorithm":"sha256","value":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}},"semanticFingerprint":{"value":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="},
                 "contentSizeBytes": text.len(), "acceptedAt": "2026-11-02T11:59:00Z",
                 "expiresAt": "2026-11-02T12:59:00Z"
             },
