@@ -2902,7 +2902,9 @@ async fn an_empty_inbox_returns_available_without_allocating_or_persisting_a_pre
 #[tokio::test]
 async fn public_preparation_rejects_a_leap_clock_before_allocating_or_opening_content() -> TestResult {
     use chrono::{Duration, TimeZone};
-    use trogon_decider_runtime::{CommandError, CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind, ReplayLimit};
+    use trogon_decider_runtime::{
+        CommandError, CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind, ReplayLimit,
+    };
     use trogon_peer::{AttachmentRef, BatchId, ConnectorId, EvolveError, MessageError, PrepareBatch, TrustedBatchPlan};
     use trogon_peer_service::{PeerApplicationError, PeerClock, PeerPortError, PeerService};
     let mut f = Fixture::new().await?;
@@ -2947,15 +2949,20 @@ async fn public_preparation_rejects_a_leap_clock_before_allocating_or_opening_co
     let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(f.bob.caller().as_str())?);
     let appends = f.store.appends.load(Ordering::SeqCst);
     assert!(matches!(
-        CommandExecution::new(&f.store, &PrepareBatch::new(f.bob.clone(), reference, batch_id, plan, leap))
-            .with_principal(principal)
-            .with_authorizer(&f.policy)
-            .with_replay_limit(ReplayLimit::try_new(4096)?)
-            .execute()
-            .await,
-        Err(CommandError::Decide(MessageError::InvalidState(EvolveError::TimestampRange {
-            field: "receipt.decided_at"
-        })))
+        CommandExecution::new(
+            &f.store,
+            &PrepareBatch::new(f.bob.clone(), reference, batch_id, plan, leap)
+        )
+        .with_principal(principal)
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await,
+        Err(CommandError::Decide(MessageError::InvalidState(
+            EvolveError::TimestampRange {
+                field: "receipt.decided_at"
+            }
+        )))
     ));
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
     *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = leap;
@@ -2966,18 +2973,35 @@ async fn public_preparation_rejects_a_leap_clock_before_allocating_or_opening_co
     let owner = f.bob.clone();
     let request = f.prepare();
     let joined = tokio::spawn(async move { app.prepare_batch(&owner, request).await }).await;
-    assert!(joined.is_ok(), "public preparation must reject an unrepresentable clock without panicking");
+    assert!(
+        joined.is_ok(),
+        "public preparation must reject an unrepresentable clock without panicking"
+    );
     assert!(matches!(
         joined?,
-        Err(PeerApplicationError::Evidence(MessageError::InvalidState(EvolveError::TimestampRange {
-            field: "batch.prepared_at"
-        })))
+        Err(PeerApplicationError::Evidence(MessageError::InvalidState(
+            EvolveError::TimestampRange {
+                field: "batch.prepared_at"
+            }
+        )))
     ));
     assert_eq!(f.ids.0.load(Ordering::SeqCst), ids);
     assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
     assert_eq!(f.cache.calls.load(Ordering::SeqCst), cache_calls);
-    assert!(f.cache.records.lock().map_err(|_| PeerPortError::Unavailable)?.is_empty());
-    assert!(f.cache.orphans.lock().map_err(|_| PeerPortError::Unavailable)?.is_empty());
+    assert!(
+        f.cache
+            .records
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
     let target = service_coverage_public_history(&f, &recipient).await?;
     assert_eq!(target.inbox.len(), 1);
@@ -3001,6 +3025,12 @@ async fn public_preparation_rejects_a_leap_clock_before_allocating_or_opening_co
     assert_eq!(f.ids.0.load(Ordering::SeqCst), ids + 1);
     assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls + 1);
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
-    assert!(f.cache.orphans.lock().map_err(|_| PeerPortError::Unavailable)?.is_empty());
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
     Ok(())
 }

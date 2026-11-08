@@ -64,6 +64,13 @@ where
                 proto::ContentAvailability::CONTENT_AVAILABILITY_AVAILABLE,
             ));
         }
+        if now.timestamp_subsec_nanos() >= 1_000_000_000 {
+            return Err(PeerApplicationError::Evidence(MessageError::InvalidState(
+                trogon_peer::EvolveError::TimestampRange {
+                    field: "batch.prepared_at",
+                },
+            )));
+        }
         let batch_id = self.ids.batch_id()?;
         let mut batch = proto::PeerBatch {
             batch_id: Some(batch_id.as_str().to_owned()),
