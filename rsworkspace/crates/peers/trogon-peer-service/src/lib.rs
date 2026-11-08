@@ -34,6 +34,7 @@ mod peer_application;
 mod prepared_presentation;
 mod presentation_key;
 mod presentation_ports;
+mod scoped_peer_history;
 mod scoped_peer_store;
 mod work_limit;
 pub use catalog_ports::PeerCatalog;

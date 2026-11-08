@@ -37,18 +37,29 @@ command authorizer is installed by this crate. `CommandExecution` authorizes
 again before its own history reads and guarded append.
 
 All writes use core decisions and the existing runtime's storage and CAS
-orchestration. Replay has a 4096-event ceiling. A command may re-read and
-re-decide once after a backend-classified CAS conflict; infrastructure failures
-are not automatically retried. Read-side folds use runtime bounded-read
+orchestration. Replay has a 4096-event ceiling. A command without a caller-supplied
+revision may re-read and re-decide once after a backend-classified CAS conflict;
+infrastructure failures are not automatically retried. Read-side folds use runtime bounded-read
 primitives and core evolution. The physical I/O bound requires a store adapter
 that implements genuinely bounded reads.
 
-Resume rejects an unknown peer-stream event because it cannot establish that the
-event is irrelevant to ownership or attachment authority. A valid history beyond
-4096 events also cannot resume. Longer-lived histories need an authorized
-checkpoint or read-model contract that preserves owner, generation, fencing and
-freshness. Neither a larger replay limit nor silent event skipping supplies that
-contract.
+### Enrollment and resume
+
+When create-only enrollment conflicts with an existing stream, resume authorizes
+`Attach` before reading that stream. It validates the history, rejecting more
+than 4096 events and any unknown event type, then pins the attachment append to
+the validated stream position. A concurrent authority event rejects the append
+instead of allowing a replacement across unvalidated history. The command replay
+also retains the 4096-event limit. Reusing a live attachment rechecks history
+before returning it.
+
+Stores receive bounded read requests, but their implementation may materialize a
+larger response before the service rejects it. The replay ceiling therefore does
+not guarantee a transport I/O bound. A longer valid history cannot resume through
+this boundary, and an event this version cannot interpret cannot be assumed
+irrelevant to ownership or attachment authority. Longer-lived histories need an
+authorized checkpoint or read-model contract; widening the bound or silently
+skipping unknown events does not provide that contract.
 
 ## Content and presentation ports
 
@@ -117,9 +128,9 @@ apply to catalog candidates, so a restricted page can be empty and still have a
 continuation. A full last page can be followed by an empty terminal page.
 
 Catalog membership, lease liveness and historical activity remain separate.
-Rows use service observation time and the actual lease expiry; inactive members
-retain historical activity without claiming live availability. There are no
-live all-peer watchers or additional workflow owners.
+Roster rows include only live attachments, using service observation time and
+actual lease expiry. History retains activity independently of roster presence.
+There are no live all-peer watchers or additional workflow owners.
 
 Broker ingress, the executable adapter, reconciliation and heartbeat scheduling,
 native detach hooks, content and presentation infrastructure, retention workers,
@@ -132,5 +143,5 @@ adapters. They do not establish a broker or native-host exchange.
 Run the focused service, core and shared-renderer tests from the Rust workspace:
 
 ```sh
-MISE_EXEC_AUTO_INSTALL=false mise exec -- cargo test -p trogon-peer-service -p trogon-peer -p trogon-peer-context
+mise exec -- cargo test -p trogon-peer-service -p trogon-peer -p trogon-peer-context --all-features
 ```
