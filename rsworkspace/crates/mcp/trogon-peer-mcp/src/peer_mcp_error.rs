@@ -1,5 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum PeerMcpError {
+    #[error("Peer detach was not confirmed; lease expiry remains the fallback.")]
+    EnrollmentUncertain,
     #[error("Peer connector is detached; start a new connector runtime.")]
     Detached,
     #[error("Peer detach was not confirmed; lease expiry remains the fallback.")]

@@ -1442,15 +1442,21 @@ async fn detach_cannot_confirm_a_cancelled_remotely_committed_enrollment() {
         };
 
         assert!(
-            outcome.is_err(),
+            matches!(outcome, Err(PeerMcpError::EnrollmentUncertain)),
             "detach must retain uncertainty after an enrollment reply is lost"
         );
         assert!(matches!(
             prompt_task.await.expect("prompt task"),
             Err(PeerMcpError::Detached)
         ));
-        assert!(adapter.invoke(detach("native_b")).await.is_err());
-        assert!(adapter.shutdown().await.is_err());
+        assert!(matches!(
+            adapter.invoke(detach("native_b")).await,
+            Err(PeerMcpError::EnrollmentUncertain)
+        ));
+        assert!(matches!(
+            adapter.shutdown().await,
+            Err(PeerMcpError::EnrollmentUncertain)
+        ));
         assert!(matches!(
             adapter.invoke(prompt("native_b", "stable_prompt")).await,
             Err(PeerMcpError::Detached)

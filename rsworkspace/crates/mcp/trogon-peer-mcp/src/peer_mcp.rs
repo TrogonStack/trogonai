@@ -158,14 +158,13 @@ where
             if current.detach_confirmed() {
                 return Ok(());
             }
-            if let Some(attachment) = current.attachment() {
-                self.backend
-                    .detach(v1::DetachRequest {
-                        attachment_ref: crate::model_tools::wire_attachment(attachment).into(),
-                    })
-                    .await
-                    .map_err(|error| PeerMcpError::Detach(Box::new(error)))?;
-            }
+            let attachment = current.attachment().ok_or(PeerMcpError::EnrollmentUncertain)?;
+            self.backend
+                .detach(v1::DetachRequest {
+                    attachment_ref: crate::model_tools::wire_attachment(attachment).into(),
+                })
+                .await
+                .map_err(|error| PeerMcpError::Detach(Box::new(error)))?;
             current.confirm_detach();
             Ok(())
         })
@@ -179,7 +178,7 @@ where
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
                 tokio::select! {
                     biased;
-                    _ = self.stopped.cancelled() => return Err(PeerMcpError::Detached),
+                    _ = self.stopped.cancelled() => Err(PeerMcpError::Detached),
                     result = tokio::time::timeout_at(deadline, self.prompt_hook(request)) => {
                         result.map_err(|_| PeerMcpError::PromptDeadline)?
                     }
