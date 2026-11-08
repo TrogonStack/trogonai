@@ -46,7 +46,8 @@ impl PeerRequester {
         let request = async_nats::Request::new()
             .headers(headers)
             .inbox(reply.as_str().to_owned())
-            .timeout(Some(timeout))
+            // The outer deadline includes subscription and publish setup.
+            .timeout(None)
             .payload(payload.into());
         let response = tokio::time::timeout(timeout, self.client.send_request(subject, request))
             .await
