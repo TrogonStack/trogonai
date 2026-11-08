@@ -91,6 +91,9 @@ fn message_views_keep_durable_metadata_separate_from_erasable_text() {
             assert_eq!(reference.storage_ref.value.as_deref(), Some("content_outgoing"));
             assert_eq!(reference.digest.algorithm.as_deref(), Some("sha256"));
             assert_eq!(reference.digest.value.as_deref(), Some(&[0; 32][..]));
+            let semantic = metadata.semantic_fingerprint.as_option().unwrap();
+            assert_eq!(semantic.value.as_deref(), Some(&[1; 32][..]));
+            assert_ne!(reference.digest.value, semantic.value);
             assert_eq!(handle.content_size_bytes(), Some(10));
             assert_eq!(handle.reply_to_message_id(), Some("message_previous"));
             assert_eq!(
@@ -266,6 +269,14 @@ fn wire_presence_preserves_zero_empty_values_and_empty_nested_messages() {
 
 #[test]
 fn stored_content_reference_views_preserve_locator_and_digest_as_one_value() {
+    retained_message!(
+        proto::ContentSemanticFingerprint,
+        proto::ContentSemanticFingerprintOwnedView,
+        fixtures::semantic_fingerprint(),
+        |handle| {
+            assert_eq!(handle.value(), Some(&[1; 32][..]));
+        }
+    );
     retained_message!(
         proto::StorageLocator,
         proto::StorageLocatorOwnedView,

@@ -112,6 +112,7 @@ fn registered_identity_and_presence_messages_keep_diagnostic_identity_and_proto_
 #[test]
 fn registered_mailbox_messages_keep_provenance_and_order_in_diagnostics_and_proto_json() {
     let registry = registry();
+    public_contract::<proto::ContentSemanticFingerprint>(&registry, fixtures::semantic_fingerprint(), &["value"]);
     public_contract::<proto::StorageLocator>(&registry, json!({"value": "content_outgoing"}), &["content_outgoing"]);
     public_contract::<proto::Digest>(
         &registry,
