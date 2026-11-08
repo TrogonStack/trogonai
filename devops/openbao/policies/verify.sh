@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Applies every policy in this directory to a throwaway dev OpenBao and asserts
-# what each role can and cannot do, using the exact percent-encoded paths
-# OpenBaoSecretStore builds. Run it after editing any .hcl here.
+# what each role can and cannot do, using the exact paths OpenBaoSecretStore
+# builds. Run it after editing any .hcl here.
 #
 #   ./verify.sh
 #
@@ -44,10 +44,8 @@ AUD=$(mktok audit_read)
 LWC=$(mktok lifecycle_worker_cleanup)
 BGA=$(mktok break_glass_admin)
 
-# Percent-encoded exactly as encode_path_segment emits it. OpenBao decodes this
-# back to `openbao:tenant-2:github/primary:webhook_secret`, which is why the
-# policies glob the credential position instead of matching one segment.
-CRED='openbao%3Atenant-2%3Agithub%2Fprimary%3Awebhook_secret'
+# A credential id is a canonical UUID, which encode_path_segment leaves as is.
+CRED='6f9619ff-8b86-4011-b42d-00c04fc964ff'
 BASE="${ADDR}/v1/secret"
 P="trogonai/tenant-2/credentials/${CRED}"
 fails=0
@@ -75,7 +73,6 @@ chk "gwr LIST metadata" 403 -X LIST -H "X-Vault-Token: $GWR" "$BASE/metadata/tro
 chk "aud GET metadata" 200 -H "X-Vault-Token: $AUD" "$BASE/metadata/$P"
 chk "aud GET data" 403 -H "X-Vault-Token: $AUD" "$BASE/data/$P"
 chk "aud LIST creds" 200 -X LIST -H "X-Vault-Token: $AUD" "$BASE/metadata/trogonai/tenant-2/credentials"
-chk "aud LIST nested" 200 -X LIST -H "X-Vault-Token: $AUD" "$BASE/metadata/trogonai/tenant-2/credentials/openbao:tenant-2:github"
 chk "lwc GET data" 403 -H "X-Vault-Token: $LWC" "$BASE/data/$P"
 chk "lwc GET metadata" 200 -H "X-Vault-Token: $LWC" "$BASE/metadata/$P"
 chk "lwc LIST creds" 200 -X LIST -H "X-Vault-Token: $LWC" "$BASE/metadata/trogonai/tenant-2/credentials"
