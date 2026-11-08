@@ -840,3 +840,13 @@ async fn early_display_does_not_copy_untrusted_argument_keys_into_the_public_dia
     let source = std::error::Error::source(&error).expect("typed parser source retained");
     assert!(source.downcast_ref::<serde_json::Error>().is_some());
 }
+
+#[test]
+fn direct_server_tool_lookup_exposes_only_the_bound_prompt_hook() {
+    use rmcp::ServerHandler;
+    let adapter = PeerMcp::new(backend(Default::default()), config()).expect("adapter");
+    let tool = adapter.get_tool("peer_prompt_hook").expect("known hook");
+    assert_eq!(tool.name, "peer_prompt_hook");
+    assert!(adapter.get_tool("unknown").is_none());
+    assert!(adapter.get_tool("peer_prompt_hook.extra").is_none());
+}
