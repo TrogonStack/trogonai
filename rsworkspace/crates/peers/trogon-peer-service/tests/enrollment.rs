@@ -343,10 +343,32 @@ async fn repeated_prompt_resumes_same_live_connector_without_replacing_attachmen
     let store = ObservedStore::default();
     let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
     let first = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let peer = PeerId::parse(first.peer_id.clone().unwrap()).unwrap();
+    let original = store
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
     let resumed = service.enroll(&owner(), request("collaboration_alpha")).await;
     assert!(resumed.is_ok(), "same live connector must resume: {resumed:?}");
     assert_eq!(first, resumed.unwrap());
-    assert_eq!(store.appends.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        store.appends.load(Ordering::SeqCst),
+        2,
+        "the create-only attempt must conflict before authorized resume"
+    );
+    assert_same_durable_history(
+        &(store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning,
+            })
+            .await
+            .unwrap()),
+        &original,
+    );
 }
 
 #[tokio::test]
@@ -508,16 +530,20 @@ async fn live_connector_resume_refuses_valid_history_beyond_the_4096_event_ceili
         },
         "resume must enforce the typed replay ceiling: {result:?}"
     );
-    assert_eq!(store.appends.load(Ordering::SeqCst), appends);
     assert_eq!(
-        store
+        store.appends.load(Ordering::SeqCst),
+        appends + 1,
+        "only the failing create-only attempt is permitted"
+    );
+    assert_same_durable_history(
+        &(store
             .read_stream(ReadStreamRequest {
                 stream_id: &peer,
-                from: ReadFrom::Beginning
+                from: ReadFrom::Beginning,
             })
             .await
-            .unwrap(),
-        full
+            .unwrap()),
+        &full,
     );
 }
 
@@ -569,15 +595,85 @@ async fn live_connector_resume_refuses_an_unknown_authority_event_without_append
             trogon_peer_service::HistoryError::UnknownEvent
         ))
     ));
-    assert_eq!(store.appends.load(Ordering::SeqCst), appends);
     assert_eq!(
-        store
+        store.appends.load(Ordering::SeqCst),
+        appends + 1,
+        "only the failing create-only attempt is permitted"
+    );
+    assert_same_durable_history(
+        &(store
             .read_stream(ReadStreamRequest {
                 stream_id: &peer,
-                from: ReadFrom::Beginning
+                from: ReadFrom::Beginning,
             })
             .await
-            .unwrap(),
-        full
+            .unwrap()),
+        &full,
     );
+}
+
+struct ResumeDenied;
+impl CommandAuthorizer<Enroll> for ResumeDenied {
+    fn authorize(&self, principal: &CommandPrincipal, command: &Enroll) -> Result<(), AuthorizationDeniedError> {
+        policy().authorize(principal, command)
+    }
+}
+impl CommandAuthorizer<trogon_peer::Attach> for ResumeDenied {
+    fn authorize(
+        &self,
+        _principal: &CommandPrincipal,
+        _command: &trogon_peer::Attach,
+    ) -> Result<(), AuthorizationDeniedError> {
+        Err(AuthorizationDeniedError::new("resume not granted"))
+    }
+}
+#[tokio::test]
+async fn a_create_conflict_cannot_bypass_separate_resume_authorization() {
+    let store = ObservedStore::default();
+    let enrolled = PeerService::new(store.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let peer = PeerId::parse(enrolled.peer_id.unwrap()).unwrap();
+    let original = store
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    let reads = store.reads.load(Ordering::SeqCst);
+    let denied = PeerService::new(store.clone(), ResumeDenied, FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await;
+    assert!(matches!(
+        denied,
+        Err(EnrollServiceError::Attach(CommandError::Unauthorized(_)))
+    ));
+    assert_eq!(
+        store.reads.load(Ordering::SeqCst),
+        reads,
+        "resume denial must precede history access"
+    );
+    assert_eq!(store.appends.load(Ordering::SeqCst), 2);
+    assert_same_durable_history(
+        &(store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning,
+            })
+            .await
+            .unwrap()),
+        &original,
+    );
+}
+
+fn assert_same_durable_history(actual: &ReadStreamResponse, expected: &ReadStreamResponse) {
+    assert_eq!(actual.current_position, expected.current_position);
+    assert_eq!(actual.events.len(), expected.events.len());
+    for (actual, expected) in actual.events.iter().zip(&expected.events) {
+        assert_eq!(actual.stream_id, expected.stream_id);
+        assert_eq!(actual.stream_position, expected.stream_position);
+        assert_eq!(actual.event, expected.event);
+    }
 }

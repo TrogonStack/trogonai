@@ -81,7 +81,16 @@ where
             .await;
         let state = match result {
             Ok(result) => result.state,
-            Err(trogon_decider_runtime::CommandError::Decide(EnrollError::AlreadyEnrolled)) => {
+            Err(error)
+                if matches!(
+                    &error,
+                    trogon_decider_runtime::CommandError::Decide(EnrollError::AlreadyEnrolled)
+                ) || matches!(
+                    &error,
+                    trogon_decider_runtime::CommandError::Append(source)
+                        if self.store.classify_append_failure(source) == trogon_decider_runtime::AppendFailure::WriteConflict
+                ) =>
+            {
                 let attach = Attach::new(
                     command.identity().clone(),
                     command.connector_id().clone(),
