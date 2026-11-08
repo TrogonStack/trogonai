@@ -1218,7 +1218,10 @@ async fn service_status_rejects_unrepresentable_observation(seconds: Option<i64>
     use trogon_peer::{EvolveError, MessageError};
     use trogon_peer_service::{PeerApplication, PeerApplicationError, PeerClock, PeerPortError, PeerService};
     let mut f = Fixture::new().await?;
-    let sent = f.app().send(&f.alice, f.send("status_clock", "durable message")).await?;
+    let sent = f
+        .app()
+        .send(&f.alice, f.send("status_clock", "durable message"))
+        .await?;
     let renewed_at = f.clock.now() + Duration::seconds(58);
     *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = renewed_at;
     f.a = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone())
@@ -1231,16 +1234,23 @@ async fn service_status_rejects_unrepresentable_observation(seconds: Option<i64>
         .ok_or(PeerPortError::Integrity)?;
     let ordinary = renewed_at + Duration::seconds(1);
     *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = ordinary;
-    let observed_at = chrono::Utc.timestamp_opt(seconds.unwrap_or(ordinary.timestamp()), nanos)
-        .single().ok_or(PeerPortError::Integrity)?;
+    let observed_at = chrono::Utc
+        .timestamp_opt(seconds.unwrap_or(ordinary.timestamp()), nanos)
+        .single()
+        .ok_or(PeerPortError::Integrity)?;
     let clock = StatusObservationClock {
         live_at: ordinary,
         observed_at,
         reads: std::sync::Arc::default(),
     };
     let app = PeerApplication::new(
-        f.store.clone(), f.policy.clone(), clock.clone(), f.content.clone(),
-        f.cache.clone(), f.ids.clone(), f.catalog.clone(),
+        f.store.clone(),
+        f.policy.clone(),
+        clock.clone(),
+        f.content.clone(),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
     );
     let appends = f.store.appends.load(Ordering::SeqCst);
     let content_calls = f.content.calls.load(Ordering::SeqCst);
@@ -1253,12 +1263,17 @@ async fn service_status_rejects_unrepresentable_observation(seconds: Option<i64>
     };
     let control_request = request.clone();
     let joined = tokio::spawn(async move { app.status(&owner, request).await }).await;
-    assert!(joined.is_ok(), "public status must reject an unrepresentable clock without panicking");
+    assert!(
+        joined.is_ok(),
+        "public status must reject an unrepresentable clock without panicking"
+    );
     assert!(matches!(
         joined?,
-        Err(PeerApplicationError::Evidence(MessageError::InvalidState(EvolveError::TimestampRange {
-            field: "status.observed_at"
-        })))
+        Err(PeerApplicationError::Evidence(MessageError::InvalidState(
+            EvolveError::TimestampRange {
+                field: "status.observed_at"
+            }
+        )))
     ));
     assert_eq!(clock.reads.load(Ordering::SeqCst), 2);
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
@@ -1267,8 +1282,14 @@ async fn service_status_rejects_unrepresentable_observation(seconds: Option<i64>
     assert_eq!(f.ids.0.load(Ordering::SeqCst), ids);
     let status = f.app().status(&f.alice, control_request).await?;
     assert_eq!(status.message, sent.message);
-    assert_eq!(status.status.and_then(|value| value.as_known()), Some(proto::MessageStatus::MESSAGE_STATUS_ACCEPTED));
-    assert_eq!(status.observed_at, buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&ordinary)));
+    assert_eq!(
+        status.status.and_then(|value| value.as_known()),
+        Some(proto::MessageStatus::MESSAGE_STATUS_ACCEPTED)
+    );
+    assert_eq!(
+        status.observed_at,
+        buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&ordinary))
+    );
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
     assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
     assert_eq!(f.cache.calls.load(Ordering::SeqCst), cache_calls);
