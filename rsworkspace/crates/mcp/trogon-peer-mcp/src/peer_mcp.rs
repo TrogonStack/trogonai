@@ -12,6 +12,7 @@ use trogon_peer_context::{PeerContext, PeerContextError};
 use trogonai_proto::peers::v1alpha1 as v1;
 
 use crate::connector_config::ConnectorConfig;
+use crate::model_operation::ModelOperation;
 use crate::model_tool_definitions::model_tool;
 use crate::model_tools;
 use crate::native_binding::NativeBinding;
@@ -29,13 +30,6 @@ pub struct PeerMcp<B> {
     backend: B,
     config: ConnectorConfig,
     binding: Mutex<Option<NativeBinding>>,
-}
-
-enum ModelOperation {
-    Roster,
-    Send,
-    Status,
-    Acknowledge,
 }
 
 impl<B> fmt::Debug for PeerMcp<B> {
