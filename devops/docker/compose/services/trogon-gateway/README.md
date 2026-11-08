@@ -71,11 +71,15 @@ docker volume rm trogonai_nats_data
 
 Credential ids became opaque once, in
 [ADR#0074](../../../../../docs/adr/0074-credential-platform-extraction-boundary.md)
-Decision 4, and no migration carries older streams across. A dev environment
-that holds the `GATEWAY_CREDENTIAL_EVENTS` stream or the
-`GATEWAY_CREDENTIAL_SNAPSHOTS` bucket from before that change resets them with
-the same two commands. Credentials created through the management API then
-need to be created again. Nothing deployed holds them.
+Decision 4, and no migration carries older data across. The gateway keeps
+credentials in the `CREDENTIAL_EVENTS` stream and the `CREDENTIAL_SNAPSHOTS`
+bucket, names no earlier build used, so it never reads an event from before
+that change. A dev environment from before it still resets with the same two
+commands, because the recovery worker's checkpoint counts positions in the
+old `GATEWAY_CREDENTIAL_EVENTS` stream and would skip the start of the new
+one. Credentials created through the management API then need to be created
+again, and their earlier OpenBao entries stay under the old paths until
+`docker compose down -v` discards them. Nothing deployed holds them.
 
 ## Webhook integrations
 

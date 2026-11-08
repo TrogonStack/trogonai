@@ -39,29 +39,23 @@ records it, but a partial manual delete produces exactly this.
 ## Manual reconciliation
 
 Enumerate the managed tree with an identity holding list capability, then
-compare against the event stream. The tree is three or four levels below the prefix:
+compare against the event stream. Every managed path is
+`trogonai/{owner_id}/credentials/{credential_id}`:
 
 ```bash
 bao kv list -mount=secret trogonai/
 bao kv list -mount=secret trogonai/{owner_id}/credentials/
 ```
 
-Everything below `credentials/` is the storage locator,
-`openbao:{owner}:{scope_key}:{kind}`. It is one path segment for a
-source-scoped credential, but an integration-scoped one has a `/` in its scope
-key (`github/primary`), so `bao kv list` shows it as two levels: list the
-first level again to reach the second. The locator is not the credential id,
-which is opaque and never appears in the path. Find the credential whose activation or
-rotation event records that `storage_locator` in the credential event stream
-for the owner.
-
-A write that has not activated yet has no event naming its locator:
-`CredentialWriteRequested` records the owner, scope and kind, not the locator.
-For every locator, replay the matching credential's stream to its current
-state. Also match write requests by the locator's owner, scope key and kind.
-Do this even when a historical activation or rotation names the locator: a
+The last segment of each path is the credential id. It is the same opaque id
+that names the credential's subject in the `CREDENTIAL_EVENTS` stream,
+`credentials.events.v1.{owner_id}.{credential_id}`, where a `.` in the owner id
+appears as `~`. Replay that subject to the credential's current state, from
+the `CredentialWriteRequested` event that recorded its owner, scope key and
+kind. Replay it even when a historical activation or rotation is on record: a
 destroyed credential can be written again at the same path, and the historical
-event does not account for the new write. A request alone does not settle it:
+event does not account for the new write. A write request alone does not
+settle it:
 
 - **`pending_write`.** A write awaiting activation, not an orphan. Check the
   recovery state (`${GATEWAY}/-/credentials/recovery/status`) and leave it to
@@ -81,7 +75,7 @@ Compare the version numbers in OpenBao metadata with activation and rotation
 versions throughout the credential's stream, including its current state.
 After a successful retry, preserve the active version and all other versions
 accounted for by the stream. Investigate each additional version separately;
-an active locator does not establish that every version at that path is
+an active credential does not establish that every version at its path is
 accounted for. If stream history is incomplete or a pending operation could
 still activate the version, defer deletion until that uncertainty is resolved.
 
@@ -91,7 +85,7 @@ The current state determines the next step:
 
 **Active in the stream.** Its recorded active version is expected. Any other
 accounted versions remain governed by their lifecycle state. Unaccounted
-versions at this same locator still need reconciliation and, when confirmed
+versions at this same path still need reconciliation and, when confirmed
 orphaned, the cleanup procedure below.
 
 **Revoked or destroyed in the stream, versions still live in OpenBao.** This
@@ -123,12 +117,12 @@ this work, so it is manual, and it depends on the state the stream records:
   confirmed leftover versions directly under `break_glass_admin`
   ([break-glass-access.md](break-glass-access.md)). Hold the write quiescence
   described below, record the exact versions and recheck the stream before
-  destruction. A new write at the same locator must not be destroyed. Record
+  destruction. A new write at the same path must not be destroyed. Record
   the reconciliation as the evidence, since the stream has nothing new to say:
 
   ```bash
   bao kv destroy -mount=secret -versions="${ORPHAN_VERSIONS}" \
-    "trogonai/{owner_id}/credentials/{storage_locator}"
+    "trogonai/{owner_id}/credentials/{credential_id}"
   ```
 
 **Absent from the stream entirely.** A true orphan. Confirm before deleting:
@@ -140,7 +134,7 @@ first and destroy only after a retention interval.
 
 ```bash
 bao kv metadata get -mount=secret \
-  "trogonai/{owner_id}/credentials/{storage_locator}"
+  "trogonai/{owner_id}/credentials/{credential_id}"
 ```
 
 Read the metadata before deciding. Creation and update times distinguish a
@@ -157,7 +151,7 @@ in effect for every cleanup state check and mutation, including management-API
 destruction, which removes every version at the path.
 
 Under that quiescence, reread the credential stream and OpenBao metadata.
-Record the stream position, current state, locator and exact version numbers
+Record the stream position, current state, credential id and exact version numbers
 confirmed orphaned in the incident record. Set `ORPHAN_VERSIONS` to that
 nonempty comma-separated list. Recheck the state and version accounting
 immediately before deletion; if either changed or quiescence was lost, stop
@@ -166,7 +160,7 @@ version and can remove material from a successful retry.
 
 ```bash
 bao kv delete -mount=secret -versions="${ORPHAN_VERSIONS}" \
-  "trogonai/{owner_id}/credentials/{storage_locator}"
+  "trogonai/{owner_id}/credentials/{credential_id}"
 ```
 
 After the retention interval, establish write quiescence again if it was
@@ -179,7 +173,7 @@ and outcomes as evidence:
 
 ```bash
 bao kv destroy -mount=secret -versions="${ORPHAN_VERSIONS}" \
-  "trogonai/{owner_id}/credentials/{storage_locator}"
+  "trogonai/{owner_id}/credentials/{credential_id}"
 ```
 
 ## What the worker would need
