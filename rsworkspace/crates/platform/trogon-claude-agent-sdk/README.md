@@ -12,6 +12,16 @@ terminology, with Rust acronym casing. Its optional fields default to `None`:
 | `cli_path: Option<PathBuf>` | [`cli_path`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2467) | `pathToClaudeCodeExecutable` |
 | `cwd: Option<PathBuf>` | [`cwd`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2464) | `cwd` |
 | `model: Option<String>` | [`model`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2438) | `model` |
+| `permission_mode: Option<PermissionMode>` | [`permission_mode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2393) | `permissionMode` |
+
+`PermissionMode` mirrors Python's
+[`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L25)
+and the exported type in
+[TypeScript `0.3.319`](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.319.tgz).
+Serde uses their literal names: `default`, `acceptEdits`, `plan`,
+`bypassPermissions`, `dontAsk`, and `auto`. `None` leaves the mode unset;
+`Some(PermissionMode::Default)` explicitly selects `default`. The API draft
+stores this choice without applying a permission policy.
 
 Model strings and paths are stored without extra identifier restrictions.
 Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L93)
@@ -30,6 +40,7 @@ let options = ClaudeAgentOptions {
     cli_path: Some(PathBuf::from("tools/claude")),
     cwd: Some(PathBuf::from(".")),
     model: Some("claude-sonnet-5".into()),
+    ..ClaudeAgentOptions::default()
 };
 let client = ClaudeSdkClient::connect(options).await?;
 client.disconnect().await?;
