@@ -1,4 +1,4 @@
-use serde::Serialize;
+use buffa_types::google::protobuf::Timestamp;
 use serde_json::Value;
 use trogon_peer::{AttachmentRef, BatchId, MessageId, PeerDisplayName, PeerId};
 use trogon_peer_context::{MAX_MESSAGE_BYTES, MAX_MESSAGES};
@@ -117,11 +117,8 @@ pub(crate) fn acknowledgment_metadata(
     })
 }
 
-pub(crate) fn timestamp_metadata<T: Serialize>(value: Option<&T>) -> Result<String, PeerMcpError> {
+pub(crate) fn timestamp_metadata(value: Option<&Timestamp>) -> Result<String, PeerMcpError> {
     let value = value.ok_or(PeerMcpError::InvalidMetadata)?;
     let encoded = serde_json::to_value(value).map_err(PeerMcpError::MetadataEncoding)?;
-    match encoded {
-        Value::String(timestamp) => Ok(timestamp),
-        _ => Err(PeerMcpError::InvalidMetadata),
-    }
+    serde_json::from_value(encoded).map_err(PeerMcpError::MetadataEncoding)
 }

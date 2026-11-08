@@ -718,3 +718,141 @@ async fn malformed_service_metadata_has_a_safe_public_jsonrpc_diagnostic() {
         assert!(!result.to_string().contains("internal_blob_ref"));
     }
 }
+
+#[tokio::test]
+async fn model_results_reject_misattribution_invalid_lifetimes_and_inconsistent_acknowledgments() {
+    for mutation in 0..6 {
+        let mut backend = backend();
+        let operation = match mutation {
+            0 => {
+                backend
+                    .send_response
+                    .message
+                    .as_option_mut()
+                    .expect("message")
+                    .recipient_peer_id = Some("c".repeat(64));
+                1
+            }
+            1 => {
+                backend
+                    .send_response
+                    .message
+                    .as_option_mut()
+                    .expect("message")
+                    .content_size_bytes = Some(14);
+                1
+            }
+            2 => {
+                let message = backend.send_response.message.as_option_mut().expect("message");
+                message.expires_at = message.accepted_at.clone();
+                1
+            }
+            3 => {
+                backend.status_response.status = Some(v1::MessageStatus::MESSAGE_STATUS_UNSPECIFIED.into());
+                2
+            }
+            4 => {
+                let batch = backend.acknowledge_response.batch.as_option_mut().expect("batch");
+                batch.message_ids.push(batch.message_ids[0].clone());
+                3
+            }
+            _ => {
+                let batch = backend.acknowledge_response.batch.as_option_mut().expect("batch");
+                batch.acknowledged_at = batch.prepared_at.clone();
+                batch
+                    .acknowledged_at
+                    .as_option_mut()
+                    .expect("acknowledged time")
+                    .seconds -= 1;
+                3
+            }
+        };
+        let calls = backend.calls.clone();
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        bind(&adapter).await;
+        let (name, arguments) = model_calls().remove(operation);
+        assert!(matches!(
+            adapter.invoke(request(name, arguments)).await,
+            Err(PeerMcpError::InvalidMetadata)
+        ));
+        assert_eq!(calls.lock().expect("calls").len(), 3);
+    }
+}
+
+#[tokio::test]
+async fn roster_rejects_unknown_presence_states_and_invalid_time_evidence() {
+    for mutation in 0..8 {
+        let mut backend = backend();
+        let peer = &mut backend.roster_response.peers[0];
+        match mutation {
+            0 => peer.availability = None,
+            1 => peer.availability = Some(buffa::EnumValue::from(99)),
+            2 => peer.condition = Some(v1::PeerCondition::PEER_CONDITION_UNSPECIFIED.into()),
+            3 => peer.condition = Some(buffa::EnumValue::from(99)),
+            4 => peer.delivery_capability = None,
+            5 => peer.expires_at = peer.observed_at.clone(),
+            6 => {
+                peer.active_at = peer.observed_at.clone();
+                peer.active_at.as_option_mut().expect("active time").nanos = -1;
+            }
+            _ => peer.observed_at.as_option_mut().expect("observed time").nanos = 1_000_000_000,
+        }
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        bind(&adapter).await;
+        let result = adapter.invoke(request("peer_roster", json!({"page_size":2}))).await;
+        if mutation >= 6 {
+            assert!(matches!(result, Err(PeerMcpError::MetadataEncoding(_))));
+        } else {
+            assert!(matches!(result, Err(PeerMcpError::InvalidMetadata)));
+        }
+    }
+}
+
+#[tokio::test]
+async fn roster_preserves_explicit_availability_condition_and_progress_metadata() {
+    for availability in [
+        v1::PeerAvailability::PEER_AVAILABILITY_READY,
+        v1::PeerAvailability::PEER_AVAILABILITY_BUSY,
+        v1::PeerAvailability::PEER_AVAILABILITY_BLOCKED,
+        v1::PeerAvailability::PEER_AVAILABILITY_DRAINING,
+    ] {
+        let mut backend = backend();
+        let peer = &mut backend.roster_response.peers[0];
+        peer.availability = Some(availability.into());
+        peer.condition = Some(v1::PeerCondition::PEER_CONDITION_APPROVAL.into());
+        peer.active_at = peer.observed_at.clone();
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        bind(&adapter).await;
+        let output = result_json(
+            adapter
+                .invoke(request("peer_roster", json!({"page_size":2})))
+                .await
+                .expect("roster"),
+        );
+        assert_eq!(
+            output["peers"][0]["availability"],
+            serde_json::to_value(availability).expect("availability")
+        );
+        assert_eq!(output["peers"][0]["condition"], "PEER_CONDITION_APPROVAL");
+        assert_eq!(output["peers"][0]["activeAt"], "2026-11-03T12:00:00Z");
+        assert_metadata_only(&output);
+    }
+}
+
+#[tokio::test]
+async fn unknown_tools_never_gain_backend_access_from_native_binding() {
+    let backend = backend();
+    let calls = backend.calls.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    for bound in [false, true] {
+        if bound {
+            bind(&adapter).await;
+        }
+        let before = calls.lock().expect("calls").len();
+        assert!(matches!(
+            adapter.invoke(request("unknown_tool", json!({}))).await,
+            Err(PeerMcpError::UnsupportedTool)
+        ));
+        assert_eq!(calls.lock().expect("calls").len(), before);
+    }
+}

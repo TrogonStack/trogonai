@@ -378,3 +378,91 @@ fn preparation_rejects_corrupted_inbox_metadata_and_ambiguous_order() {
         ));
     }
 }
+
+#[test]
+fn preparation_replay_cannot_create_receipts_for_messages_absent_from_intake() {
+    let before = inbox(&[0], 1);
+    let (prepared, events) = evaluate_decision(before.clone(), &prepare(&[0], 20, 3)).unwrap();
+    let original = events.iter().next().unwrap();
+    assert_eq!(commands::state::evolve(before.clone(), original).unwrap(), prepared);
+    let mut absent = before.clone();
+    absent.inbox.clear();
+    assert_eq!(
+        commands::state::evolve(absent, original),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let mut forged = original.clone();
+    assert!(matches!(forged.event, Some(PeerEventCase::PeerBatchPrepared(_))));
+    if let Some(PeerEventCase::PeerBatchPrepared(event)) = forged.event.as_mut() {
+        event.batch.as_option_mut().unwrap().message_ids[0] = "absent_message".to_owned();
+        event.receipts[0].message_id = Some("absent_message".to_owned());
+    }
+    assert_eq!(
+        commands::state::evolve(before, &forged),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+}
+
+#[test]
+fn preparation_cannot_reuse_a_retired_batch_id() {
+    let mut before = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    before.batches[0].acknowledged_at = trogonai_proto::convert::timestamp_from_datetime(&time(3)).into();
+    assert_eq!(error(before, &prepare(&[0], 20, 3)), MessageError::Conflict);
+}
+
+#[test]
+fn preparation_time_remains_inside_the_validated_attachment_lease() {
+    for (at, expected) in [
+        (
+            chrono::DateTime::<chrono::Utc>::MIN_UTC,
+            HeartbeatError::ClockRegression,
+        ),
+        (chrono::DateTime::<chrono::Utc>::MAX_UTC, HeartbeatError::Expired),
+    ] {
+        let command = PrepareBatch::new(
+            identity("recipient").owner().clone(),
+            reference("recipient", 1),
+            BatchId::new("bounded_time").unwrap(),
+            TrustedBatchPlan::from_renderer(vec![MessageId::new("message_0").unwrap()], 20).unwrap(),
+            at,
+        );
+        assert_eq!(error(inbox(&[0], 1), &command), MessageError::Guard(expected));
+    }
+}
+
+#[test]
+fn incomplete_settlement_cannot_be_admitted_as_an_authority_event() {
+    let event = proto::PeerEvent {
+        event: Some(proto::PeerMessageSettled::default().into()),
+    };
+    assert_eq!(
+        commands::state::evolve(enrolled("recipient", 0), &event),
+        Err(EvolveError::MissingField { field: "receipt" })
+    );
+}
+
+#[test]
+fn preparation_cannot_emit_a_receipt_with_non_protobuf_leap_nanoseconds() {
+    use chrono::TimeZone as _;
+    let state = run(enrolled("recipient", 55), &IntakeMessage::new(evidence(0, 1), time(56)));
+    let make = |now| {
+        PrepareBatch::new(
+            identity("recipient").owner().clone(),
+            reference("recipient", 1),
+            BatchId::new("leap_batch").unwrap(),
+            TrustedBatchPlan::from_renderer(vec![MessageId::new("message_0").unwrap()], 20).unwrap(),
+            now,
+        )
+    };
+    assert!(evaluate_decision(state.clone(), &make(time(59))).is_ok());
+    let leap = chrono::Utc
+        .timestamp_opt(time(59).timestamp(), 1_500_000_000)
+        .single()
+        .unwrap();
+    assert_eq!(
+        error(state, &make(leap)),
+        MessageError::InvalidState(EvolveError::TimestampRange {
+            field: "receipt.decided_at"
+        })
+    );
+}
