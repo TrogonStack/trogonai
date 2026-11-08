@@ -64,10 +64,10 @@ where
                 .and_then(|e| e.message.as_option())
                 .cloned()
                 .ok_or(PeerApplicationError::Scope)?,
-            Err(CommandError::Decide(MessageError::AlreadyAccepted(entry))) => {
+            Err(PeerApplicationError::Message(CommandError::Decide(MessageError::AlreadyAccepted(entry)))) => {
                 entry.message.as_option().cloned().ok_or(PeerApplicationError::Scope)?
             }
-            Err(error) => return Err(PeerApplicationError::Message(error)),
+            Err(error) => return Err(error),
         };
         Ok(proto::SendResponse {
             message: MessageField::some(message),

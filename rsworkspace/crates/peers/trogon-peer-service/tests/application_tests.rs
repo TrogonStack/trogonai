@@ -711,6 +711,16 @@ async fn unimplemented_operations_return_typed_errors_without_calling_ports() ->
         f.store.reads.load(Ordering::SeqCst),
         f.store.appends.load(Ordering::SeqCst),
     );
+    let sender = trogon_peer::PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    assert!(matches!(
+        app.reconcile(&f.alice, &sender, &[], trogon_peer_service::WorkLimit::new(1)?)
+            .await,
+        Err(PeerApplicationError::NotImplemented)
+    ));
     assert!(matches!(
         app.prepare_batch(&f.bob, Default::default()).await,
         Err(PeerApplicationError::NotImplemented)
@@ -764,6 +774,20 @@ async fn public_preparation_receipts_drive_status_and_preserve_the_exact_present
         .with_authorizer(&f.policy)
         .execute()
         .await?;
+    let intake_status = f
+        .app()
+        .status(
+            &f.alice,
+            proto::StatusRequest {
+                attachment_ref: f.a.clone().into(),
+                idempotency_key: Some("presentation_status".into()),
+            },
+        )
+        .await?;
+    assert_eq!(
+        intake_status.status.and_then(|status| status.as_known()),
+        Some(proto::MessageStatus::MESSAGE_STATUS_INTAKE_RECORDED)
+    );
     let batch_id = BatchId::new("presentation_batch")?;
     let draft_batch = proto::PeerBatch {
         batch_id: Some(batch_id.as_str().to_owned()),
