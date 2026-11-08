@@ -2,6 +2,7 @@
 
 include!("trogonai.peers.v1alpha1.digest.rs");
 include!("trogonai.peers.v1alpha1.claim_check.rs");
+include!("trogonai.peers.v1alpha1.content_semantic_fingerprint.rs");
 include!("trogonai.peers.v1alpha1.message_metadata.rs");
 include!("trogonai.peers.v1alpha1.preparation_outcome.rs");
 include!("trogonai.peers.v1alpha1.recipient_receipt.rs");
@@ -66,6 +67,7 @@ pub mod __buffa {
         use super::*;
         include!("trogonai.peers.v1alpha1.digest.__view.rs");
         include!("trogonai.peers.v1alpha1.claim_check.__view.rs");
+        include!("trogonai.peers.v1alpha1.content_semantic_fingerprint.__view.rs");
         include!("trogonai.peers.v1alpha1.message_metadata.__view.rs");
         include!("trogonai.peers.v1alpha1.recipient_receipt.__view.rs");
         include!("trogonai.peers.v1alpha1.inbox_entry.__view.rs");
@@ -120,6 +122,7 @@ pub mod __buffa {
         reg.register_json_any(super::__DIGEST_JSON_ANY);
         reg.register_json_any(super::__STORAGE_LOCATOR_JSON_ANY);
         reg.register_json_any(super::__CLAIM_CHECK_JSON_ANY);
+        reg.register_json_any(super::__CONTENT_SEMANTIC_FINGERPRINT_JSON_ANY);
         reg.register_json_any(super::__MESSAGE_METADATA_JSON_ANY);
         reg.register_json_any(super::__RECIPIENT_RECEIPT_JSON_ANY);
         reg.register_json_any(super::__INBOX_ENTRY_JSON_ANY);
@@ -172,6 +175,10 @@ pub use self::__buffa::view::StorageLocatorOwnedView;
 pub use self::__buffa::view::ClaimCheckView;
 #[doc(inline)]
 pub use self::__buffa::view::ClaimCheckOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ContentSemanticFingerprintView;
+#[doc(inline)]
+pub use self::__buffa::view::ContentSemanticFingerprintOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::MessageMetadataView;
 #[doc(inline)]
