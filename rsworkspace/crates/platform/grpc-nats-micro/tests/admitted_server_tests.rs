@@ -354,13 +354,7 @@ async fn admitted_metadata_without_reply_never_runs_the_handler_or_publishes() {
     let mut message = message(ReplyMode::Say, ContentType::Protobuf, "not executed");
     message.reply = None;
     dispatch_admitted(&client, &message, &ServiceOptions::default(), &admission).await;
-    assert_eq!(
-        trace.calls(),
-        vec![Call::Admission {
-            subject: ALPHA_SAY.to_owned(),
-            reply: None,
-        }]
-    );
+    assert!(trace.calls().is_empty());
     assert!(client.published_messages().is_empty());
     assert!(client.published_payloads().is_empty());
     assert!(client.published_headers().is_empty());
