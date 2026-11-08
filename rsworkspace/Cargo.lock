@@ -97,6 +97,8 @@ dependencies = [
  "filetime",
  "futures",
  "nkeys",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -113,7 +115,9 @@ dependencies = [
  "trogon-audit",
  "trogon-identity-types",
  "trogon-nats",
+ "trogon-semconv",
  "trogon-std",
+ "trogon-telemetry",
  "trogonai-proto",
  "uuid",
 ]
@@ -7234,9 +7238,14 @@ name = "trogon-audit"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "async-trait",
+ "base64 0.23.1",
+ "bs58",
  "buffa",
  "buffa-types",
  "bytes",
+ "ed25519-dalek",
+ "serde",
  "serde_json",
  "sha2 0.11.1",
  "spiffe",

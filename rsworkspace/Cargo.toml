@@ -110,6 +110,7 @@ async-trait = "=0.1.92"
 axum = { version = "=0.8.9", features = ["ws"] }
 bytes = "=1.12.1"
 base64 = "=0.23.1"
+bs58 = "=0.5.1"
 buffa = { version = "=0.9.2", features = ["json"] }
 buffa-types = { version = "=0.9.2", features = ["json"] }
 buffa-descriptor = { version = "=0.9.2" }

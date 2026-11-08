@@ -231,6 +231,10 @@ pub trait JetStreamCreateConsumer: Send + 'static {
     -> impl Future<Output = Result<Self::Consumer, Self::Error>> + Send;
 }
 
+pub trait JetStreamDeleteConsumer: Send + Sync + 'static {
+    fn delete_consumer(&self, name: &str) -> impl Future<Output = Result<(), stream::ConsumerError>> + Send;
+}
+
 pub trait JetStreamConsumer: Send + Sync + 'static {
     /// Error from the `messages()` call itself. Maps to async_nats `StreamError`.
     type StreamError: Error + Send + Sync;
@@ -339,6 +343,12 @@ impl JetStreamCreateConsumer for jetstream::stream::Stream {
 
     async fn create_consumer(&self, config: pull::Config) -> Result<Self::Consumer, Self::Error> {
         self.create_consumer(config).await
+    }
+}
+
+impl<I: Send + Sync + 'static> JetStreamDeleteConsumer for jetstream::stream::Stream<I> {
+    async fn delete_consumer(&self, name: &str) -> Result<(), stream::ConsumerError> {
+        jetstream::stream::Stream::delete_consumer(self, name).await.map(|_| ())
     }
 }
 
