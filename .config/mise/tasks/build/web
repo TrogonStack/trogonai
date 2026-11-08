@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE dir="tsworkspace"
+
+exec pnpm build "$@"

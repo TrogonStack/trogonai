@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Format and check all Rust code (fmt, clippy, all targets, all features)"
+#MISE dir="rsworkspace"
+
+cargo fmt && cargo clippy --all-targets --all-features "$@"
