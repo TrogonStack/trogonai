@@ -14,7 +14,7 @@ on:
       - 'proto/trogonai/scheduler/schedules/v1/schedule_status.proto'
       - 'buf.lock'
       - 'buf.yaml'
-      - '.mise.toml'
+      - 'mise.toml'
       - '.config/mise/tasks/**'
       - '.github/workflows/ci-go.yml'
 
