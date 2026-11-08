@@ -122,6 +122,49 @@ fn signatures_do_not_bypass_resource_timestamp_or_role_contracts() {
 }
 
 #[test]
+fn approval_diagnostics_preserve_boundary_order_and_canonical_collections() {
+    let mut invalid = snapshot();
+    invalid.tenant = "other".into();
+    invalid.issued_at = MessageField::none();
+    let payload = invalid.encode_to_vec();
+    assert!(matches!(
+        ApprovedRegistration::verify(&config(NonZeroU64::MIN), &payload, &[0; 64]),
+        Err(RegistrationError::Signature(_))
+    ));
+    assert!(matches!(verify(&invalid), Err(RegistrationError::Scope)));
+
+    invalid = snapshot();
+    invalid.registration_revision = 0;
+    invalid.issued_at = MessageField::none();
+    assert!(matches!(verify(&invalid), Err(RegistrationError::Revision)));
+
+    invalid = snapshot();
+    invalid.expires_at = MessageField::some(Timestamp::from(SystemTime::now() - Duration::from_secs(1)));
+    invalid.bindings = vec![invalid.bindings[0].clone(); MAX_BINDINGS + 1];
+    assert!(matches!(verify(&invalid), Err(RegistrationError::Lease)));
+
+    invalid = snapshot();
+    invalid.expires_at = MessageField::some(Timestamp::from(SystemTime::now() + Duration::from_secs(331)));
+    invalid.bindings[0].role = EnumValue::from(WorkloadRole::Unspecified);
+    assert!(matches!(verify(&invalid), Err(RegistrationError::Lease)));
+
+    invalid = snapshot();
+    invalid.bindings.push(invalid.bindings[0].clone());
+    assert!(matches!(verify(&invalid), Err(RegistrationError::Bounds)));
+
+    invalid = snapshot();
+    invalid.bindings.push(RegistrationBinding {
+        spiffe_id: "spiffe://identity.example.org/service/alpha".into(),
+        ..invalid.bindings[0].clone()
+    });
+    assert!(matches!(verify(&invalid), Err(RegistrationError::NoncanonicalPayload)));
+
+    invalid = snapshot();
+    invalid.approved_root_sha256 = vec![vec![2; 32], vec![1; 32]];
+    assert!(matches!(verify(&invalid), Err(RegistrationError::NoncanonicalPayload)));
+}
+
+#[test]
 fn configured_domain_and_application_identity_cannot_be_normalized_into_authority() {
     let key = SigningKey::from_bytes(&[7; 32]).verifying_key();
     for alias in ["spiffe://identity.example.org/path", "IDENTITY.EXAMPLE.ORG"] {
