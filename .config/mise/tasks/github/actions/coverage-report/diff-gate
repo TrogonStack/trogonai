@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+if [[ "$COVERAGE_DIFF_ENABLED" == "true" && "$COVERAGE_SKIP_STORAGE" != "true" ]]; then
+  if [[ ! -f .coverage-comparison-status ]]; then
+    echo "Coverage comparison did not produce a result" >&2
+    exit 1
+  fi
+  COVERAGE_PYCOBERTURA_STATUS=$(cat .coverage-comparison-status)
+  case "$COVERAGE_PYCOBERTURA_STATUS" in 0|1|2|3) ;; *) exit 1 ;; esac
+fi
+if [[ "${COVERAGE_PYCOBERTURA_STATUS}" == "2" && "${COVERAGE_INCREASE_FAILURE}" == "true" ]]
+then {
+  echo "Code changes increased the number of uncovered lines in at least one file."
+  exit 1
+}
+fi
+if [[ "${COVERAGE_PYCOBERTURA_STATUS}" == "3" && "${COVERAGE_NEW_FAILURE}" == "true" ]]
+then {
+  echo "Code changes introduced new uncovered statements despite overall coverage improvement."
+  exit 1
+}
+fi
+if [[ "${COVERAGE_PYCOBERTURA_STATUS}" == "1" && "${COVERAGE_EXCEPTION_FAILURE}" == "true" ]]
+then {
+  echo "Pycobertura exception occurred."
+  exit 1
+}
+fi
+if [[ "${COVERAGE_RATE_FAILURE}" == "true" && -f .coverage-total.diff-branch ]]
+then {
+  current_coverage=$(cat .coverage-total)
+  diff_branch_coverage=$(cat .coverage-total.diff-branch)
+  if (( $(echo "$current_coverage < $diff_branch_coverage" | bc -l) ))
+  then {
+    echo "Coverage rate decreased from ${diff_branch_coverage}% to ${current_coverage}%."
+    exit 1
+  }
+  fi
+}
+fi
