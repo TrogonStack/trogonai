@@ -7449,6 +7449,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-evaluation-bindings"
+version = "0.1.0"
+dependencies = [
+ "buffa",
+ "thiserror 2.0.21",
+ "trogon-decider",
+ "trogonai-proto",
+]
+
+[[package]]
 name = "trogon-gateway"
 version = "0.1.0"
 dependencies = [

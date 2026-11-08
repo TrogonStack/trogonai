@@ -1,0 +1,19 @@
+[package]
+name = "trogon-evaluation-bindings"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Deciders for the evaluation bindings stream: bind a rubric, unbind it, and record an evaluation result (ADR 0072)"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+buffa = { workspace = true }
+thiserror = { workspace = true }
+trogon-decider = { workspace = true }
+trogonai-proto = { workspace = true, features = ["evaluation"] }
+
+[dev-dependencies]
+trogon-decider = { workspace = true, features = ["test-support"] }
