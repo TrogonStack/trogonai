@@ -2,10 +2,10 @@
 
 use buffa::MessageField;
 use chrono::{DateTime, TimeZone, Utc};
-use trogon_decider::testing::TestCase;
+use trogon_decider::{Decider, testing::TestCase};
 use trogon_peer::{
     AttachmentRef, CallerId, ConnectorId, EnrollmentIdentity, Heartbeat, HeartbeatError, InstallationId,
-    NativeSessionId, PeerId, PeerObservation, TenantId, TrustedPeerOwner,
+    NativeSessionId, PeerId, PeerObservation, PeerObservationError, TenantId, TrustedPeerOwner,
 };
 use trogonai_proto::convert::timestamp_from_datetime;
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
@@ -95,9 +95,20 @@ fn heartbeat_renews_only_connectivity_without_fabricating_progress() {
     };
     let mut expected = before.clone();
     expected.attachment = MessageField::some(renewed);
+    let command = heartbeat("old_connector", 1, now, None);
+    assert_eq!(command.owner(), identity().owner());
+    assert_eq!(command.attachment(), &reference("old_connector", 1));
+    assert_eq!(command.stream_id(), identity().peer_id());
+    assert_eq!(
+        command.observation().availability(),
+        proto::PeerAvailability::PEER_AVAILABILITY_BUSY
+    );
+    assert_eq!(command.observation().condition(), None);
+    assert_eq!(command.observation().active_at(), None);
+    assert_eq!(command.now(), now);
     TestCase::<Heartbeat>::new()
         .given_state(before)
-        .when(heartbeat("old_connector", 1, now, None))
+        .when(command)
         .then([event])
         .then_state(expected);
 }
@@ -196,6 +207,16 @@ fn peer_reference_and_observation_reject_invalid_boundary_values() {
         )
         .is_err()
     );
+    for outside in [
+        DateTime::<Utc>::from_timestamp(-62_135_596_801, 0).unwrap(),
+        DateTime::<Utc>::from_timestamp(253_402_300_800, 0).unwrap(),
+        DateTime::<Utc>::from_timestamp(59, 1_000_000_000).unwrap(),
+    ] {
+        assert!(matches!(
+            PeerObservation::new(proto::PeerAvailability::PEER_AVAILABILITY_READY, None, Some(outside)),
+            Err(PeerObservationError::InvalidActivity)
+        ));
+    }
     assert!(PeerObservation::new(proto::PeerAvailability::PEER_AVAILABILITY_UNSPECIFIED, None, None).is_err());
     assert!(
         PeerObservation::new(
@@ -261,5 +282,44 @@ fn heartbeat_replay_rejects_unknown_observations_or_loss_of_progress() {
             )
             .is_err()
         );
+    }
+}
+
+#[test]
+fn a_heartbeat_requires_enrollment_history_before_it_can_renew_a_lease() {
+    let now = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    TestCase::<Heartbeat>::new()
+        .given_no_history()
+        .when(heartbeat("old_connector", 1, now, None))
+        .then_error(HeartbeatError::MissingEnrollment);
+}
+
+#[test]
+fn heartbeat_replay_cannot_replace_a_fence_or_accept_a_renewal_after_expiry() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    for (connector, generation, seconds) in [
+        ("old_connector", 2, 2),
+        ("other_connector", 1, 2),
+        ("old_connector", 1, 10),
+    ] {
+        let event = proto::PeerEvent {
+            event: Some(
+                proto::PeerHeartbeatRecorded {
+                    attachment: MessageField::some(attachment(
+                        &identity(),
+                        connector,
+                        generation,
+                        start + chrono::Duration::seconds(seconds),
+                    )),
+                    availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+                    ..Default::default()
+                }
+                .into(),
+            ),
+        };
+        assert!(matches!(
+            trogon_peer::commands::state::evolve(state(start), &event),
+            Err(trogon_peer::EvolveError::InvalidAttachment)
+        ));
     }
 }
