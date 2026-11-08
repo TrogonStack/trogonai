@@ -47,27 +47,22 @@ impl EndpointBinding {
     }
 }
 
-/// The annotated protobuf service registered as one NATS micro service
-/// (ADR 0016 §1), and the subject prefix its endpoints are derived under.
+/// Service discovery identity is independent of the concrete or admitted endpoint addresses.
 #[derive(Debug, Clone)]
-pub struct ServiceBinding {
+pub struct ServiceDescriptor {
     name: ServiceName,
     version: ServiceVersion,
     description: Option<String>,
     metadata: DiscoveryMetadata,
-    subject_prefix: SubjectPrefix,
-    endpoints: Vec<EndpointBinding>,
 }
 
-impl ServiceBinding {
-    pub fn new(name: ServiceName, version: ServiceVersion, subject_prefix: SubjectPrefix) -> Self {
+impl ServiceDescriptor {
+    pub fn new(name: ServiceName, version: ServiceVersion) -> Self {
         Self {
             name,
             version,
             description: None,
             metadata: DiscoveryMetadata::default(),
-            subject_prefix,
-            endpoints: Vec::new(),
         }
     }
 
@@ -80,6 +75,67 @@ impl ServiceBinding {
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
     pub fn with_metadata(mut self, metadata: DiscoveryMetadata) -> Self {
         self.metadata = metadata;
+        self
+    }
+
+    pub fn name(&self) -> &ServiceName {
+        &self.name
+    }
+
+    pub const fn version(&self) -> &ServiceVersion {
+        &self.version
+    }
+
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    pub const fn metadata(&self) -> &DiscoveryMetadata {
+        &self.metadata
+    }
+}
+
+/// The annotated protobuf service registered as one NATS micro service
+/// (ADR 0016 §1), and the subject prefix its endpoints are derived under.
+#[derive(Clone)]
+pub struct ServiceBinding {
+    descriptor: ServiceDescriptor,
+    subject_prefix: SubjectPrefix,
+    endpoints: Vec<EndpointBinding>,
+}
+
+impl std::fmt::Debug for ServiceBinding {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ServiceBinding")
+            .field("name", self.descriptor.name())
+            .field("version", self.descriptor.version())
+            .field("description", &self.descriptor.description())
+            .field("metadata", self.descriptor.metadata())
+            .field("subject_prefix", &self.subject_prefix)
+            .field("endpoints", &self.endpoints)
+            .finish()
+    }
+}
+
+impl ServiceBinding {
+    pub fn new(name: ServiceName, version: ServiceVersion, subject_prefix: SubjectPrefix) -> Self {
+        Self {
+            descriptor: ServiceDescriptor::new(name, version),
+            subject_prefix,
+            endpoints: Vec::new(),
+        }
+    }
+
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.descriptor = self.descriptor.with_description(description);
+        self
+    }
+
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    pub fn with_metadata(mut self, metadata: DiscoveryMetadata) -> Self {
+        self.descriptor = self.descriptor.with_metadata(metadata);
         self
     }
 
@@ -96,29 +152,31 @@ impl ServiceBinding {
     ) -> Result<Self, EndpointSubjectError> {
         self.endpoints.push(EndpointBinding::new(
             &self.subject_prefix,
-            &self.name,
+            self.descriptor.name(),
             method_name,
             metadata,
         )?);
         Ok(self)
     }
 
+    pub fn descriptor(&self) -> &ServiceDescriptor {
+        &self.descriptor
+    }
+
     pub fn name(&self) -> &ServiceName {
-        &self.name
+        self.descriptor.name()
     }
 
     pub const fn version(&self) -> &ServiceVersion {
-        &self.version
+        self.descriptor.version()
     }
 
     pub fn description(&self) -> Option<&str> {
-        self.description.as_deref()
+        self.descriptor.description()
     }
 
-    /// `ServiceOptions.metadata`, which populates this service's discovery
-    /// record (ADR 0016 §1).
     pub const fn metadata(&self) -> &DiscoveryMetadata {
-        &self.metadata
+        self.descriptor.metadata()
     }
 
     pub fn subject_prefix(&self) -> &SubjectPrefix {

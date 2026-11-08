@@ -32,7 +32,7 @@ pub mod status_codec;
 pub mod subject_prefix;
 pub mod subject_prefix_input;
 
-pub use binding::{EndpointBinding, ServiceBinding};
+pub use binding::{EndpointBinding, ServiceBinding, ServiceDescriptor};
 pub use content_type::ContentType;
 pub use content_type_input::ContentTypeInput;
 pub use discovery_metadata::{DiscoveryMetadata, DiscoveryMetadataError};
@@ -40,7 +40,9 @@ pub use discovery_metadata_input::DiscoveryMetadataInput;
 pub use endpoint_subject::{EndpointSubject, EndpointSubjectError};
 pub use method_name::{MethodName, MethodNameError};
 pub use method_name_input::MethodNameInput;
-pub use server::{AdmittedEndpoint, EndpointHandler, ServeError, serve, serve_admitted};
+pub use server::{
+    AdmittedEndpoint, EndpointHandler, NamedAdmittedEndpoint, ServeError, serve, serve_admitted, serve_named_admitted,
+};
 pub use service_error_code::{ServiceErrorCode, ServiceErrorCodeError};
 pub use service_error_code_input::ServiceErrorCodeInput;
 pub use service_fault::ServiceFault;
