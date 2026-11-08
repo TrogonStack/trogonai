@@ -494,3 +494,23 @@ impl Fixture {
         Ok(sent)
     }
 }
+impl Fixture {
+    pub async fn history(&self, peer: &PeerId) -> TestResult<trogonai_proto::peers::state_v1alpha1::PeerState> {
+        let read = self
+            .store
+            .read_stream(ReadStreamRequest {
+                stream_id: peer,
+                from: ReadFrom::Beginning,
+            })
+            .await?;
+        let mut state = trogon_peer::commands::state::initial_state();
+        for event in read.events {
+            let event = event
+                .decode::<proto::PeerEvent>()?
+                .into_decoded()
+                .ok_or(PeerPortError::Integrity)?;
+            state = trogon_peer::commands::state::evolve(state, &event)?;
+        }
+        Ok(state)
+    }
+}
