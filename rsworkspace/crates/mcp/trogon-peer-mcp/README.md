@@ -85,8 +85,8 @@ invalid identity, routing, availability and anonymous authentication settings.
 [NATS configuration reference](../../platform/trogon-nats/README.md).
 Secret values and opaque secret references remain on that factory's path.
 TLS remains the default; disabling it is only for explicit local debugging or
-tests. The executable installs no tracing subscriber and prints only static
-failure diagnostics to stderr. Stdout carries MCP protocol only.
+tests. The executable filters tracing to static connector failure diagnostics
+on stderr. Stdout carries MCP protocol only.
 
 The issuer must actually restrict the configured credential to its caller and
 connection grants. Configuration does not establish credential authority.
@@ -114,8 +114,9 @@ Malformed and wrong-session requests fail before backend access. Unbound
 new prompts and heartbeats before waiting for remote work. Its total budget is
 one second, including synchronization. Repeats after confirmation are local
 no-ops. Unconfirmed detach retries retain the same attachment; lease expiry is
-the fallback. Durable enrollment, inbox and acknowledgment facts stay owned by
-the service.
+the fallback. If a prompt reserved the native session but enrollment has no
+confirmed attachment, detach and shutdown remain unconfirmed. Durable enrollment,
+inbox and acknowledgment facts stay owned by the service.
 
 EOF, SIGINT and SIGTERM cancel native work and attempt bounded detach. Unix
 stdio uses readiness-based nonblocking pipes, avoiding a blocking stdin thread
