@@ -7630,7 +7630,9 @@ dependencies = [
 name = "trogon-peer-service"
 version = "0.1.0"
 dependencies = [
+ "buffa",
  "chrono",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "tokio",
  "trogon-decider-runtime",
