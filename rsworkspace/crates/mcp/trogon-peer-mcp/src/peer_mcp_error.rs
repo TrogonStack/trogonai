@@ -1,5 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum PeerMcpError {
+    #[error("Peer hook deadline elapsed; retry the same prompt identity. Remote outcome is uncertain.")]
+    PromptDeadline,
     #[error("Peer connector has not enrolled a native session.")]
     Unbound,
     #[error("This connector belongs to another native session; reconnect it for this session.")]

@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Duration;
 
 use rmcp::ServerHandler;
 use rmcp::model::{
@@ -52,7 +53,16 @@ where
 
     pub async fn invoke(&self, request: CallToolRequestParams) -> Result<CallToolResult, PeerMcpError> {
         match request.name.as_ref() {
-            "peer_prompt_hook" => self.prompt_hook(request).await,
+            "peer_prompt_hook" => {
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+                let result = tokio::time::timeout_at(deadline, self.prompt_hook(request))
+                    .await
+                    .map_err(|_| PeerMcpError::PromptDeadline)?;
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(PeerMcpError::PromptDeadline);
+                }
+                result
+            }
             "peer_roster" | "peer_send" | "peer_status" | "peer_acknowledge_batch" => {
                 let attachment = self
                     .binding

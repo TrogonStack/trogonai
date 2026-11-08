@@ -25,6 +25,9 @@ struct Backend {
     enrollment: Arc<Mutex<v1::EnrollResponse>>,
     fail_enroll: bool,
     fail_prepare: Arc<std::sync::atomic::AtomicBool>,
+    enroll_delay: std::time::Duration,
+    prepare_delay: std::time::Duration,
+    prepare_completion_at: Option<tokio::time::Instant>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -94,6 +97,7 @@ impl EnrollPeer for Backend {
             .lock()
             .expect("call recorder")
             .push(ObservedCall::Enroll(request));
+        tokio::time::sleep(self.enroll_delay).await;
         if self.fail_enroll {
             return Err(UnconfiguredOperationError);
         }
@@ -109,6 +113,11 @@ impl PreparePeerBatch for Backend {
             .lock()
             .expect("call recorder")
             .push(ObservedCall::Prepare(request));
+        if let Some(completion_at) = self.prepare_completion_at {
+            tokio::time::sleep_until(completion_at).await;
+        } else {
+            tokio::time::sleep(self.prepare_delay).await;
+        }
         if self.fail_prepare.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(UnconfiguredOperationError);
         }
@@ -157,6 +166,9 @@ fn backend(response: v1::PrepareBatchResponse) -> Backend {
         enrollment: Arc::new(Mutex::new(enrollment())),
         fail_enroll: false,
         fail_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        enroll_delay: std::time::Duration::ZERO,
+        prepare_delay: std::time::Duration::ZERO,
+        prepare_completion_at: None,
     }
 }
 
@@ -1166,5 +1178,82 @@ async fn jsonrpc_hook_failures_keep_pending_delivery_queued_and_validate_assignm
         let adapter = PeerMcp::new(backend, config()).expect("config");
         let results = wire_results(adapter, vec![prompt("native_b", "prompt_1")]).await;
         assert_wire_error(&results[0], diagnostic);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_prompt_deadline_covers_the_complete_work_and_lock_wait() {
+    let mut backend = backend(Default::default());
+    backend.enroll_delay = std::time::Duration::from_millis(1500);
+    backend.prepare_delay = std::time::Duration::from_millis(1500);
+    let calls = backend.calls.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    let first = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.invoke(prompt("native_b", "prompt_1")).await })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_millis(500)).await;
+    let started = tokio::time::Instant::now();
+    let second = adapter.invoke(prompt("native_b", "prompt_2")).await;
+    assert!(
+        second.is_err(),
+        "local synchronization must be inside the hook deadline"
+    );
+    assert!(started.elapsed() <= std::time::Duration::from_secs(2));
+    assert!(first.await.expect("prompt task").is_err());
+    assert!(calls.lock().expect("calls").iter().all(|call| match call {
+        ObservedCall::Enroll(request) => request.native_session_id.as_deref() == Some("native_b"),
+        ObservedCall::Prepare(request) => request.attachment_ref.generation == Some(1),
+    }));
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancelled_enrollment_reserves_native_identity_and_same_prompt_retry() {
+    let mut backend = backend(Default::default());
+    backend.enroll_delay = std::time::Duration::from_secs(3);
+    let calls = backend.calls.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    let first = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        adapter.invoke(prompt("native_b", "stable_prompt")),
+    )
+    .await;
+    assert!(matches!(first, Ok(Err(_))), "connector must enforce its own deadline");
+    assert!(matches!(
+        adapter.invoke(prompt("native_c", "stable_prompt")).await,
+        Err(PeerMcpError::NativeSessionChanged)
+    ));
+    let _ = adapter.invoke(prompt("native_b", "stable_prompt")).await;
+    let calls = calls.lock().expect("calls");
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0], calls[1], "uncertain enrollment retries retain identity");
+}
+
+#[tokio::test(start_paused = true)]
+async fn completed_prompt_outcome_at_deadline_is_preserved() {
+    for fail_prepare in [false, true] {
+        let started = tokio::time::Instant::now();
+        let mut backend = backend(prepared("completed context"));
+        backend.prepare_completion_at = Some(started + std::time::Duration::from_secs(2));
+        backend
+            .fail_prepare
+            .store(fail_prepare, std::sync::atomic::Ordering::SeqCst);
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+
+        let outcome = adapter.invoke(prompt("native_b", "boundary_prompt")).await;
+
+        assert_eq!(started.elapsed(), std::time::Duration::from_secs(2));
+        if fail_prepare {
+            assert!(matches!(outcome, Err(PeerMcpError::Prepare(_))));
+        } else {
+            let output = hook_json(outcome.expect("completed prompt outcome"));
+            assert!(
+                output["hookSpecificOutput"]["additionalContext"]
+                    .as_str()
+                    .expect("context text")
+                    .contains("completed context")
+            );
+        }
     }
 }
