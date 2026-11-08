@@ -1,4 +1,14 @@
 use std::sync::atomic::Ordering;
+use trogon_peer::Attach;
+use trogon_peer::Enroll;
+use trogon_peer::EnrollmentIdentity;
+use trogon_peer::Heartbeat;
+use trogon_peer::InstallationId;
+use trogon_peer::NativeSessionId;
+use trogon_peer::PeerDisplayName;
+use trogon_peer::PeerObservation;
+use trogon_peer_service::PeerService;
+use trogon_peer_service::test_support::IsolatedEnrollmentFixture;
 
 mod support;
 use support::*;
@@ -435,7 +445,6 @@ async fn terminal_and_settlement_grants_bind_authoritative_outcomes_before_stora
 
 #[tokio::test]
 async fn public_fixture_shared_enrollment_and_resume_reject_other_collaborations_before_storage() -> TestResult {
-    use trogon_peer::{Attach, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId, PeerDisplayName};
     let f = Fixture::new().await?;
     let identity = EnrollmentIdentity::new(
         f.alice.clone(),
@@ -516,8 +525,6 @@ async fn public_fixture_shared_enrollment_and_resume_reject_other_collaborations
 #[tokio::test]
 async fn public_isolated_fixture_authorizes_real_expired_resume_and_denies_other_collaborations_before_storage()
 -> TestResult {
-    use trogon_peer::{Attach, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId, PeerDisplayName};
-    use trogon_peer_service::{PeerService, test_support::IsolatedEnrollmentFixture};
     let f = Fixture::new().await?;
     let identity = EnrollmentIdentity::new(
         f.alice.clone(),
@@ -614,7 +621,6 @@ async fn public_isolated_fixture_authorizes_real_expired_resume_and_denies_other
 
 #[tokio::test]
 async fn public_fixture_owner_grant_rejects_another_peers_heartbeat_before_storage() -> TestResult {
-    use trogon_peer::{Heartbeat, PeerObservation};
     let f = Fixture::new().await?;
     let actor = principal(&f.alice)?;
     let observation = PeerObservation::new(proto::PeerAvailability::PEER_AVAILABILITY_READY, None, None)?;
