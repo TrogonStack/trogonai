@@ -1,6 +1,49 @@
+use chrono::Duration;
+use chrono::TimeZone;
 use std::sync::atomic::Ordering;
+use trogon_decider_runtime::CommandAuthorizer as _;
+use trogon_decider_runtime::CommandError;
+use trogon_decider_runtime::CommandExecution;
+use trogon_decider_runtime::CommandPrincipal;
+use trogon_decider_runtime::EventEncode;
+use trogon_decider_runtime::PrincipalId;
+use trogon_decider_runtime::PrincipalKind;
+use trogon_decider_runtime::ReadFrom;
+use trogon_decider_runtime::ReadStreamRequest;
+use trogon_decider_runtime::ReplayLimit;
+use trogon_decider_runtime::StreamAppend;
+use trogon_decider_runtime::StreamRead;
+use trogon_peer::AcceptedMessage;
+use trogon_peer::AcknowledgeBatch;
+use trogon_peer::AttachmentRef;
+use trogon_peer::BatchId;
+use trogon_peer::ConnectorId;
+use trogon_peer::EvolveError;
+use trogon_peer::IntakeMessage;
+use trogon_peer::MessageError;
+use trogon_peer::PeerValueError;
+use trogon_peer::PrepareBatch;
+use trogon_peer::SealedContentRef;
+use trogon_peer::TrustedBatchPlan;
 use trogon_peer::{MessageId, PeerId};
+use trogon_peer_service::ContentBinding;
+use trogon_peer_service::ContentOpen;
+use trogon_peer_service::ContentSeal as _;
+use trogon_peer_service::HistoryError;
+use trogon_peer_service::MessageText;
+use trogon_peer_service::PeerAccess;
+use trogon_peer_service::PeerApplication;
+use trogon_peer_service::PeerApplicationError;
+use trogon_peer_service::PeerClock;
+use trogon_peer_service::PeerOperation;
+use trogon_peer_service::PeerPortError;
+use trogon_peer_service::PeerService;
+use trogon_peer_service::PreparedPresentation;
+use trogon_peer_service::PresentationInsert;
+use trogon_peer_service::PresentationKey;
+use trogon_peer_service::PresentationRead;
 use trogon_peer_service::WorkLimit;
+use trogonai_proto::peers::PeerEventCase;
 mod support;
 use support::*;
 use trogonai_proto::peers::v1alpha1 as proto;
@@ -59,12 +102,6 @@ async fn denied_acceptance_touches_no_store_content_cache_or_catalog() -> TestRe
 
 #[tokio::test]
 async fn content_ports_preserve_semantics_but_verify_storage_integrity_and_scope_independently() -> TestResult {
-    use trogon_decider_runtime::{CommandAuthorizer as _, CommandPrincipal, PrincipalId, PrincipalKind};
-    use trogon_peer::{PeerId, SealedContentRef};
-    use trogon_peer_service::{
-        ContentBinding, ContentOpen as _, ContentSeal as _, MessageText, PeerAccess, PeerOperation, PeerPortError,
-    };
-
     let f = Fixture::new().await?;
     let peer = PeerId::parse(f.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
     let scope = PeerAccess::new(f.alice.clone(), peer, PeerOperation::Send);
@@ -189,7 +226,6 @@ impl trogon_decider_runtime::CommandAuthorizer<trogon_peer::Attach> for ServiceC
 
 #[tokio::test]
 async fn message_byte_limits_reject_invalid_requests_before_ports_and_preserve_utf8() -> TestResult {
-    use trogon_peer_service::{MessageText, PeerApplicationError};
     let f = Fixture::new().await?;
     let reads = f.store.reads.load(Ordering::SeqCst);
     let appends = f.store.appends.load(Ordering::SeqCst);
@@ -431,7 +467,6 @@ async fn service_coverage_public_history(
     f: &Fixture,
     peer: &trogon_peer::PeerId,
 ) -> TestResult<trogonai_proto::peers::state_v1alpha1::PeerState> {
-    use trogon_decider_runtime::StreamRead;
     let read = f
         .store
         .read_stream(trogon_decider_runtime::ReadStreamRequest {
@@ -543,7 +578,6 @@ async fn status_reports_terminal_backend_dispositions_without_claiming_sender_se
 
 #[tokio::test]
 async fn a_history_beyond_the_documented_replay_ceiling_fails_closed_at_the_public_query() -> TestResult {
-    use trogon_decider_runtime::{StreamAppend, StreamRead};
     let f = Fixture::new().await?;
     let service = trogon_peer_service::PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone());
     service
@@ -767,7 +801,6 @@ async fn replay_reconciliation_receipt(
     store: &StoreFixture,
     peer: &PeerId,
 ) -> TestResult<trogonai_proto::peers::state_v1alpha1::PeerState> {
-    use trogon_decider_runtime::StreamRead;
     let history = store
         .read_stream(trogon_decider_runtime::ReadStreamRequest {
             stream_id: peer,
@@ -1118,7 +1151,6 @@ async fn rejected_settlement_preserves_the_authoritative_receipt_for_a_later_aut
 
 #[tokio::test]
 async fn operations_without_required_fields_return_typed_errors_before_ports() -> TestResult {
-    use trogon_peer_service::PeerApplicationError;
     let f = Fixture::new().await?;
     let app = f.app();
     let before = (
@@ -1161,14 +1193,6 @@ async fn operations_without_required_fields_return_typed_errors_before_ports() -
 
 #[tokio::test]
 async fn public_preparation_receipts_drive_status_and_preserve_the_exact_presentation_record() -> TestResult {
-    use trogon_decider_runtime::{CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind};
-    use trogon_peer::{
-        AcceptedMessage, AcknowledgeBatch, AttachmentRef, BatchId, ConnectorId, IntakeMessage, MessageId, PeerId,
-        PrepareBatch, TrustedBatchPlan,
-    };
-    use trogon_peer_service::{
-        PeerClock, PeerPortError, PreparedPresentation, PresentationInsert, PresentationKey, PresentationRead,
-    };
     let f = Fixture::new().await?;
     let body = "presentation <body>";
     let sent = f.app().send(&f.alice, f.send("presentation_status", body)).await?;
@@ -1315,7 +1339,6 @@ enum MalformedHistoryField {
 
 impl MalformedHistoryField {
     fn expected(self) -> trogon_peer::EvolveError {
-        use trogon_peer::{EvolveError, PeerValueError};
         match self {
             Self::MissingCollaboration => EvolveError::MissingField {
                 field: "enrollment.collaboration_ref",
@@ -1443,8 +1466,6 @@ async fn altered_history_store(
     peer: trogon_peer::PeerId,
     field: MalformedHistoryField,
 ) -> TestResult<AlteredHistoryEnvelope> {
-    use trogon_decider_runtime::{EventEncode, ReadFrom, ReadStreamRequest, StreamRead};
-    use trogonai_proto::peers::PeerEventCase;
     let history = fixture
         .store
         .read_stream(ReadStreamRequest {
@@ -1783,7 +1804,6 @@ async fn a_cross_caller_reconcile_grant_cannot_settle_another_callers_obligation
 
 #[tokio::test]
 async fn an_already_expired_obligation_is_disposed_without_opening_content() -> TestResult {
-    use trogon_peer_service::{PeerPortError, PeerService};
     let mut f = Fixture::new().await?;
     let sent = f.app().send(&f.alice, f.send("expired-before-open", "pending")).await?;
     let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
@@ -1865,7 +1885,6 @@ impl trogon_peer_service::ContentOpen for WrongSizeReconciliationContent {
         scope: &trogon_peer_service::PeerAccess,
         binding: &trogon_peer_service::ContentBinding,
     ) -> Result<Option<trogon_peer_service::MessageText>, trogon_peer_service::PeerPortError> {
-        use trogon_peer_service::{ContentOpen, MessageText, PeerPortError};
         match ContentOpen::open(&self.0, scope, binding).await? {
             Some(text) => Ok(Some(
                 MessageText::new(format!("{}!", text.as_str())).map_err(|_| PeerPortError::Integrity)?,
@@ -1877,7 +1896,6 @@ impl trogon_peer_service::ContentOpen for WrongSizeReconciliationContent {
 
 #[tokio::test]
 async fn a_wrong_size_content_response_cannot_intake_or_dispose_an_obligation() -> TestResult {
-    use trogon_peer_service::{PeerApplication, PeerApplicationError, PeerPortError};
     let f = Fixture::new().await?;
     let sent = f.app().send(&f.alice, f.send("wrong-open-size", "pending")).await?;
     let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
@@ -1944,11 +1962,6 @@ async fn a_wrong_size_content_response_cannot_intake_or_dispose_an_obligation() 
 
 #[tokio::test]
 async fn a_full_recipient_defers_only_its_obligation_and_retries_after_capacity_is_released() -> TestResult {
-    use trogon_decider_runtime::{
-        CommandError, CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind, ReplayLimit,
-    };
-    use trogon_peer::{AcceptedMessage, IntakeMessage, MessageError};
-    use trogon_peer_service::{PeerClock, PeerPortError, PeerService};
     let f = Fixture::new().await?;
     let recipient = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
     let service = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone());
@@ -2111,7 +2124,6 @@ async fn a_full_recipient_defers_only_its_obligation_and_retries_after_capacity_
 
 #[tokio::test]
 async fn malformed_accepted_content_history_fails_before_status_or_reconciliation_ports() -> TestResult {
-    use trogon_peer_service::{HistoryError, PeerApplication, PeerApplicationError, PeerPortError};
     for field in [
         MalformedHistoryField::MissingContentRef,
         MalformedHistoryField::MissingContentLocator,
@@ -2202,9 +2214,6 @@ impl trogon_peer_service::PeerClock for StatusObservationClock {
 }
 
 async fn service_status_rejects_unrepresentable_observation(seconds: Option<i64>, nanos: u32) -> TestResult {
-    use chrono::{Duration, TimeZone};
-    use trogon_peer::{EvolveError, MessageError};
-    use trogon_peer_service::{PeerApplication, PeerApplicationError, PeerClock, PeerPortError, PeerService};
     let mut f = Fixture::new().await?;
     let sent = f
         .app()
