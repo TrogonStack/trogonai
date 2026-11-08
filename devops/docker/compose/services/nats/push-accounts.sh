@@ -7,9 +7,10 @@ set -eu
 
 ACCOUNTS_DIR=/accounts
 
-for jwt in "$ACCOUNTS_DIR"/*.jwt; do
-  name=$(basename "$jwt" .jwt)
-  reply=$(nats request '$SYS.REQ.CLAIMS.UPDATE' "$(cat "$jwt")" --raw --timeout 5s)
+# Load exports before imports so a refreshed import captures the current response mode.
+for name in AUTH PLATFORM DEV; do
+  jwt="$ACCOUNTS_DIR/$name.jwt"
+  reply=$(nats request "\$SYS.REQ.CLAIMS.UPDATE" "$(cat "$jwt")" --raw --timeout 5s)
   if ! printf '%s' "$reply" | jq -e '.data.code == 200' >/dev/null 2>&1; then
     echo "nats-account-push: the server rejected $name: $reply" >&2
     exit 1

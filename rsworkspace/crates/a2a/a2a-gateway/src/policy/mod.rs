@@ -12,6 +12,7 @@
 
 pub mod caller_spicedb_subject;
 pub mod error;
+mod owner_emit_error;
 pub mod per_skill;
 #[cfg(feature = "spicedb")]
 pub mod spicedb_tier1;
