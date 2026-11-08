@@ -112,7 +112,7 @@ impl Decider for Enroll {
             enrolled_at: MessageField::some(timestamp_from_datetime(&command.now)),
         };
         let attachment = proto::PeerAttachment {
-            attachment: MessageField::some(proto::AttachmentRef {
+            attachment_ref: MessageField::some(proto::AttachmentRef {
                 peer_id: Some(identity.peer_id().as_str().to_owned()),
                 connector_id: Some(command.connector_id.as_str().to_owned()),
                 generation: Some(1),

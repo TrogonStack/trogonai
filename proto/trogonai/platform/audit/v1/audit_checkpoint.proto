@@ -1,0 +1,25 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+import "buf/validate/validate.proto";
+
+// AuditCheckpoint is a signed checkpoint as stored on the checkpoint stream.
+//
+// Checkpoints are not audit records and are not chained. A checkpoint lets a
+// verifier detect a truncated chain tail, which no record in the chain can
+// show by itself.
+message AuditCheckpoint {
+  // An encoded CheckpointStatement, stored verbatim and never re-serialized.
+  // These are the bytes the signature covers.
+  bytes statement = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  // A compact JWS over statement with the payload segment left empty
+  // (detached), as in RFC 7515 Appendix F.
+  string detached_jws = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

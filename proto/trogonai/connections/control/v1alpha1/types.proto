@@ -1,0 +1,153 @@
+edition = "2024";
+
+package trogonai.connections.control.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/types/v1alpha1/discovery.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+
+message ControlRequestId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      uuid: true
+      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    }
+  ];
+}
+
+// A retry preserves every field. Only a previously unseen request checks the
+// issuance window; accepted requests recover their durable receipt first.
+message ControlMutation {
+  ControlRequestId request_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp issued_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  uint64 expected_revision = 3 [(buf.validate.field).uint64.gt = 0];
+}
+
+enum ControlAction {
+  CONTROL_ACTION_UNSPECIFIED = 0;
+  CONTROL_ACTION_START_CONNECT = 1;
+  CONTROL_ACTION_RECONNECT = 2;
+  CONTROL_ACTION_DISCONNECT = 3;
+  CONTROL_ACTION_CANCEL_CONNECT = 4;
+}
+
+enum ControlRequestPhase {
+  CONTROL_REQUEST_PHASE_UNSPECIFIED = 0;
+  CONTROL_REQUEST_PHASE_ACCEPTED = 1;
+  // The domain intent committed, not a claim that provider cleanup completed.
+  CONTROL_REQUEST_PHASE_COMMITTED = 2;
+  CONTROL_REQUEST_PHASE_FAILED = 3;
+  CONTROL_REQUEST_PHASE_OUTCOME_UNKNOWN = 4;
+}
+
+enum ControlFailureReason {
+  CONTROL_FAILURE_REASON_UNSPECIFIED = 0;
+  CONTROL_FAILURE_REASON_INVALID_ARGUMENT = 1;
+  // Identical for a missing resource and a resource the caller cannot inspect.
+  CONTROL_FAILURE_REASON_RESOURCE_NOT_AVAILABLE = 2;
+  CONTROL_FAILURE_REASON_REVISION_CONFLICT = 3;
+  CONTROL_FAILURE_REASON_IDEMPOTENCY_CONFLICT = 4;
+  CONTROL_FAILURE_REASON_ATTEMPT_IN_PROGRESS = 5;
+  CONTROL_FAILURE_REASON_NOT_CANCELLABLE = 6;
+  CONTROL_FAILURE_REASON_TERMINAL_CONNECTION = 7;
+  CONTROL_FAILURE_REASON_UNSUPPORTED_METHOD = 8;
+  CONTROL_FAILURE_REASON_PROVIDER_UNAVAILABLE = 9;
+  CONTROL_FAILURE_REASON_PROVIDER_REJECTED = 10;
+  CONTROL_FAILURE_REASON_ACCOUNT_ALREADY_CONNECTED = 11;
+  CONTROL_FAILURE_REASON_ACCOUNT_MISMATCH = 12;
+  CONTROL_FAILURE_REASON_AUTHORIZATION_FAILED = 13;
+  CONTROL_FAILURE_REASON_UNAVAILABLE = 14;
+  CONTROL_FAILURE_REASON_OUTCOME_UNKNOWN = 15;
+  CONTROL_FAILURE_REASON_AUTHORIZATION_EXPIRED = 16;
+  CONTROL_FAILURE_REASON_OWNER_KIND_NOT_ENABLED = 17;
+  CONTROL_FAILURE_REASON_RATE_LIMITED = 18;
+  CONTROL_FAILURE_REASON_SCOPE_NOT_ALLOWED = 19;
+  CONTROL_FAILURE_REASON_PERMISSION_DENIED = 20;
+  CONTROL_FAILURE_REASON_REQUEST_EXPIRED = 21;
+}
+
+// Also carried as a typed detail on the canonical google.rpc.Status error
+// channel. Messages are fixed templates; provider text and input are excluded.
+message ControlFailure {
+  option (buf.validate.message).cel = {
+    id: "control_failure.retry_after_reason"
+    message: "retry advice is limited to transient unavailability or rate limiting"
+    expression: "!has(this.retry_after) || this.reason in [9, 14, 18]"
+  };
+
+  ControlFailureReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  google.protobuf.Duration retry_after = 2 [(buf.validate.field).duration = {
+    gt: {}
+    lte: {seconds: 3600}
+  }];
+}
+
+message OAuthConnectOptions {
+  option (buf.validate.message).cel = {
+    id: "oauth_connect_options.scopes_unique"
+    message: "optional scopes must be unique"
+    expression: "this.optional_scopes.map(s, s.value).unique()"
+  };
+  repeated trogonai.connections.types.v1alpha1.ProviderScope optional_scopes = 1 [(buf.validate.field).repeated.max_items = 128];
+}
+
+message McpConnectOptions {
+  option (buf.validate.message).cel = {
+    id: "mcp_connect_options.scopes_unique"
+    message: "optional scopes must be unique"
+    expression: "this.optional_scopes.map(s, s.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "mcp_connect_options.https"
+    message: "a product MCP resource uses HTTPS without userinfo"
+    expression: "this.resource_uri.value.startsWith('https://') && !this.resource_uri.value.matches('^https://[^/?#]*@')"
+  };
+  trogonai.connections.types.v1alpha1.CanonicalResourceUri resource_uri = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.connections.types.v1alpha1.ProviderScope optional_scopes = 2 [(buf.validate.field).repeated.max_items = 128];
+}
+
+// The caller selects an immutable release and permitted optional scopes. The
+// service supplies required scopes, issuer, app, endpoints and callback facts.
+message ConnectTarget {
+  trogonai.connections.types.v1alpha1.ConnectorReleaseRef connector_release = 1 [features.field_presence = LEGACY_REQUIRED];
+  oneof method {
+    option (buf.validate.oneof).required = true;
+
+    OAuthConnectOptions oauth = 2;
+    McpConnectOptions mcp = 3;
+  }
+}
+
+// Transient sensitive reply only. Never part of an event, snapshot, request
+// receipt, cache, trace, error, audit fact or status/list response.
+message BrowserAuthorizationRedirect {
+  option (buf.validate.message).cel = {
+    id: "browser_authorization_redirect.https_no_fragment"
+    message: "the authorization URL is HTTPS without a fragment or userinfo"
+    expression: "this.authorization_url.startsWith('https://') && !this.authorization_url.contains('#') && !this.authorization_url.matches('^https://[^/?#]*@')"
+  };
+  string authorization_url = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      uri: true
+      max_len: 16384
+    }
+  ];
+  google.protobuf.Timestamp expires_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}

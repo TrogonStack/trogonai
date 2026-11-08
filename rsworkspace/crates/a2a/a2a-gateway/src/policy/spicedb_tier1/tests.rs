@@ -2,13 +2,17 @@ use std::sync::Mutex;
 
 use a2a_nats::catalog::import_gate::ZedTokenTtl;
 use a2a_pack::Tier1Permission;
+use a2a_pack::resource_tuples::{Tier1ResourceId, Tier1ResourceType};
 use authzed::v1::{
     CheckBulkPermissionsPair, CheckBulkPermissionsRequest, CheckBulkPermissionsResponse,
     CheckBulkPermissionsResponseItem, ZedToken, check_bulk_permissions_pair, check_permission_response::Permissionship,
 };
+use tonic::Status;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_std::env::{InMemoryEnv, ReadEnv};
 
 use super::*;
+use crate::policy::CallerSpiceDbSubject;
 
 fn agent(s: &str) -> A2aAgentId {
     A2aAgentId::new(s).expect("nats-safe test agent")
@@ -110,82 +114,6 @@ impl BulkImportPermissionCheck for FakeBulkClient {
             written_at: None,
         }))
     }
-}
-
-#[tokio::test]
-async fn noop_gate_is_disabled_and_authorizes_everything() {
-    let gate = NoopSpiceDbTier1Gate;
-    assert!(!gate.is_enabled());
-    let outcome = gate
-        .authorize(
-            &Tier1SessionKey::new("alice", "acme"),
-            &empty_principal(),
-            &Tier1ResourceTuple::new(
-                Tier1ResourceType::new("agent").expect("valid"),
-                Tier1ResourceId::new("planner").expect("valid"),
-                Tier1Permission::new("invoke").expect("valid"),
-            ),
-        )
-        .await;
-    assert_eq!(outcome, Tier1AuthorizeOutcome::Allowed { zed_token: None });
-}
-
-#[tokio::test]
-async fn noop_gate_bulk_check_returns_allowed_for_every_agent() {
-    let gate = NoopSpiceDbTier1Gate;
-    let outcomes = gate
-        .bulk_check_agent_view(
-            &Tier1SessionKey::new("alice", "acme"),
-            &empty_principal(),
-            &[agent("a1"), agent("a2"), agent("a3")],
-        )
-        .await;
-    assert_eq!(outcomes.len(), 3);
-    assert!(outcomes.iter().all(|o| *o == AgentViewCheckOutcome::Allowed));
-}
-
-#[test]
-fn tier1_owner_tuple_for_task_builds_validated_value_objects() {
-    let owner = Tier1OwnerTuple::for_task(&agent("planner"), "task-1", "user", "alice").expect("valid");
-    assert_eq!(owner.resource_type.as_str(), "task");
-    assert_eq!(owner.resource_id.as_str(), "planner:task-1");
-    assert_eq!(owner.relation, "owner");
-}
-
-#[test]
-fn derive_tuple_handles_each_a2a_method() {
-    let principal_agent = agent("planner");
-    let tuple = derive_tuple(
-        &A2aMethod::MessageSend,
-        &principal_agent,
-        "publisher",
-        &serde_json::json!({}),
-    )
-    .expect("derive ok");
-    assert_eq!(tuple.permission.as_str(), "invoke");
-    assert_eq!(tuple.resource_type.as_str(), "agent");
-
-    let tuple = derive_tuple(
-        &A2aMethod::TasksGet,
-        &principal_agent,
-        "publisher",
-        &serde_json::json!({"id": "task-1"}),
-    )
-    .expect("derive ok");
-    assert_eq!(tuple.permission.as_str(), "read");
-    assert_eq!(tuple.resource_id.as_str(), "planner:task-1");
-}
-
-#[test]
-fn derive_tuple_surfaces_missing_task_id() {
-    let err = derive_tuple(
-        &A2aMethod::TasksGet,
-        &agent("planner"),
-        "publisher",
-        &serde_json::json!({}),
-    )
-    .expect_err("missing task id must error");
-    assert_eq!(err, Tier1DeriveError::MissingTaskId);
 }
 
 #[tokio::test]
@@ -489,48 +417,6 @@ async fn live_gate_is_enabled() {
     assert!(gate.is_enabled());
 }
 
-#[test]
-fn tier1_principal_from_caller_carries_subject_and_account() {
-    let principal = tier1_principal_from_caller("alice", "acme");
-    assert_eq!(
-        principal.0.get("spicedb_subject").and_then(serde_json::Value::as_str),
-        Some("user/alice"),
-    );
-    assert_eq!(
-        principal.0.get("sub").and_then(serde_json::Value::as_str),
-        Some("alice"),
-    );
-    assert_eq!(
-        principal.0.get("session_account").and_then(serde_json::Value::as_str),
-        Some("acme"),
-    );
-}
-
-#[test]
-fn tier1_session_from_principal_extracts_session_key() {
-    let principal = tier1_principal_from_caller("alice", "acme");
-    let session = tier1_session_from_principal(&principal, "fallback").expect("present");
-    assert_eq!(session.sub(), "alice");
-    assert_eq!(session.account(), "acme");
-}
-
-#[test]
-fn tier1_enabled_recognizes_padded_truthy_values() {
-    for raw in ["1", "true", " on ", "\tyes\n"] {
-        let env = InMemoryEnv::new();
-        env.set(ENV_TIER1_SPICEDB_ENABLED, raw);
-        assert!(tier1_enabled(&env), "{raw:?} must enable");
-    }
-    let env = InMemoryEnv::new();
-    assert!(!tier1_enabled(&env));
-}
-
-#[test]
-fn tier1_enabled_handles_non_unicode_env_as_disabled() {
-    let env = AllNotUnicodeEnv;
-    assert!(!tier1_enabled(&env));
-}
-
 struct AllNotUnicodeEnv;
 impl ReadEnv for AllNotUnicodeEnv {
     fn var(&self, _key: &str) -> Result<String, std::env::VarError> {
@@ -577,20 +463,30 @@ fn optional_tier1_credentials_rejects_non_unicode_token() {
 }
 
 #[test]
-fn gateway_tier1_layer_debug_emits_summary_fields() {
-    let layer = GatewayTier1Layer::noop();
-    let debug = format!("{layer:?}");
-    assert!(debug.contains("gate_is_enabled"));
-    assert!(debug.contains("has_owner_emitter"));
-    assert!(debug.contains("discovery_view_is_enabled"));
-}
-
-#[test]
 fn gateway_tier1_layer_noop_has_disabled_gates() {
     let layer = GatewayTier1Layer::noop();
     assert!(!layer.gate.is_enabled());
     assert!(layer.owner_emitter.is_none());
     assert!(!layer.discovery_view.is_enabled());
+}
+
+#[test]
+fn tier1_principal_from_caller_resolves_to_a_spicedb_subject() {
+    let caller = SubjectPrincipal::from_tokens("person", "alice").expect("principal");
+    let principal = tier1_principal_from_caller(&CallerSpiceDbSubject::from(&caller));
+    assert_eq!(
+        spicedb_tier1_subject_from_principal(&principal),
+        Some(("user".to_owned(), "alice".to_owned()))
+    );
+}
+
+#[test]
+fn owner_emit_error_from_status_keeps_the_typed_status() {
+    let error = OwnerEmitError::from(Status::unavailable("outage"));
+    let source = std::error::Error::source(&error).unwrap();
+    let status = source.downcast_ref::<Status>().unwrap();
+    assert_eq!(status.code(), tonic::Code::Unavailable);
+    assert_eq!(status.message(), "outage");
 }
 
 #[test]
@@ -604,20 +500,9 @@ fn spicedb_import_gate_build_error_lifts_into_tier1_error() {
     let from = Tier1SpiceDbBuildError::from(SpiceDbImportGateBuildError::Connect("bad".into()));
     assert!(matches!(from, Tier1SpiceDbBuildError::Connect(_)));
 }
-
 #[test]
-fn tier1_authorize_outcome_variants_compare_by_value() {
-    assert_eq!(
-        Tier1AuthorizeOutcome::Allowed { zed_token: None },
-        Tier1AuthorizeOutcome::Allowed { zed_token: None },
-    );
-    assert_ne!(
-        Tier1AuthorizeOutcome::Allowed { zed_token: None },
-        Tier1AuthorizeOutcome::Denied
-    );
-    assert_ne!(Tier1AuthorizeOutcome::Denied, Tier1AuthorizeOutcome::TransportError);
-    assert_ne!(
-        Tier1AuthorizeOutcome::TransportError,
-        Tier1AuthorizeOutcome::DeriveFailed
-    );
+fn live_gate_debug_does_not_expose_its_client() {
+    let client = Arc::new(FakeBulkClient::new(vec![]));
+    let gate = LiveSpiceDbTier1Gate::new(client, SpiceDbTier1SessionCache::new(ZedTokenTtl::from_secs(60)));
+    assert_eq!(format!("{gate:?}"), "LiveSpiceDbTier1Gate { .. }");
 }

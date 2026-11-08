@@ -69,7 +69,7 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
                 .attachment
                 .as_option()
                 .ok_or(EvolveError::MissingField { field: "attachment" })?;
-            let reference = attachment.attachment.as_option().ok_or(EvolveError::MissingField {
+            let reference = attachment.attachment_ref.as_option().ok_or(EvolveError::MissingField {
                 field: "attachment.ref",
             })?;
             if required(&reference.peer_id, "attachment.peer_id")?

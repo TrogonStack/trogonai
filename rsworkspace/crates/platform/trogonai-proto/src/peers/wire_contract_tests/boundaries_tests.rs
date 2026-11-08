@@ -43,7 +43,10 @@ fn peer_metadata_and_state_fields_reject_wrong_wire_types_and_truncated_nested_v
     field_contract::<proto::PeerEnrollment>(&[1, 2, 3, 4, 5, 6, 7, 8], &[], &[8]);
     field_contract::<proto::PeerAttachment>(&[1, 3, 4], &[2], &[1, 3, 4]);
     field_contract::<proto::PeerPresence>(&[1, 2, 6, 7, 8], &[3, 4, 5], &[6, 7, 8]);
-    field_contract::<proto::MessageMetadata>(&[1, 2, 3, 4, 5, 7, 8, 9, 10], &[6], &[8, 9]);
+    field_contract::<proto::MessageMetadata>(&[1, 2, 3, 4, 8, 9, 10, 11], &[6], &[8, 9, 11]);
+    field_contract::<proto::StorageLocator>(&[1], &[], &[]);
+    field_contract::<proto::Digest>(&[1, 2], &[], &[]);
+    field_contract::<proto::ClaimCheck>(&[1, 2], &[], &[1, 2]);
     field_contract::<proto::MessageContent>(&[1], &[], &[]);
     field_contract::<proto::RecipientReceipt>(&[1, 2, 4, 6], &[3, 5], &[6]);
     field_contract::<proto::OutboxEntry>(&[1, 2, 3, 4], &[], &[3, 4]);
@@ -122,15 +125,15 @@ fn mailbox_and_roster_collections_charge_even_empty_elements_against_decode_limi
 #[test]
 fn attachment_fragments_merge_while_later_scalar_values_replace_earlier_values() {
     let first = assert_json_codec::<proto::SendRequest>(json!({
-        "attachment": {"peerId": "peer_alpha", "connectorId": "connector_old"},
+        "attachmentRef": {"peerId": "peer_alpha", "connectorId": "connector_old"},
         "recipientPeerId": "peer_beta", "idempotencyKey": "send_original", "text": "first"
     }));
     let second = assert_json_codec::<proto::SendRequest>(json!({
-        "attachment": {"connectorId": "connector_alpha", "generation": "7"},
+        "attachmentRef": {"connectorId": "connector_alpha", "generation": "7"},
         "idempotencyKey": "send_current", "text": "second"
     }));
     let expected = assert_json_codec::<proto::SendRequest>(json!({
-        "attachment": fixtures::attachment_ref(), "recipientPeerId": "peer_beta",
+        "attachmentRef": fixtures::attachment_ref(), "recipientPeerId": "peer_beta",
         "idempotencyKey": "send_current", "text": "second"
     }));
     assert_wire_codec(&[first.encode_to_vec(), second.encode_to_vec()].concat(), &expected);
@@ -165,7 +168,7 @@ fn utf8_text_size_and_wire_message_limits_are_distinct() {
     assert_malformed::<proto::MessageContent>(b"\x0a\x01\xff", DecodeError::InvalidUtf8);
     assert_malformed::<proto::MessageMetadata>(b"\x0a\x01\xff", DecodeError::InvalidUtf8);
     assert_malformed::<proto::SendRequest>(b"\x22\x01\xff", DecodeError::InvalidUtf8);
-    assert_json_codec::<proto::MessageMetadata>(json!({"contentDigest": "/w=="}));
+    assert_json_codec::<proto::MessageMetadata>(json!({"contentRef": {"digest": {"value": "/w=="}}}));
 }
 
 #[test]
@@ -194,7 +197,7 @@ fn json_identity_aliases_and_unsigned_boundaries_do_not_silently_change_values()
     for invalid in [
         json!({"contentSizeBytes": -1}),
         json!({"contentSizeBytes": 4_294_967_296_u64}),
-        json!({"contentDigest": "!"}),
+        json!({"contentRef": {"digest": {"value": "!"}}}),
     ] {
         assert!(serde_json::from_value::<proto::MessageMetadata>(invalid).is_err());
     }

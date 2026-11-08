@@ -132,3 +132,21 @@ pub fn sign_p384_pop(base: &[u8]) -> String {
 pub fn jwks_with_key(issuer: &str, key: Jwk) -> crate::jwks::StaticJwks {
     crate::jwks::StaticJwks::new().with(issuer, JwkSet { keys: vec![key] })
 }
+
+/// A fresh PKCS#8 PEM P-256 private key, the form a challenge key is
+/// provisioned in.
+pub fn challenge_key_pem() -> String {
+    P256SigningKey::random(&mut OsRng)
+        .to_pkcs8_pem(p256::pkcs8::LineEnding::LF)
+        .expect("pkcs8 pem")
+        .to_string()
+}
+
+pub fn challenge_key_from(pem: &str, kid: &str) -> crate::server_nonce::ChallengeKey {
+    crate::server_nonce::ChallengeKey::from_pkcs8_pem(pem, crate::server_nonce::ChallengeKid::new(kid).expect("kid"))
+        .expect("challenge key")
+}
+
+pub fn challenge_key(kid: &str) -> crate::server_nonce::ChallengeKey {
+    challenge_key_from(&challenge_key_pem(), kid)
+}

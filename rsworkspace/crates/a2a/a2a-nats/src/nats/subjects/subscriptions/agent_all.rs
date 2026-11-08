@@ -1,8 +1,10 @@
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 
-/// `{prefix}.v1.agents.{agent_id}.>`: agent-side subscription for all methods routed to
-/// this agent. The agent binary subscribes here and dispatches to handlers per subject.
+/// `{prefix}.v1.agents.{agent_id}.*.*.>`: agent-side subscription for all methods routed to
+/// this agent, for every caller. The `*.*` covers the principal position, so the agent
+/// binary parses each delivery with [`crate::nats::subjects::agents::AgentDeliverySubject`]
+/// to learn its caller and method before it dispatches to a handler.
 #[derive(Debug)]
 pub struct AgentAllSubject {
     prefix: A2aPrefix,
@@ -20,7 +22,7 @@ impl AgentAllSubject {
 
 impl std::fmt::Display for AgentAllSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.v1.agents.{}.>", self.prefix.as_str(), self.agent_id.as_str())
+        write!(f, "{}.v1.agents.{}.*.*.>", self.prefix.as_str(), self.agent_id.as_str())
     }
 }
 

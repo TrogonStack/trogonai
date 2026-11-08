@@ -46,7 +46,7 @@ fn fresh_enrollment_records_trusted_owner_and_a_ten_second_attachment() {
         enrolled_at: MessageField::some(timestamp_from_datetime(&now)),
     };
     let attachment = proto::PeerAttachment {
-        attachment: MessageField::some(proto::AttachmentRef {
+        attachment_ref: MessageField::some(proto::AttachmentRef {
             peer_id: Some(peer_id.to_owned()),
             connector_id: Some("connector_alpha".to_owned()),
             generation: Some(1),
