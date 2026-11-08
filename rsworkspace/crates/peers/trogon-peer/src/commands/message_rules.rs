@@ -1,22 +1,13 @@
 use super::{
-    AcceptedMessage, IntakenMessage, domain::*, evolve_error::EvolveError, inbox_replacement::InboxReplacement,
-    accepted_outbox::AcceptedOutbox, state_values,
+    AcceptedMessage, IntakenMessage, accepted_outbox::AcceptedOutbox, domain::*, evolve_error::EvolveError,
+    inbox_replacement::InboxReplacement, state_values,
 };
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
 
 use super::message_values::value;
-pub(super) use super::message_values::{metadata, outbox_entry, receipt_matches_message, semantic_digest, validate_receipt};
-
-
-
-
-
-
-
-
-
-
-
+pub(super) use super::message_values::{
+    metadata, outbox_entry, receipt_matches_message, semantic_digest, validate_receipt,
+};
 
 pub(super) fn fold_accepted(
     state: &mut PeerState,
@@ -333,7 +324,6 @@ pub(super) fn fold_prepared(
     state.batches.push(batch.clone());
     Ok(replacements)
 }
-
 
 pub(super) fn fold_acknowledged(
     state: &mut PeerState,
