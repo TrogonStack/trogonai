@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+grep -E "^TOTAL " .coverage-output | \
+  awk '{printf "%.8f", (1 - $3/$2) * 100}' > .coverage-total
