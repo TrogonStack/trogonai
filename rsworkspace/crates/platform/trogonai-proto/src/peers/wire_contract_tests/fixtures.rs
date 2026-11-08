@@ -5,6 +5,7 @@ pub(super) const LEASE_END: &str = "2026-11-02T12:00:10Z";
 pub(super) const PREPARED: &str = "2026-11-02T12:01:00Z";
 pub(super) const ACKNOWLEDGED: &str = "2026-11-02T12:02:00Z";
 pub(super) const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+pub(super) const SEMANTIC_FINGERPRINT: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
 
 pub(super) fn attachment_ref() -> Value {
     json!({"peerId": "peer_alpha", "connectorId": "connector_alpha", "generation": "7"})
@@ -40,10 +41,15 @@ pub(super) fn content_ref() -> Value {
     })
 }
 
+pub(super) fn semantic_fingerprint() -> Value {
+    json!({"value": SEMANTIC_FINGERPRINT})
+}
+
 pub(super) fn metadata() -> Value {
     json!({
         "messageId": "message_outgoing", "senderPeerId": "peer_alpha", "recipientPeerId": "peer_beta",
-        "collaborationRef": "collaboration_alpha", "contentRef": content_ref(), "contentSizeBytes": 10,
+        "collaborationRef": "collaboration_alpha", "contentRef": content_ref(),
+        "semanticFingerprint": semantic_fingerprint(), "contentSizeBytes": 10,
         "acceptedAt": OBSERVED, "expiresAt": "2026-11-02T13:00:00Z",
         "replyToMessageId": "message_previous"
     })
