@@ -176,6 +176,11 @@ pub(super) fn make_receipt(
     batch_id: Option<String>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<proto::RecipientReceipt, EvolveError> {
+    if !state_values::timestamp_seconds_supported(now.timestamp()) || now.timestamp_subsec_nanos() >= 1_000_000_000 {
+        return Err(EvolveError::TimestampRange {
+            field: "receipt.decided_at",
+        });
+    }
     let revision = u64::try_from(state.dispositions.len())
         .ok()
         .and_then(|n| n.checked_add(1))

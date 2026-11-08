@@ -431,6 +431,8 @@ fn disposal_cannot_emit_a_receipt_with_a_non_protobuf_leap_timestamp() {
     let command = DisposeMessage::new(evidence(0, 1), TerminalDisposition::Unavailable, at);
     assert_eq!(
         error(enrolled("recipient", 55), &command),
-        MessageError::InvalidState(EvolveError::TimestampRange { field: "receipt.decided_at" })
+        MessageError::InvalidState(EvolveError::TimestampRange {
+            field: "receipt.decided_at"
+        })
     );
 }
