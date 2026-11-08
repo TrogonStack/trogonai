@@ -422,9 +422,22 @@ fn acknowledgment_rejects_a_leap_clock_before_serializing_receipt_time() {
     let evidence = AcceptedMessage::from_sender_history(&sender, &MessageId::new("message_0").unwrap()).unwrap();
     let recipient = run(enrolled("recipient", -3), &IntakeMessage::new(evidence, time(-1)));
     let prepared = run(recipient, &prepare(&[0], 20, -1));
-    let leap = chrono::Utc.timestamp_opt(time(-1).timestamp(), 1_500_000_000).single().unwrap();
-    let command = AcknowledgeBatch::new(identity("recipient").owner().clone(), reference("recipient", 1), BatchId::new("batch").unwrap(), leap);
-    assert_eq!(error(prepared.clone(), &command), MessageError::InvalidState(EvolveError::TimestampRange { field: "acknowledged_at" }));
+    let leap = chrono::Utc
+        .timestamp_opt(time(-1).timestamp(), 1_500_000_000)
+        .single()
+        .unwrap();
+    let command = AcknowledgeBatch::new(
+        identity("recipient").owner().clone(),
+        reference("recipient", 1),
+        BatchId::new("batch").unwrap(),
+        leap,
+    );
+    assert_eq!(
+        error(prepared.clone(), &command),
+        MessageError::InvalidState(EvolveError::TimestampRange {
+            field: "acknowledged_at"
+        })
+    );
     let ordinary = run(prepared, &acknowledge("batch", 0));
     assert_eq!(ordinary.batches[0].acknowledged_at.seconds, time(0).timestamp());
     assert_eq!(ordinary.batches[0].acknowledged_at.nanos, 0);

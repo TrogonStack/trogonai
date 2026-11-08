@@ -49,6 +49,12 @@ impl Decider for AcknowledgeBatch {
         if command.now < state::read_time(batch.prepared_at.as_option(), "prepared_at")? {
             return Err(MessageError::InvalidTransition);
         }
+        if command.now.timestamp_subsec_nanos() >= 1_000_000_000 {
+            return Err(EvolveError::TimestampRange {
+                field: "acknowledged_at",
+            }
+            .into());
+        }
         Ok(Decision::event(PeerEvent {
             event: Some(
                 trogonai_proto::peers::v1alpha1::PeerBatchAcknowledged {
