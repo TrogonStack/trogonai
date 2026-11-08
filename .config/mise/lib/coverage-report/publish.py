@@ -40,24 +40,26 @@ def context():
     branch = os.environ.get('GITHUB_HEAD_REF') or os.environ['GITHUB_REF'].removeprefix('refs/heads/')
     directory = relative_path(f"data/{branch}/{os.environ['COVERAGE_STORAGE_SUBDIRECTORY']}")
     baseline = relative_path(f"data/{os.environ['COVERAGE_DIFF_BRANCH']}/{os.environ['COVERAGE_STORAGE_SUBDIRECTORY']}/coverage.xml")
-    paths = [f'{directory}/coverage.xml', f'{directory}/badge.svg']
+    baseline_sources = str(PurePosixPath(baseline).with_name('sources.json'))
+    paths = [f'{directory}/coverage.xml', f'{directory}/badge.svg', f'{directory}/sources.json']
     if os.environ['COVERAGE_DIFF_ENABLED'] == 'true':
-        paths.append(baseline)
+        paths.extend([baseline, baseline_sources])
     baseline_writer = (os.environ.get('GITHUB_EVENT_NAME') == 'push'
         and not os.environ.get('GITHUB_HEAD_REF')
         and os.environ.get('GITHUB_REF') == 'refs/heads/' + os.environ['COVERAGE_DIFF_BRANCH'])
-    if baseline in paths[:2] and not baseline_writer:
+    if baseline in paths[:3] and not baseline_writer:
         raise RuntimeError('coverage report cannot overwrite the comparison baseline')
     return storage, baseline, list(dict.fromkeys(paths)), baseline_writer
 
 
 def main():
     storage, baseline, paths, baseline_writer = context()
+    baseline_sources = str(PurePosixPath(baseline).with_name('sources.json'))
     receipt = Path(git('rev-parse', '--git-path', 'coverage-publication-receipt.json').stdout.strip())
     binding = {'storage': storage, 'paths': paths, 'source': os.environ['GITHUB_SHA'], 'baseline_writer': baseline_writer}
     if sys.argv[1:] == ['init']:
         expected = {path: identity('HEAD', path) for path in paths}
-        if baseline in paths and expected[baseline] is None:
+        if baseline in paths and any(expected[path] is None for path in (baseline, baseline_sources)):
             raise RuntimeError('coverage comparison baseline is missing')
         receipt.write_text(json.dumps({'binding': binding, 'expected': expected}) + '\n')
         return
@@ -66,7 +68,7 @@ def main():
     state = json.loads(receipt.read_text())
     if state['binding'] != binding:
         raise RuntimeError('coverage publication receipt belongs to another report')
-    if not baseline_writer and baseline in paths and identity('HEAD', baseline) != state['expected'][baseline]:
+    if not baseline_writer and baseline in paths and any(identity('HEAD', path) != state['expected'][path] for path in (baseline, baseline_sources)):
         raise RuntimeError('local coverage comparison baseline changed')
     remote_ref = 'refs/remotes/origin/coverage-publication'
     for attempt in range(1, MAX_ATTEMPTS + 1):
