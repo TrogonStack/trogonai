@@ -886,3 +886,290 @@ async fn heartbeat_grant_cannot_authorize_another_peer_or_a_detach_operation() {
     assert_eq!(store.reads.load(Ordering::SeqCst), reads);
     assert_eq!(store.appends.load(Ordering::SeqCst), appends);
 }
+
+async fn expired_resume_unknown_authority_history() -> (ObservedStore, PeerId, ReadStreamResponse, DateTime<Utc>) {
+    let store = ObservedStore::default();
+    let enrolled = PeerService::new(store.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let peer = PeerId::parse(enrolled.peer_id.clone().unwrap()).unwrap();
+    let expiry =
+        trogonai_proto::convert::datetime_from_timestamp(enrolled.attachment.expires_at.as_option().unwrap()).unwrap();
+    let original = store
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    let mut future_authority = original.events[0].event.clone();
+    future_authority.id = "00000000-0000-4000-8000-fffffffffff0".parse().unwrap();
+    future_authority.r#type = "trogonai.peers.future.PeerAuthorityTransferred".into();
+    store
+        .append_stream(AppendStreamRequest {
+            stream_id: &peer,
+            stream_write_precondition: original.current_position.into(),
+            events: vec![future_authority],
+        })
+        .await
+        .unwrap();
+    let history = store
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    assert_eq!(history.events.len(), original.events.len() + 1);
+    assert!(
+        history
+            .events
+            .last()
+            .unwrap()
+            .decode::<proto::PeerEvent>()
+            .unwrap()
+            .into_decoded()
+            .is_none()
+    );
+    (store, peer, history, expiry)
+}
+
+#[tokio::test]
+async fn expired_connector_replacement_refuses_unknown_authority_history_without_a_new_attachment() {
+    let (store, peer, history, expiry) = expired_resume_unknown_authority_history().await;
+    let mut replacement = request("collaboration_alpha");
+    replacement.connector_id = Some("replacement_alpha".into());
+    let appends = store.appends.load(Ordering::SeqCst);
+    let result = PeerService::new(store.clone(), policy(), FixedClock(expiry))
+        .enroll(&owner(), replacement)
+        .await;
+    assert!(
+        matches!(
+            &result,
+            Err(EnrollServiceError::History(
+                trogon_peer_service::HistoryError::UnknownEvent
+            ))
+        ),
+        "expired replacement cannot infer authority across an unknown event: {result:?}"
+    );
+    assert_eq!(
+        store.appends.load(Ordering::SeqCst),
+        appends + 1,
+        "only the rejected create-only attempt may reach the append port"
+    );
+    assert_same_durable_history(
+        &store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning,
+            })
+            .await
+            .unwrap(),
+        &history,
+    );
+}
+
+#[tokio::test]
+async fn denied_expired_replacement_does_not_read_unknown_authority_history() {
+    let (store, peer, history, expiry) = expired_resume_unknown_authority_history().await;
+    let mut replacement = request("collaboration_alpha");
+    replacement.connector_id = Some("replacement_alpha".into());
+    let reads = store.reads.load(Ordering::SeqCst);
+    let appends = store.appends.load(Ordering::SeqCst);
+    let result = PeerService::new(store.clone(), ResumeDenied, FixedClock(expiry))
+        .enroll(&owner(), replacement)
+        .await;
+    assert!(matches!(
+        result,
+        Err(EnrollServiceError::Attach(CommandError::Unauthorized(_)))
+    ));
+    assert_eq!(store.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(store.appends.load(Ordering::SeqCst), appends + 1);
+    assert_same_durable_history(
+        &store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning,
+            })
+            .await
+            .unwrap(),
+        &history,
+    );
+}
+
+#[derive(Clone)]
+struct UnknownAuthorityAfterHistoryRead {
+    inner: ObservedStore,
+    armed: Arc<std::sync::atomic::AtomicBool>,
+    injected_history: Arc<Mutex<Option<ReadStreamResponse>>>,
+}
+
+impl UnknownAuthorityAfterHistoryRead {
+    async fn inject_after_snapshot(&self, peer: &PeerId, snapshot: ReadStreamResponse) -> ReadStreamResponse {
+        if self.armed.swap(false, Ordering::SeqCst) {
+            let mut unknown = snapshot.events.first().expect("enrolled snapshot").event.clone();
+            unknown.id = "00000000-0000-4000-8000-fffffffffff1".parse().unwrap();
+            unknown.r#type = "trogonai.peers.future.PeerAuthorityTransferred".into();
+            self.inner
+                .append_stream(AppendStreamRequest {
+                    stream_id: peer,
+                    stream_write_precondition: snapshot.current_position.into(),
+                    events: vec![unknown],
+                })
+                .await
+                .expect("append the competing authority envelope at its actual OCC position");
+            let changed = self
+                .inner
+                .read_stream(ReadStreamRequest {
+                    stream_id: peer,
+                    from: ReadFrom::Beginning,
+                })
+                .await
+                .unwrap();
+            assert!(
+                changed
+                    .events
+                    .last()
+                    .unwrap()
+                    .decode::<proto::PeerEvent>()
+                    .unwrap()
+                    .into_decoded()
+                    .is_none()
+            );
+            *self.injected_history.lock().unwrap() = Some(changed);
+        }
+        snapshot
+    }
+}
+
+impl StreamRead<PeerId> for UnknownAuthorityAfterHistoryRead {
+    type Error = <ObservedStore as StreamRead<PeerId>>::Error;
+
+    async fn read_stream(&self, request: ReadStreamRequest<'_, PeerId>) -> Result<ReadStreamResponse, Self::Error> {
+        let peer = request.stream_id.clone();
+        let snapshot = self.inner.read_stream(request).await?;
+        Ok(self.inject_after_snapshot(&peer, snapshot).await)
+    }
+
+    async fn read_stream_bounded(
+        &self,
+        request: ReadStreamRequest<'_, PeerId>,
+        maximum: u64,
+    ) -> Result<ReadStreamResponse, Self::Error> {
+        let peer = request.stream_id.clone();
+        let snapshot = self.inner.read_stream_bounded(request, maximum).await?;
+        Ok(self.inject_after_snapshot(&peer, snapshot).await)
+    }
+}
+
+impl StreamAppend<PeerId> for UnknownAuthorityAfterHistoryRead {
+    type Error = <ObservedStore as StreamAppend<PeerId>>::Error;
+
+    async fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, PeerId>,
+    ) -> Result<AppendStreamResponse, Self::Error> {
+        self.inner.append_stream(request).await
+    }
+
+    fn classify_append_failure(&self, error: &Self::Error) -> AppendFailure {
+        self.inner.classify_append_failure(error)
+    }
+}
+
+#[tokio::test]
+async fn expired_replacement_cannot_append_after_authority_changes_past_its_validated_history_position() {
+    let inner = ObservedStore::default();
+    let first = PeerService::new(inner.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let peer = PeerId::parse(first.peer_id.clone().unwrap()).unwrap();
+    let expiry =
+        trogonai_proto::convert::datetime_from_timestamp(first.attachment.expires_at.as_option().unwrap()).unwrap();
+    let store = UnknownAuthorityAfterHistoryRead {
+        inner: inner.clone(),
+        armed: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        injected_history: Arc::new(Mutex::new(None)),
+    };
+    let mut replacement = request("collaboration_alpha");
+    replacement.connector_id = Some("replacement_raced".into());
+    let appends = inner.appends.load(Ordering::SeqCst);
+    let result = PeerService::new(store.clone(), policy(), FixedClock(expiry))
+        .enroll(&owner(), replacement)
+        .await;
+    assert!(
+        matches!(
+            &result,
+            Err(EnrollServiceError::Attach(CommandError::Append(error)))
+                if store.classify_append_failure(error) == AppendFailure::WriteConflict
+        ),
+        "the validated position must fence a competing unknown authority event: {result:?}"
+    );
+    assert!(!store.armed.load(Ordering::SeqCst));
+    assert_eq!(
+        inner.appends.load(Ordering::SeqCst),
+        appends + 3,
+        "create rejection, competing envelope, and one fenced attachment attempt are the only append calls"
+    );
+    let injected = store
+        .injected_history
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the competing envelope was persisted");
+    let actual = inner
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    assert_same_durable_history(&actual, &injected);
+}
+
+#[tokio::test]
+async fn live_resume_rechecks_unknown_authority_that_raced_its_validated_history() {
+    let inner = ObservedStore::default();
+    let first = PeerService::new(inner.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let peer = PeerId::parse(first.peer_id.clone().unwrap()).unwrap();
+    let store = UnknownAuthorityAfterHistoryRead {
+        inner: inner.clone(),
+        armed: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        injected_history: Arc::new(Mutex::new(None)),
+    };
+    let appends = inner.appends.load(Ordering::SeqCst);
+    let result = PeerService::new(store.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await;
+    assert!(matches!(
+        result,
+        Err(EnrollServiceError::History(
+            trogon_peer_service::HistoryError::UnknownEvent
+        ))
+    ));
+    assert!(!store.armed.load(Ordering::SeqCst));
+    assert_eq!(
+        inner.appends.load(Ordering::SeqCst),
+        appends + 2,
+        "only the rejected create and competing authority envelope may append"
+    );
+    let injected = store
+        .injected_history
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("persisted competing envelope");
+    let actual = inner
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    assert_same_durable_history(&actual, &injected);
+}
