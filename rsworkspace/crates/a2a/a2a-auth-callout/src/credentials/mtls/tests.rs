@@ -164,7 +164,9 @@ async fn rejects_ca_cert_presented_as_leaf() {
         .unwrap_err();
     assert!(matches!(
         err,
-        AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+        AuthCalloutError::CredentialVerification(CredentialError::MtlsCertificate(CertificateVerificationError::Path(
+            webpki::Error::CaUsedAsEndEntity
+        )))
     ));
 }
 
