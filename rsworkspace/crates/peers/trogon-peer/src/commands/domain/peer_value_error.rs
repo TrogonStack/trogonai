@@ -1,7 +1,11 @@
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PeerValueError {
-    #[error("content must contain 1 to 2048 UTF-8 bytes and a 32-byte digest")]
+    #[error("content must contain 1 to 2048 UTF-8 bytes")]
     InvalidContent,
+    #[error("stored content reference must contain a locator and a SHA-256 integrity digest")]
+    InvalidContentReference,
+    #[error("semantic content fingerprint must contain exactly 32 bytes")]
+    InvalidSemanticFingerprint,
     #[error("peer identifier must contain exactly 64 lowercase hexadecimal characters")]
     InvalidPeerId,
     #[error("attachment generation must be positive")]

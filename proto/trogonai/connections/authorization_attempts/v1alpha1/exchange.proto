@@ -1,0 +1,47 @@
+edition = "2024";
+
+package trogonai.connections.authorization_attempts.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/account.proto";
+import "trogonai/connections/types/v1alpha1/authority.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+import "trogonai/secrets/v1alpha1/secret_ref.proto";
+
+// The origin of the token endpoint the exchange is sent to, taken from the
+// pinned discovery snapshot or the release (ADR#0094 Decision 4). The scheme is
+// always https (ADR#0094 Decision 8), so it is not carried.
+message ExchangeOrigin {
+  string host = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.hostname = true
+  ];
+  uint32 port = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 65535
+    }
+  ];
+}
+
+// What the attempt learned after a successful exchange, recorded before the
+// account claim is taken: the staged bundle, the account the identity probe
+// observed, and the authority the provider granted (ADR#0094 Decision 5). It
+// holds no token and no personal data.
+message CapturedAuthority {
+  // The bundle the broker staged under this attempt. It is not usable until
+  // promotion at activation, and the identity probe resolved it through an
+  // attempt reference (ADR#0095 Decisions 5 and 12).
+  trogonai.secrets.v1alpha1.SecretVersionRef staged_bundle_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Custody's canonical account identity receipt for this exact attempt/stage
+  // must match before dispatch. A rotated lookup alias is resolved before this
+  // value reaches the fold. A USER subject carries only its fingerprint.
+  trogonai.connections.types.v1alpha1.ProviderAccount provider_account = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The granted scope, normalized like the requested scope. An absent response
+  // scope means the grant equals the request (ADR#0094 Decision 12).
+  trogonai.connections.types.v1alpha1.GrantedAuthority granted_authority = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Custody of the staged receipt and observed account. Dispatch verifies
+  // the opaque staged ref against this parent and the open attempt.
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}

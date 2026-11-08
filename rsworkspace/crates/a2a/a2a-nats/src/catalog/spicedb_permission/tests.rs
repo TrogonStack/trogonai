@@ -19,10 +19,6 @@ fn principal_with_subject(subject: &str) -> SpiceDbPrincipal {
     SpiceDbPrincipal(serde_json::json!({ "spicedb_subject": subject }))
 }
 
-fn principal_with_sub_and_account(sub: &str, account: &str) -> SpiceDbPrincipal {
-    SpiceDbPrincipal(serde_json::json!({ "sub": sub, "account": account }))
-}
-
 fn empty_principal() -> SpiceDbPrincipal {
     SpiceDbPrincipal(serde_json::json!({}))
 }
@@ -179,27 +175,6 @@ async fn session_cache_returns_fresh_within_ttl() {
     // A second read must still hit the cache -- `get` mustn't be
     // self-invalidating when the entry is still fresh.
     assert!(cache.get(&key).await.is_some());
-}
-
-#[test]
-fn session_from_principal_prefers_sub_claim() {
-    let principal = principal_with_sub_and_account("alice", "acme");
-    let key = session_from_principal(&principal, "fallback").expect("present");
-    assert_eq!(key.sub(), "alice");
-    assert_eq!(key.account(), "acme");
-}
-
-#[test]
-fn session_from_principal_falls_back_when_account_claim_absent() {
-    let principal = SpiceDbPrincipal(serde_json::json!({ "sub": "alice" }));
-    let key = session_from_principal(&principal, "fallback-account").expect("present");
-    assert_eq!(key.account(), "fallback-account");
-}
-
-#[test]
-fn session_from_principal_returns_none_without_sub_or_subject() {
-    let principal = empty_principal();
-    assert!(session_from_principal(&principal, "x").is_none());
 }
 
 #[test]
@@ -508,14 +483,4 @@ async fn live_agent_view_gate_connect_dials_unreachable_endpoint() {
         .await
         .expect_err("unreachable endpoint must error");
     assert!(matches!(err, SpiceDbImportGateBuildError::Connect(_)));
-}
-
-#[test]
-fn parse_subject_id_strips_slash_and_colon_prefixes() {
-    assert_eq!(parse_subject_id("user/alice"), Some("alice".to_owned()));
-    assert_eq!(parse_subject_id("user:alice"), Some("alice".to_owned()));
-    assert_eq!(parse_subject_id("alice"), Some("alice".to_owned()));
-    assert_eq!(parse_subject_id(""), None);
-    assert_eq!(parse_subject_id("user/"), None);
-    assert_eq!(parse_subject_id("user:"), None);
 }

@@ -34,13 +34,6 @@ pub struct MessageMetadata {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub collaboration_ref: ::core::option::Option<::buffa::alloc::string::String>,
-    /// Field 5: `content_ref`
-    #[serde(
-        rename = "contentRef",
-        alias = "content_ref",
-        skip_serializing_if = "::core::option::Option::is_none"
-    )]
-    pub content_ref: ::core::option::Option<::buffa::alloc::string::String>,
     /// Field 6: `content_size_bytes`
     #[serde(
         rename = "contentSizeBytes",
@@ -49,14 +42,6 @@ pub struct MessageMetadata {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub content_size_bytes: ::core::option::Option<u32>,
-    /// Field 7: `content_digest`
-    #[serde(
-        rename = "contentDigest",
-        alias = "content_digest",
-        with = "::buffa::json_helpers::opt_bytes",
-        skip_serializing_if = "::core::option::Option::is_none"
-    )]
-    pub content_digest: ::core::option::Option<::buffa::alloc::vec::Vec<u8>>,
     /// Field 8: `accepted_at`
     #[serde(
         rename = "acceptedAt",
@@ -84,6 +69,23 @@ pub struct MessageMetadata {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub reply_to_message_id: ::core::option::Option<::buffa::alloc::string::String>,
+    /// Field 11: `content_ref`
+    #[serde(
+        rename = "contentRef",
+        alias = "content_ref",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub content_ref: ::buffa::MessageField<ClaimCheck, ::buffa::Inline<ClaimCheck>>,
+    /// Field 12: `semantic_fingerprint`
+    #[serde(
+        rename = "semanticFingerprint",
+        alias = "semantic_fingerprint",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub semantic_fingerprint: ::buffa::MessageField<
+        ContentSemanticFingerprint,
+        ::buffa::Inline<ContentSemanticFingerprint>,
+    >,
 }
 impl ::core::fmt::Debug for MessageMetadata {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -92,12 +94,12 @@ impl ::core::fmt::Debug for MessageMetadata {
             .field("sender_peer_id", &self.sender_peer_id)
             .field("recipient_peer_id", &self.recipient_peer_id)
             .field("collaboration_ref", &self.collaboration_ref)
-            .field("content_ref", &self.content_ref)
             .field("content_size_bytes", &self.content_size_bytes)
-            .field("content_digest", &self.content_digest)
             .field("accepted_at", &self.accepted_at)
             .field("expires_at", &self.expires_at)
             .field("reply_to_message_id", &self.reply_to_message_id)
+            .field("content_ref", &self.content_ref)
+            .field("semantic_fingerprint", &self.semantic_fingerprint)
             .finish()
     }
 }
@@ -151,29 +153,9 @@ impl MessageMetadata {
     }
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
     #[inline]
-    ///Sets [`Self::content_ref`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_content_ref(
-        mut self,
-        value: impl Into<::buffa::alloc::string::String>,
-    ) -> Self {
-        self.content_ref = Some(value.into());
-        self
-    }
-    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
-    #[inline]
     ///Sets [`Self::content_size_bytes`] to `Some(value)`, consuming and returning `self`.
     pub fn with_content_size_bytes(mut self, value: u32) -> Self {
         self.content_size_bytes = Some(value);
-        self
-    }
-    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
-    #[inline]
-    ///Sets [`Self::content_digest`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_content_digest(
-        mut self,
-        value: impl Into<::buffa::alloc::vec::Vec<u8>>,
-    ) -> Self {
-        self.content_digest = Some(value.into());
         self
     }
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
@@ -219,14 +201,8 @@ impl ::buffa::Message for MessageMetadata {
         if let Some(ref v) = self.collaboration_ref {
             size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
-        if let Some(ref v) = self.content_ref {
-            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
-        }
         if let Some(v) = self.content_size_bytes {
             size += 1u64 + ::buffa::types::uint32_encoded_len(v) as u64;
-        }
-        if let Some(ref v) = self.content_digest {
-            size += 1u64 + ::buffa::types::bytes_encoded_len(v) as u64;
         }
         if self.accepted_at.is_set() {
             let __slot = __cache.reserve();
@@ -246,6 +222,22 @@ impl ::buffa::Message for MessageMetadata {
         }
         if let Some(ref v) = self.reply_to_message_id {
             size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
+        }
+        if self.content_ref.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.content_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.semantic_fingerprint.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.semantic_fingerprint.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         ::buffa::saturate_size(size)
     }
@@ -268,14 +260,8 @@ impl ::buffa::Message for MessageMetadata {
         if let Some(ref v) = self.collaboration_ref {
             ::buffa::types::put_string_field(4u32, v, buf);
         }
-        if let Some(ref v) = self.content_ref {
-            ::buffa::types::put_string_field(5u32, v, buf);
-        }
         if let Some(v) = self.content_size_bytes {
             ::buffa::types::put_uint32_field(6u32, v, buf);
-        }
-        if let Some(ref v) = self.content_digest {
-            ::buffa::types::put_shared_bytes_field(7u32, v, buf);
         }
         if self.accepted_at.is_set() {
             ::buffa::types::put_len_delimited_header(
@@ -295,6 +281,22 @@ impl ::buffa::Message for MessageMetadata {
         }
         if let Some(ref v) = self.reply_to_message_id {
             ::buffa::types::put_string_field(10u32, v, buf);
+        }
+        if self.content_ref.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                11u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.content_ref.write_to(__cache, buf);
+        }
+        if self.semantic_fingerprint.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                12u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.semantic_fingerprint.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -356,18 +358,6 @@ impl ::buffa::Message for MessageMetadata {
                     buf,
                 )?;
             }
-            5u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::types::merge_string(
-                    self
-                        .content_ref
-                        .get_or_insert_with(::buffa::alloc::string::String::new),
-                    buf,
-                )?;
-            }
             6u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
@@ -376,18 +366,6 @@ impl ::buffa::Message for MessageMetadata {
                 self.content_size_bytes = ::core::option::Option::Some(
                     ::buffa::types::decode_uint32(buf)?,
                 );
-            }
-            7u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::types::merge_bytes(
-                    self
-                        .content_digest
-                        .get_or_insert_with(::buffa::alloc::vec::Vec::new),
-                    buf,
-                )?;
             }
             8u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -423,6 +401,28 @@ impl ::buffa::Message for MessageMetadata {
                     buf,
                 )?;
             }
+            11u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.content_ref.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
+            12u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.semantic_fingerprint.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -434,12 +434,12 @@ impl ::buffa::Message for MessageMetadata {
         self.sender_peer_id = ::core::option::Option::None;
         self.recipient_peer_id = ::core::option::Option::None;
         self.collaboration_ref = ::core::option::Option::None;
-        self.content_ref = ::core::option::Option::None;
         self.content_size_bytes = ::core::option::Option::None;
-        self.content_digest = ::core::option::Option::None;
         self.accepted_at = ::buffa::MessageField::none();
         self.expires_at = ::buffa::MessageField::none();
         self.reply_to_message_id = ::core::option::Option::None;
+        self.content_ref = ::buffa::MessageField::none();
+        self.semantic_fingerprint = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for MessageMetadata {

@@ -5,6 +5,7 @@ pub(super) const LEASE_END: &str = "2026-11-02T12:00:10Z";
 pub(super) const PREPARED: &str = "2026-11-02T12:01:00Z";
 pub(super) const ACKNOWLEDGED: &str = "2026-11-02T12:02:00Z";
 pub(super) const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+pub(super) const SEMANTIC_FINGERPRINT: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
 
 pub(super) fn attachment_ref() -> Value {
     json!({"peerId": "peer_alpha", "connectorId": "connector_alpha", "generation": "7"})
@@ -12,7 +13,7 @@ pub(super) fn attachment_ref() -> Value {
 
 pub(super) fn attachment() -> Value {
     json!({
-        "attachment": attachment_ref(), "status": "ATTACHMENT_STATUS_ATTACHED",
+        "attachmentRef": attachment_ref(), "status": "ATTACHMENT_STATUS_ATTACHED",
         "observedAt": OBSERVED, "expiresAt": LEASE_END
     })
 }
@@ -33,11 +34,23 @@ pub(super) fn presence() -> Value {
     })
 }
 
+pub(super) fn content_ref() -> Value {
+    json!({
+        "storageRef": {"value": "content_outgoing"},
+        "digest": {"algorithm": "sha256", "value": DIGEST}
+    })
+}
+
+pub(super) fn semantic_fingerprint() -> Value {
+    json!({"value": SEMANTIC_FINGERPRINT})
+}
+
 pub(super) fn metadata() -> Value {
     json!({
         "messageId": "message_outgoing", "senderPeerId": "peer_alpha", "recipientPeerId": "peer_beta",
-        "collaborationRef": "collaboration_alpha", "contentRef": "content_outgoing", "contentSizeBytes": 10,
-        "contentDigest": DIGEST, "acceptedAt": OBSERVED, "expiresAt": "2026-11-02T13:00:00Z",
+        "collaborationRef": "collaboration_alpha", "contentRef": content_ref(),
+        "semanticFingerprint": semantic_fingerprint(), "contentSizeBytes": 10,
+        "acceptedAt": OBSERVED, "expiresAt": "2026-11-02T13:00:00Z",
         "replyToMessageId": "message_previous"
     })
 }
@@ -47,7 +60,7 @@ pub(super) fn incoming_metadata(id: &str) -> Value {
     value["messageId"] = json!(id);
     value["senderPeerId"] = json!("peer_beta");
     value["recipientPeerId"] = json!("peer_alpha");
-    value["contentRef"] = json!(format!("content_{id}"));
+    value["contentRef"]["storageRef"]["value"] = json!(format!("content_{id}"));
     value
 }
 
@@ -114,7 +127,7 @@ pub(super) fn events() -> Vec<Value> {
         json!({"peerEnrolled": {"enrollment": enrollment()}}),
         json!({"peerAttached": {"attachment": attachment()}}),
         json!({"peerHeartbeatRecorded": {"attachment": attachment(), "availability": "PEER_AVAILABILITY_BLOCKED", "condition": "PEER_CONDITION_RATE_LIMIT", "activeAt": OBSERVED}}),
-        json!({"peerDetached": {"attachment": attachment_ref(), "detachedAt": LEASE_END}}),
+        json!({"peerDetached": {"attachmentRef": attachment_ref(), "detachedAt": LEASE_END}}),
         json!({"peerMessageAccepted": {"entry": outbox()}}),
         json!({"peerMessageIntakeRecorded": {"entry": inbox("message_incoming_one", 7)}}),
         json!({"peerBatchPrepared": {"batch": batch(), "receipts": [incoming_receipt("message_incoming_one", 11), incoming_receipt("message_incoming_two", 12)]}}),

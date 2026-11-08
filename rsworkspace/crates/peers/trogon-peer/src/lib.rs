@@ -19,3 +19,5 @@ pub use commands::{MessageError, SendMessage};
 pub use commands::AcceptedMessage;
 pub use commands::domain::TerminalDisposition;
 pub use commands::{DisposeMessage, IntakeMessage};
+
+pub use commands::domain::ContentSemanticFingerprint;

@@ -3,13 +3,15 @@ name = "trogon-identity-types"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "Shared mesh identity wire types (nested act delegation chain, AAuth claims)"
+description = "Shared mesh identity types (principals and their subject form, nested act delegation chain, AAuth claims)"
 publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
+base64 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }

@@ -1,7 +1,8 @@
 use std::io;
 use std::process::{Output, Stdio};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use base64::Engine;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use trogon_nats::test_support::CoreTestServer;
@@ -17,6 +18,21 @@ enum FixtureError {
     Json(#[from] serde_json::Error),
     #[error("child stdin pipe was not created")]
     MissingStdin,
+    #[error(transparent)]
+    SystemTime(#[from] std::time::SystemTimeError),
+}
+
+fn caller_jwt() -> Result<String, FixtureError> {
+    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600;
+    let encode = &base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    Ok(format!(
+        "{}.{}.{}",
+        encode.encode(br#"{"alg":"HS256","typ":"JWT"}"#),
+        encode.encode(format!(
+            r#"{{"exp":{expiration},"caller_id":"worker-caller","principal_kind":"service"}}"#
+        )),
+        encode.encode(b"test-signature")
+    ))
 }
 
 enum ParentOutput {
@@ -52,12 +68,25 @@ async fn run_process(settings: &[(&str, &str)], input: &[u8], output: ParentOutp
 
 #[tokio::test]
 async fn invalid_startup_configuration_exits_with_a_diagnostic() -> Result<(), FixtureError> {
+    let caller = caller_jwt()?;
     for (settings, expected) in [
         (vec![], "A2A_AGENT_ID environment variable is required"),
         (vec![("A2A_PREFIX", "bad prefix")], "invalid A2A prefix"),
         (vec![("A2A_AGENT_ID", "bad agent")], "invalid agent id"),
         (
-            vec![("A2A_AGENT_ID", "worker"), ("NATS_URL", "invalid://server")],
+            vec![("A2A_AGENT_ID", "worker")],
+            "A2A_CALLER_JWT environment variable is required",
+        ),
+        (
+            vec![("A2A_AGENT_ID", "worker"), ("A2A_CALLER_JWT", "malformed")],
+            "invalid caller JWT",
+        ),
+        (
+            vec![
+                ("A2A_AGENT_ID", "worker"),
+                ("A2A_CALLER_JWT", caller.as_str()),
+                ("NATS_URL", "invalid://server"),
+            ],
             "NATS connection failed",
         ),
     ] {
@@ -72,9 +101,11 @@ async fn invalid_startup_configuration_exits_with_a_diagnostic() -> Result<(), F
 #[tokio::test]
 async fn connected_runtime_reports_parse_errors_and_drains_output_on_eof() -> Result<(), FixtureError> {
     let server = CoreTestServer::start().await;
+    let caller = caller_jwt()?;
     let output = run_process(
         &[
             ("A2A_AGENT_ID", "worker"),
+            ("A2A_CALLER_JWT", &caller),
             ("A2A_PREFIX", "tenant"),
             ("NATS_URL", server.address()),
             ("NATS_TLS_DISABLED", "true"),
@@ -96,9 +127,11 @@ async fn connected_runtime_reports_parse_errors_and_drains_output_on_eof() -> Re
 #[tokio::test]
 async fn closed_parent_output_causes_a_nonzero_runtime_exit() -> Result<(), FixtureError> {
     let server = CoreTestServer::start().await;
+    let caller = caller_jwt()?;
     let output = run_process(
         &[
             ("A2A_AGENT_ID", "worker"),
+            ("A2A_CALLER_JWT", &caller),
             ("NATS_URL", server.address()),
             ("NATS_TLS_DISABLED", "true"),
         ],

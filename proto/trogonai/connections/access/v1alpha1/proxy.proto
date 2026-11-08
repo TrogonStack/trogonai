@@ -1,0 +1,119 @@
+edition = "2024";
+
+package trogonai.connections.access.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/proxy.proto";
+import "trogonai/connections/types/v1alpha1/use_result.proto";
+
+// Ephemeral HTTP control metadata only, never an event or stored request.
+// The platform supervisor, outside agent code, places the base64url encoding
+// of these exact protobuf bytes in Trogon-Connection-Context. A descriptor-aware
+// preflight rejects unknown fields, duplicate singular fields, wrong wire
+// types, truncated values, malformed varints and contexts over 4 KiB decoded.
+// Valid field orders/varint spellings are signature-distinct byte strings;
+// protobuf has no universal canonical encoding. Never decode/re-encode before
+// authenticating the received bytes. No HTTP body travels in this message.
+//
+// Relay profile v1 (ADR#0096): HTTPS to the immutable binding.relay_origin,
+// request path '/v1/connection-proxy' followed by the provider's origin-form
+// path (which begins '/'), and the unchanged provider query. The proxy strips
+// exactly that fixed prefix and uses only binding.upstream as the authority.
+// The context binding must exist in the named Activated HTTP_PROXY grant;
+// grant/session/attempt/plan/generation and live policy checks precede use.
+// The logical fixed upstream must pass both live Session egress permission
+// and the connection permit/release restrictions. The configured relay origin
+// is internal routing, never permission to reach an otherwise forbidden host.
+//
+// The supervisor signs with RFC 9421 Signature-Input and Signature fields,
+// label 'connection' and alg 'ed25519'. keyid is unpadded base64url of the
+// RFC 7638/RFC 8037 SHA-256 public OKP JWK thumbprint, using canonical members
+// {crv,kty,x}; it equals the grant's confirmation_key_thumbprint.value. Never
+// hash raw key bytes or a serialized Digest instead. The proxy retrieves the
+// attested key from service state, never from a caller-supplied key URL.
+// Covered components include '@method', '@target-uri', 'content-digest',
+// 'trogon-connection-context', and every end-to-end header that is forwarded.
+// The Content-Digest is RFC 9530 sha-256 over the actual HTTP content bytes,
+// including empty content. The proxy buffers/verifies the bounded request
+// before credential resolution; digest trailers and unsigned forwarded headers
+// are refused. Host, framing and hop-by-hop headers are validated then rebuilt,
+// not forwarded. Conflicting Content-Length/Transfer-Encoding is refused.
+// FINITE_BUFFERED_HTTPS_V1 accepts no Content-Encoding, trailers, streaming,
+// SSE, WebSocket, CONNECT or upgrades. The supervisor signs Accept-Encoding:
+// identity; transparent decompression and automatic redirects are disabled.
+// Headers, targets and both complete bodies are bounded before release.
+//
+// Signature parameters created, expires and nonce are required. nonce equals
+// invocation_id; expires is at most created+60 seconds and no later than grant
+// expiry. Future-created or expired proofs are refused. The proxy atomically
+// claims (grant, invocation_id) across replicas before dispatch and retains the
+// replay tombstone through the grant's final expiry or revocation; renewals
+// extend existing tombstones and never reset consumption. Lost consumption
+// state fails closed. A repeated id is refused, including
+// after an unknown outcome; it never automatically replays a provider effect.
+// Proof material and request digests are not persisted in audit records.
+message ProxyRequestContext {
+  trogonai.connections.types.v1alpha1.ProxyBindingRef binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.InvocationId invocation_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Relay-generated failure metadata, encoded as base64url protobuf bytes in
+// Trogon-Connection-Failure. It carries no provider response body or error text.
+// The relay always writes Trogon-Connection-Response as exactly 'proxy' for
+// these errors or 'upstream' for a preserved provider response; all upstream
+// Trogon-Connection-* fields are stripped before that marker is written.
+// Thus a provider 401/429/5xx is distinguishable from the relay's own failure.
+// A relay failure has an empty HTTP body and Cache-Control: no-store.
+//
+// Mapping: GRANT_MISMATCH -> 401; NOT_PERMITTED and RELEASE_BLOCKED -> 403;
+// CONNECTION_UNAVAILABLE and CONNECTION_SUPERSEDED -> 409; INPUT_REJECTED ->
+// 400; PROVIDER_RATE_LIMITED -> 429; PROVIDER_UNAVAILABLE or
+// RESPONSE_TOO_LARGE -> 502; PROVIDER_OUTCOME_UNKNOWN -> 504; audit, projection
+// or internal failure -> 503; REQUEST_REPLAYED -> 409;
+// UNSUPPORTED_RESTRICTION -> 403; CREDENTIAL_RESPONSE_REJECTED and
+// PROVIDER_RESPONSE_REJECTED -> 502.
+// The provider's own attributable response keeps its original status, permitted headers and bounded body, with audit outcome
+// classification independent from its HTTP representation. Authentication and
+// scope observations update Connection health without converting that response
+// into a platform operation envelope.
+//
+// Control/proof headers are stripped before upstream dispatch. Caller-selected
+// Authorization, Cookie, proxy credentials or the injection target header are
+// rejected, as are workload Forwarded, X-Forwarded-*, Via and transport-control
+// overrides. Redirects are never followed; credential-bearing Location and
+// Set-Cookie headers are removed. Header/body bytes echoing the injected value
+// cause a safe 502 CREDENTIAL_RESPONSE_REJECTED. A bounded response is buffered
+// before release so a detected credential is not partially returned. Transformed or
+// encoded credential echoes are not claimed safe by a generic schema; a
+// provider requiring such a response policy needs a reviewed trusted filter.
+message ConnectionProxyFailure {
+  option (buf.validate.message).cel = {
+    id: "connection_proxy_failure.failure_only"
+    message: "only relay-generated failures use this header"
+    expression: "this.result in [2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_proxy_failure.rate_limit_source"
+    message: "limited_by is present exactly for PROVIDER_RATE_LIMITED"
+    expression: "has(this.limited_by) == (this.result == 8)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_proxy_failure.retry_delay"
+    message: "retry_after is present only for throttling or temporary unavailability"
+    expression: "!has(this.retry_after) || this.result in [8, 11, 14, 16]"
+  };
+  trogonai.connections.types.v1alpha1.ConnectionUseResult result = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ConnectionRateLimitSource limited_by = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  google.protobuf.Duration retry_after = 3 [(buf.validate.field).duration.gte = {}];
+}

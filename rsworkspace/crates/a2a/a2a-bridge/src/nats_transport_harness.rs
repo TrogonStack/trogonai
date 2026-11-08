@@ -7,14 +7,16 @@ use bytes::Bytes;
 use serde_json::json;
 
 use a2a_auth_callout::CALLER_JWT_HEADER_NAME;
-use a2a_nats::A2aPrefix;
 use a2a_nats::agent_id::A2aAgentId;
 use a2a_nats::audit::emitter::{AuditEmitter, NatsAuditEmitter};
 use a2a_nats::audit::envelope::{AuditEnvelope, AuditOutcome};
+use a2a_nats::nats::subjects::gateway::GatewayIngressSubject;
+use a2a_nats::{A2aMethod, A2aPrefix};
 
 use crate::auth::{
-    AuthCalloutJsonMintClient, BridgeTenantAccount, InProcessCalloutDispatcherMintWire, harness_callout_dispatcher,
+    AuthCalloutJsonMintClient, InProcessCalloutDispatcherMintWire, harness_callout_dispatcher, harness_callout_xkey,
 };
+use crate::edge_auth::BearerOnlyGuard;
 use crate::error::BridgeError;
 use crate::identity::BridgeUserJwt;
 use crate::inbound::{
@@ -23,7 +25,6 @@ use crate::inbound::{
 };
 
 const HARNESS_CALLER_ID: &str = "bridge-harness-caller";
-const HARNESS_TENANT: &str = "tenant-harness";
 
 /// Gateway+agent stub for NATS transport integration tests.
 #[derive(Clone)]
@@ -74,12 +75,11 @@ impl GatewayUnaryPublish for HarnessGatewayUnary {
         let jwt_present = headers.get(CALLER_JWT_HEADER_NAME).is_some();
         *self.last_caller_jwt_present.lock().expect("harness mutex poisoned") = jwt_present;
 
-        let gateway_prefix = format!("{}.v1.gateway.{}.", self.prefix.as_str(), self.agent_id.as_str());
-        let method_dots = subject.strip_prefix(&gateway_prefix).unwrap_or("message.send");
-        let method_slashes = method_dots.replace('.', "/");
+        let ingress = GatewayIngressSubject::parse(&self.prefix, subject)
+            .map_err(|error| BridgeError::NatsPublish(error.to_string()))?;
         let envelope = AuditEnvelope::new(
             &self.agent_id,
-            method_slashes,
+            ingress.method().as_str(),
             None,
             0,
             0,
@@ -90,7 +90,7 @@ impl GatewayUnaryPublish for HarnessGatewayUnary {
         let emitter = NatsAuditEmitter::new(self.nats.clone());
         emitter.publish(&self.prefix, &self.agent_id, envelope).await;
 
-        let body = if method_dots == "tasks.resubscribe" {
+        let body = if *ingress.method() == A2aMethod::TasksResubscribe {
             json!({
                 "jsonrpc": "2.0",
                 "id": null,
@@ -133,16 +133,24 @@ pub fn build_nats_transport_app_state(
         .to_string(),
     ));
 
-    let tenant = BridgeTenantAccount::new(HARNESS_TENANT).expect("harness tenant");
-    let dispatcher = Arc::new(harness_callout_dispatcher(HARNESS_CALLER_ID));
-    let mint_wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant));
-    let auth = Arc::new(AuthCalloutJsonMintClient::with_tenant_account(
-        mint_wire.clone(),
-        AuthCalloutJsonMintClient::<InProcessCalloutDispatcherMintWire>::default_mint_subject(),
-        Some(BridgeTenantAccount::new(HARNESS_TENANT).expect("harness tenant")),
+    let (dispatcher, tenant) = harness_callout_dispatcher(HARNESS_CALLER_ID);
+    let callout_xkey = harness_callout_xkey();
+    let callout_xkey_public = callout_xkey.public_key();
+    let mint_wire = Arc::new(InProcessCalloutDispatcherMintWire::new(
+        dispatcher,
+        tenant.clone(),
+        Some(callout_xkey),
     ));
+    let auth = Arc::new(
+        AuthCalloutJsonMintClient::with_tenant_account(
+            mint_wire.clone(),
+            AuthCalloutJsonMintClient::<InProcessCalloutDispatcherMintWire>::default_mint_subject(),
+            Some(tenant),
+        )
+        .sealing_to(callout_xkey_public),
+    );
 
-    let state = AppState::new(auth, Arc::new(publisher), jetstream, prefix);
+    let state = AppState::new(auth, Arc::new(publisher), jetstream, prefix, Arc::new(BearerOnlyGuard));
     (state, harness, mint_wire)
 }
 

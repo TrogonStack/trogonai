@@ -1,0 +1,64 @@
+edition = "2024";
+
+package trogonai.policy.connection_permissions.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only templates for the policy.connection_permissions module's
+// DeciderService refusals. These messages are never encoded. Administration
+// authorization and connection admission keep their own failure contracts;
+// this fold only owns permit mutations and the target checks dispatch makes
+// before them. Concurrency faults use the Decider channel.
+message ConnectionPermissionCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.connection_permissions"
+    reason: "CONNECTION_PERMISSION_COMMAND_INVALID"
+    message: "The command violates the connection permission policy contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionPermissionNotInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.connection_permissions"
+    reason: "CONNECTION_PERMISSION_NOT_INITIALIZED"
+    message: "The connection permission history must be initialized before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionPermissionAlreadyInitializedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.connection_permissions"
+    reason: "CONNECTION_PERMISSION_ALREADY_INITIALIZED"
+    message: "The connection permission history has already been initialized."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionPermissionSubjectMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.connection_permissions"
+    reason: "CONNECTION_PERMISSION_SUBJECT_MISMATCH"
+    message: "The command names a different subject from this connection permission history."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// A permit names a target this subject may not hold: a person-owned connection
+// on a node subject or with a mode other than HTTP_PROXY or MCP_SESSION, a delegation
+// the owning person did not write, a connection in another tenant, or an owner
+// kind the current phase does not enable.
+message ConnectionPermitTargetRefusedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "policy.connection_permissions"
+    reason: "CONNECTION_PERMIT_TARGET_REFUSED"
+    message: "A permit names a connection this subject cannot be permitted to use."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
