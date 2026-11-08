@@ -15,7 +15,8 @@
     feature = "grpc-nats-micro",
     feature = "policy",
     feature = "model-access",
-    feature = "audit"
+    feature = "audit",
+    feature = "evaluation"
 ))]
 mod r#gen;
 
@@ -50,7 +51,7 @@ pub use crate::r#gen::trogon::nats;
 ))]
 pub mod google;
 
-#[cfg(feature = "policy")]
+#[cfg(any(feature = "policy", feature = "evaluation"))]
 pub use crate::r#gen::trogonai::policy;
 
 #[cfg(feature = "model-access")]
@@ -59,8 +60,11 @@ pub use crate::r#gen::trogonai::model_access;
 #[cfg(feature = "audit")]
 pub use crate::r#gen::trogonai::platform;
 
-#[cfg(feature = "audit")]
+#[cfg(any(feature = "audit", feature = "evaluation"))]
 pub use crate::r#gen::trogonai::session;
+
+#[cfg(feature = "evaluation")]
+pub mod evaluation;
 
 #[cfg(feature = "policy")]
 pub use crate::r#gen::trogonai::connections;
@@ -68,10 +72,10 @@ pub use crate::r#gen::trogonai::connections;
 #[cfg(feature = "policy")]
 pub use crate::r#gen::trogonai::projects;
 
-#[cfg(any(feature = "policy", feature = "model-access"))]
+#[cfg(any(feature = "policy", feature = "model-access", feature = "evaluation"))]
 pub use crate::r#gen::trogon::hierarchy;
 
-#[cfg(any(feature = "policy", feature = "model-access"))]
+#[cfg(any(feature = "policy", feature = "model-access", feature = "evaluation"))]
 pub use crate::r#gen::trogonai::agents;
 
 #[cfg(feature = "grpc-nats-micro")]
@@ -135,7 +139,8 @@ mod tests;
         feature = "grpc-nats-micro",
         feature = "policy",
         feature = "model-access",
-        feature = "audit"
+        feature = "audit",
+        feature = "evaluation"
     )
 ))]
 mod codec_conformance_tests;
