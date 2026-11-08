@@ -68,6 +68,9 @@ impl StdioPeer {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+            command.env("LLVM_PROFILE_FILE", profile);
+        }
         let mut child = command.spawn()?;
         let output = child.stdout.take().ok_or("missing stdout")?;
         let input = child.stdin.take().ok_or("missing stdin")?;
@@ -440,8 +443,108 @@ async fn executable_sigterm_detaches_bound_generation_without_durable_erasure() 
     Ok(())
 }
 
+#[cfg(unix)]
+async fn public_cli_signal_preserves_prepared_assignment(signal: &str) -> TestResult {
+    let broker = Broker::start().await?;
+    let (service, _) = broker.connect("service").await?;
+    let fixture = Fixture::new().await?;
+    let store = PeerJetStreamStore::open(
+        async_nats::jetstream::new(service.clone()),
+        &PeerStoreConfig::new(PeerTenant::new("tenant")?, PeerStorageBudget::new(16_777_216)?),
+    )
+    .await?;
+    let backend = application::compose(store.clone(), &fixture);
+    let registration = serve_peer_rpc(&service, account()?, backend.clone()).await?;
+    observed_barrier(&service).await?;
+    let alice = StdioPeer::start(&broker, "alice", "one").await?;
+    let bob = StdioPeer::start(&broker, "bob", "one").await?;
+    alice.prompt("alice", "initial").await?;
+    bob.prompt("bob", "initial").await?;
+    let sender = PeerId::parse(fixture.a.peer_id.clone().ok_or("sender")?)?;
+    let recipient = PeerId::parse(fixture.b.peer_id.clone().ok_or("recipient")?)?;
+    let body = "prepared context must survive native signal shutdown";
+    let sent = alice
+        .call(
+            "peer_send",
+            json!({"recipient_peer_id":recipient.as_str(),"idempotency_key":"signal_assignment","text":body}),
+        )
+        .await?;
+    assert!(!sent.to_string().contains(body));
+    let before_intake = history(&store, &sender).await?;
+    assert_eq!(before_intake.outbox.len(), 1);
+    let message = MessageId::new(before_intake.outbox[0].message.message_id.clone().ok_or("message")?)?;
+    backend
+        .application()
+        .reconcile(&fixture.alice, &sender, &[message], WorkLimit::new(1)?)
+        .await?;
+    let context = bob.prompt("bob", "delivery").await?;
+    assert!(
+        context["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .is_some_and(|value| value.contains(body))
+    );
+    let prepared = history(&store, &recipient).await?;
+    assert_eq!(prepared.inbox.len(), 1);
+    assert_eq!(prepared.batches.len(), 1);
+    assert!(!prepared.batches[0].acknowledged_at.is_set());
+    assert_eq!(prepared.attachment.attachment_ref.generation, Some(1));
+    assert_eq!(
+        prepared.attachment.status.and_then(|value| value.as_known()),
+        Some(v1::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
+    );
+    let pending_sender = history(&store, &sender).await?;
+    assert_eq!(pending_sender.outbox.len(), 1);
+    assert!(!pending_sender.outbox[0].settlement.is_set());
+    let pid = bob.child.id().ok_or("missing owned connector process")?;
+    let delivered = tokio::time::timeout(
+        Duration::from_secs(2),
+        Command::new("kill").arg(signal).arg(pid.to_string()).status(),
+    )
+    .await??;
+    assert!(delivered.success(), "signal was not delivered to owned connector");
+    let output = tokio::time::timeout(Duration::from_secs(3), bob.child.wait_with_output())
+        .await
+        .map_err(|_| "owned signalled connector exit timed out")??;
+    assert!(output.status.success(), "connector did not handle {signal} gracefully");
+    assert!(
+        output.stderr.is_empty(),
+        "successful signal shutdown wrote a diagnostic"
+    );
+    tokio::time::timeout(Duration::from_secs(3), bob.client.cancel())
+        .await
+        .map_err(|_| "signalled connector client cancellation timed out")??;
+    let detached = history(&store, &recipient).await?;
+    assert_eq!(detached.enrollment, prepared.enrollment);
+    assert_eq!(detached.attachment.attachment_ref, prepared.attachment.attachment_ref);
+    assert_eq!(
+        detached.attachment.status.and_then(|value| value.as_known()),
+        Some(v1::AttachmentStatus::ATTACHMENT_STATUS_DETACHED)
+    );
+    assert_eq!(detached.inbox, prepared.inbox);
+    assert_eq!(detached.dispositions, prepared.dispositions);
+    assert_eq!(detached.batches, prepared.batches);
+    assert!(!detached.batches[0].acknowledged_at.is_set());
+    assert_eq!(history(&store, &sender).await?.outbox, pending_sender.outbox);
+    alice.finish().await?;
+    registration.stop().await?;
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn executable_sigterm_detaches_prepared_assignment_without_acknowledgment() -> TestResult {
+    public_cli_signal_preserves_prepared_assignment("-TERM").await
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn executable_sigint_detaches_prepared_assignment_without_acknowledgment() -> TestResult {
+    public_cli_signal_preserves_prepared_assignment("-INT").await
+}
+
 #[tokio::test]
 async fn executable_invalid_settings_keep_stdout_empty_and_diagnostics_static() -> TestResult {
+    use trogon_std::env::{ReadEnv, SystemEnv};
     let output = Command::new(env!("CARGO_BIN_EXE_trogon-peer-mcp"))
         .env_clear()
         .envs(

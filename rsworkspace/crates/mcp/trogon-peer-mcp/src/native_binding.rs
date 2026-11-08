@@ -1,3 +1,4 @@
+use tokio::sync::watch;
 use trogon_peer::{AttachmentRef, ConnectorId, NativeSessionId, PeerId};
 use trogonai_proto::peers::v1alpha1 as v1;
 
@@ -6,7 +7,7 @@ use crate::connector_config::ConnectorConfig;
 
 pub(crate) struct NativeBinding {
     native_session_id: NativeSessionId,
-    attachment: Option<AttachmentRef>,
+    attachment: Option<watch::Sender<AttachmentRef>>,
     detach_confirmed: bool,
 }
 
@@ -23,8 +24,12 @@ impl NativeBinding {
         &self.native_session_id
     }
 
-    pub(crate) fn attachment(&self) -> Option<&AttachmentRef> {
-        self.attachment.as_ref()
+    pub(crate) fn attachment(&self) -> Option<AttachmentRef> {
+        self.attachment.as_ref().map(|attachment| attachment.borrow().clone())
+    }
+
+    pub(crate) fn attachment_subscription(&self) -> Option<watch::Receiver<AttachmentRef>> {
+        self.attachment.as_ref().map(watch::Sender::subscribe)
     }
 
     pub(crate) fn detach_confirmed(&self) -> bool {
@@ -74,12 +79,17 @@ impl NativeBinding {
         let generation = raw.generation.ok_or(PeerMcpError::InvalidEnrollment)?;
         let attachment =
             AttachmentRef::new(peer_id, connector_id, generation).map_err(PeerMcpError::InvalidEnrollmentIdentity)?;
-        if self.attachment.as_ref().is_some_and(|prior| {
+        if self.attachment().as_ref().is_some_and(|prior| {
             prior.peer_id() != attachment.peer_id() || prior.generation() > attachment.generation()
         }) {
             return Err(PeerMcpError::InvalidEnrollment);
         }
-        self.attachment = Some(attachment.clone());
+        match &self.attachment {
+            Some(current) => {
+                current.send_replace(attachment.clone());
+            }
+            None => self.attachment = Some(watch::channel(attachment.clone()).0),
+        }
         Ok(attachment)
     }
 }
