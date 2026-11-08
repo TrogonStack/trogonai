@@ -1,13 +1,11 @@
 use trogon_decider::{Decider, Decision, WritePrecondition};
 use trogonai_proto::evaluation::bindings::v1alpha1 as v1;
 
+use crate::constants::MAX_FINDINGS;
 use crate::error::{CommandInvalidError, EvaluationBindingDecideError, EvaluationBindingEvolveError};
 use crate::facts::{FindingEvidence, WithheldVocabularyScreen};
 use crate::state::{BindingStatus, EvaluationBindingState};
 use crate::surface::finding_inside_surface;
-
-/// The most findings one result may carry (`record_evaluation_result.proto`).
-const MAX_FINDINGS: usize = 64;
 
 /// Records the score of one evaluated run, with its findings and the judge's own session.
 ///

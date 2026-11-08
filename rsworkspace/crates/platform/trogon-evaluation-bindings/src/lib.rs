@@ -10,6 +10,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod bind_rubric;
+mod constants;
 mod error;
 pub mod facts;
 mod record_evaluation_result;
