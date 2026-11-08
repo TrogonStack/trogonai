@@ -45,3 +45,8 @@ pub use authoritative_receipt::AuthoritativeReceipt;
 
 mod settle_message;
 pub use settle_message::SettleMessage;
+
+pub use domain::EnrollmentFacts;
+
+mod peer_history;
+pub use peer_history::PeerHistory;

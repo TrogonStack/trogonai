@@ -1,24 +1,36 @@
-use super::{domain::*, evolve_error::EvolveError, state_values};
+use super::{AcceptedMessage, domain::*, evolve_error::EvolveError, peer_history::AcceptedOutbox, state_values};
 use sha2::{Digest, Sha256};
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
 
 fn value<T>(result: Result<T, PeerValueError>, field: &'static str) -> Result<T, EvolveError> {
     result.map_err(|source| EvolveError::InvalidValue { field, source })
 }
-pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<(), EvolveError> {
+pub(super) struct ParsedMetadata<'a> {
+    pub(super) message: &'a proto::MessageMetadata,
+    pub(super) sender: PeerId,
+    pub(super) recipient: PeerId,
+    pub(super) collaboration: CollaborationRef,
+}
+
+pub(super) struct ParsedOutbox<'a> {
+    pub(super) key: IdempotencyKey,
+    pub(super) metadata: ParsedMetadata<'a>,
+}
+
+pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<ParsedMetadata<'_>, EvolveError> {
     value(
         MessageId::new(state_values::required(&message.message_id, "message_id")?),
         "message_id",
     )?;
-    value(
+    let sender = value(
         PeerId::parse(state_values::required(&message.sender_peer_id, "sender_peer_id")?),
         "sender_peer_id",
     )?;
-    value(
+    let recipient = value(
         PeerId::parse(state_values::required(&message.recipient_peer_id, "recipient_peer_id")?),
         "recipient_peer_id",
     )?;
-    value(
+    let collaboration = value(
         CollaborationRef::new(state_values::required(&message.collaboration_ref, "collaboration_ref")?),
         "collaboration_ref",
     )?;
@@ -50,7 +62,12 @@ pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<(), EvolveErr
     if expires - accepted != chrono::Duration::hours(1) {
         return Err(EvolveError::InvalidMessageTransition);
     }
-    Ok(())
+    Ok(ParsedMetadata {
+        message,
+        sender,
+        recipient,
+        collaboration,
+    })
 }
 
 fn semantic_fingerprint(message: &proto::MessageMetadata) -> Result<ContentSemanticFingerprint, EvolveError> {
@@ -85,8 +102,8 @@ pub(super) fn semantic_digest(message: &proto::MessageMetadata) -> Result<Vec<u8
     }
     Ok(hash.finalize().to_vec())
 }
-pub(super) fn outbox_entry(entry: &proto::OutboxEntry) -> Result<(), EvolveError> {
-    value(
+pub(super) fn outbox_entry(entry: &proto::OutboxEntry) -> Result<ParsedOutbox<'_>, EvolveError> {
+    let key = value(
         IdempotencyKey::new(state_values::required(&entry.idempotency_key, "idempotency_key")?),
         "idempotency_key",
     )?;
@@ -94,23 +111,26 @@ pub(super) fn outbox_entry(entry: &proto::OutboxEntry) -> Result<(), EvolveError
         .message
         .as_option()
         .ok_or(EvolveError::MissingField { field: "message" })?;
-    metadata(message)?;
+    let metadata = metadata(message)?;
     if entry.semantic_digest.as_deref() != Some(semantic_digest(message)?.as_slice()) {
         return Err(EvolveError::InvalidMessageTransition);
     }
     if let Some(receipt) = entry.settlement.as_option() {
         receipt_matches_message(receipt, message)?;
     }
-    Ok(())
+    Ok(ParsedOutbox { key, metadata })
 }
-pub(super) fn fold_accepted(state: &mut PeerState, event: &proto::PeerMessageAccepted) -> Result<(), EvolveError> {
+pub(super) fn fold_accepted(
+    state: &mut PeerState,
+    event: &proto::PeerMessageAccepted,
+) -> Result<AcceptedOutbox, EvolveError> {
     let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
-    state_values::parse_enrollment(enrollment)?;
+    let facts = state_values::parse_enrollment_facts(enrollment)?;
     let entry = event
         .entry
         .as_option()
         .ok_or(EvolveError::MissingField { field: "entry" })?;
-    outbox_entry(entry)?;
+    let parsed = outbox_entry(entry)?;
     if entry.settlement.is_set()
         || entry.message.sender_peer_id != enrollment.peer_id
         || entry.message.collaboration_ref != enrollment.collaboration_ref
@@ -151,8 +171,16 @@ pub(super) fn fold_accepted(state: &mut PeerState, event: &proto::PeerMessageAcc
     if count >= 16 || bytes + u64::from(entry.message.content_size_bytes.unwrap_or(0)) > 32768 || recent >= 10 {
         return Err(EvolveError::InvalidMessageTransition);
     }
+    let evidence = AcceptedMessage {
+        tenant: facts.identity().owner().tenant().clone(),
+        recipient: parsed.metadata.recipient,
+        message: parsed.metadata.message.clone(),
+    };
     state.outbox.push(entry.clone());
-    Ok(())
+    Ok(AcceptedOutbox {
+        key: parsed.key,
+        evidence,
+    })
 }
 
 pub(super) fn pending_inbox(state: &PeerState) -> Result<(usize, u64), EvolveError> {
@@ -194,6 +222,11 @@ pub(super) fn make_receipt(
     batch_id: Option<String>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<proto::RecipientReceipt, EvolveError> {
+    if !state_values::timestamp_seconds_supported(now.timestamp()) || now.timestamp_subsec_nanos() >= 1_000_000_000 {
+        return Err(EvolveError::TimestampRange {
+            field: "receipt.decided_at",
+        });
+    }
     let revision = u64::try_from(state.dispositions.len())
         .ok()
         .and_then(|n| n.checked_add(1))
@@ -308,8 +341,6 @@ pub(super) fn fold_receipt(state: &mut PeerState, receipt: &proto::RecipientRece
             return Err(EvolveError::InvalidMessageTransition);
         }
         entry.disposition = buffa::MessageField::some(receipt.clone());
-    } else if outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED {
-        return Err(EvolveError::InvalidMessageTransition);
     }
     state.dispositions.push(receipt.clone());
     Ok(())
@@ -329,9 +360,6 @@ pub(super) fn eligible_inbox(
     state: &PeerState,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<Vec<&proto::InboxEntry>, EvolveError> {
-    if !(-62_135_596_800..=253_402_300_799).contains(&now.timestamp()) {
-        return Err(EvolveError::InvalidMessageTransition);
-    }
     let mut eligible = Vec::new();
     for entry in &state.inbox {
         metadata(

@@ -50,19 +50,13 @@ where
         let mut obligations = Vec::new();
         for id in messages {
             let evidence = AcceptedMessage::from_sender_history(&history, id)?;
-            let recipient = PeerId::parse(
-                evidence
-                    .metadata()
-                    .recipient_peer_id
-                    .clone()
-                    .ok_or(PeerApplicationError::Scope)?,
-            )?;
+            let recipient = evidence.recipient().clone();
             let scope = self.authorize(owner, &recipient, PeerOperation::ReadPeer)?;
             obligations.push((id, evidence, recipient, scope));
         }
         for (id, evidence, recipient, scope) in obligations {
             let target = self.load(owner, &recipient).await?;
-            if self.collaboration(&target)? != self.collaboration(&history)? {
+            if target.collaboration() != history.collaboration() {
                 return Err(PeerApplicationError::Scope);
             }
             if !target
@@ -100,8 +94,10 @@ where
                         .execute_message(owner, &DisposeMessage::new(evidence, disposition, observed_at))
                         .await
                     {
-                        Ok(_) | Err(CommandError::Decide(MessageError::AlreadyDisposed(_))) => {}
-                        Err(error) => return Err(PeerApplicationError::Message(error)),
+                        Ok(_)
+                        | Err(PeerApplicationError::Message(CommandError::Decide(MessageError::AlreadyDisposed(_)))) => {
+                        }
+                        Err(error) => return Err(error),
                     }
                 } else {
                     match self
@@ -109,11 +105,11 @@ where
                         .await
                     {
                         Ok(_)
-                        | Err(CommandError::Decide(
+                        | Err(PeerApplicationError::Message(CommandError::Decide(
                             MessageError::AlreadyIntaken(_) | MessageError::AlreadyDisposed(_),
-                        )) => {}
-                        Err(CommandError::Decide(MessageError::DeferIntake)) => continue,
-                        Err(error) => return Err(PeerApplicationError::Message(error)),
+                        ))) => {}
+                        Err(PeerApplicationError::Message(CommandError::Decide(MessageError::DeferIntake))) => continue,
+                        Err(error) => return Err(error),
                     }
                 }
             }
@@ -128,8 +124,9 @@ where
                     .execute_message(owner, &SettleMessage::new(sender.clone(), receipt))
                     .await
                 {
-                    Ok(_) | Err(CommandError::Decide(MessageError::AlreadySettled(_))) => {}
-                    Err(error) => return Err(PeerApplicationError::Message(error)),
+                    Ok(_)
+                    | Err(PeerApplicationError::Message(CommandError::Decide(MessageError::AlreadySettled(_)))) => {}
+                    Err(error) => return Err(error),
                 }
             }
         }

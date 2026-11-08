@@ -36,9 +36,9 @@ where
         self.authorize(owner, &recipient, PeerOperation::ReadPeer)?;
         let sender = self.load(owner, reference.peer_id()).await?;
         self.live(owner, &reference, &sender)?;
-        let collaboration = self.collaboration(&sender)?;
+        let collaboration = sender.collaboration();
         let target = self.load(owner, &recipient).await?;
-        if self.collaboration(&target)? != collaboration {
+        if target.collaboration() != collaboration {
             return Err(PeerApplicationError::Scope);
         }
         let binding = self.content.seal(&scope, &text).await?;
@@ -51,7 +51,7 @@ where
             key.clone(),
             self.ids.message_id()?,
             recipient,
-            collaboration,
+            collaboration.clone(),
             binding.content().clone(),
             reply,
             self.clock.now(),
@@ -64,10 +64,10 @@ where
                 .and_then(|e| e.message.as_option())
                 .cloned()
                 .ok_or(PeerApplicationError::Scope)?,
-            Err(CommandError::Decide(MessageError::AlreadyAccepted(entry))) => {
+            Err(PeerApplicationError::Message(CommandError::Decide(MessageError::AlreadyAccepted(entry)))) => {
                 entry.message.as_option().cloned().ok_or(PeerApplicationError::Scope)?
             }
-            Err(error) => return Err(PeerApplicationError::Message(error)),
+            Err(error) => return Err(error),
         };
         Ok(proto::SendResponse {
             message: MessageField::some(message),
@@ -83,27 +83,17 @@ where
         self.authorize(owner, reference.peer_id(), PeerOperation::Status)?;
         let state = self.load(owner, reference.peer_id()).await?;
         self.live(owner, &reference, &state)?;
-        let entry = state
-            .outbox
-            .iter()
-            .find(|e| e.idempotency_key.as_deref() == Some(key.as_str()))
-            .ok_or(MessageError::MessageNotFound)?;
-        let recipient = PeerId::parse(
-            entry
-                .message
-                .recipient_peer_id
-                .clone()
-                .ok_or(PeerApplicationError::Scope)?,
-        )?;
-        self.authorize(owner, &recipient, PeerOperation::ReadPeer)?;
-        let target = self.load(owner, &recipient).await?;
-        if self.collaboration(&target)? != self.collaboration(&state)? {
+        let evidence = state.accepted(&key).ok_or(MessageError::MessageNotFound)?;
+        let recipient = evidence.recipient();
+        self.authorize(owner, recipient, PeerOperation::ReadPeer)?;
+        let target = self.load(owner, recipient).await?;
+        if target.collaboration() != state.collaboration() {
             return Err(PeerApplicationError::Scope);
         }
         let receipt = target
             .dispositions
             .iter()
-            .find(|r| r.message_id == entry.message.message_id);
+            .find(|r| r.message_id == evidence.metadata().message_id);
         let status = match receipt.and_then(|r| r.outcome).and_then(|v| v.as_known()) {
             Some(proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED) => {
                 if target
@@ -125,14 +115,14 @@ where
             _ if target
                 .inbox
                 .iter()
-                .any(|e| e.message.message_id == entry.message.message_id) =>
+                .any(|e| e.message.message_id == evidence.metadata().message_id) =>
             {
                 proto::MessageStatus::MESSAGE_STATUS_INTAKE_RECORDED
             }
             _ => proto::MessageStatus::MESSAGE_STATUS_ACCEPTED,
         };
         Ok(proto::StatusResponse {
-            message: entry.message.clone(),
+            message: MessageField::some(evidence.metadata().clone()),
             status: Some(status.into()),
             observed_at: MessageField::some(timestamp_from_datetime(&self.clock.now())),
         })

@@ -13,15 +13,31 @@ pub fn initial_state() -> PeerState {
     }
 }
 
-pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerState, EvolveError> {
+pub fn evolve(state: PeerState, event: &proto::PeerEvent) -> Result<PeerState, EvolveError> {
+    Ok(transition(state, event)?.state)
+}
+
+pub(super) struct Transition {
+    pub(super) state: PeerState,
+    pub(super) update: Option<ProjectionUpdate>,
+}
+
+pub(super) enum ProjectionUpdate {
+    Enrolled(super::EnrollmentFacts),
+    Accepted(Box<super::peer_history::AcceptedOutbox>),
+}
+
+pub(super) fn transition(mut state: PeerState, event: &proto::PeerEvent) -> Result<Transition, EvolveError> {
+    let mut update = None;
     match event.event.as_ref().ok_or(EvolveError::MissingEvent)? {
         PeerEventCase::PeerEnrolled(event) => {
             if state.enrollment.is_set() {
                 return Err(EvolveError::AlreadyEnrolled);
             }
             let enrollment = event.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
-            parse_enrollment(enrollment)?;
+            let facts = super::state_values::parse_enrollment_facts(enrollment)?;
             state.enrollment = MessageField::some(enrollment.clone());
+            update = Some(ProjectionUpdate::Enrolled(facts));
         }
         PeerEventCase::PeerAttached(event) => {
             let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
@@ -133,7 +149,9 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
             });
         }
         PeerEventCase::PeerMessageAccepted(event) => {
-            super::message_rules::fold_accepted(&mut state, event)?;
+            update = Some(ProjectionUpdate::Accepted(Box::new(
+                super::message_rules::fold_accepted(&mut state, event)?,
+            )));
         }
         PeerEventCase::PeerMessageIntakeRecorded(event) => super::message_rules::fold_intake(&mut state, event)?,
         PeerEventCase::PeerMessageDisposed(event) => super::message_rules::fold_disposed(&mut state, event)?,
@@ -141,5 +159,5 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
         PeerEventCase::PeerBatchAcknowledged(event) => super::message_rules::fold_acknowledged(&mut state, event)?,
         PeerEventCase::PeerMessageSettled(event) => super::message_rules::fold_settled(&mut state, event)?,
     }
-    Ok(state)
+    Ok(Transition { state, update })
 }
