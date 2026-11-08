@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+use trogon_decider::Decider as _;
 mod support;
 use support::*;
 use trogon_peer::*;
@@ -134,4 +135,226 @@ fn malformed_intake_and_receipt_history_is_refused() {
             .is_err()
         );
     }
+}
+
+#[test]
+fn core759_accepted_metadata_routes_intake_and_disposal_replay_to_recipient() {
+    use trogon_decider::evaluate_decision;
+
+    let sender = run(enrolled("sender", 0), &send(0, 1, 7));
+    let accepted = AcceptedMessage::from_sender_history(&sender, &MessageId::new("message_0").unwrap()).unwrap();
+    assert_eq!(accepted.tenant(), identity("sender").owner().tenant());
+    assert_eq!(Some(accepted.metadata()), sender.outbox[0].message.as_option());
+    let recipient = PeerId::parse(accepted.metadata().recipient_peer_id.clone().unwrap()).unwrap();
+    let intake_command = IntakeMessage::new(accepted.clone(), time(2));
+    assert_eq!(intake_command.stream_id(), &recipient);
+    let initial = IntakeMessage::initial_state();
+    assert_eq!(initial, commands::state::initial_state());
+    let enrollment = Enroll::new(
+        identity("recipient"),
+        ConnectorId::new("connector").unwrap(),
+        CollaborationRef::new("collaboration").unwrap(),
+        PeerDisplayName::new("Peer").unwrap(),
+        time(0),
+    );
+    let (before, enrollment_events) = evaluate_decision(initial.clone(), &enrollment).unwrap();
+    let mut replayed = initial;
+    for event in enrollment_events.iter() {
+        replayed = commands::state::evolve(replayed, event).unwrap();
+    }
+    assert_eq!(replayed, before);
+    let (intaken, events) = evaluate_decision(before, &intake_command).unwrap();
+    for event in events.iter() {
+        replayed = commands::state::evolve(replayed, event).unwrap();
+    }
+    assert_eq!(replayed, intaken);
+    assert_eq!(replayed.inbox[0].message.as_option(), Some(accepted.metadata()));
+    let dispose = DisposeMessage::new(accepted, TerminalDisposition::Unavailable, time(3));
+    assert_eq!(dispose.stream_id(), &recipient);
+    assert_eq!(DisposeMessage::initial_state(), IntakeMessage::initial_state());
+    let (disposed, events) = evaluate_decision(replayed.clone(), &dispose).unwrap();
+    for event in events.iter() {
+        replayed = commands::state::evolve(replayed, event).unwrap();
+    }
+    assert_eq!(replayed, disposed);
+    assert_eq!(
+        disposed.inbox[0].disposition.as_option(),
+        Some(&disposed.dispositions[0])
+    );
+    assert_eq!(disposed.dispositions[0].message_id.as_deref(), Some("message_0"));
+    assert_eq!(
+        disposed.dispositions[0].outcome.and_then(|v| v.as_known()),
+        Some(proto::PreparationOutcome::PREPARATION_OUTCOME_UNAVAILABLE)
+    );
+}
+
+#[test]
+fn core759_history_origin_and_disposal_content_conflicts_are_rejected() {
+    let sender = run(enrolled("sender", 0), &send(0, 1, 1));
+    let message = MessageId::new("message_0").unwrap();
+    let mut wrong_sender = sender.clone();
+    wrong_sender.enrollment = enrolled("different_sender", 0).enrollment;
+    assert!(matches!(
+        AcceptedMessage::from_sender_history(&wrong_sender, &message),
+        Err(MessageError::InvalidTransition)
+    ));
+    let mut wrong_collaboration = sender;
+    wrong_collaboration
+        .enrollment
+        .as_option_mut()
+        .unwrap()
+        .collaboration_ref = Some("different".into());
+    assert!(matches!(
+        AcceptedMessage::from_sender_history(&wrong_collaboration, &message),
+        Err(MessageError::InvalidTransition)
+    ));
+    assert_eq!(
+        error(
+            run(enrolled("recipient", 0), &intake(0, 1)),
+            &DisposeMessage::new(evidence(0, 2), TerminalDisposition::Unavailable, time(3))
+        ),
+        MessageError::Conflict
+    );
+}
+
+#[test]
+fn core759_foreign_tenant_sender_evidence_cannot_authorize_intake_or_disposal() {
+    let foreign = EnrollmentIdentity::new(
+        TrustedPeerOwner::new(TenantId::new("foreign").unwrap(), CallerId::new("caller").unwrap()),
+        InstallationId::new("installation").unwrap(),
+        NativeSessionId::new("sender").unwrap(),
+    );
+    let sender = run(
+        commands::state::initial_state(),
+        &Enroll::new(
+            foreign.clone(),
+            ConnectorId::new("connector").unwrap(),
+            CollaborationRef::new("collaboration").unwrap(),
+            PeerDisplayName::new("Peer").unwrap(),
+            time(0),
+        ),
+    );
+    let send = SendMessage::new(
+        foreign.owner().clone(),
+        AttachmentRef::new(foreign.peer_id().clone(), ConnectorId::new("connector").unwrap(), 1).unwrap(),
+        IdempotencyKey::new("foreign_key").unwrap(),
+        MessageId::new("foreign_message").unwrap(),
+        identity("recipient").peer_id().clone(),
+        CollaborationRef::new("collaboration").unwrap(),
+        content(1, 1),
+        None,
+        time(1),
+    );
+    let sender = run(sender, &send);
+    let accepted = AcceptedMessage::from_sender_history(&sender, &MessageId::new("foreign_message").unwrap()).unwrap();
+    assert_eq!(
+        accepted.metadata().recipient_peer_id.as_deref(),
+        Some(identity("recipient").peer_id().as_str())
+    );
+    assert_eq!(accepted.tenant(), foreign.owner().tenant());
+    assert_eq!(
+        error(enrolled("recipient", 0), &IntakeMessage::new(accepted.clone(), time(2))),
+        MessageError::TenantMismatch
+    );
+    assert_eq!(
+        error(
+            enrolled("recipient", 0),
+            &DisposeMessage::new(accepted, TerminalDisposition::Unavailable, time(2))
+        ),
+        MessageError::TenantMismatch
+    );
+}
+
+#[test]
+fn core759_intake_clock_and_replayed_capacity_do_not_bypass_guards() {
+    use trogon_decider::evaluate_decision;
+
+    for at in [time(0), chrono::DateTime::<chrono::Utc>::MAX_UTC] {
+        assert_eq!(
+            error(enrolled("recipient", 0), &IntakeMessage::new(evidence(0, 1), at)),
+            MessageError::InvalidTransition
+        );
+    }
+    let mut full = enrolled("recipient", 0);
+    for index in 0..64 {
+        full = run(full, &intake(index, 2048));
+    }
+    let (_, events) = evaluate_decision(enrolled("recipient", 0), &intake(64, 1)).unwrap();
+    let mut overflow = events.iter().next().unwrap().clone();
+    if let Some(trogonai_proto::peers::PeerEventCase::PeerMessageIntakeRecorded(ref mut event)) = overflow.event {
+        event.entry.as_option_mut().unwrap().intake_ordinal = full.next_intake_ordinal;
+    }
+    assert_eq!(
+        commands::state::evolve(full.clone(), &overflow),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    assert_eq!(error(full, &intake(64, 1)), MessageError::DeferIntake);
+    let mut damaged = run(enrolled("recipient", 0), &intake(0, 1));
+    damaged.inbox[0].message.as_option_mut().unwrap().content_size_bytes = Some(0);
+    assert!(matches!(
+        error(damaged, &intake(1, 1)),
+        MessageError::InvalidState(EvolveError::InvalidValue { field: "content", .. })
+    ));
+}
+
+#[test]
+fn core759_disposal_replay_cannot_forge_preparation_or_rewrite_existing_disposition() {
+    use trogon_decider::evaluate_decision;
+    let before = run(enrolled("recipient", 0), &intake(0, 1));
+    let command = DisposeMessage::new(evidence(0, 1), TerminalDisposition::Unavailable, time(3));
+    let (disposed, events) = evaluate_decision(before.clone(), &command).unwrap();
+    let original = events.iter().next().unwrap().clone();
+    assert_eq!(
+        commands::state::evolve(disposed.clone(), &original),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let mut prepared = original.clone();
+    if let Some(trogonai_proto::peers::PeerEventCase::PeerMessageDisposed(ref mut event)) = prepared.event {
+        let receipt = event.receipt.as_option_mut().unwrap();
+        receipt.outcome = Some(proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED.into());
+        receipt.batch_id = Some("forged_batch".into());
+    }
+    assert_eq!(
+        commands::state::evolve(before.clone(), &prepared),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let mut too_early = original.clone();
+    if let Some(trogonai_proto::peers::PeerEventCase::PeerMessageDisposed(ref mut event)) = too_early.event {
+        event.receipt.as_option_mut().unwrap().decided_at =
+            trogonai_proto::convert::timestamp_from_datetime(&time(0)).into();
+    }
+    assert_eq!(
+        commands::state::evolve(before.clone(), &too_early),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    let mut missing_from_log = disposed;
+    missing_from_log.dispositions.clear();
+    assert_eq!(
+        commands::state::evolve(missing_from_log, &original),
+        Err(EvolveError::InvalidMessageTransition)
+    );
+    for value in ["invalid.message", ""] {
+        let mut malformed = original.clone();
+        if let Some(trogonai_proto::peers::PeerEventCase::PeerMessageDisposed(ref mut event)) = malformed.event {
+            event.receipt.as_option_mut().unwrap().message_id = Some(value.into());
+        }
+        assert!(matches!(
+            commands::state::evolve(before.clone(), &malformed),
+            Err(EvolveError::InvalidValue {
+                field: "receipt.message_id",
+                ..
+            })
+        ));
+    }
+    let mut malformed = original;
+    if let Some(trogonai_proto::peers::PeerEventCase::PeerMessageDisposed(ref mut event)) = malformed.event {
+        event.receipt.as_option_mut().unwrap().recipient_peer_id = Some("invalid".into());
+    }
+    assert!(matches!(
+        commands::state::evolve(before, &malformed),
+        Err(EvolveError::InvalidValue {
+            field: "receipt.recipient_peer_id",
+            ..
+        })
+    ));
 }

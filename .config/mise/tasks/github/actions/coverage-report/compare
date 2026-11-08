@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+echo "storage_subdirectory = '${COVERAGE_STORAGE_SUBDIRECTORY}'"
+pushd "${COVERAGE_STORAGE_BRANCH}"
+git checkout "${COVERAGE_STORAGE_BRANCH}" || touch "${COVERAGE_STORAGE_BRANCH}"-not-found
+popd
+if [[ -f "${COVERAGE_STORAGE_BRANCH}/data/${COVERAGE_DIFF_BRANCH}/${COVERAGE_STORAGE_SUBDIRECTORY}/coverage.xml" && (! -f "${COVERAGE_STORAGE_BRANCH}"-not-found) ]]
+then {
+  pycobertura diff --no-color --no-source "${COVERAGE_STORAGE_BRANCH}"/data/"${COVERAGE_DIFF_BRANCH}"/"${COVERAGE_STORAGE_SUBDIRECTORY}"/coverage.xml \
+    coverage-action/verified/coverage.xml \
+    --output .coverage-output.diff && pycobertura_status=$? || pycobertura_status=$?
+    # Save status both in case of success and failure.
+    echo "pycobertura_status=$pycobertura_status" >> "$GITHUB_ENV"
+  printf '%s\n' "$pycobertura_status" > .coverage-comparison-status
+  cat .coverage-output.diff
+} else {
+  echo "${COVERAGE_STORAGE_BRANCH}/data/${COVERAGE_DIFF_BRANCH}/${COVERAGE_STORAGE_SUBDIRECTORY}/coverage.xml not found! Not diffing."
+}
+fi
