@@ -5,6 +5,7 @@ mod connector_config;
 mod connector_config_input;
 mod message_metadata_projection;
 mod model_inputs;
+mod model_operation;
 mod model_tool_definitions;
 mod model_tools;
 mod native_binding;

@@ -8,8 +8,9 @@ use rmcp::model::{
 };
 use rmcp::service::{RequestContext, RoleServer};
 use serde_json::Value;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, OnceCell, watch};
 use tokio_util::sync::CancellationToken;
+use trogon_peer::AttachmentRef;
 use trogon_peer_context::{PeerContext, PeerContextError};
 use trogonai_proto::peers::v1alpha1 as v1;
 
@@ -17,6 +18,7 @@ use crate::backend::{DetachPeer, HeartbeatPeer};
 use crate::connector_config::ConnectorConfig;
 use crate::detach_hook_input::DetachHookInput;
 use crate::detach_tool::detach_tool;
+use crate::model_operation::ModelOperation;
 use crate::model_tool_definitions::model_tool;
 use crate::model_tools;
 use crate::native_binding::NativeBinding;
@@ -33,7 +35,7 @@ use crate::{
 pub struct PeerMcp<B> {
     backend: B,
     config: ConnectorConfig,
-    binding: Mutex<Option<NativeBinding>>,
+    binding: OnceCell<Mutex<NativeBinding>>,
     operation: Mutex<()>,
     stopped: CancellationToken,
     bound: Notify,
@@ -61,7 +63,7 @@ where
         Ok(Self {
             backend,
             config,
-            binding: Mutex::new(None),
+            binding: OnceCell::new(),
             operation: Mutex::new(()),
             stopped: CancellationToken::new(),
             bound: Notify::new(),
@@ -69,24 +71,19 @@ where
     }
 
     pub async fn run_heartbeat(&self, availability: crate::AvailabilityObservation) {
-        loop {
+        let attachment = loop {
             let notified = self.bound.notified();
-            if self
-                .binding
-                .lock()
-                .await
-                .as_ref()
-                .and_then(NativeBinding::attachment)
-                .is_some()
+            if let Some(binding) = self.binding.get()
+                && let Some(attachment) = binding.lock().await.attachment_subscription()
             {
-                break;
+                break attachment;
             }
             tokio::select! {
                 biased;
                 _ = self.stopped.cancelled() => return,
                 _ = notified => {},
             }
-        }
+        };
         let period = Duration::from_secs(2);
         let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -99,30 +96,26 @@ where
             tokio::select! {
                 biased;
                 _ = self.stopped.cancelled() => return,
-                _ = tokio::time::timeout(period, self.heartbeat_once(availability)) => {},
+                _ = tokio::time::timeout(period, self.heartbeat_once(availability, &attachment)) => {},
             }
         }
     }
 
-    async fn heartbeat_once(&self, availability: crate::AvailabilityObservation) {
+    async fn heartbeat_once(
+        &self,
+        availability: crate::AvailabilityObservation,
+        attachment: &watch::Receiver<AttachmentRef>,
+    ) {
         let _operation = self.operation.lock().await;
-        let attachment = self
-            .binding
-            .lock()
-            .await
-            .as_ref()
-            .and_then(NativeBinding::attachment)
-            .cloned();
-        if let Some(attachment) = attachment {
-            let _result = self
-                .backend
-                .heartbeat(v1::HeartbeatRequest {
-                    attachment_ref: crate::model_tools::wire_attachment(&attachment).into(),
-                    availability: Some(availability.wire().into()),
-                    ..Default::default()
-                })
-                .await;
-        }
+        let attachment = attachment.borrow().clone();
+        let _result = self
+            .backend
+            .heartbeat(v1::HeartbeatRequest {
+                attachment_ref: crate::model_tools::wire_attachment(&attachment).into(),
+                availability: Some(availability.wire().into()),
+                ..Default::default()
+            })
+            .await;
     }
 
     pub async fn shutdown(&self) -> Result<(), PeerMcpError> {
@@ -134,11 +127,11 @@ where
         let input: DetachHookInput = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
             .map_err(PeerMcpError::InvalidArguments)?;
         let session = input.into_session()?;
+        let Some(binding) = self.binding.get() else {
+            return Ok(CallToolResult::success(Vec::new()));
+        };
         {
-            let binding = self.binding.lock().await;
-            let Some(current) = binding.as_ref() else {
-                return Ok(CallToolResult::success(Vec::new()));
-            };
+            let current = binding.lock().await;
             if current.native_session_id() != &session {
                 return Err(PeerMcpError::NativeSessionChanged);
             }
@@ -151,17 +144,17 @@ where
     async fn detach_bound(&self) -> Result<(), PeerMcpError> {
         tokio::time::timeout(Duration::from_secs(1), async {
             let _operation = self.operation.lock().await;
-            let mut binding = self.binding.lock().await;
-            let Some(current) = binding.as_mut() else {
+            let Some(binding) = self.binding.get() else {
                 return Ok(());
             };
+            let mut current = binding.lock().await;
             if current.detach_confirmed() {
                 return Ok(());
             }
             let attachment = current.attachment().ok_or(PeerMcpError::EnrollmentUncertain)?;
             self.backend
                 .detach(v1::DetachRequest {
-                    attachment_ref: crate::model_tools::wire_attachment(attachment).into(),
+                    attachment_ref: crate::model_tools::wire_attachment(&attachment).into(),
                 })
                 .await
                 .map_err(|error| PeerMcpError::Detach(Box::new(error)))?;
@@ -173,43 +166,41 @@ where
     }
 
     pub async fn invoke(&self, request: CallToolRequestParams) -> Result<CallToolResult, PeerMcpError> {
-        match request.name.as_ref() {
+        let operation = match request.name.as_ref() {
             "peer_prompt_hook" => {
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-                tokio::select! {
+                return tokio::select! {
                     biased;
                     _ = self.stopped.cancelled() => Err(PeerMcpError::Detached),
                     result = tokio::time::timeout_at(deadline, self.prompt_hook(request)) => {
                         result.map_err(|_| PeerMcpError::PromptDeadline)?
                     }
-                }
+                };
             }
-            "peer_detach_hook" => self.detach_hook(request).await,
-            "peer_roster" | "peer_send" | "peer_status" | "peer_acknowledge_batch" => {
-                if self.stopped.is_cancelled() {
-                    return Err(PeerMcpError::Detached);
-                }
-                let _operation = self.operation.lock().await;
-                if self.stopped.is_cancelled() {
-                    return Err(PeerMcpError::Detached);
-                }
-                let attachment = self
-                    .binding
-                    .lock()
-                    .await
-                    .as_ref()
-                    .and_then(NativeBinding::attachment)
-                    .cloned()
-                    .ok_or(PeerMcpError::Unbound)?;
-                match request.name.as_ref() {
-                    "peer_roster" => model_tools::roster(&self.backend, request, &attachment).await,
-                    "peer_send" => model_tools::send(&self.backend, request, &attachment, &self.config).await,
-                    "peer_status" => model_tools::status(&self.backend, request, &attachment, &self.config).await,
-                    "peer_acknowledge_batch" => model_tools::acknowledge(&self.backend, request, &attachment).await,
-                    _ => Err(PeerMcpError::UnsupportedTool),
-                }
-            }
-            _ => Err(PeerMcpError::UnsupportedTool),
+            "peer_detach_hook" => return self.detach_hook(request).await,
+            "peer_roster" => ModelOperation::Roster,
+            "peer_send" => ModelOperation::Send,
+            "peer_status" => ModelOperation::Status,
+            "peer_acknowledge_batch" => ModelOperation::Acknowledge,
+            _ => return Err(PeerMcpError::UnsupportedTool),
+        };
+        if self.stopped.is_cancelled() {
+            return Err(PeerMcpError::Detached);
+        }
+        let _operation = self.operation.lock().await;
+        if self.stopped.is_cancelled() {
+            return Err(PeerMcpError::Detached);
+        }
+        let attachment = match self.binding.get() {
+            Some(binding) => binding.lock().await.attachment(),
+            None => None,
+        }
+        .ok_or(PeerMcpError::Unbound)?;
+        match operation {
+            ModelOperation::Roster => model_tools::roster(&self.backend, request, &attachment).await,
+            ModelOperation::Send => model_tools::send(&self.backend, request, &attachment, &self.config).await,
+            ModelOperation::Status => model_tools::status(&self.backend, request, &attachment, &self.config).await,
+            ModelOperation::Acknowledge => model_tools::acknowledge(&self.backend, request, &attachment).await,
         }
     }
 
@@ -218,18 +209,17 @@ where
         let input: PromptHookInput = serde_json::from_value(arguments).map_err(PeerMcpError::InvalidArguments)?;
         let (session_id, prompt_id) = input.into_identity()?;
         let _operation = self.operation.lock().await;
-        let mut binding = self.binding.lock().await;
-        if binding
-            .as_ref()
-            .is_some_and(|current| current.native_session_id() != &session_id)
-        {
-            return Err(PeerMcpError::NativeSessionChanged);
-        }
-        let session = binding
-            .get_or_insert_with(|| NativeBinding::new(session_id))
-            .native_session_id()
-            .clone();
-        drop(binding);
+        let binding = self
+            .binding
+            .get_or_init(|| async { Mutex::new(NativeBinding::new(session_id.clone())) })
+            .await;
+        let session = {
+            let current = binding.lock().await;
+            if current.native_session_id() != &session_id {
+                return Err(PeerMcpError::NativeSessionChanged);
+            }
+            current.native_session_id().clone()
+        };
         let enrollment = self
             .backend
             .enroll(v1::EnrollRequest {
@@ -241,10 +231,7 @@ where
             })
             .await
             .map_err(|error| PeerMcpError::Enroll(Box::new(error)))?;
-        let mut binding = self.binding.lock().await;
-        let current = binding.as_mut().ok_or(PeerMcpError::Unbound)?;
-        let attachment = current.revalidate(&enrollment, &self.config)?;
-        drop(binding);
+        let attachment = binding.lock().await.revalidate(&enrollment, &self.config)?;
         self.bound.notify_one();
         let response = self
             .backend
