@@ -24,7 +24,7 @@ pub(super) struct Transition {
 
 pub(super) enum ProjectionUpdate {
     Enrolled(super::EnrollmentFacts),
-    Accepted(Box<super::peer_history::AcceptedOutbox>),
+    Accepted(Box<super::accepted_outbox::AcceptedOutbox>),
     Intaken(Box<super::IntakenMessage>),
     InboxReplacements(Vec<super::inbox_replacement::InboxReplacement>),
 }
