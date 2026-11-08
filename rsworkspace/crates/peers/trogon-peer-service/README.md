@@ -18,14 +18,21 @@ the same live connector returns its existing attachment without appending;
 another connector can replace it after its lease expires, fencing the previous
 generation while preserving peer identity.
 
-The resume fallback rejects histories longer than 4096 events and rejects unknown
-event types. The `Enroll` and `Attach` executions replay before that fallback at
-this layer, so this ceiling does not guarantee bounded total replay work or store
-I/O. A longer valid history cannot resume through this boundary, and an event
-this version cannot interpret cannot be assumed irrelevant to ownership or
-attachment authority. Longer-lived histories need an authorized checkpoint or
-read-model contract; widening the bound or silently skipping unknown events does
-not provide that contract.
+When create-only enrollment conflicts with an existing stream, resume authorizes
+`Attach` before reading that stream. It validates the history, rejecting more
+than 4096 events and any unknown event type, then pins the attachment append to
+the validated stream position. A concurrent authority event rejects the append
+instead of allowing a replacement across unvalidated history. The command replay
+also retains the 4096-event limit. Reusing a live attachment rechecks history
+before returning it.
+
+Stores receive bounded read requests, but their implementation may materialize a
+larger response before the service rejects it. The replay ceiling therefore does
+not guarantee a transport I/O bound. A longer valid history cannot resume through
+this boundary, and an event this version cannot interpret cannot be assumed
+irrelevant to ownership or attachment authority. Longer-lived histories need an
+authorized checkpoint or read-model contract; widening the bound or silently
+skipping unknown events does not provide that contract.
 
 Attachment renewal, presence queries, messaging, and network serving are separate
 integration work at this layer.
