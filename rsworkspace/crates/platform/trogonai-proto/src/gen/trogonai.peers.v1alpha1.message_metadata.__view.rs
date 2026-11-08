@@ -28,6 +28,10 @@ pub struct MessageMetadataView<'a> {
     pub content_ref: ::buffa::MessageFieldView<
         super::super::__buffa::view::ClaimCheckView<'a>,
     >,
+    /// Field 12: `semantic_fingerprint`
+    pub semantic_fingerprint: ::buffa::MessageFieldView<
+        super::super::__buffa::view::ContentSemanticFingerprintView<'a>,
+    >,
 }
 impl<'a> ::buffa::MessageView<'a> for MessageMetadataView<'a> {
     type Owned = super::super::MessageMetadata;
@@ -162,6 +166,27 @@ impl<'a> ::buffa::MessageView<'a> for MessageMetadataView<'a> {
                     }
                 }
             }
+            12u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.semantic_fingerprint.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.semantic_fingerprint = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::ContentSemanticFingerprintView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -215,6 +240,15 @@ impl<'a> ::buffa::MessageView<'a> for MessageMetadataView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            semantic_fingerprint: match self.semantic_fingerprint.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::ContentSemanticFingerprint,
+                        ::buffa::Inline<super::super::ContentSemanticFingerprint>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
@@ -262,6 +296,14 @@ impl<'a> ::buffa::ViewEncode<'a> for MessageMetadataView<'a> {
         if self.content_ref.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.content_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.semantic_fingerprint.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.semantic_fingerprint.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
@@ -319,6 +361,14 @@ impl<'a> ::buffa::ViewEncode<'a> for MessageMetadataView<'a> {
             );
             self.content_ref.write_to(__cache, buf);
         }
+        if self.semantic_fingerprint.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                12u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.semantic_fingerprint.write_to(__cache, buf);
+        }
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -374,6 +424,14 @@ impl<'__a> ::serde::Serialize for MessageMetadataView<'__a> {
         {
             if let ::core::option::Option::Some(__v) = self.content_ref.as_option() {
                 __map.serialize_entry("contentRef", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self
+                .semantic_fingerprint
+                .as_option()
+            {
+                __map.serialize_entry("semanticFingerprint", __v)?;
             }
         }
         __map.end()
@@ -523,6 +581,15 @@ impl MessageMetadataOwnedView {
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::ClaimCheckView<'_>> {
         &self.0.reborrow().content_ref
+    }
+    /// Field 12: `semantic_fingerprint`
+    #[must_use]
+    pub fn semantic_fingerprint(
+        &self,
+    ) -> &::buffa::MessageFieldView<
+        super::super::__buffa::view::ContentSemanticFingerprintView<'_>,
+    > {
+        &self.0.reborrow().semantic_fingerprint
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<MessageMetadataView<'static>>>
