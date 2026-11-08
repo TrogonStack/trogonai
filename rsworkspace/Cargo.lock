@@ -7637,6 +7637,7 @@ dependencies = [
  "tokio",
  "trogon-decider-runtime",
  "trogon-peer",
+ "trogon-peer-context",
  "trogonai-proto",
 ]
 
