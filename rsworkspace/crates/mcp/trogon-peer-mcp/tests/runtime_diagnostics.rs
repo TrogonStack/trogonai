@@ -2,6 +2,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use tokio::process::Command;
+use trogon_std::env::{ReadEnv as _, SystemEnv};
 
 type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
@@ -23,7 +24,7 @@ async fn executable_reports_credential_startup_failure_without_shutdown_uncertai
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+    if let Some(profile) = SystemEnv.var_os("LLVM_PROFILE_FILE") {
         command.env("LLVM_PROFILE_FILE", profile);
     }
     let output = tokio::time::timeout(Duration::from_secs(3), command.output()).await??;

@@ -1,6 +1,10 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+use std::future::Future as _;
+use std::future::poll_fn;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
+use trogon_peer_mcp::AvailabilityObservation;
 
 use buffa::MessageField;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
@@ -921,7 +925,6 @@ async fn early_display_does_not_copy_untrusted_argument_keys_into_the_public_dia
 
 #[test]
 fn direct_server_tool_lookup_exposes_only_the_bound_prompt_hook() {
-    use rmcp::ServerHandler;
     let adapter = PeerMcp::new(backend(Default::default()), config()).expect("adapter");
     let tool = adapter.get_tool("peer_prompt_hook").expect("known hook");
     assert_eq!(tool.name, "peer_prompt_hook");
@@ -1563,8 +1566,6 @@ async fn runtime_terminal_hook_response_and_repeats_survive_heartbeat_completion
 
 #[tokio::test(start_paused = true)]
 async fn lifecycle_preserves_every_explicit_availability_without_inventing_activity() {
-    use trogon_peer_mcp::AvailabilityObservation;
-
     for (observation, expected) in [
         (
             AvailabilityObservation::Ready,
@@ -1714,9 +1715,6 @@ async fn shutdown_without_a_reserved_native_session_never_contacts_the_backend()
 
 #[tokio::test(start_paused = true)]
 async fn a_model_operation_queued_behind_uncertain_enrollment_observes_terminal_shutdown() {
-    use std::future::{Future as _, poll_fn};
-    use std::task::Poll;
-
     let mut backend = backend(Default::default());
     backend.enroll_delay = std::time::Duration::from_secs(3);
     let calls = backend.calls.clone();
@@ -1855,9 +1853,6 @@ async fn heartbeat_uses_the_latest_valid_attachment_after_same_native_session_re
 
 #[tokio::test(start_paused = true)]
 async fn heartbeat_waits_for_a_confirmed_attachment_when_the_native_session_is_only_reserved() {
-    use std::future::{Future as _, poll_fn};
-    use std::task::Poll;
-
     let mut backend = backend(Default::default());
     backend.enroll_delay = std::time::Duration::from_secs(3);
     let calls = backend.calls.clone();

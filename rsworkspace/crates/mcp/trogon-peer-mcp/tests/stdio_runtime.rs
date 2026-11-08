@@ -1,6 +1,8 @@
 use futures::StreamExt;
 use std::process::Stdio;
 use std::time::Duration;
+use trogon_std::env::ReadEnv;
+use trogon_std::env::SystemEnv;
 
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
@@ -16,7 +18,6 @@ use trogon_peer_nats::test_support::{
 };
 use trogon_peer_nats::{PeerAccount, PeerTenant, serve_peer_rpc};
 use trogon_peer_service::{WorkLimit, test_support::Fixture};
-use trogon_std::env::{ReadEnv, SystemEnv};
 use trogonai_proto::peers::state_v1alpha1::PeerState;
 use trogonai_proto::peers::v1alpha1 as v1;
 
@@ -68,7 +69,7 @@ impl StdioPeer {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+        if let Some(profile) = SystemEnv.var_os("LLVM_PROFILE_FILE") {
             command.env("LLVM_PROFILE_FILE", profile);
         }
         let mut child = command.spawn()?;
@@ -544,7 +545,6 @@ async fn executable_sigint_detaches_prepared_assignment_without_acknowledgment()
 
 #[tokio::test]
 async fn executable_invalid_settings_keep_stdout_empty_and_diagnostics_static() -> TestResult {
-    use trogon_std::env::{ReadEnv, SystemEnv};
     let output = Command::new(env!("CARGO_BIN_EXE_trogon-peer-mcp"))
         .env_clear()
         .envs(
