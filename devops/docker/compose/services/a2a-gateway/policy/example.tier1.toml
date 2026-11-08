@@ -1,0 +1,14 @@
+# Tier-1 declarative policy for the dev a2a-gateway. Every *.tier1.toml file in
+# this directory is loaded at boot, rules run in descending priority order, the
+# first rule whose matches all hit decides, and a request no rule matches is
+# allowed. Restart the gateway after editing: `docker compose restart a2a-gateway`.
+
+# Refuses any request addressed to an agent whose id starts with `quarantined-`.
+[[rule]]
+id = "deny-quarantined-agents"
+priority = 100
+effect = "deny"
+
+[[rule.matches]]
+kind = "agent_id"
+pattern = "quarantined-*"

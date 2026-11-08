@@ -7,6 +7,9 @@ date: 2026-08-15
 
 # ADR#0074: Credential Platform Extraction Boundary
 
+> **Proposed connector refinement:** [ADR#0095](./0095-connection-credential-custody-and-refresh.md) remains a draft. Connector custody adds broker/staging/refresh operations and a dedicated identity operation; no provider token moves into gateway state. This note does not change either ADR's status.
+
+
 ## Context
 
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md) is the

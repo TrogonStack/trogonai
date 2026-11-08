@@ -1,0 +1,68 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// CheckpointStatement is what a signed checkpoint states about one writer's
+// chain: its head, where the head is stored, when, and under which key.
+//
+// The writer encodes it once and signs those bytes. AuditCheckpoint carries the
+// same bytes verbatim, so a statement is never re-serialized, and a verifier
+// checks the signature over the stored bytes before it decodes them.
+message CheckpointStatement {
+  // Same rules as Integrity.writer_id.
+  string writer_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // The chain the head belongs to, a UUIDv7.
+  string chain_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.uuid = true
+  ];
+  // The head record's Integrity.sequence.
+  uint64 head_sequence = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gte = 1
+  ];
+  // The head record's Integrity.record_hash.
+  bytes head_hash = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+  // The stream that stored the head record, from its publish acknowledgement.
+  string audit_stream = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // The head record's sequence in audit_stream: the sequence of the publish
+  // acknowledgement of the head record. On a duplicate acknowledgement it is the
+  // sequence of the copy already stored.
+  uint64 audit_stream_sequence = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gte = 1
+  ];
+  // When the writer issued the checkpoint.
+  google.protobuf.Timestamp issued_at = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  // The signing key, which the signature's header names too.
+  string key_id = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // A UUIDv7 that is also the Nats-Msg-Id the checkpoint stream deduplicates
+  // on.
+  string checkpoint_id = 9 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.uuid = true
+  ];
+  // The kind of writer, the same token as in the writer's audit subjects.
+  string component = 10 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

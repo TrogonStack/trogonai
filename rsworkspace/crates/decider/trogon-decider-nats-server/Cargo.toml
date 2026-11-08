@@ -33,6 +33,7 @@ trogon-decider-nats = { workspace = true }
 trogon-decider-runtime = { workspace = true }
 trogon-decider-wasm-runtime = { workspace = true }
 trogon-decider-wit = { workspace = true }
+trogon-identity-types = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-semconv = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal"] }
@@ -42,6 +43,7 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 buffa-types = { workspace = true }
+grpc-nats-micro = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 trogon-nats = { workspace = true, features = ["test-support"] }

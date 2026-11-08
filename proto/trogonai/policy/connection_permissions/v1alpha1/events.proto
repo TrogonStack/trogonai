@@ -1,0 +1,75 @@
+edition = "2024";
+
+package trogonai.policy.connection_permissions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/connection_permissions/v1alpha1/parent.proto";
+import "trogonai/policy/connection_permissions/v1alpha1/permission_policy.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// Each concrete event records immutable resource containment. Replay verifies
+// resource_parent against the stream route and genesis; a parent mismatch is
+// invalid history, never a resource move.
+
+// An unset or unknown event rejects replay; skipping a permission change could
+// admit a connection use the current policy forbids, or refuse one it allows.
+// Actor identity and occurrence time come from the event envelope, which is
+// where the owning person's act behind a delegation is recorded.
+message ConnectionPermissionEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    ConnectionPermissionInitialized connection_permission_initialized = 1;
+    ConnectionPermissionSet connection_permission_set = 2;
+    ConnectionPermissionCleared connection_permission_cleared = 3;
+  }
+}
+
+// Genesis, written under NoStream, fixes the subject for this history. The
+// admitted origin and exact initial policy remain immutable receipt evidence
+// after replacements and clears, independent of the current policy projection.
+message ConnectionPermissionInitialized {
+  option (buf.validate.message).cel = {
+    id: "connectionpermissioninitialized.subject_parent"
+    message: "the policy resource parent must name its exact subject"
+    expression: "this.resource_parent.subject == this.subject"
+  };
+
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionPermissionPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+  string provisioning_id = 3 [(buf.validate.field).cel = {
+    id: "connection_permission_initialized.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+
+  trogonai.policy.connection_permissions.v1alpha1.ConnectionPermissionParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Replaces the policy in force without replacing the history's identity.
+message ConnectionPermissionSet {
+  option (buf.validate.message).cel = {
+    id: "connectionpermissionset.subject_parent"
+    message: "the policy resource parent must name its exact subject"
+    expression: "this.resource_parent.subject == this.subject"
+  };
+
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionPermissionPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.policy.connection_permissions.v1alpha1.ConnectionPermissionParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Removes the policy, never the identity. An already cleared history emits no
+// second clear.
+message ConnectionPermissionCleared {
+  option (buf.validate.message).cel = {
+    id: "connectionpermissioncleared.subject_parent"
+    message: "the policy resource parent must name its exact subject"
+    expression: "this.resource_parent.subject == this.subject"
+  };
+
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.policy.connection_permissions.v1alpha1.ConnectionPermissionParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}

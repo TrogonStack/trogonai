@@ -1,0 +1,112 @@
+edition = "2024";
+
+package trogonai.connections.grants.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/connections/grants/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/authority.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/operation.proto";
+import "trogonai/connections/types/v1alpha1/proxy.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+import "trogonai/policy/subjects/v1alpha1/rule_ref.proto";
+import "trogonai/session/sessions/v1alpha1/session_id.proto";
+
+// resource_parent is the Session's project, checked from the authoritative
+// Session record at issuance and renewal; connection_ref may have another
+// custody parent. The immutable terms and outer grant parent must match.
+//
+// What one grant binds: live authorization to use one planned connection for
+// one ExecutionAttempt (ADR#0096 Decision 2). Every term is fixed at
+// preparation except expires_at, which only renewal moves.
+//
+// No policy is copied here. authority_ceiling is the release and granted-scope
+// bound from the plan, and admitting_permit_ref names the permit history that
+// admitted the use; the permit's own ceiling is read live on each call (ADR#0071
+// Decision 7, ADR#0096 Decision 1). The grant holds no SecretRef and no
+// credential; a leaked grant id is useless without a proof signed by the
+// confirmation key, which only the attempt's supervisor holds.
+message ConnectionGrantTerms {
+  reserved 7;
+  reserved operations;
+
+  option (buf.validate.message).cel = {
+    id: "connection_grant_terms.proxy_binding"
+    message: "only HTTP_PROXY grants carry a proxy binding"
+    expression: "has(this.proxy_binding) == (this.mode == 3)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_grant_terms.audience_matches_mode"
+    message: "the audience must match the authorized use mode"
+    expression: "(this.mode == 3 && this.audience == 2) || (this.mode == 4 && this.audience == 3) || (this.mode == 2 && this.audience == 4)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_grant_terms.restriction_destination"
+    message: "planned request rules must stay within the proxy binding destination"
+    expression: "!has(this.proxy_binding) || !has(this.authority_ceiling.http_requests) || this.authority_ceiling.http_requests.rules.all(r, r.host == this.proxy_binding.upstream)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_grant_terms.http_ceiling_mode"
+    message: "HTTP request restrictions apply only to HTTP_PROXY"
+    expression: "!has(this.authority_ceiling.http_requests) || this.mode == 3"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_grant_terms.admitting_permit_kind"
+    message: "the admitting rule must be a connection permit that existed"
+    expression: "this.admitting_permit_ref.kind == trogonai.policy.subjects.v1alpha1.PolicyRuleKind.POLICY_RULE_KIND_CONNECTION_PERMISSION && this.admitting_permit_ref.stream_revision > 0u"
+  };
+
+  trogonai.session.sessions.v1alpha1.SessionId session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string execution_attempt_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.agents.agents.v1alpha1.AgentRevisionRef agent_revision_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The SessionExecutionPlan digest the attempt runs under.
+  trogonai.connections.types.v1alpha1.Digest plan_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionRef connection_ref = 5 [features.field_presence = LEGACY_REQUIRED];
+  // The planned generation. A different live generation fails every call with
+  // CONNECTION_SUPERSEDED.
+  uint64 authorization_generation = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  // The release and granted-scope bound only (ADR#0096 Decision 1).
+  trogonai.connections.types.v1alpha1.AuthorityCeiling authority_ceiling = 8 [features.field_presence = LEGACY_REQUIRED];
+  // The use this grant authorizes. HTTP_PROXY is distinct from MCP_SESSION
+  // and optional TOKEN_ISSUANCE. The live permit must still grant it.
+  trogonai.connections.types.v1alpha1.ConnectionUseMode mode = 9 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The thumbprint of the attempt's confirmation public key, attested by Ready.
+  // A thumbprint, never key material; every call's proof verifies against it.
+  trogonai.connections.types.v1alpha1.Digest confirmation_key_thumbprint = 10 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionGrantAudience audience = 11 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The permit history that admitted the use at Session admission.
+  trogonai.policy.subjects.v1alpha1.PolicyRuleRef admitting_permit_ref = 12 [features.field_presence = LEGACY_REQUIRED];
+  // At most five minutes after the issuing or renewing dispatch, and never
+  // beyond the end of the attempt.
+  google.protobuf.Timestamp expires_at = 13 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  // Server-selected and copied exactly from admission. The binding fixes the
+  // HTTPS relay, provider destination and credential role for this grant;
+  // the request cannot choose or replace them. Grant renewal changes none of it.
+  trogonai.connections.types.v1alpha1.ProxyBinding proxy_binding = 14;
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 15 [features.field_presence = LEGACY_REQUIRED];
+}

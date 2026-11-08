@@ -1,0 +1,74 @@
+edition = "2024";
+
+package trogonai.connections.catalog.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/catalog/v1alpha1/definition.proto";
+import "trogonai/connections/catalog/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// Each concrete payload identifies its immutable resource_parent. Dispatch
+// and replay require it to match the addressed stream and stored genesis; it
+// is not caller authorization and never changes with logical ownership.
+
+// connections.catalog owns one platform-scoped stream per ConnectorRelease
+// (ADR#0092 Decision 1). Publishing uses NoStream and a stable nonempty
+// Decider command_id. Every later command uses StreamUnchanged with the
+// observed revision and a stable command_id; retries preserve both. Only
+// platform catalog maintainers and platform operators dispatch here. There is
+// no patch command: a correction is a new release (ADR#0092 Decision 2).
+//
+// NoStream. definition_bytes is the authoritative exact encoding of
+// ConnectorDefinition and definition_digest covers exactly those bytes. The
+// fold verifies the digest before decoding, requires definition to equal the
+// decoded bytes, refuses unknown fields, and never recreates the digest by
+// re-encoding. It also refuses an ProxyLimits value above the platform
+// ceiling and a route or declared endpoint whose host is not an egress host.
+message PublishConnectorRelease {
+  reserved 2;
+  reserved connector_id;
+
+  trogonai.connections.types.v1alpha1.ConnectorReleaseId release_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectorDefinition definition = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.Digest definition_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  bytes definition_bytes = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  trogonai.connections.types.v1alpha1.ConnectorReleaseParent resource_parent = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Published only. Denies new selection and leaves every existing connection
+// usable (ADR#0092 Decision 10). A successor in the notice must be another
+// release of the same connector; the fold does not check its standing, which
+// is read live.
+message DeprecateConnectorRelease {
+  option (buf.validate.message).cel = {
+    id: "deprecate_connector_release.successor_parent"
+    message: "a successor belongs to the same connector catalog parent"
+    expression: "!has(this.notice.successor) || this.notice.successor.resource_parent == this.resource_parent"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectorReleaseId release_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  DeprecationNotice notice = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectorReleaseParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Published or Deprecated only. Terminal: admission and invocation fail with
+// a release-blocked reason from the next live read, no connection stream is
+// written, and no connection is upgraded (ADR#0092 Decisions 2 and 10). The
+// reason is recorded; who may block and whether a second approver is needed
+// is an open question of ADR#0092 and is enforced by dispatch, not here.
+message BlockConnectorRelease {
+  trogonai.connections.types.v1alpha1.ConnectorReleaseId release_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectorReleaseBlockReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ConnectorReleaseParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -128,3 +128,34 @@ fn outcome_enums_compare_by_variant() {
     assert_eq!(DiscoveryHiddenReason::Denied, DiscoveryHiddenReason::Denied);
     assert_ne!(DiscoveryHiddenReason::Denied, DiscoveryHiddenReason::TransportError);
 }
+
+#[test]
+fn session_from_principal_prefers_sub_claim() {
+    let principal = SpiceDbPrincipal(serde_json::json!({ "sub": "alice", "account": "acme" }));
+    let key = session_from_principal(&principal, "fallback").expect("present");
+    assert_eq!(key.sub(), "alice");
+    assert_eq!(key.account(), "acme");
+}
+
+#[test]
+fn session_from_principal_falls_back_when_account_claim_absent() {
+    let principal = SpiceDbPrincipal(serde_json::json!({ "sub": "alice" }));
+    let key = session_from_principal(&principal, "fallback-account").expect("present");
+    assert_eq!(key.account(), "fallback-account");
+}
+
+#[test]
+fn session_from_principal_returns_none_without_sub_or_subject() {
+    let principal = SpiceDbPrincipal(serde_json::json!({}));
+    assert!(session_from_principal(&principal, "x").is_none());
+}
+
+#[test]
+fn parse_subject_id_strips_slash_and_colon_prefixes() {
+    assert_eq!(parse_subject_id("user/alice"), Some("alice".to_owned()));
+    assert_eq!(parse_subject_id("user:alice"), Some("alice".to_owned()));
+    assert_eq!(parse_subject_id("alice"), Some("alice".to_owned()));
+    assert_eq!(parse_subject_id(""), None);
+    assert_eq!(parse_subject_id("user/"), None);
+    assert_eq!(parse_subject_id("user:"), None);
+}
