@@ -74,11 +74,9 @@ impl NativeBinding {
         let generation = raw.generation.ok_or(PeerMcpError::InvalidEnrollment)?;
         let attachment =
             AttachmentRef::new(peer_id, connector_id, generation).map_err(PeerMcpError::InvalidEnrollmentIdentity)?;
-        if self
-            .attachment
-            .as_ref()
-            .is_some_and(|prior| prior.peer_id() != attachment.peer_id())
-        {
+        if self.attachment.as_ref().is_some_and(|prior| {
+            prior.peer_id() != attachment.peer_id() || prior.generation() > attachment.generation()
+        }) {
             return Err(PeerMcpError::InvalidEnrollment);
         }
         self.attachment = Some(attachment.clone());
