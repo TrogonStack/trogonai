@@ -13,7 +13,9 @@ on:
       - 'LICENSE'
       - 'mise.toml'
       - '.config/mise/tasks/**'
+      - '.config/mise/lib/**'
       - '.github/actions/setup-rust/**'
+      - '.github/actions/coverage-report/**'
       - '.github/workflows/ci-rust.yml'
 
 concurrency:
