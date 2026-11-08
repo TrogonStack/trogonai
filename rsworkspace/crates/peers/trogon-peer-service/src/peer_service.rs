@@ -2,8 +2,8 @@ use trogon_decider_runtime::{
     CommandAuthorizer, CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind, StreamAppend, StreamRead,
 };
 use trogon_peer::{
-    Attach, AttachError, CollaborationRef, ConnectorId, Enroll, EnrollError, EnrollmentIdentity, InstallationId,
-    NativeSessionId, PeerDisplayName, PeerId, TrustedPeerOwner,
+    Attach, AttachError, CollaborationRef, ConnectorId, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId,
+    PeerDisplayName, PeerId, TrustedPeerOwner,
 };
 use trogonai_proto::peers::v1alpha1;
 
@@ -83,9 +83,6 @@ where
             Ok(result) => result.state,
             Err(error)
                 if matches!(
-                    &error,
-                    trogon_decider_runtime::CommandError::Decide(EnrollError::AlreadyEnrolled)
-                ) || matches!(
                     &error,
                     trogon_decider_runtime::CommandError::Append(source)
                         if self.store.classify_append_failure(source) == trogon_decider_runtime::AppendFailure::WriteConflict
