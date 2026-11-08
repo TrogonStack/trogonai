@@ -1299,6 +1299,18 @@ enum MalformedHistoryField {
     OversizedCollaboration,
     MissingRecipient,
     InvalidRecipient,
+    MissingContentRef,
+    MissingContentLocator,
+    InvalidContentLocator,
+    MissingContentDigest,
+    InvalidContentDigestAlgorithm,
+    ShortContentDigest,
+    MissingContentSize,
+    ZeroContentSize,
+    OversizedContentSize,
+    MissingSemanticFingerprint,
+    MissingSemanticFingerprintValue,
+    ShortSemanticFingerprint,
 }
 
 impl MalformedHistoryField {
@@ -1326,6 +1338,35 @@ impl MalformedHistoryField {
             Self::InvalidRecipient => EvolveError::InvalidValue {
                 field: "recipient_peer_id",
                 source: PeerValueError::InvalidPeerId,
+            },
+            Self::MissingContentRef => EvolveError::MissingField { field: "content_ref" },
+            Self::MissingContentLocator
+            | Self::MissingContentDigest
+            | Self::InvalidContentDigestAlgorithm
+            | Self::ShortContentDigest => EvolveError::InvalidValue {
+                field: "content_ref",
+                source: PeerValueError::InvalidContentReference,
+            },
+            Self::InvalidContentLocator => EvolveError::InvalidValue {
+                field: "content_ref",
+                source: PeerValueError::InvalidCharacter,
+            },
+            Self::MissingContentSize => EvolveError::MissingField {
+                field: "content_size_bytes",
+            },
+            Self::ZeroContentSize | Self::OversizedContentSize => EvolveError::InvalidValue {
+                field: "content",
+                source: PeerValueError::InvalidContent,
+            },
+            Self::MissingSemanticFingerprint => EvolveError::MissingField {
+                field: "semantic_fingerprint",
+            },
+            Self::MissingSemanticFingerprintValue => EvolveError::MissingField {
+                field: "semantic_fingerprint.value",
+            },
+            Self::ShortSemanticFingerprint => EvolveError::InvalidValue {
+                field: "semantic_fingerprint",
+                source: PeerValueError::InvalidSemanticFingerprint,
             },
         }
     }
@@ -1453,6 +1494,104 @@ async fn altered_history_store(
                     MalformedHistoryField::InvalidRecipient => Some("not-a-peer".into()),
                     _ => return Err(trogon_peer_service::PeerPortError::Integrity.into()),
                 };
+                true
+            }
+            (
+                MalformedHistoryField::MissingContentRef
+                | MalformedHistoryField::MissingContentLocator
+                | MalformedHistoryField::InvalidContentLocator
+                | MalformedHistoryField::MissingContentDigest
+                | MalformedHistoryField::InvalidContentDigestAlgorithm
+                | MalformedHistoryField::ShortContentDigest
+                | MalformedHistoryField::MissingContentSize
+                | MalformedHistoryField::ZeroContentSize
+                | MalformedHistoryField::OversizedContentSize
+                | MalformedHistoryField::MissingSemanticFingerprint
+                | MalformedHistoryField::MissingSemanticFingerprintValue
+                | MalformedHistoryField::ShortSemanticFingerprint,
+                Some(PeerEventCase::PeerMessageAccepted(event)),
+            ) => {
+                let message = event
+                    .entry
+                    .as_option_mut()
+                    .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                    .message
+                    .as_option_mut()
+                    .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+                match field {
+                    MalformedHistoryField::MissingContentRef => message.content_ref = Default::default(),
+                    MalformedHistoryField::MissingContentLocator => {
+                        message
+                            .content_ref
+                            .as_option_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .storage_ref = Default::default();
+                    }
+                    MalformedHistoryField::InvalidContentLocator => {
+                        message
+                            .content_ref
+                            .as_option_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .storage_ref
+                            .as_option_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .value = Some("invalid/location".into());
+                    }
+                    MalformedHistoryField::MissingContentDigest => {
+                        message
+                            .content_ref
+                            .as_option_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .digest = Default::default();
+                    }
+                    MalformedHistoryField::InvalidContentDigestAlgorithm => {
+                        message
+                            .content_ref
+                            .as_option_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .digest
+                            .as_option_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .algorithm = Some("sha512".into());
+                    }
+                    MalformedHistoryField::ShortContentDigest => {
+                        message
+                            .content_ref
+                            .as_option_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .digest
+                            .as_option_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .value
+                            .as_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .truncate(31);
+                    }
+                    MalformedHistoryField::MissingContentSize => message.content_size_bytes = None,
+                    MalformedHistoryField::ZeroContentSize => message.content_size_bytes = Some(0),
+                    MalformedHistoryField::OversizedContentSize => message.content_size_bytes = Some(2049),
+                    MalformedHistoryField::MissingSemanticFingerprint => {
+                        message.semantic_fingerprint = Default::default();
+                    }
+                    MalformedHistoryField::MissingSemanticFingerprintValue => {
+                        message
+                            .semantic_fingerprint
+                            .as_option_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .value = None;
+                    }
+                    MalformedHistoryField::ShortSemanticFingerprint => {
+                        message
+                            .semantic_fingerprint
+                            .as_option_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .value
+                            .as_mut()
+                            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+                            .truncate(31);
+                    }
+                    _ => return Err(trogon_peer_service::PeerPortError::Integrity.into()),
+                }
                 true
             }
             _ => false,
@@ -1639,5 +1778,408 @@ async fn a_cross_caller_reconcile_grant_cannot_settle_another_callers_obligation
     assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
     assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
     assert_eq!(f.catalog.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_already_expired_obligation_is_disposed_without_opening_content() -> TestResult {
+    use trogon_peer_service::{PeerPortError, PeerService};
+    let mut f = Fixture::new().await?;
+    let sent = f.app().send(&f.alice, f.send("expired-before-open", "pending")).await?;
+    let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let sender = PeerId::parse(sent.message.sender_peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let recipient = PeerId::parse(sent.message.recipient_peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = trogonai_proto::convert::datetime_from_timestamp(
+        sent.message.expires_at.as_option().ok_or(PeerPortError::Integrity)?,
+    )?;
+    f.a = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone())
+        .enroll(&f.alice, Fixture::enrollment("alice"))
+        .await?
+        .attachment
+        .attachment_ref
+        .clone()
+        .into_option()
+        .ok_or(PeerPortError::Integrity)?;
+    assert_eq!(f.a.peer_id.as_deref(), Some(sender.as_str()));
+    let content_calls = f.content.calls.load(Ordering::SeqCst);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert_eq!(
+        f.app()
+            .reconcile(&f.alice, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
+            .await?,
+        1
+    );
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 2);
+    let target = service_coverage_public_history(&f, &recipient).await?;
+    assert!(target.inbox.is_empty());
+    assert_eq!(target.dispositions.len(), 1);
+    let receipt = target.dispositions.first().ok_or(PeerPortError::Integrity)?;
+    assert_eq!(receipt.message_id.as_deref(), Some(id.as_str()));
+    assert_eq!(
+        receipt.outcome.and_then(|value| value.as_known()),
+        Some(proto::PreparationOutcome::PREPARATION_OUTCOME_EXPIRED)
+    );
+    assert_eq!(receipt.decided_at, sent.message.expires_at);
+    let source = service_coverage_public_history(&f, &sender).await?;
+    assert_eq!(
+        source
+            .outbox
+            .first()
+            .ok_or(PeerPortError::Integrity)?
+            .settlement
+            .as_option(),
+        Some(receipt)
+    );
+    let status = f
+        .app()
+        .status(
+            &f.alice,
+            proto::StatusRequest {
+                attachment_ref: f.a.clone().into(),
+                idempotency_key: Some("expired-before-open".into()),
+            },
+        )
+        .await?;
+    assert_eq!(
+        status.status.and_then(|value| value.as_known()),
+        Some(proto::MessageStatus::MESSAGE_STATUS_EXPIRED)
+    );
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
+    assert_eq!(f.catalog.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+struct WrongSizeReconciliationContent(DisposableContentFixture);
+
+impl trogon_peer_service::ContentOpen for WrongSizeReconciliationContent {
+    async fn open(
+        &self,
+        scope: &trogon_peer_service::PeerAccess,
+        binding: &trogon_peer_service::ContentBinding,
+    ) -> Result<Option<trogon_peer_service::MessageText>, trogon_peer_service::PeerPortError> {
+        use trogon_peer_service::{ContentOpen, MessageText, PeerPortError};
+        match ContentOpen::open(&self.0, scope, binding).await? {
+            Some(text) => Ok(Some(
+                MessageText::new(format!("{}!", text.as_str())).map_err(|_| PeerPortError::Integrity)?,
+            )),
+            None => Ok(None),
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_wrong_size_content_response_cannot_intake_or_dispose_an_obligation() -> TestResult {
+    use trogon_peer_service::{PeerApplication, PeerApplicationError, PeerPortError};
+    let f = Fixture::new().await?;
+    let sent = f.app().send(&f.alice, f.send("wrong-open-size", "pending")).await?;
+    let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let sender = PeerId::parse(sent.message.sender_peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let recipient = PeerId::parse(sent.message.recipient_peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let app = PeerApplication::new(
+        f.store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        WrongSizeReconciliationContent(f.content.clone()),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let content_calls = f.content.calls.load(Ordering::SeqCst);
+    assert!(matches!(
+        app.reconcile(&f.alice, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
+            .await,
+        Err(PeerApplicationError::Scope)
+    ));
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls + 1);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    let target = service_coverage_public_history(&f, &recipient).await?;
+    assert!(target.inbox.is_empty());
+    assert!(target.dispositions.is_empty());
+    let source = service_coverage_public_history(&f, &sender).await?;
+    assert!(
+        !source
+            .outbox
+            .first()
+            .ok_or(PeerPortError::Integrity)?
+            .settlement
+            .is_set()
+    );
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    assert!(
+        f.cache
+            .records
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
+    assert_eq!(f.catalog.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        f.app()
+            .reconcile(&f.alice, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
+            .await?,
+        1
+    );
+    let target = service_coverage_public_history(&f, &recipient).await?;
+    assert_eq!(target.inbox.len(), 1);
+    assert_eq!(target.inbox[0].message, sent.message);
+    assert!(target.dispositions.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_full_recipient_defers_only_its_obligation_and_retries_after_capacity_is_released() -> TestResult {
+    use trogon_decider_runtime::{
+        CommandError, CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind, ReplayLimit,
+    };
+    use trogon_peer::{AcceptedMessage, IntakeMessage, MessageError};
+    use trogon_peer_service::{PeerClock, PeerPortError, PeerService};
+    let f = Fixture::new().await?;
+    let recipient = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let service = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone());
+    let mut first_obligation = None;
+    for sender_number in 0..8 {
+        let reference = service
+            .enroll(&f.alice, Fixture::enrollment(&format!("quota_sender_{sender_number}")))
+            .await?
+            .attachment
+            .attachment_ref
+            .clone()
+            .into_option()
+            .ok_or(PeerPortError::Integrity)?;
+        let sender = PeerId::parse(reference.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+        assert!(
+            f.policy
+                .grants
+                .lock()
+                .map_err(|_| PeerPortError::Unavailable)?
+                .insert(sender.as_str().to_owned(), f.alice.clone())
+                .is_none()
+        );
+        let mut ids = Vec::new();
+        for message_number in 0..8 {
+            let mut request = f.send(&format!("quota_{sender_number}_{message_number}"), "queued");
+            request.attachment_ref = reference.clone().into();
+            let sent = f.app().send(&f.alice, request).await?;
+            let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
+            if first_obligation.is_none() {
+                first_obligation = Some((
+                    sender.clone(),
+                    id.clone(),
+                    sent.message
+                        .content_ref
+                        .storage_ref
+                        .value
+                        .clone()
+                        .ok_or(PeerPortError::Integrity)?,
+                ));
+            }
+            ids.push(id);
+        }
+        assert_eq!(f.app().reconcile(&f.alice, &sender, &ids, WorkLimit::new(8)?).await?, 8);
+    }
+    let full = service_coverage_public_history(&f, &recipient).await?;
+    assert_eq!(full.inbox.len(), 64);
+    assert!(full.inbox.iter().all(|entry| !entry.disposition.is_set()));
+    assert!(full.dispositions.is_empty());
+    let available = service
+        .enroll(&f.bob, Fixture::enrollment("available_recipient"))
+        .await?
+        .attachment
+        .attachment_ref
+        .clone()
+        .into_option()
+        .ok_or(PeerPortError::Integrity)?;
+    let available = PeerId::parse(available.peer_id.ok_or(PeerPortError::Integrity)?)?;
+    assert!(
+        f.policy
+            .grants
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .insert(available.as_str().to_owned(), f.bob.clone())
+            .is_none()
+    );
+    let blocked = f.app().send(&f.alice, f.send("capacity_blocked", "pending")).await?;
+    let blocked_id = MessageId::new(blocked.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let mut next_request = f.send("capacity_independent", "next");
+    next_request.recipient_peer_id = Some(available.as_str().to_owned());
+    let next = f.app().send(&f.alice, next_request).await?;
+    let next_id = MessageId::new(next.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let sender = PeerId::parse(f.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let source = service_coverage_public_history(&f, &sender).await?;
+    let evidence = AcceptedMessage::from_sender_history(&source, &blocked_id)?;
+    let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(f.alice.caller().as_str())?);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        CommandExecution::new(&f.store, &IntakeMessage::new(evidence, f.clock.now()))
+            .with_principal(principal)
+            .with_authorizer(&f.policy)
+            .with_replay_limit(ReplayLimit::try_new(4096)?)
+            .execute()
+            .await,
+        Err(CommandError::Decide(MessageError::DeferIntake))
+    ));
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    let content_calls = f.content.calls.load(Ordering::SeqCst);
+    assert_eq!(
+        f.app()
+            .reconcile(
+                &f.alice,
+                &sender,
+                &[blocked_id.clone(), next_id.clone()],
+                WorkLimit::new(2)?
+            )
+            .await?,
+        2
+    );
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls + 2);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
+    let target = service_coverage_public_history(&f, &recipient).await?;
+    assert_eq!(target.inbox, full.inbox);
+    assert!(target.dispositions.is_empty());
+    let target = service_coverage_public_history(&f, &available).await?;
+    assert_eq!(target.inbox.len(), 1);
+    assert_eq!(target.inbox[0].message, next.message);
+    assert!(target.dispositions.is_empty());
+    let source = service_coverage_public_history(&f, &sender).await?;
+    assert_eq!(source.outbox.len(), 2);
+    assert!(source.outbox.iter().all(|entry| !entry.settlement.is_set()));
+    let (first_sender, first_id, first_ref) = first_obligation.ok_or(PeerPortError::Integrity)?;
+    assert!(
+        f.content
+            .bodies
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .remove(&first_ref)
+            .is_some()
+    );
+    assert_eq!(
+        f.app()
+            .reconcile(&f.alice, &first_sender, &[first_id], WorkLimit::new(1)?)
+            .await?,
+        1
+    );
+    assert_eq!(
+        f.app()
+            .reconcile(&f.alice, &sender, std::slice::from_ref(&blocked_id), WorkLimit::new(1)?)
+            .await?,
+        1
+    );
+    let target = service_coverage_public_history(&f, &recipient).await?;
+    assert_eq!(target.inbox.len(), 65);
+    assert_eq!(
+        target.inbox.iter().filter(|entry| !entry.disposition.is_set()).count(),
+        64
+    );
+    assert_eq!(target.dispositions.len(), 1);
+    assert_eq!(
+        target
+            .inbox
+            .iter()
+            .filter(|entry| entry.message.message_id.as_deref() == Some(blocked_id.as_str()))
+            .count(),
+        1
+    );
+    let source = service_coverage_public_history(&f, &sender).await?;
+    assert!(source.outbox.iter().all(|entry| !entry.settlement.is_set()));
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
+    assert_eq!(f.catalog.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn malformed_accepted_content_history_fails_before_status_or_reconciliation_ports() -> TestResult {
+    use trogon_peer_service::{HistoryError, PeerApplication, PeerApplicationError, PeerPortError};
+    for field in [
+        MalformedHistoryField::MissingContentRef,
+        MalformedHistoryField::MissingContentLocator,
+        MalformedHistoryField::InvalidContentLocator,
+        MalformedHistoryField::MissingContentDigest,
+        MalformedHistoryField::InvalidContentDigestAlgorithm,
+        MalformedHistoryField::ShortContentDigest,
+        MalformedHistoryField::MissingContentSize,
+        MalformedHistoryField::ZeroContentSize,
+        MalformedHistoryField::OversizedContentSize,
+        MalformedHistoryField::MissingSemanticFingerprint,
+        MalformedHistoryField::MissingSemanticFingerprintValue,
+        MalformedHistoryField::ShortSemanticFingerprint,
+    ] {
+        let f = Fixture::new().await?;
+        let sent = f.app().send(&f.alice, f.send("malformed_content", "private")).await?;
+        let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
+        let sender = PeerId::parse(sent.message.sender_peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+        let store = altered_history_store(&f, sender.clone(), field).await?;
+        let app = PeerApplication::new(
+            store,
+            f.policy.clone(),
+            f.clock.clone(),
+            f.content.clone(),
+            f.cache.clone(),
+            f.ids.clone(),
+            f.catalog.clone(),
+        );
+        let reads = f.store.reads.load(Ordering::SeqCst);
+        let appends = f.store.appends.load(Ordering::SeqCst);
+        let content_calls = f.content.calls.load(Ordering::SeqCst);
+        let expected = field.expected();
+        assert!(matches!(
+            app.status(
+                &f.alice,
+                proto::StatusRequest {
+                    attachment_ref: f.a.clone().into(),
+                    idempotency_key: Some("malformed_content".into()),
+                },
+            )
+            .await,
+            Err(PeerApplicationError::History(HistoryError::Evolve(ref source))) if source == &expected
+        ));
+        assert_eq!(f.store.reads.load(Ordering::SeqCst), reads + 1);
+        assert!(matches!(
+            app.reconcile(&f.alice, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
+                .await,
+            Err(PeerApplicationError::History(HistoryError::Evolve(ref source))) if source == &expected
+        ));
+        assert_eq!(f.store.reads.load(Ordering::SeqCst), reads + 2);
+        assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+        assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
+        assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+        assert!(
+            f.cache
+                .records
+                .lock()
+                .map_err(|_| PeerPortError::Unavailable)?
+                .is_empty()
+        );
+        assert!(
+            f.cache
+                .orphans
+                .lock()
+                .map_err(|_| PeerPortError::Unavailable)?
+                .is_empty()
+        );
+        assert_eq!(f.catalog.calls.load(Ordering::SeqCst), 0);
+    }
     Ok(())
 }
