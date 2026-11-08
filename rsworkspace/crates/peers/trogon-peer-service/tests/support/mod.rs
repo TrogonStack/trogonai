@@ -477,20 +477,3 @@ impl Fixture {
         }
     }
 }
-impl Fixture {
-    pub fn prepare(&self) -> proto::PrepareBatchRequest {
-        proto::PrepareBatchRequest {
-            attachment_ref: self.b.clone().into(),
-            prompt_id: Some("prompt".into()),
-        }
-    }
-    pub async fn intake(&self, key: &str, text: &str) -> TestResult<proto::SendResponse> {
-        let sent = self.app().send(&self.alice, self.send(key, text)).await?;
-        let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
-        let sender = PeerId::parse(self.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
-        self.app()
-            .reconcile(&self.alice, &sender, &[id], WorkLimit::new(1)?)
-            .await?;
-        Ok(sent)
-    }
-}
