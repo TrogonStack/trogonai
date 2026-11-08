@@ -110,9 +110,23 @@ where
                 {
                     Ok(result) => result.state,
                     Err(trogon_decider_runtime::CommandError::Decide(AttachError::AlreadyAttached)) => {
-                        crate::history::load(&self.store, command.identity().peer_id())
+                        let current = crate::history::load(&self.store, command.identity().peer_id())
                             .await
-                            .map_err(EnrollServiceError::History)?
+                            .map_err(EnrollServiceError::History)?;
+                        let expected = trogon_peer::AttachmentRef::new(
+                            command.identity().peer_id().clone(),
+                            command.connector_id().clone(),
+                            current.attachment.attachment_ref.generation.unwrap_or(0),
+                        )
+                        .map_err(EnrollServiceError::ResumeReference)?;
+                        trogon_peer::guard_live_attachment(
+                            &current,
+                            command.identity().owner(),
+                            &expected,
+                            self.clock.now(),
+                        )
+                        .map_err(EnrollServiceError::ResumeGuard)?;
+                        current
                     }
                     Err(error) => return Err(EnrollServiceError::Attach(error)),
                 }
