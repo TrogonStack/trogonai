@@ -1,4 +1,13 @@
+use futures::StreamExt as _;
 use grpc_nats_micro::ServiceFault;
+use grpc_nats_micro::SubjectPrefixError;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use trogon_peer_nats::PeerAccount;
+use trogon_peer_nats::PeerRpcServeError;
+use trogon_peer_nats::PeerTenant;
+use trogon_peer_nats::serve_peer_rpc;
 use trogon_peer_nats::{PeerRpcApplication, PeerRpcOperation};
 use trogon_peer_service::{PeerService, test_support::Fixture};
 use trogonai_proto::peers::v1alpha1 as proto;
@@ -86,12 +95,6 @@ async fn service_discovery_registers_the_annotated_methods_and_queue() -> TestRe
 
 #[tokio::test]
 async fn named_peer_registration_preserves_the_existing_shared_prefix_boundary() -> TestResult {
-    use futures::StreamExt as _;
-    use grpc_nats_micro::SubjectPrefixError;
-    use std::sync::{Arc, atomic::Ordering};
-    use std::time::Duration;
-    use trogon_peer_nats::{PeerAccount, PeerRpcServeError, PeerTenant, serve_peer_rpc};
-
     let fixture = Fixture::new().await?;
     let backend = Arc::new(PeerRpcApplication::new(
         PeerService::new(fixture.store.clone(), fixture.policy.clone(), fixture.clock.clone()),
