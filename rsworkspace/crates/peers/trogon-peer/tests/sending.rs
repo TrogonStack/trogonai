@@ -422,3 +422,19 @@ fn replay_rejects_malformed_retry_keys_before_accepting_the_message() {
         }
     }
 }
+
+#[test]
+fn acceptance_rejects_a_leap_clock_before_serializing_message_time() {
+    let state = enrolled("sender", 58);
+    let leap = chrono::Utc.timestamp_opt(time(59).timestamp(), 1_500_000_000).single().unwrap();
+    let command = SendMessage::new(
+        identity("sender").owner().clone(), reference("sender", 1),
+        IdempotencyKey::new("leap_key").unwrap(), MessageId::new("leap_message").unwrap(),
+        identity("recipient").peer_id().clone(), CollaborationRef::new("collaboration").unwrap(),
+        content(1, 1), None, leap,
+    );
+    assert_eq!(error(state.clone(), &command), MessageError::InvalidState(EvolveError::TimestampRange { field: "accepted_at" }));
+    let ordinary = run(state, &send(0, 59, 1));
+    assert_eq!(ordinary.outbox[0].message.accepted_at.seconds, time(59).timestamp());
+    assert_eq!(ordinary.outbox[0].message.accepted_at.nanos, 0);
+}
