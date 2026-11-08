@@ -1,6 +1,11 @@
 use super::*;
 
 #[test]
+fn rejects_empty_ids() {
+    assert_eq!(SourceIntegrationId::new(""), Err(SourceIntegrationIdError::Empty));
+}
+
+#[test]
 fn accepts_route_safe_ids() {
     let id = SourceIntegrationId::new("acme-main_1").unwrap();
 
