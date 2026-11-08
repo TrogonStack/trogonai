@@ -7,7 +7,7 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     paths:
       - 'otel/semconv/**'
-      - '.mise.toml'
+      - 'mise.toml'
       - '.github/workflows/ci-semconv.yml'
 
 concurrency:
