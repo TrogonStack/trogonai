@@ -10,7 +10,7 @@ on:
       - 'goworkspace/internal/spirepolicy/**'
       - 'goworkspace/go.mod'
       - 'goworkspace/go.sum'
-      - '.mise.toml'
+      - 'mise.toml'
       - '.github/workflows/ci-workload-identity.yml'
 
 concurrency:
