@@ -7,6 +7,9 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     paths:
       - 'rsworkspace/**'
+      - 'devops/docker/compose/compose.yml'
+      - 'devops/docker/compose/services/a2a-gateway/**'
+      - 'devops/docker/compose/services/nats/**'
       - 'LICENSE'
       - '.mise.toml'
       - '.config/mise/tasks/**'
@@ -125,6 +128,9 @@ jobs:
       - name: Test a2a-gateway (default features)
         run: cargo test -p a2a-gateway
         working-directory: rsworkspace
+
+      - name: Test gateway bootstrap identity
+        run: sh devops/docker/compose/services/nats/gateway-env.test.sh
 
       - name: Run tests with coverage
         run: mise run --skip-tools github-actions:rust-coverage

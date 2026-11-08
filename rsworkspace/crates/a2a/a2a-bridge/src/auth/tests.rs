@@ -9,6 +9,10 @@ use super::*;
 use crate::auth::callout_mint::{InProcessCalloutDispatcherMintWire, harness_callout_dispatcher, harness_callout_xkey};
 use crate::identity::CallerHttpsAuth;
 
+mod subscription_readiness_tests;
+
+use subscription_readiness_tests::wait_for_callout_subscription;
+
 fn harness_client(caller_id: &str) -> AuthCalloutJsonMintClient<InProcessCalloutDispatcherMintWire> {
     let (dispatcher, tenant) = harness_callout_dispatcher(caller_id);
     let callout = harness_callout_xkey();
@@ -255,7 +259,9 @@ async fn the_bridge_mints_through_the_callout_responder_over_nats() {
     .unwrap();
     let subject = subscriber.subject().to_owned();
     let task = tokio::spawn(subscriber.serve());
-    callout_client.flush().await.unwrap();
+    wait_for_callout_subscription(&callout_client, Duration::from_secs(5))
+        .await
+        .unwrap();
 
     // A socket flush does not acknowledge subscription processing on the broker.
     let ready_subject = callout_client.new_inbox();

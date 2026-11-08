@@ -6,6 +6,8 @@ use std::time::Duration;
 
 // --- config.rs ---
 
+pub const ENV_GATEWAY_NON_UNARY_RELAY_TIMEOUT_SECS: &str = "A2A_GATEWAY_NON_UNARY_RELAY_TIMEOUT_SECS";
+
 pub(crate) const ENV_GATEWAY_QUEUE_GROUP: &str = "A2A_GATEWAY_QUEUE_GROUP";
 
 // --- gw_ingress_stream.rs ---

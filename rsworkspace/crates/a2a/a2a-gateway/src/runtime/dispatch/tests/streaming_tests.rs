@@ -220,3 +220,51 @@ async fn the_streaming_gate_holds_the_subject_principal_whatever_caller_the_hint
     fixture.shutdown.cancel();
     Ok(())
 }
+
+#[tokio::test]
+async fn imported_success_keeps_its_pump_until_gateway_shutdown_and_deletes_the_consumer() -> TestResult {
+    let mut fixture = DispatchFixture::streaming().await?;
+    let mut events = jetstream::new(fixture.client.clone())
+        .create_stream(stream::Config {
+            name: events_stream_name(&fixture.config.a2a_prefix),
+            subjects: vec![TaskAllEventsSubject::new(&fixture.config.a2a_prefix).to_string()],
+            ..Default::default()
+        })
+        .await?;
+    let mut imported = request("message.stream", json!({}));
+    imported.reply = Some("_R_.shutdown-probe".into());
+    fixture.dispatch(imported).await;
+    let forwarded = receive(&mut fixture.agents).await?;
+    fixture
+        .client
+        .publish(
+            forwarded.reply.expect("local bootstrap inbox"),
+            Bytes::from_static(b"bootstrap"),
+        )
+        .await?;
+    fixture.audit("ok").await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if events.info().await.expect("events").state.consumer_count == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    assert!(fixture.streaming_gate.try_acquire(&alice()).is_none());
+    fixture.shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(permit) = fixture.streaming_gate.try_acquire(&alice()) {
+                drop(permit);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    assert_eq!(events.info().await.expect("events").state.consumer_count, 0);
+    assert_empty(&fixture.client, &mut fixture.audits, "a2a.v1.audit.shutdown.barrier").await?;
+    Ok(())
+}
