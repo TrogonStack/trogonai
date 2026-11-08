@@ -2021,7 +2021,7 @@ async fn authorized_roster_paginates_membership_and_observes_liveness_with_servi
         .roster(
             &f.alice,
             proto::RosterRequest {
-                attachment: f.a.clone().into(),
+                attachment_ref: f.a.clone().into(),
                 page_size: Some(1),
                 ..Default::default()
             },
@@ -2033,7 +2033,7 @@ async fn authorized_roster_paginates_membership_and_observes_liveness_with_servi
         .roster(
             &f.alice,
             proto::RosterRequest {
-                attachment: f.a.clone().into(),
+                attachment_ref: f.a.clone().into(),
                 page_size: Some(1),
                 page_token: first.next_page_token,
             },
@@ -2050,7 +2050,7 @@ async fn authorized_roster_paginates_membership_and_observes_liveness_with_servi
             .roster(
                 &f.alice,
                 proto::RosterRequest {
-                    attachment: f.a.clone().into(),
+                    attachment_ref: f.a.clone().into(),
                     page_size: Some(1),
                     ..Default::default()
                 }

@@ -29,7 +29,7 @@ where
         owner: &TrustedPeerOwner,
         request: proto::RosterRequest,
     ) -> ApplicationResult<proto::RosterResponse, S> {
-        let reference = attachment(request.attachment.as_option().ok_or(PeerApplicationError::Input)?)?;
+        let reference = attachment(request.attachment_ref.as_option().ok_or(PeerApplicationError::Input)?)?;
         let limit = WorkLimit::new(request.page_size.filter(|n| *n != 0).unwrap_or(DEFAULT_ROSTER_PAGE) as usize)?;
         let after = request
             .page_token

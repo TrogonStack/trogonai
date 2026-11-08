@@ -117,7 +117,7 @@ async fn fork_session_records_error_when_session_ready_publish_fails() {
         .await
         .expect("session.ready publish must enter the bounded mock delay")
         .expect("publish entry signal");
-    tokio::time::sleep(Duration::from_millis(600)).await;
+    bridge.drain_background_tasks().await;
     provider.force_flush().unwrap();
     let finished_metrics = exporter.get_finished_metrics().unwrap();
     assert!(
