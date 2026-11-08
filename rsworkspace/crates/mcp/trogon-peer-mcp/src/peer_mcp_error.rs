@@ -1,4 +1,4 @@
-#[derive(Debug, thiserror::Error)]
+#[derive(thiserror::Error)]
 pub enum PeerMcpError {
     #[error("Peer detach was not confirmed; lease expiry remains the fallback.")]
     EnrollmentUncertain,
@@ -50,4 +50,10 @@ pub enum PeerMcpError {
     Send(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("Peer metadata is unavailable.")]
     Status(#[source] Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl std::fmt::Debug for PeerMcpError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, formatter)
+    }
 }

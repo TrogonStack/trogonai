@@ -1568,3 +1568,31 @@ async fn lifecycle_stale_enrollment_cannot_replace_a_newer_generation() {
     };
     assert_eq!(request.attachment_ref.generation, Some(2));
 }
+
+#[tokio::test]
+async fn diagnostics_keep_untrusted_arguments_and_backend_sources_opaque() {
+    let mut failing = backend(Default::default());
+    failing.fail_enroll = true;
+    let adapter = PeerMcp::new(failing, config()).expect("config");
+    let error = adapter
+        .invoke(prompt("native_b", "initial"))
+        .await
+        .expect_err("enrollment fails");
+    assert_eq!(
+        format!("{error:?}"),
+        error.to_string(),
+        "Debug must not dump backend sources"
+    );
+    let error = adapter
+        .invoke(request(
+            "peer_prompt_hook",
+            json!({"session_id":"native_b", "hook_event_name":"untrusted_field_value"}),
+        ))
+        .await
+        .expect_err("malformed event");
+    assert!(!format!("{error:?} {error}").contains("untrusted_field_value"));
+    assert!(
+        std::error::Error::source(&error).is_some(),
+        "typed sources remain inspectable"
+    );
+}
