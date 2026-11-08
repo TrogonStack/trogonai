@@ -213,3 +213,22 @@ fn assigned_metadata_requires_complete_valid_provenance_and_exact_text_byte_coun
 
     assert!(PeerContext::render(&batch(&["message_1"]), &[original]).is_ok());
 }
+
+#[test]
+fn context_diagnostics_retain_size_without_exposing_untrusted_content_or_provenance() {
+    let text = "private_context_marker_that_must_not_appear_in_diagnostics";
+    let context =
+        PeerContext::render(&batch(&["message_1"]), &[message("message_1", text)]).expect("valid untrusted context");
+    assert!(context.as_str().contains(text));
+    let diagnostic = format!("{context:?}");
+    assert!(diagnostic.contains("utf8_bytes"));
+    for private_value in [
+        text,
+        "message_1",
+        "collaboration_a",
+        sender_peer_id().as_str(),
+        recipient_peer_id().as_str(),
+    ] {
+        assert!(!diagnostic.contains(private_value));
+    }
+}
