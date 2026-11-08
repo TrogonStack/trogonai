@@ -2249,3 +2249,414 @@ async fn lost_append_reply_keeps_the_possibly_winning_presentation_out_of_orphan
     assert_eq!(replay.messages[0].text.as_deref(), Some("durable winner"));
     Ok(())
 }
+
+#[tokio::test]
+async fn policy_denials_precede_all_ports_for_queries_preparation_ack_and_reconciliation() -> TestResult {
+    let f = Fixture::new().await?;
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let before = (
+        f.store.reads.load(Ordering::SeqCst),
+        f.store.appends.load(Ordering::SeqCst),
+    );
+    f.policy.deny.store(true, Ordering::SeqCst);
+    assert!(
+        f.app()
+            .status(
+                &f.alice,
+                proto::StatusRequest {
+                    attachment_ref: f.a.clone().into(),
+                    idempotency_key: Some("key".into())
+                }
+            )
+            .await
+            .is_err()
+    );
+    assert!(f.app().prepare_batch(&f.bob, f.prepare()).await.is_err());
+    assert!(
+        f.app()
+            .acknowledge_batch(
+                &f.bob,
+                proto::AcknowledgeBatchRequest {
+                    attachment_ref: f.b.clone().into(),
+                    batch_id: Some("batch".into())
+                }
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        f.app()
+            .reconcile(&f.alice, &sender, &[MessageId::new("message")?], WorkLimit::new(1)?)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        before,
+        (
+            f.store.reads.load(Ordering::SeqCst),
+            f.store.appends.load(Ordering::SeqCst)
+        )
+    );
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.catalog.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn infrastructure_failure_stays_retryable_but_confirmed_unavailability_has_a_recipient_receipt() -> TestResult {
+    let f = Fixture::new().await?;
+    let sent = f.app().send(&f.alice, f.send("key", "retry this")).await?;
+    let id = MessageId::new(
+        sent.message
+            .message_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let recipient = PeerId::parse(
+        f.b.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    f.content.fail_open.store(true, Ordering::SeqCst);
+    assert!(
+        f.app()
+            .reconcile(&f.alice, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
+            .await
+            .is_err()
+    );
+    assert!(!f.history(&sender).await?.outbox[0].settlement.is_set());
+    assert!(f.history(&recipient).await?.dispositions.is_empty());
+    f.content.fail_open.store(false, Ordering::SeqCst);
+    f.content
+        .bodies
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .clear();
+    f.app().reconcile(&f.alice, &sender, &[id], WorkLimit::new(1)?).await?;
+    let state = f.history(&sender).await?;
+    assert_eq!(
+        state.outbox[0].settlement.outcome.and_then(|v| v.as_known()),
+        Some(proto::PreparationOutcome::PREPARATION_OUTCOME_UNAVAILABLE)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn expiry_disposes_only_unprepared_obligations_and_prepared_winners_survive_expiry() -> TestResult {
+    let mut f = Fixture::new().await?;
+    let sent = f.intake("key", "keep exact").await?;
+    let prepared = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    f.advance_and_resume(chrono::Duration::hours(1)).await?;
+    f.content
+        .bodies
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .clear();
+    assert_eq!(f.app().prepare_batch(&f.bob, f.prepare()).await?, prepared);
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let id = MessageId::new(
+        sent.message
+            .message_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    f.app().reconcile(&f.alice, &sender, &[id], WorkLimit::new(1)?).await?;
+    assert_eq!(
+        f.history(&sender).await?.outbox[0]
+            .settlement
+            .outcome
+            .and_then(|v| v.as_known()),
+        Some(proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED)
+    );
+    f.cache
+        .records
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .clear();
+    let unavailable = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(unavailable.batch, prepared.batch);
+    assert!(unavailable.messages.is_empty());
+    assert_eq!(
+        unavailable.content_availability.and_then(|v| v.as_known()),
+        Some(proto::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE)
+    );
+    let mut unprepared = Fixture::new().await?;
+    let sent = unprepared
+        .app()
+        .send(&unprepared.alice, unprepared.send("key", "expired"))
+        .await?;
+    let id = MessageId::new(
+        sent.message
+            .message_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    unprepared.advance_and_resume(chrono::Duration::hours(1)).await?;
+    unprepared
+        .app()
+        .reconcile(&unprepared.alice, &sender, &[id], WorkLimit::new(1)?)
+        .await?;
+    assert_eq!(
+        unprepared.history(&sender).await?.outbox[0]
+            .settlement
+            .outcome
+            .and_then(|v| v.as_known()),
+        Some(proto::PreparationOutcome::PREPARATION_OUTCOME_EXPIRED)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn recipient_overflow_defers_intake_without_deleting_inbox_or_settling_sender() -> TestResult {
+    let f = Fixture::new().await?;
+    let mut last = None;
+    for index in 0..7 {
+        let (owner, reference) = f.add_peer(&format!("sender{index}")).await?;
+        for number in 0..10 {
+            let mut request = f.send(&format!("key{number}"), "bounded");
+            request.attachment_ref = reference.clone().into();
+            let sent = f.app().send(&owner, request).await?;
+            let id = MessageId::new(
+                sent.message
+                    .message_id
+                    .clone()
+                    .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+            )?;
+            let sender = PeerId::parse(
+                reference
+                    .peer_id
+                    .clone()
+                    .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+            )?;
+            f.app()
+                .reconcile(&owner, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
+                .await?;
+            last = Some((owner.clone(), sender, id));
+        }
+    }
+    let recipient = PeerId::parse(
+        f.b.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    assert_eq!(f.history(&recipient).await?.inbox.len(), 64);
+    let (owner, sender, id) = last.ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    f.app().reconcile(&owner, &sender, &[id], WorkLimit::new(1)?).await?;
+    let history = f.history(&sender).await?;
+    assert!(!history.outbox[9].settlement.is_set());
+    assert_eq!(f.history(&recipient).await?.inbox.len(), 64);
+    Ok(())
+}
+
+#[tokio::test]
+async fn scoped_work_limits_and_cross_tenant_owner_fail_before_port_access() -> TestResult {
+    let f = Fixture::new().await?;
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let before = f.store.reads.load(Ordering::SeqCst);
+    assert!(
+        f.app()
+            .reconcile(
+                &f.alice,
+                &sender,
+                &[MessageId::new("one")?, MessageId::new("two")?],
+                WorkLimit::new(1)?
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(f.store.reads.load(Ordering::SeqCst), before);
+    let intruder = trogon_peer::TrustedPeerOwner::new(
+        trogon_peer::TenantId::new("other")?,
+        trogon_peer::CallerId::new("alice")?,
+    );
+    assert!(f.app().send(&intruder, f.send("key", "denied")).await.is_err());
+    assert_eq!(f.store.reads.load(Ordering::SeqCst), before);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn immutable_cache_key_reuse_cannot_overwrite_an_acknowledged_assignment() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("first", "original").await?;
+    let first = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    f.app()
+        .acknowledge_batch(
+            &f.bob,
+            proto::AcknowledgeBatchRequest {
+                attachment_ref: f.b.clone().into(),
+                batch_id: first.batch.batch_id.clone(),
+            },
+        )
+        .await?;
+    f.intake("second", "replacement").await?;
+    let existing = f
+        .cache
+        .records
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .values()
+        .next()
+        .cloned()
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    f.ids.0.store(1, Ordering::SeqCst);
+    let before = f.store.appends.load(Ordering::SeqCst);
+    assert!(f.app().prepare_batch(&f.bob, f.prepare()).await.is_err());
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before);
+    let unchanged = f
+        .cache
+        .records
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .values()
+        .next()
+        .cloned()
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    assert!(existing == unchanged);
+    Ok(())
+}
+
+#[tokio::test]
+async fn separate_collaborations_cannot_accept_content_even_when_peer_reads_are_granted() -> TestResult {
+    let f = Fixture::new().await?;
+    let owner = trogon_peer::TrustedPeerOwner::new(f.alice.tenant().clone(), trogon_peer::CallerId::new("isolated")?);
+    let service = trogon_peer_service::PeerService::new(
+        f.store.clone(),
+        IsolatedEnrollmentFixture(owner.clone()),
+        f.clock.clone(),
+    );
+    let mut request = Fixture::enrollment("isolated");
+    request.collaboration_ref = Some("isolated".into());
+    let isolated = service.enroll(&owner, request).await?;
+    let id = isolated.peer_id.ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    f.policy
+        .grants
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .insert(id.clone(), owner);
+    let mut send = f.send("cross", "private");
+    send.recipient_peer_id = Some(id);
+    let before = f.store.appends.load(Ordering::SeqCst);
+    assert!(f.app().send(&f.alice, send).await.is_err());
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn offline_catalog_members_keep_historical_activity_without_a_live_availability_claim() -> TestResult {
+    let mut f = Fixture::new().await?;
+    let active = *f
+        .clock
+        .time
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
+    let service = trogon_peer_service::PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone());
+    service
+        .heartbeat(
+            &f.bob,
+            proto::HeartbeatRequest {
+                attachment_ref: f.b.clone().into(),
+                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+                active_at: trogonai_proto::convert::timestamp_from_datetime(&active).into(),
+                ..Default::default()
+            },
+        )
+        .await?;
+    *f.clock
+        .time
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)? += chrono::Duration::seconds(11);
+    f.a = service
+        .enroll(&f.alice, Fixture::enrollment("alice"))
+        .await?
+        .attachment
+        .attachment_ref
+        .clone()
+        .into_option()
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    let roster = f
+        .app()
+        .roster(
+            &f.alice,
+            proto::RosterRequest {
+                attachment_ref: f.a.clone().into(),
+                page_size: Some(64),
+                ..Default::default()
+            },
+        )
+        .await?;
+    let bob = roster
+        .peers
+        .iter()
+        .find(|p| p.peer_id == f.b.peer_id)
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    assert!(bob.availability.is_none());
+    assert_eq!(
+        bob.active_at.as_option(),
+        Some(&trogonai_proto::convert::timestamp_from_datetime(&active))
+    );
+    assert_eq!(
+        bob.observed_at.as_option(),
+        Some(&trogonai_proto::convert::timestamp_from_datetime(
+            &(active + chrono::Duration::seconds(11))
+        ))
+    );
+    let id =
+        f.b.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    f.policy
+        .grants
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .remove(&id);
+    let restricted = f
+        .app()
+        .roster(
+            &f.alice,
+            proto::RosterRequest {
+                attachment_ref: f.a.clone().into(),
+                page_size: Some(64),
+                ..Default::default()
+            },
+        )
+        .await?;
+    assert_eq!(restricted.peers.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn lost_send_append_reply_retries_the_original_durable_obligation() -> TestResult {
+    let f = Fixture::new().await?;
+    f.store.lose_append_reply.store(true, Ordering::SeqCst);
+    assert!(f.app().send(&f.alice, f.send("key", "accepted once")).await.is_err());
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let accepted = f.history(&sender).await?.outbox[0].message.clone();
+    let retried = f.app().send(&f.alice, f.send("key", "accepted once")).await?;
+    assert_eq!(retried.message, accepted);
+    assert_eq!(f.history(&sender).await?.outbox.len(), 1);
+    Ok(())
+}
