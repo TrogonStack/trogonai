@@ -1,7 +1,6 @@
 use chrono::Duration;
 use chrono::TimeZone;
 use std::sync::atomic::Ordering;
-use trogon_decider_runtime::CommandAuthorizer as _;
 use trogon_decider_runtime::CommandError;
 use trogon_decider_runtime::CommandExecution;
 use trogon_decider_runtime::CommandPrincipal;
@@ -4355,9 +4354,8 @@ async fn roster_rechecks_store_tenant_after_catalog_await_before_loading_a_membe
     Ok(())
 }
 
-use trogon_decider_runtime::{AuthorizationDeniedError, CommandAuthorizer, CommandPrincipal, PrincipalKind};
+use trogon_decider_runtime::{AuthorizationDeniedError, CommandAuthorizer};
 use trogon_peer::{Attach, CallerId, Enroll, TrustedPeerOwner};
-use trogon_peer_service::PeerService;
 
 impl Fixture {
     pub async fn add_peer(&self, name: &str) -> TestResult<(TrustedPeerOwner, proto::AttachmentRef)> {
