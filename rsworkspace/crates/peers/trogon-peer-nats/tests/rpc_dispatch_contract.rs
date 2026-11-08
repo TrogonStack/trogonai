@@ -381,23 +381,26 @@ async fn assert_route<Request, Response>(
     }
 }
 
+macro_rules! check {
+    ($encoding:expr, $outcome:expr, $method:ident, $request:expr, $response:expr) => {
+        let request = $request;
+        let witness = RequestWitness::$method(request.clone());
+        assert_route(
+            PeerMethod::$method,
+            request,
+            witness,
+            Some($response),
+            $encoding,
+            $outcome,
+        )
+        .await;
+    };
+}
+
 async fn assert_matrix(encoding: ContentType, outcome: BackendOutcome) {
-    macro_rules! check {
-        ($method:ident, $request:expr, $response:expr) => {
-            let request = $request;
-            let witness = RequestWitness::$method(request.clone());
-            assert_route(
-                PeerMethod::$method,
-                request,
-                witness,
-                Some($response),
-                encoding,
-                outcome,
-            )
-            .await;
-        };
-    }
     check!(
+        encoding,
+        outcome,
         Enroll,
         proto::EnrollRequest {
             installation_id: Some("installation_enroll".to_owned()),
@@ -409,6 +412,8 @@ async fn assert_matrix(encoding: ContentType, outcome: BackendOutcome) {
         enroll_response()
     );
     check!(
+        encoding,
+        outcome,
         Heartbeat,
         proto::HeartbeatRequest {
             attachment_ref: attachment("heartbeat"),
@@ -431,6 +436,8 @@ async fn assert_matrix(encoding: ContentType, outcome: BackendOutcome) {
     )
     .await;
     check!(
+        encoding,
+        outcome,
         Roster,
         proto::RosterRequest {
             attachment_ref: attachment("roster"),
@@ -440,6 +447,8 @@ async fn assert_matrix(encoding: ContentType, outcome: BackendOutcome) {
         roster_response()
     );
     check!(
+        encoding,
+        outcome,
         Send,
         proto::SendRequest {
             attachment_ref: attachment("send"),
@@ -451,6 +460,8 @@ async fn assert_matrix(encoding: ContentType, outcome: BackendOutcome) {
         send_response()
     );
     check!(
+        encoding,
+        outcome,
         Status,
         proto::StatusRequest {
             attachment_ref: attachment("status"),
@@ -459,6 +470,8 @@ async fn assert_matrix(encoding: ContentType, outcome: BackendOutcome) {
         status_response()
     );
     check!(
+        encoding,
+        outcome,
         PrepareBatch,
         proto::PrepareBatchRequest {
             attachment_ref: attachment("prepare"),
@@ -467,6 +480,8 @@ async fn assert_matrix(encoding: ContentType, outcome: BackendOutcome) {
         prepare_response()
     );
     check!(
+        encoding,
+        outcome,
         AcknowledgeBatch,
         proto::AcknowledgeBatchRequest {
             attachment_ref: attachment("acknowledge"),
