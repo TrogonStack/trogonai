@@ -31,6 +31,7 @@ struct Backend {
     fail_prepare: Arc<std::sync::atomic::AtomicBool>,
     pause_enroll: Arc<std::sync::atomic::AtomicBool>,
     pause_prepare: Arc<std::sync::atomic::AtomicBool>,
+    pause_heartbeat: Arc<std::sync::atomic::AtomicBool>,
     enroll_delay: std::time::Duration,
     prepare_delay: std::time::Duration,
     prepare_completion_at: Option<tokio::time::Instant>,
@@ -189,6 +190,7 @@ fn backend(response: v1::PrepareBatchResponse) -> Backend {
         fail_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         pause_enroll: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         pause_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        pause_heartbeat: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         enroll_delay: std::time::Duration::ZERO,
         prepare_delay: std::time::Duration::ZERO,
         prepare_completion_at: None,
@@ -1288,6 +1290,9 @@ impl trogon_peer_mcp::HeartbeatPeer for Backend {
     type Error = UnconfiguredOperationError;
     async fn heartbeat(&self, request: v1::HeartbeatRequest) -> Result<v1::HeartbeatResponse, Self::Error> {
         self.calls.lock().expect("calls").push(ObservedCall::Heartbeat(request));
+        if self.pause_heartbeat.load(std::sync::atomic::Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         Ok(Default::default())
     }
 }
@@ -1740,4 +1745,130 @@ async fn runtime_signal_cancels_inflight_prompt_and_unbound_shutdown_never_enrol
         }
         client.cancel().await.expect("client cleanup");
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn runtime_shutdown_drops_pending_heartbeat_before_detach_lock_wait() {
+    let backend = backend(Default::default());
+    backend.pause_heartbeat.store(true, std::sync::atomic::Ordering::SeqCst);
+    let calls = backend.calls.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(trogon_peer_mcp::serve_connector(
+        adapter,
+        server_transport,
+        trogon_peer_mcp::AvailabilityObservation::Ready,
+        async move {
+            let _ = stopped.await;
+        },
+    ));
+    let client = ().serve(client_transport).await.expect("handshake");
+    client.call_tool(prompt("native_b", "initial")).await.expect("bind");
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        calls
+            .lock()
+            .expect("calls")
+            .iter()
+            .any(|call| matches!(call, ObservedCall::Heartbeat(_)))
+    );
+    let _ = stop.send(());
+    server
+        .await
+        .expect("runtime task")
+        .expect("shutdown cancels heartbeat before detach");
+    assert!(
+        calls
+            .lock()
+            .expect("calls")
+            .iter()
+            .any(|call| matches!(call, ObservedCall::Detach(_)))
+    );
+    client.cancel().await.expect("cleanup");
+}
+
+#[tokio::test(start_paused = true)]
+async fn runtime_eof_cancels_pending_prompt_before_sdk_response_drain() {
+    let backend = backend(Default::default());
+    let paused = backend.pause_prepare.clone();
+    let calls = backend.calls.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+    let server = tokio::spawn(trogon_peer_mcp::serve_connector(
+        adapter,
+        server_transport,
+        trogon_peer_mcp::AvailabilityObservation::Ready,
+        std::future::pending::<()>(),
+    ));
+    let client = ().serve(client_transport).await.expect("handshake");
+    client.call_tool(prompt("native_b", "initial")).await.expect("bind");
+    paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    let pending = client.peer().clone();
+    let work = tokio::spawn(async move { pending.call_tool(prompt("native_b", "pending")).await });
+    tokio::task::yield_now().await;
+    tokio::task::yield_now().await;
+    assert!(calls.lock().expect("calls").len() >= 4);
+    let started = tokio::time::Instant::now();
+    client.cancel().await.expect("EOF");
+    server.await.expect("runtime task").expect("EOF shutdown");
+    let _outcome = work.await.expect("work task");
+    assert!(
+        started.elapsed() <= std::time::Duration::from_secs(1),
+        "EOF must cancel native prompt without waiting for its deadline"
+    );
+    assert!(
+        calls
+            .lock()
+            .expect("calls")
+            .iter()
+            .any(|call| matches!(call, ObservedCall::Detach(_)))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn mcp_request_cancellation_releases_local_work_and_preserves_retry_identity() {
+    let backend = backend(Default::default());
+    backend.pause_prepare.store(true, std::sync::atomic::Ordering::SeqCst);
+    let paused = backend.pause_prepare.clone();
+    let calls = backend.calls.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+    let server = tokio::spawn(async move {
+        adapter
+            .serve(server_transport)
+            .await
+            .expect("handshake")
+            .waiting()
+            .await
+            .expect("server shutdown")
+    });
+    let client = ().serve(client_transport).await.expect("handshake");
+    let work = client
+        .send_cancellable_request(
+            rmcp::model::ClientRequest::CallToolRequest(rmcp::model::Request::new(prompt("native_b", "stable"))),
+            rmcp::service::PeerRequestOptions::no_options(),
+        )
+        .await
+        .expect("cancellable hook");
+    tokio::task::yield_now().await;
+    tokio::task::yield_now().await;
+    assert_eq!(calls.lock().expect("calls").len(), 2);
+    work.cancel(None).await.expect("native cancellation");
+    paused.store(false, std::sync::atomic::Ordering::SeqCst);
+    let started = tokio::time::Instant::now();
+    let result = client.call_tool(prompt("native_b", "stable")).await.expect("retry");
+    assert_ne!(result.is_error, Some(true));
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(100),
+        "cancelled MCP work must release the operation lock immediately"
+    );
+    let calls = calls.lock().expect("calls").clone();
+    assert_eq!(calls.len(), 4);
+    assert_eq!(calls[0], calls[2]);
+    assert_eq!(calls[1], calls[3]);
+    client.cancel().await.expect("close");
+    server.await.expect("server task");
 }
