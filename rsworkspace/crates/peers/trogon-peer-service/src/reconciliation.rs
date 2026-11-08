@@ -78,19 +78,26 @@ where
                         .ok_or(PeerApplicationError::Scope)?,
                 )
                 .map_err(|_| PeerApplicationError::Input)?;
-                let disposition = if self.clock.now() >= expiry {
+                let mut observed_at = self.clock.now();
+                let disposition = if observed_at >= expiry {
                     Some(TerminalDisposition::Expired)
                 } else {
                     let binding = binding(owner, evidence.metadata())?;
-                    match self.content.open(&scope, &binding).await? {
-                        Some(text) if text.as_str().len() == binding.content().size() as usize => None,
-                        Some(_) => return Err(PeerApplicationError::Scope),
-                        None => Some(TerminalDisposition::Unavailable),
+                    let opened = self.content.open(&scope, &binding).await?;
+                    observed_at = self.clock.now();
+                    if observed_at >= expiry {
+                        Some(TerminalDisposition::Expired)
+                    } else {
+                        match opened {
+                            Some(text) if text.as_str().len() == binding.content().size() as usize => None,
+                            Some(_) => return Err(PeerApplicationError::Scope),
+                            None => Some(TerminalDisposition::Unavailable),
+                        }
                     }
                 };
                 if let Some(disposition) = disposition {
                     match self
-                        .execute_message(owner, &DisposeMessage::new(evidence, disposition, self.clock.now()))
+                        .execute_message(owner, &DisposeMessage::new(evidence, disposition, observed_at))
                         .await
                     {
                         Ok(_) | Err(CommandError::Decide(MessageError::AlreadyDisposed(_))) => {}
@@ -98,7 +105,7 @@ where
                     }
                 } else {
                     match self
-                        .execute_message(owner, &IntakeMessage::new(evidence, self.clock.now()))
+                        .execute_message(owner, &IntakeMessage::new(evidence, observed_at))
                         .await
                     {
                         Ok(_)

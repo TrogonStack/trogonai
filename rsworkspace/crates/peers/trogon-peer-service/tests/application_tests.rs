@@ -6,8 +6,7 @@ use support::*;
 use trogonai_proto::peers::v1alpha1 as proto;
 
 #[tokio::test]
-async fn durable_acceptance_survives_reconstruction_and_exact_retry_with_new_content_location()
--> TestResult {
+async fn durable_acceptance_survives_reconstruction_and_exact_retry_with_new_content_location() -> TestResult {
     let f = Fixture::new().await?;
     let sent = f
         .app()
@@ -33,12 +32,7 @@ async fn durable_acceptance_survives_reconstruction_and_exact_retry_with_new_con
         status.status.and_then(|v| v.as_known()),
         Some(proto::MessageStatus::MESSAGE_STATUS_ACCEPTED)
     );
-    assert!(
-        f.app()
-            .send(&f.alice, f.send("key", "different"))
-            .await
-            .is_err()
-    );
+    assert!(f.app().send(&f.alice, f.send("key", "different")).await.is_err());
     Ok(())
 }
 
@@ -49,12 +43,7 @@ async fn denied_acceptance_touches_no_store_content_cache_or_catalog() -> TestRe
         f.store.reads.load(Ordering::SeqCst),
         f.store.appends.load(Ordering::SeqCst),
     );
-    assert!(
-        f.app()
-            .send(&f.bob, f.send("denied", "private"))
-            .await
-            .is_err()
-    );
+    assert!(f.app().send(&f.bob, f.send("denied", "private")).await.is_err());
     assert_eq!(
         before,
         (
@@ -69,8 +58,7 @@ async fn denied_acceptance_touches_no_store_content_cache_or_catalog() -> TestRe
 }
 
 #[tokio::test]
-async fn explicit_reconciliation_intakes_from_trusted_history_without_settling_early() -> TestResult
-{
+async fn explicit_reconciliation_intakes_from_trusted_history_without_settling_early() -> TestResult {
     let f = Fixture::new().await?;
     let sent = f.app().send(&f.alice, f.send("key", "pending")).await?;
     let id = MessageId::new(
@@ -85,11 +73,9 @@ async fn explicit_reconciliation_intakes_from_trusted_history_without_settling_e
             .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
     )?;
     f.app()
-        .reconcile(&f.alice, &sender, &[id.clone()], WorkLimit::new(1)?)
+        .reconcile(&f.alice, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
         .await?;
-    f.app()
-        .reconcile(&f.alice, &sender, &[id], WorkLimit::new(1)?)
-        .await?;
+    f.app().reconcile(&f.alice, &sender, &[id], WorkLimit::new(1)?).await?;
     let status = f
         .app()
         .status(
@@ -153,13 +139,9 @@ async fn replay_reconciliation_receipt(
 }
 
 #[tokio::test]
-async fn reconciliation_crossing_expiry_during_content_open_records_terminal_receipt() -> TestResult
-{
+async fn reconciliation_crossing_expiry_during_content_open_records_terminal_receipt() -> TestResult {
     let f = Fixture::new().await?;
-    let sent = f
-        .app()
-        .send(&f.alice, f.send("expiry-race", "pending"))
-        .await?;
+    let sent = f.app().send(&f.alice, f.send("expiry-race", "pending")).await?;
     let id = MessageId::new(
         sent.message
             .message_id
@@ -198,20 +180,12 @@ async fn reconciliation_crossing_expiry_during_content_open_records_terminal_rec
     );
 
     assert_eq!(
-        app.reconcile(
-            &f.alice,
-            &sender,
-            std::slice::from_ref(&id),
-            WorkLimit::new(1)?
-        )
-        .await?,
+        app.reconcile(&f.alice, &sender, std::slice::from_ref(&id), WorkLimit::new(1)?)
+            .await?,
         1
     );
     let target = replay_reconciliation_receipt(&f.store, &recipient).await?;
-    assert!(
-        target.inbox.is_empty(),
-        "expired content must not be intaken"
-    );
+    assert!(target.inbox.is_empty(), "expired content must not be intaken");
     assert_eq!(target.dispositions.len(), 1);
     let receipt = target
         .dispositions
