@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 use chrono::{DateTime, TimeZone, Utc};
+use sha2::Digest as _;
 use trogon_decider::{Decider, DecisionError, evaluate_decision};
 use trogon_peer::*;
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
@@ -53,7 +54,6 @@ where
     }
 }
 pub fn claim_check(locator: &str, stored: &[u8]) -> proto::ClaimCheck {
-    use sha2::Digest as _;
     proto::ClaimCheck {
         storage_ref: proto::StorageLocator {
             value: Some(locator.into()),
