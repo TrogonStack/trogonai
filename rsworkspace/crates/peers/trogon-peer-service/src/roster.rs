@@ -39,8 +39,8 @@ where
         let scope = self.authorize(owner, reference.peer_id(), PeerOperation::Roster)?;
         let requester = self.load(owner, reference.peer_id()).await?;
         self.live(owner, &reference, &requester)?;
-        let collaboration = self.collaboration(&requester)?;
-        let members = self.catalog.page(&scope, &collaboration, after.as_ref(), limit).await?;
+        let collaboration = requester.collaboration();
+        let members = self.catalog.page(&scope, collaboration, after.as_ref(), limit).await?;
         if members.len() > limit.get()
             || members.windows(2).any(|p| p[0].as_str() >= p[1].as_str())
             || members
@@ -63,7 +63,7 @@ where
                 Err(error) => return Err(error),
             }
             let state = self.load(owner, &peer).await?;
-            if self.collaboration(&state)? != collaboration {
+            if state.collaboration() != collaboration {
                 return Err(PeerApplicationError::Scope);
             }
             let expires = datetime_from_timestamp(
@@ -77,6 +77,15 @@ where
             let live = state.attachment.status.and_then(|v| v.as_known())
                 == Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
                 && now < expires;
+            if !(-62_135_596_800..=253_402_300_799).contains(&now.timestamp())
+                || now.timestamp_subsec_nanos() >= 1_000_000_000
+            {
+                return Err(PeerApplicationError::Evidence(trogon_peer::MessageError::InvalidState(
+                    trogon_peer::EvolveError::TimestampRange {
+                        field: "presence.observed_at",
+                    },
+                )));
+            }
             peers.push(proto::PeerPresence {
                 peer_id: state.enrollment.peer_id.clone(),
                 display_name: state.enrollment.display_name.clone(),
@@ -85,7 +94,7 @@ where
                 delivery_capability: Some(proto::DeliveryCapability::DELIVERY_CAPABILITY_ON_USER_PROMPT.into()),
                 observed_at: MessageField::some(timestamp_from_datetime(&now)),
                 expires_at: state.attachment.expires_at.clone(),
-                active_at: state.active_at,
+                active_at: state.active_at.clone(),
             });
         }
         Ok(proto::RosterResponse { peers, next_page_token })
