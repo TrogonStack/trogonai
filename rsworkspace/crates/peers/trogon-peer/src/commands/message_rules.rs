@@ -290,8 +290,6 @@ pub(super) fn fold_receipt(state: &mut PeerState, receipt: &proto::RecipientRece
             return Err(EvolveError::InvalidMessageTransition);
         }
         entry.disposition = buffa::MessageField::some(receipt.clone());
-    } else if outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED {
-        return Err(EvolveError::InvalidMessageTransition);
     }
     state.dispositions.push(receipt.clone());
     Ok(())
