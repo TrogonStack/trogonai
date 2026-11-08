@@ -12,6 +12,12 @@ pub enum PeerMcpError {
     InvalidConfig(#[source] trogon_peer::PeerValueError),
     #[error("Peer tool arguments are invalid.")]
     InvalidHostIdentity(#[source] trogon_peer::PeerValueError),
+    #[error("Peer tool arguments are invalid.")]
+    InvalidModelInput(#[source] trogon_peer::PeerValueError),
+    #[error("Peer service returned invalid operation metadata.")]
+    InvalidMetadata,
+    #[error("Peer service returned invalid operation metadata.")]
+    MetadataEncoding(#[source] serde_json::Error),
     #[error("Peer service returned an invalid enrollment.")]
     InvalidEnrollment,
     #[error("Peer service returned an invalid enrollment.")]
@@ -26,4 +32,12 @@ pub enum PeerMcpError {
     Enroll(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("Peer service is unavailable; pending delivery remains queued.")]
     Prepare(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Peer application acknowledgment was not confirmed; retry the same batch.")]
+    Acknowledge(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Peer metadata is unavailable.")]
+    Roster(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Peer send outcome was not confirmed; retry with the same idempotency key.")]
+    Send(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Peer metadata is unavailable.")]
+    Status(#[source] Box<dyn std::error::Error + Send + Sync>),
 }

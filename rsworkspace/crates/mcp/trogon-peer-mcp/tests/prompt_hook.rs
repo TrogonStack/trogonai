@@ -6,7 +6,10 @@ use buffa::MessageField;
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use serde_json::{Value, json};
-use trogon_peer_mcp::{ConnectorConfigInput, EnrollPeer, PeerMcp, PeerMcpError, PreparePeerBatch};
+use trogon_peer_mcp::{
+    AcknowledgePeerBatch, ConnectorConfigInput, EnrollPeer, PeerMcp, PeerMcpError, PreparePeerBatch,
+    ReadPeerMessageStatus, ReadPeerRoster, SendPeerMessage,
+};
 use trogonai_proto::peers::v1alpha1 as v1;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -27,6 +30,41 @@ struct Backend {
 #[derive(Debug, thiserror::Error)]
 #[error("operation is not configured in the prompt-hook fixture")]
 struct UnconfiguredOperationError;
+
+impl ReadPeerRoster for Backend {
+    type Error = UnconfiguredOperationError;
+
+    async fn roster(&self, _request: v1::RosterRequest) -> Result<v1::RosterResponse, Self::Error> {
+        Err(UnconfiguredOperationError)
+    }
+}
+
+impl SendPeerMessage for Backend {
+    type Error = UnconfiguredOperationError;
+
+    async fn send(&self, _request: v1::SendRequest) -> Result<v1::SendResponse, Self::Error> {
+        Err(UnconfiguredOperationError)
+    }
+}
+
+impl ReadPeerMessageStatus for Backend {
+    type Error = UnconfiguredOperationError;
+
+    async fn status(&self, _request: v1::StatusRequest) -> Result<v1::StatusResponse, Self::Error> {
+        Err(UnconfiguredOperationError)
+    }
+}
+
+impl AcknowledgePeerBatch for Backend {
+    type Error = UnconfiguredOperationError;
+
+    async fn acknowledge_batch(
+        &self,
+        _request: v1::AcknowledgeBatchRequest,
+    ) -> Result<v1::AcknowledgeBatchResponse, Self::Error> {
+        Err(UnconfiguredOperationError)
+    }
+}
 
 fn sender_peer_id() -> String {
     "a".repeat(64)
@@ -444,7 +482,7 @@ fn early_wire_error(result: &Value, expected: &str) {
 }
 
 #[tokio::test]
-async fn early_jsonrpc_dispatch_rejects_invalid_inputs_and_preserves_reserved_model_boundaries() {
+async fn jsonrpc_dispatch_rejects_invalid_inputs_and_maps_unconfigured_model_ports() {
     let backend = backend(Default::default());
     let calls = backend.calls.clone();
     let adapter = PeerMcp::new(backend, config()).expect("config");
@@ -471,13 +509,14 @@ async fn early_jsonrpc_dispatch_rejects_invalid_inputs_and_preserves_reserved_mo
         &results[6],
         "This connector belongs to another native session; reconnect it for this session.",
     );
-    for result in &results[7..] {
-        early_wire_error(result, "Peer operation is not available in this adapter layer.");
+    early_wire_error(&results[7], "Peer metadata is unavailable.");
+    for result in &results[8..] {
+        early_wire_error(result, "Peer tool arguments are invalid.");
     }
     assert_eq!(
         calls.lock().expect("calls").len(),
         2,
-        "invalid, unbound, unknown or reserved operations reached a backend port"
+        "invalid, unbound or unknown operations reached an enrollment or preparation port"
     );
 }
 
