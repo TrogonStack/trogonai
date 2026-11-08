@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 mod support;
+use buffa::Message;
 use chrono::TimeZone;
 use support::*;
 use trogon_decider::{Decider, WritePrecondition};
@@ -220,4 +221,179 @@ fn exact_retry_does_not_require_a_new_representable_lifetime() {
         .given_state(state)
         .when(retry)
         .then_error(MessageError::AlreadyAccepted(Box::new(original)));
+}
+
+fn accepted_event(entry: proto::OutboxEntry) -> proto::PeerEvent {
+    proto::PeerEvent {
+        event: Some(proto::PeerMessageAccepted { entry: entry.into() }.into()),
+    }
+}
+
+#[test]
+fn acceptance_replay_reports_the_missing_or_invalid_required_identity_field() {
+    let accepted = run(enrolled("sender", 0), &send(0, 1, 3)).outbox[0].clone();
+    type MetadataMutation = (fn(&mut proto::MessageMetadata), &'static str);
+    let missing: [MetadataMutation; 4] = [
+        (|metadata| metadata.message_id = None, "message_id"),
+        (|metadata| metadata.sender_peer_id = None, "sender_peer_id"),
+        (|metadata| metadata.recipient_peer_id = None, "recipient_peer_id"),
+        (|metadata| metadata.collaboration_ref = None, "collaboration_ref"),
+    ];
+    for (remove, field) in missing {
+        let mut entry = accepted.clone();
+        remove(entry.message.as_option_mut().unwrap());
+        assert!(
+            matches!(commands::state::evolve(enrolled("sender", 0), &accepted_event(entry)),
+            Err(EvolveError::MissingField { field: actual }) if actual == field)
+        );
+    }
+    let invalid: [MetadataMutation; 3] = [
+        (
+            |metadata| metadata.message_id = Some("contains space".into()),
+            "message_id",
+        ),
+        (
+            |metadata| metadata.sender_peer_id = Some("bad".into()),
+            "sender_peer_id",
+        ),
+        (
+            |metadata| metadata.collaboration_ref = Some("contains\ncontrol".into()),
+            "collaboration_ref",
+        ),
+    ];
+    for (mutate, field) in invalid {
+        let mut entry = accepted.clone();
+        mutate(entry.message.as_option_mut().unwrap());
+        assert!(
+            matches!(commands::state::evolve(enrolled("sender", 0), &accepted_event(entry)),
+            Err(EvolveError::InvalidValue { field: actual, .. }) if actual == field)
+        );
+    }
+    let mut no_message = accepted;
+    no_message.message = Default::default();
+    assert!(matches!(
+        commands::state::evolve(enrolled("sender", 0), &accepted_event(no_message)),
+        Err(EvolveError::MissingField { field: "message" })
+    ));
+}
+
+#[test]
+fn acceptance_replay_rejects_duplicate_and_foreign_sender_receipts_with_valid_semantic_hashes() {
+    let state = run(enrolled("sender", 0), &send(0, 1, 3));
+    let duplicate = accepted_event(state.outbox[0].clone());
+    assert!(matches!(
+        commands::state::evolve(state, &duplicate),
+        Err(EvolveError::InvalidMessageTransition)
+    ));
+    let foreign_command = SendMessage::new(
+        identity("foreign").owner().clone(),
+        reference("foreign", 1),
+        IdempotencyKey::new("foreign_key").unwrap(),
+        MessageId::new("foreign_message").unwrap(),
+        identity("recipient").peer_id().clone(),
+        CollaborationRef::new("collaboration").unwrap(),
+        content(3, 1),
+        None,
+        time(1),
+    );
+    let foreign = run(enrolled("foreign", 0), &foreign_command).outbox[0].clone();
+    assert!(matches!(
+        commands::state::evolve(enrolled("sender", 0), &accepted_event(foreign)),
+        Err(EvolveError::InvalidMessageTransition)
+    ));
+}
+
+#[test]
+fn acceptance_replay_requires_the_acceptance_time_to_belong_to_the_current_lease() {
+    let expired = run(enrolled("sender", 10), &send(1, 11, 3)).outbox[0].clone();
+    assert!(matches!(
+        commands::state::evolve(enrolled("sender", 0), &accepted_event(expired)),
+        Err(EvolveError::InvalidMessageTransition)
+    ));
+    let earlier = run(enrolled("sender", 0), &send(2, 1, 3)).outbox[0].clone();
+    assert!(matches!(
+        commands::state::evolve(enrolled("sender", 2), &accepted_event(earlier)),
+        Err(EvolveError::InvalidMessageTransition)
+    ));
+}
+
+#[test]
+fn acceptance_replay_rejects_future_ordering_and_the_eleventh_recent_receipt() {
+    let later = run(enrolled("sender", 0), &send(0, 2, 3));
+    let earlier_entry = run(enrolled("sender", 0), &send(1, 1, 3)).outbox[0].clone();
+    assert!(matches!(
+        commands::state::evolve(later, &accepted_event(earlier_entry)),
+        Err(EvolveError::InvalidMessageTransition)
+    ));
+    let mut recent = enrolled("sender", 0);
+    for index in 0..10 {
+        recent = run(recent, &send(index, 1, 3));
+    }
+    let eleventh = run(enrolled("sender", 0), &send(10, 2, 3)).outbox[0].clone();
+    assert!(matches!(
+        commands::state::evolve(recent, &accepted_event(eleventh)),
+        Err(EvolveError::InvalidMessageTransition)
+    ));
+}
+
+#[test]
+fn new_send_rejects_foreign_collaboration_reused_message_identity_and_future_history() {
+    let foreign_collaboration = SendMessage::new(
+        identity("sender").owner().clone(),
+        reference("sender", 1),
+        IdempotencyKey::new("new_key").unwrap(),
+        MessageId::new("new_message").unwrap(),
+        identity("recipient").peer_id().clone(),
+        CollaborationRef::new("other").unwrap(),
+        content(3, 1),
+        None,
+        time(1),
+    );
+    assert_eq!(
+        error(enrolled("sender", 0), &foreign_collaboration),
+        MessageError::CollaborationMismatch
+    );
+    let state = run(enrolled("sender", 0), &send(0, 1, 3));
+    let reused_id = SendMessage::new(
+        identity("sender").owner().clone(),
+        reference("sender", 1),
+        IdempotencyKey::new("new_key").unwrap(),
+        MessageId::new("message_0").unwrap(),
+        identity("recipient").peer_id().clone(),
+        CollaborationRef::new("collaboration").unwrap(),
+        content(3, 1),
+        None,
+        time(2),
+    );
+    assert_eq!(error(state, &reused_id), MessageError::Conflict);
+    let future = run(enrolled("sender", 0), &send(0, 2, 3));
+    assert_eq!(
+        error(future, &send(1, 1, 3)),
+        MessageError::Guard(HeartbeatError::ClockRegression)
+    );
+}
+
+#[test]
+fn batch_correlation_names_roundtrip_the_wire_carrier_and_reject_invalid_tokens() {
+    let accepted = run(enrolled("sender", 0), &send(0, 1, 3));
+    for name in ["batch_live".to_owned(), "b".repeat(128)] {
+        let id = BatchId::new(name).unwrap();
+        let batch = proto::PeerBatch {
+            batch_id: Some(id.as_str().to_owned()),
+            message_ids: vec![accepted.outbox[0].message.message_id.clone().unwrap()],
+            prepared_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&time(2))),
+            ..Default::default()
+        };
+        let decoded = proto::PeerBatch::decode_from_slice(&batch.encode_to_vec()).unwrap();
+        assert_eq!(decoded.message_ids, batch.message_ids);
+        assert_eq!(BatchId::new(decoded.batch_id.unwrap()).unwrap(), id);
+    }
+    for (invalid, expected) in [
+        (String::new(), PeerValueError::Empty),
+        ("b".repeat(129), PeerValueError::TooLong { maximum: 128 }),
+        ("batch.with.dot".into(), PeerValueError::InvalidCharacter),
+        ("batch\nline".into(), PeerValueError::InvalidCharacter),
+    ] {
+        assert_eq!(BatchId::new(invalid), Err(expected));
+    }
 }
