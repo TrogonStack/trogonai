@@ -2877,3 +2877,24 @@ impl Fixture {
         Ok(sent)
     }
 }
+
+#[tokio::test]
+async fn an_empty_inbox_returns_available_without_allocating_or_persisting_a_presentation() -> TestResult {
+    let f = Fixture::new().await?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let identifiers = f.ids.0.load(Ordering::SeqCst);
+    for _ in 0..2 {
+        let response = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+        assert!(!response.batch.is_set());
+        assert!(response.messages.is_empty());
+        assert_eq!(
+            response.content_availability.and_then(|value| value.as_known()),
+            Some(proto::ContentAvailability::CONTENT_AVAILABILITY_AVAILABLE)
+        );
+        assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+        assert_eq!(f.ids.0.load(Ordering::SeqCst), identifiers);
+        assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    }
+    Ok(())
+}
