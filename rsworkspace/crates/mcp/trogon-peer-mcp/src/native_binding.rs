@@ -7,6 +7,7 @@ use crate::connector_config::ConnectorConfig;
 pub(crate) struct NativeBinding {
     native_session_id: NativeSessionId,
     attachment: Option<AttachmentRef>,
+    detach_confirmed: bool,
 }
 
 impl NativeBinding {
@@ -14,6 +15,7 @@ impl NativeBinding {
         Self {
             native_session_id,
             attachment: None,
+            detach_confirmed: false,
         }
     }
 
@@ -23,6 +25,14 @@ impl NativeBinding {
 
     pub(crate) fn attachment(&self) -> Option<&AttachmentRef> {
         self.attachment.as_ref()
+    }
+
+    pub(crate) fn detach_confirmed(&self) -> bool {
+        self.detach_confirmed
+    }
+
+    pub(crate) fn confirm_detach(&mut self) {
+        self.detach_confirmed = true;
     }
 
     pub(crate) fn revalidate(

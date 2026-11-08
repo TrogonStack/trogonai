@@ -718,3 +718,16 @@ async fn malformed_service_metadata_has_a_safe_public_jsonrpc_diagnostic() {
         assert!(!result.to_string().contains("internal_blob_ref"));
     }
 }
+
+impl trogon_peer_mcp::HeartbeatPeer for Backend {
+    type Error = Infallible;
+    async fn heartbeat(&self, _request: v1::HeartbeatRequest) -> Result<v1::HeartbeatResponse, Self::Error> {
+        Ok(Default::default())
+    }
+}
+impl trogon_peer_mcp::DetachPeer for Backend {
+    type Error = Infallible;
+    async fn detach(&self, _request: v1::DetachRequest) -> Result<v1::DetachResponse, Self::Error> {
+        Ok(Default::default())
+    }
+}
