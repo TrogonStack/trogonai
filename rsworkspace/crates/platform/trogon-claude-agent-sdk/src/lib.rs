@@ -16,6 +16,7 @@ mod model_name;
 mod options;
 mod permission_mode;
 mod prompt;
+mod queue_capacity;
 mod sensitive_string;
 mod session_id;
 mod setting_source;
@@ -62,3 +63,5 @@ pub use mcp_server_name::McpServerName;
 pub use mcp_tool_name::McpToolName;
 
 pub use dialog_kind::DialogKind;
+
+pub use queue_capacity::{QueueCapacity, QueueCapacityError};
