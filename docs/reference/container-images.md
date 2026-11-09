@@ -12,5 +12,8 @@ Images follow the
 | `canary` | The newest build of `main` |
 | `<commit>` | The first build of that full commit SHA, never moved |
 
-The legacy package was removed after all tracked deployments migrated to the
-ADR-compliant path above.
+## Migration
+
+The legacy image reference `ghcr.io/trogonstack/trogonai/trogon-gateway` was
+retired after tracked deployments moved to the ADR-compliant path above. The
+legacy package is no longer published; update consumers to the new path.
