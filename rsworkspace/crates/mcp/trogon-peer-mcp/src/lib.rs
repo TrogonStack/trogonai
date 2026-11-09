@@ -5,6 +5,7 @@ mod native_binding;
 mod peer_mcp;
 mod peer_mcp_error;
 mod peer_mcp_error_code;
+mod peer_mcp_error_content;
 mod prompt_hook_context;
 mod prompt_hook_event;
 mod prompt_hook_input;
