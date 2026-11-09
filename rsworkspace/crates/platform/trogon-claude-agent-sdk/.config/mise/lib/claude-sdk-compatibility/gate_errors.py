@@ -12,4 +12,6 @@ class Code(StrEnum):
 
 
 class GateError(ValueError):
-    pass
+    def __init__(self, code: Code, selector: str):
+        self.code, self.selector = code, selector
+        super().__init__(f"{code}: {selector}")
