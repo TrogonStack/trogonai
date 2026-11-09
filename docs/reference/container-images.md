@@ -5,7 +5,7 @@ Images follow the
 
 | Image | Platforms | Dockerfile |
 |---|---|---|
-| `ghcr.io/trogonstack/images/trogonai/trogon-gateway` | `linux/amd64` | `devops/docker/images/trogon-gateway/` |
+| `ghcr.io/trogonstack/images/trogonai/trogon-gateway` | `linux/amd64`, `linux/arm64` | `devops/docker/images/trogon-gateway/` |
 
 | Tag | Points at |
 |---|---|
