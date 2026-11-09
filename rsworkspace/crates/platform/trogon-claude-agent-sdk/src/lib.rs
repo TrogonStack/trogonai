@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+mod agent_name;
 mod client;
 mod effort_level;
 mod error;
@@ -17,3 +18,5 @@ pub use setting_source::SettingSource;
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 
 pub use effort_level::EffortLevel;
+
+pub use agent_name::{AgentName, AgentNameError};
