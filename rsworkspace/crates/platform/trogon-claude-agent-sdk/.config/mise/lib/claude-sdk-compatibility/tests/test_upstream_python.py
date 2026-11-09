@@ -52,3 +52,12 @@ class PythonDeclarationTests(unittest.TestCase):
                        SOURCE.replace(b'Literal["default", "plan"]', b'Literal["plan", "plan"]')):
             with self.subTest(source=source), self.assertRaises(GateError):
                 read(source)
+
+    def test_selected_rebindings_and_inherited_options_cannot_be_silently_ignored(self):
+        for source in (SOURCE + b'\nPermissionMode = Other = Literal["again"]\n',
+                       SOURCE + b'\nClaudeAgentOptions = object\n',
+                       SOURCE + b'\ndef PermissionMode(): pass\n',
+                       SOURCE + b'\ntype SettingSource = str\n',
+                       SOURCE.replace(b'class ClaudeAgentOptions:', b'class ClaudeAgentOptions(Base):')):
+            with self.subTest(source=source), self.assertRaises(GateError):
+                read(source)
