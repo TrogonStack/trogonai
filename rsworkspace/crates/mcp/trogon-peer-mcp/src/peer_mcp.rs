@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Duration;
 
 use rmcp::ServerHandler;
 use rmcp::model::{
@@ -44,7 +45,12 @@ impl<B: EnrollPeer + PreparePeerBatch> PeerMcp<B> {
 
     pub async fn invoke(&self, request: CallToolRequestParams) -> Result<CallToolResult, PeerMcpError> {
         match request.name.as_ref() {
-            "peer_prompt_hook" => self.prompt_hook(request).await,
+            "peer_prompt_hook" => {
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+                tokio::time::timeout_at(deadline, self.prompt_hook(request))
+                    .await
+                    .map_err(|_| PeerMcpError::PromptDeadline)?
+            }
             "peer_roster" | "peer_send" | "peer_status" | "peer_acknowledge_batch" => {
                 let binding = self.binding.lock().await;
                 if binding.as_ref().and_then(NativeBinding::attachment).is_none() {
@@ -163,7 +169,11 @@ impl<B: EnrollPeer + PreparePeerBatch> ServerHandler for PeerMcp<B> {
     ) -> Result<CallToolResponse, ErrorData> {
         let result = match self.invoke(request).await {
             Ok(result) => result,
-            Err(error) => CallToolResult::error(vec![ContentBlock::text(error.to_string())]),
+            Err(error) => {
+                let mut result = CallToolResult::error(vec![ContentBlock::text(error.to_string())]);
+                result.structured_content = Some(serde_json::json!({"code":error.code()}));
+                result
+            }
         };
         Ok(CallToolResponse::Complete(result))
     }

@@ -8,7 +8,7 @@ use std::time::Duration;
 use rmcp::ServiceExt;
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
-use trogon_peer_mcp::{ConnectorConfigInput, EnrollPeer, PeerMcp, PreparePeerBatch};
+use trogon_peer_mcp::{ConnectorConfigInput, EnrollPeer, PeerMcp, PeerMcpError, PeerMcpErrorCode, PreparePeerBatch};
 use trogonai_proto::peers::v1alpha1 as v1;
 
 #[derive(Clone, Copy)]
@@ -181,6 +181,99 @@ async fn served_codes_distinguish_typed_failures_with_the_same_safe_message() {
     assert_eq!(missing[0]["content"], invalid[0]["content"]);
     assert_code(&missing[0], "invalid_enrollment");
     assert_code(&invalid[0], "invalid_enrollment_identity");
+}
+
+#[tokio::test(start_paused = true)]
+async fn served_prompt_deadline_has_a_safe_stable_code() {
+    let result = served(Backend::new(Work::Pending, Work::Ready), vec![prompt("native_b")]).await;
+    assert_code(&result[0], "prompt_deadline");
+    assert_eq!(
+        result[0]["content"][0]["text"],
+        "Peer hook deadline elapsed; retry the same prompt identity. Remote outcome is uncertain."
+    );
+}
+
+#[test]
+fn typed_error_codes_have_distinct_stable_wire_names_without_serializing_sources() {
+    fn json_error() -> serde_json::Error {
+        serde_json::from_value::<String>(json!({"untrusted_argument_content":true})).expect_err("invalid string")
+    }
+    let errors = [
+        (
+            PeerMcpError::PromptDeadline,
+            PeerMcpErrorCode::PromptDeadline,
+            "prompt_deadline",
+        ),
+        (PeerMcpError::Unbound, PeerMcpErrorCode::Unbound, "unbound"),
+        (
+            PeerMcpError::NativeSessionChanged,
+            PeerMcpErrorCode::NativeSessionChanged,
+            "native_session_changed",
+        ),
+        (
+            PeerMcpError::InvalidArguments(json_error()),
+            PeerMcpErrorCode::InvalidArguments,
+            "invalid_arguments",
+        ),
+        (
+            PeerMcpError::InvalidBatch(trogon_peer_context::PeerContextError::ContractViolation),
+            PeerMcpErrorCode::InvalidBatch,
+            "invalid_batch",
+        ),
+        (
+            PeerMcpError::InvalidConfig(trogon_peer::PeerValueError::Empty),
+            PeerMcpErrorCode::InvalidConfig,
+            "invalid_config",
+        ),
+        (
+            PeerMcpError::InvalidHostIdentity(trogon_peer::PeerValueError::Empty),
+            PeerMcpErrorCode::InvalidHostIdentity,
+            "invalid_host_identity",
+        ),
+        (
+            PeerMcpError::InvalidEnrollment,
+            PeerMcpErrorCode::InvalidEnrollment,
+            "invalid_enrollment",
+        ),
+        (
+            PeerMcpError::InvalidEnrollmentIdentity(trogon_peer::PeerValueError::InvalidPeerId),
+            PeerMcpErrorCode::InvalidEnrollmentIdentity,
+            "invalid_enrollment_identity",
+        ),
+        (
+            PeerMcpError::UnsupportedTool,
+            PeerMcpErrorCode::UnsupportedTool,
+            "unsupported_tool",
+        ),
+        (
+            PeerMcpError::RetryContentUnavailable,
+            PeerMcpErrorCode::RetryContentUnavailable,
+            "retry_content_unavailable",
+        ),
+        (PeerMcpError::Encode(json_error()), PeerMcpErrorCode::Encode, "encode"),
+        (
+            PeerMcpError::Enroll(Box::new(BackendError)),
+            PeerMcpErrorCode::Enroll,
+            "enroll",
+        ),
+        (
+            PeerMcpError::Prepare(Box::new(BackendError)),
+            PeerMcpErrorCode::Prepare,
+            "prepare",
+        ),
+    ];
+    let mut names = std::collections::BTreeSet::new();
+    for (error, code, name) in errors {
+        assert_eq!(error.code(), code);
+        assert_eq!(serde_json::to_value(code).expect("serialized code"), json!(name));
+        assert!(names.insert(name), "typed variants must have distinct codes");
+    }
+    let error = PeerMcpError::Enroll(Box::new(BackendError));
+    assert!(
+        std::error::Error::source(&error)
+            .expect("retained source")
+            .is::<BackendError>()
+    );
 }
 
 #[tokio::test(start_paused = true)]

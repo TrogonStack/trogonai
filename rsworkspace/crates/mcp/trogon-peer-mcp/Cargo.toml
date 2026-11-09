@@ -13,7 +13,7 @@ rmcp = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 trogon-peer = { path = "../../peers/trogon-peer" }
 trogon-peer-context = { path = "../../peers/trogon-peer-context" }
 trogonai-proto = { path = "../../platform/trogonai-proto", features = ["peers"] }
