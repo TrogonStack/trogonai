@@ -14,6 +14,7 @@ import "trogonai/platform/audit/v1/credential_use.proto";
 import "trogonai/platform/audit/v1/gateway_decision.proto";
 import "trogonai/platform/audit/v1/integrity.proto";
 import "trogonai/platform/audit/v1/writer_lifecycle.proto";
+import "trogonai/platform/workload_identity/v1alpha1/credential_activation.proto";
 import "trogonai/projects/projects/v1alpha1/identity.proto";
 
 // AuditRecord is the one envelope every platform audit record shares.
@@ -27,6 +28,21 @@ import "trogonai/projects/projects/v1alpha1/identity.proto";
 // in this package has a type that could hold one, and there is no free-text
 // field a caller fills.
 message AuditRecord {
+  option (buf.validate.message).cel = {
+    id: "audit_record.readiness_probe_integrity"
+    message: "readiness probes are must-audit integrity records without decision attribution"
+    expression: "!has(this.writer_lifecycle) || this.writer_lifecycle.kind != 3 || (this.class == 1 && !has(this.attribution))"
+  };
+  option (buf.validate.message).cel = {
+    id: "audit_record.workload_peer_scope"
+    message: "authenticated workload evidence requires an enforced must-audit egress decision under its exact registered actor and scope"
+    expression: "!has(this.gateway_decision) || !has(this.gateway_decision.workload_peer) || (this.class == 1 && this.gateway_decision.surface == 2 && has(this.attribution) && this.attribution.enforcement_mode == 1 && !this.attribution.would_deny && has(this.actor.agent) && this.gateway_decision.workload_peer.peer_binding.tenant == this.tenant.value && this.gateway_decision.workload_peer.peer_binding.project == this.project.value && this.gateway_decision.workload_peer.peer_binding.application_id == this.actor.agent.agent_id.value)"
+  };
+  option (buf.validate.message).cel = {
+    id: "audit_record.credential_activation_scope"
+    message: "credential activation is must-audit under its exact registered scope"
+    expression: "!has(this.credential_activation) || (this.class == 1 && this.credential_activation.binding.tenant == this.tenant.value && this.credential_activation.binding.project == this.project.value && has(this.attribution) && this.attribution.decision == 1 && this.attribution.enforcement_mode == 1 && !this.attribution.would_deny)"
+  };
   option (buf.validate.message).cel = {
     id: "audit_record.attribution_on_decisions_and_credentials"
     message: "a decision or credential record carries its attribution"
@@ -79,5 +95,6 @@ message AuditRecord {
     CredentialUse credential_use = 14;
     Change change = 15;
     WriterLifecycle writer_lifecycle = 16;
+    trogonai.platform.workload_identity.v1alpha1.CredentialActivation credential_activation = 17;
   }
 }

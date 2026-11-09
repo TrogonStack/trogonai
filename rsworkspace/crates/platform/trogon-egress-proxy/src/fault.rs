@@ -10,6 +10,7 @@ use crate::constants::{FAULT_HEADER, RETRY_AFTER_SECONDS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Fault {
+    AuthorityExpired,
     /// No permit of the calling agent names the destination.
     NoPermit,
     /// The destination resolves only to addresses the policy did not intend.
@@ -35,6 +36,7 @@ pub enum Fault {
 impl Fault {
     pub fn code(self) -> &'static str {
         match self {
+            Self::AuthorityExpired => "AUTHORITY_EXPIRED",
             Self::NoPermit => "NO_PERMIT",
             Self::AddressForbidden => "ADDRESS_FORBIDDEN",
             Self::SniMismatch => "SNI_MISMATCH",
@@ -51,6 +53,7 @@ impl Fault {
     /// audit vocabulary spells it.
     pub fn reason_code(self) -> &'static str {
         match self {
+            Self::AuthorityExpired => "authority_expired",
             Self::NoPermit => "no_permit",
             Self::AddressForbidden => "address_forbidden",
             Self::SniMismatch => "sni_mismatch",
@@ -64,7 +67,7 @@ impl Fault {
 
     pub fn status(self) -> Status {
         match self {
-            Self::NoPermit | Self::AddressForbidden | Self::SniMismatch => Status::Forbidden,
+            Self::AuthorityExpired | Self::NoPermit | Self::AddressForbidden | Self::SniMismatch => Status::Forbidden,
             Self::PolicyUnavailable | Self::AuditUnavailable => Status::ServiceUnavailable,
             Self::UpstreamUnreachable => Status::BadGateway,
             Self::MethodNotAllowed => Status::MethodNotAllowed,

@@ -1,0 +1,304 @@
+{
+  "templates": {
+    "peer": {
+      "type": "trogonai.platform.workload_identity.v1alpha1.WorkloadPeerEvidence",
+      "payload": {
+        "peerBinding": {
+          "spiffeId": "spiffe://example.test/workload/one",
+          "tenant": "tenant_1",
+          "project": "project_1",
+          "role": 2,
+          "applicationId": "agent-7"
+        },
+        "peerLeafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "peerPathExpiresAt": "2030-01-01T00:01:00Z",
+        "recoveryFence": "1",
+        "registrationRevision": "2",
+        "trustRevision": "3",
+        "verifierSourceRevision": "4",
+        "verifierActivationRevision": "5",
+        "verifierBundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+      }
+    },
+    "record": {
+      "type": "trogonai.platform.audit.v1.AuditRecord",
+      "payload": {
+        "recordId": "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f01",
+        "class": 1,
+        "occurredAt": "2030-01-01T00:00:00Z",
+        "recordedAt": "2030-01-01T00:00:00Z",
+        "tenant": {
+          "value": "tenant_1"
+        },
+        "project": {
+          "value": "project_1"
+        },
+        "actor": {
+          "agent": {
+            "agentId": {
+              "value": "agent-7"
+            }
+          }
+        },
+        "attribution": {
+          "decision": 1,
+          "enforcementMode": 1,
+          "wouldDeny": false
+        },
+        "gatewayDecision": {
+          "surface": 2,
+          "target": "api.example.test",
+          "workloadPeer": {
+            "peerBinding": {
+              "spiffeId": "spiffe://example.test/workload/one",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 2,
+              "applicationId": "agent-7"
+            },
+            "peerLeafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            "peerPathExpiresAt": "2030-01-01T00:01:00Z",
+            "recoveryFence": "1",
+            "registrationRevision": "2",
+            "trustRevision": "3",
+            "verifierSourceRevision": "4",
+            "verifierActivationRevision": "5",
+            "verifierBundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+          }
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "workload peer identifies authenticated runtime",
+      "template": "record"
+    },
+    {
+      "name": "workload peer refusal survives expiry",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attribution/decision",
+          "value": 2
+        },
+        {
+          "op": "replace",
+          "path": "/occurredAt",
+          "value": "2030-01-01T00:02:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/recordedAt",
+          "value": "2030-01-01T00:02:00Z"
+        }
+      ]
+    },
+    {
+      "name": "workload peer cannot relabel actor",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/actor/agent/agentId/value",
+          "value": "agent-8"
+        }
+      ],
+      "violations": [
+        "authenticated workload evidence requires an enforced must-audit egress decision under its exact registered actor and scope"
+      ]
+    },
+    {
+      "name": "workload peer cannot cross tenant",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/tenant/value",
+          "value": "tenant_2"
+        }
+      ],
+      "violations": [
+        "authenticated workload evidence requires an enforced must-audit egress decision under its exact registered actor and scope"
+      ]
+    },
+    {
+      "name": "workload peer cannot select best effort",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/class",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "authenticated workload evidence requires an enforced must-audit egress decision under its exact registered actor and scope"
+      ]
+    },
+    {
+      "name": "workload peer cannot select another surface",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/gatewayDecision/surface",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "authenticated workload evidence requires an enforced must-audit egress decision under its exact registered actor and scope"
+      ]
+    },
+    {
+      "name": "workload peer cannot use an unknown fingerprint shape",
+      "template": "peer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/peerLeafSha256",
+          "value": "AA=="
+        }
+      ],
+      "violations": [
+        "must be 32 bytes"
+      ]
+    },
+    {
+      "name": "workload peer requires verifier generation",
+      "template": "peer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/verifierActivationRevision",
+          "value": "0"
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
+      ]
+    },
+    {
+      "name": "workload peer requires agent registration",
+      "template": "peer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/peerBinding/role",
+          "value": 3
+        },
+        {
+          "op": "remove",
+          "path": "/peerBinding/applicationId"
+        }
+      ],
+      "violations": [
+        "authenticated workload peer registration must name an agent"
+      ]
+    },
+    {
+      "name": "workload peer static compatibility remains absent",
+      "template": "record",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/gatewayDecision/workloadPeer"
+        },
+        {
+          "op": "replace",
+          "path": "/class",
+          "value": 2
+        }
+      ]
+    },
+    {
+      "name": "workload peer can distinguish another runtime of the same application",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/gatewayDecision/workloadPeer/peerBinding/spiffeId",
+          "value": "spiffe://example.test/workload/two"
+        },
+        {
+          "op": "replace",
+          "path": "/gatewayDecision/workloadPeer/peerLeafSha256",
+          "value": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI="
+        }
+      ]
+    },
+    {
+      "name": "workload peer cannot select dry run",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attribution/enforcementMode",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "authenticated workload evidence requires an enforced must-audit egress decision under its exact registered actor and scope"
+      ]
+    },
+    {
+      "name": "workload peer cannot invent an unattributed application actor",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/actor",
+          "value": {
+            "unattributed": {}
+          }
+        }
+      ],
+      "violations": [
+        "authenticated workload evidence requires an enforced must-audit egress decision under its exact registered actor and scope"
+      ]
+    },
+    {
+      "name": "workload peer cannot cross project",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/project/value",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "authenticated workload evidence requires an enforced must-audit egress decision under its exact registered actor and scope"
+      ]
+    },
+    {
+      "name": "workload peer requires supported path expiry",
+      "template": "peer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/peerPathExpiresAt",
+          "value": "1970-01-01T00:00:00Z"
+        }
+      ],
+      "violations": [
+        "peer_path_expires_at"
+      ]
+    },
+    {
+      "name": "workload peer requires exact verifier trust fingerprint",
+      "template": "peer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/verifierBundleSha256",
+          "value": "AA=="
+        }
+      ],
+      "violations": [
+        "must be 32 bytes"
+      ]
+    }
+  ]
+}
