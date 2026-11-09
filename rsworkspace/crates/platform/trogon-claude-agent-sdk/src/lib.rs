@@ -34,4 +34,4 @@ pub use session_id::{SessionId, SessionIdError};
 
 pub use message_id::{MessageId, MessageIdError};
 
-pub use tool_use_id::{ToolUseId, ToolUseIdError};
+pub use tool_use_id::ToolUseId;
