@@ -129,3 +129,6 @@ They prepare values for later runtime slices without implementing wire dispatch.
 | `QueueCapacity` | Rust host-side bounded-channel policy; not an upstream SDK class | Positive and no larger than Tokio's `Semaphore::MAX_PERMITS`; the value creates no channel. |
 | `Timeout` | Rust host-side wait policy; not an upstream SDK class | A positive duration no longer than the runtime draft's 24-hour maximum; no clock is read. |
 | `StderrTail` | Rust diagnostic byte container for later child-process failures; not an upstream SDK class | Read-only public bytes and a content-free debug representation. Only the empty default is publicly constructible in this API slice. |
+
+Message data declarations are reviewed separately in the
+[message data reference](docs/reference/message-data.md).
