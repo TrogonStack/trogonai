@@ -2,6 +2,7 @@
 // source: trogonai/policy/holds/v1alpha1/hold.proto
 
 /// How much a hold stops. Unknown and unspecified scopes reject.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum HoldScope {

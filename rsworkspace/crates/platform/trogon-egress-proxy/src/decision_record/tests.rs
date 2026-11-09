@@ -25,10 +25,12 @@ fn record_for(destination: Option<&Destination>, decision: Decision) -> Record {
     let source = source();
     let event = AuditEvent {
         agent: &agent,
+        workload_peer: None,
         destination,
         resolved_address: Some("93.184.216.34".parse().expect("ip")),
         decision,
         snapshot_source: &source,
+        policy_revision: None,
     };
     let stamper = Stamper::new(SystemClock, UuidV7Generator);
     decision_record(
@@ -144,5 +146,77 @@ fn every_fault_has_a_reason_code_the_record_accepts() {
             record.message().attribution.reason_code.as_deref(),
             Some(fault.reason_code())
         );
+    }
+}
+
+#[test]
+fn live_decision_provenance_binds_the_epoch_and_observed_producer_generation() {
+    let source = PolicySource::NatsKv {
+        bucket: "egress_policy".into(),
+        incarnation: std::num::NonZeroU64::new(7).unwrap(),
+    };
+    let agent = AgentId::new("agent-1").unwrap();
+    let target = destination("api.example.com:443");
+    let event = AuditEvent {
+        agent: &agent,
+        workload_peer: None,
+        destination: Some(&target),
+        resolved_address: None,
+        decision: Decision::Permitted,
+        snapshot_source: &source,
+        policy_revision: Some(crate::policy_revision::PolicyRevision {
+            incarnation: std::num::NonZeroU64::new(7).unwrap(),
+            generation: std::num::NonZeroU64::new(42).unwrap(),
+        }),
+    };
+    let record = decision_record(
+        &event,
+        &AuditName::new("acme").unwrap(),
+        &NatsToken::new("payments").unwrap(),
+        Stamper::new(SystemClock, UuidV7Generator).stamp(),
+    )
+    .unwrap();
+    assert_eq!(
+        record.message().attribution.policy_source.as_deref(),
+        Some("nats_kv:egress_policy:7")
+    );
+    assert_eq!(record.message().attribution.projection_revision, Some(42));
+    assert_eq!(record.message().tenant.value, "acme");
+    assert_eq!(record.message().project.value, "payments");
+}
+
+#[test]
+fn live_permit_audit_refuses_missing_or_cross_incarnation_evidence() {
+    let source = PolicySource::NatsKv {
+        bucket: "egress_policy".into(),
+        incarnation: std::num::NonZeroU64::new(7).unwrap(),
+    };
+    let agent = AgentId::new("agent-1").unwrap();
+    let target = destination("api.example.com:443");
+    for policy_revision in [
+        None,
+        Some(crate::policy_revision::PolicyRevision {
+            incarnation: std::num::NonZeroU64::new(8).unwrap(),
+            generation: std::num::NonZeroU64::new(42).unwrap(),
+        }),
+    ] {
+        let event = AuditEvent {
+            agent: &agent,
+            workload_peer: None,
+            destination: Some(&target),
+            resolved_address: None,
+            decision: Decision::Permitted,
+            snapshot_source: &source,
+            policy_revision,
+        };
+        assert!(matches!(
+            decision_record(
+                &event,
+                &AuditName::new("acme").unwrap(),
+                &NatsToken::new("payments").unwrap(),
+                Stamper::new(SystemClock, UuidV7Generator).stamp()
+            ),
+            Err(AuditError::PolicyEvidence)
+        ));
     }
 }
