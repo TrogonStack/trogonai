@@ -80,31 +80,31 @@ pub mod variable_type {
             Self::Some(Kind::from(v))
         }
     }
-    impl serde::Serialize for Kind {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Kind {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::StringType(v) => {
-                    map.serialize_entry("stringType", v)?;
+                    map.serialize_entry("stringType", &**v)?;
                 }
                 Self::BooleanType(v) => {
-                    map.serialize_entry("booleanType", v)?;
+                    map.serialize_entry("booleanType", &**v)?;
                 }
                 Self::IntegerType(v) => {
-                    map.serialize_entry("integerType", v)?;
+                    map.serialize_entry("integerType", &**v)?;
                 }
                 Self::NumberType(v) => {
-                    map.serialize_entry("numberType", v)?;
+                    map.serialize_entry("numberType", &**v)?;
                 }
                 Self::ListType(v) => {
-                    map.serialize_entry("listType", v)?;
+                    map.serialize_entry("listType", &**v)?;
                 }
                 Self::ObjectType(v) => {
-                    map.serialize_entry("objectType", v)?;
+                    map.serialize_entry("objectType", &**v)?;
                 }
             }
             map.end()

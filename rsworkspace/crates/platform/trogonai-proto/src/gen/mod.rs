@@ -730,6 +730,35 @@ pub mod trogonai {
                 include!("trogonai.platform.audit.v1.mod.rs");
             }
         }
+        #[allow(
+            non_camel_case_types,
+            dead_code,
+            unused_imports,
+            unused_qualifications,
+            clippy::derivable_impls,
+            clippy::match_single_binding,
+            clippy::uninlined_format_args,
+            clippy::doc_lazy_continuation,
+            clippy::module_inception
+        )]
+        pub mod workload_identity {
+            use super::*;
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
+            pub mod v1alpha1 {
+                use super::*;
+                include!("trogonai.platform.workload_identity.v1alpha1.mod.rs");
+            }
+        }
     }
     #[allow(
         non_camel_case_types,

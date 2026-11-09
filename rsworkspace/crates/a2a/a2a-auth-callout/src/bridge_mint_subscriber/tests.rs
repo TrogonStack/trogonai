@@ -13,6 +13,8 @@ use crate::credentials::oidc::BearerToken;
 use crate::jwt::MintedUserJwt;
 use crate::wire::ServerAuthRequestClaims;
 
+mod overload_tests;
+
 const WAIT: Duration = Duration::from_secs(5);
 
 enum Outcome {

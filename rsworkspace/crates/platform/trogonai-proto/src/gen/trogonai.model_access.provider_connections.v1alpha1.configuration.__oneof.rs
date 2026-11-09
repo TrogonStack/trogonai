@@ -34,19 +34,19 @@ pub mod provider_endpoint {
             Self::Some(Endpoint::from(v))
         }
     }
-    impl serde::Serialize for Endpoint {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Endpoint {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Network(v) => {
-                    map.serialize_entry("network", v)?;
+                    map.serialize_entry("network", &**v)?;
                 }
                 Self::DeploymentLocal(v) => {
-                    map.serialize_entry("deploymentLocal", v)?;
+                    map.serialize_entry("deploymentLocal", &**v)?;
                 }
             }
             map.end()
