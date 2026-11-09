@@ -113,4 +113,4 @@ They prepare values for later runtime slices without implementing wire dispatch.
 
 | Rust value | Upstream scalar or purpose | Rust boundary |
 | --- | --- | --- |
-| `Prompt` | [Python `query(prompt=...)`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/query.py#L11) / TypeScript `query` string prompt | Nonempty and NUL-free; multiline, whitespace and Unicode text remain valid. |
+| `Prompt` | [Python `ClaudeSDKClient.query(prompt=...)`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L272) / TypeScript `query` string prompt | Infallible owned string storage; empty strings and control characters remain unchanged. |
