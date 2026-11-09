@@ -19,3 +19,11 @@ class CohortTests(unittest.TestCase):
         self.assertEqual(result.get('UserMessage.content'), {'annotation': 'str', 'default': "'hello'"})
         with self.assertRaises(Exception):
             read("class TextBlock(Base):\n    text: str\n")
+
+    def test_typed_dict_forms_use_import_identity_and_preserve_total(self):
+        for declaration in ("class MessageOrigin(TypedDict, total=False):\n    value: R[str]\n",
+                            "MessageOrigin = TypedDict('MessageOrigin', {'value': R[str]}, total=False)\n"):
+            result = read('from typing import Required as R\n' + declaration)
+            self.assertEqual(result.get('MessageOrigin'), {'kind': 'typed-dict', 'total': False,
+                             **({'decorators': []} if declaration.startswith('class') else {})})
+            self.assertEqual(result.get('MessageOrigin.value'), {'annotation': 'R[str]', 'required': True})
