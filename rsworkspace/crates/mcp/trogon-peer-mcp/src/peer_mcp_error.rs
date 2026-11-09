@@ -1,5 +1,9 @@
+use crate::PeerMcpErrorCode;
+
 #[derive(Debug, thiserror::Error)]
 pub enum PeerMcpError {
+    #[error("Peer hook deadline elapsed; retry the same prompt identity. Remote outcome is uncertain.")]
+    PromptDeadline,
     #[error("Peer connector has not enrolled a native session.")]
     Unbound,
     #[error("This connector belongs to another native session; reconnect it for this session.")]
@@ -40,4 +44,32 @@ pub enum PeerMcpError {
     Send(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("Peer metadata is unavailable.")]
     Status(#[source] Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl PeerMcpError {
+    pub const fn code(&self) -> crate::PeerMcpErrorCode {
+        match self {
+            Self::PromptDeadline => PeerMcpErrorCode::PromptDeadline,
+            Self::Unbound => PeerMcpErrorCode::Unbound,
+            Self::NativeSessionChanged => PeerMcpErrorCode::NativeSessionChanged,
+            Self::InvalidArguments(_) => PeerMcpErrorCode::InvalidArguments,
+            Self::InvalidBatch(_) => PeerMcpErrorCode::InvalidBatch,
+            Self::InvalidConfig(_) => PeerMcpErrorCode::InvalidConfig,
+            Self::InvalidHostIdentity(_) => PeerMcpErrorCode::InvalidHostIdentity,
+            Self::InvalidModelInput(_) => PeerMcpErrorCode::InvalidModelInput,
+            Self::InvalidMetadata => PeerMcpErrorCode::InvalidMetadata,
+            Self::MetadataEncoding(_) => PeerMcpErrorCode::MetadataEncoding,
+            Self::InvalidEnrollment => PeerMcpErrorCode::InvalidEnrollment,
+            Self::InvalidEnrollmentIdentity(_) => PeerMcpErrorCode::InvalidEnrollmentIdentity,
+            Self::UnsupportedTool => PeerMcpErrorCode::UnsupportedTool,
+            Self::RetryContentUnavailable => PeerMcpErrorCode::RetryContentUnavailable,
+            Self::Encode(_) => PeerMcpErrorCode::Encode,
+            Self::Enroll(_) => PeerMcpErrorCode::Enroll,
+            Self::Prepare(_) => PeerMcpErrorCode::Prepare,
+            Self::Acknowledge(_) => PeerMcpErrorCode::Acknowledge,
+            Self::Roster(_) => PeerMcpErrorCode::Roster,
+            Self::Send(_) => PeerMcpErrorCode::Send,
+            Self::Status(_) => PeerMcpErrorCode::Status,
+        }
+    }
 }

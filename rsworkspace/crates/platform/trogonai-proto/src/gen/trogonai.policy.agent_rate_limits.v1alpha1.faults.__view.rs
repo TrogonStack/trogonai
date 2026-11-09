@@ -14,9 +14,11 @@ impl<'a> ::buffa::MessageView<'a> for AgentRateLimitCommandInvalidErrorView<'a> 
     type Owned = super::super::AgentRateLimitCommandInvalidError;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        let __elem = ::core::cell::Cell::new(::buffa::DEFAULT_ELEMENT_MEMORY_LIMIT);
         <Self as ::buffa::MessageView>::decode_view_ctx(
             buf,
-            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit)
+                .with_element_memory(&__elem),
         )
     }
     fn decode_view_with_ctx(
@@ -249,9 +251,11 @@ impl<'a> ::buffa::MessageView<'a> for AgentRateLimitNotInitializedErrorView<'a> 
     type Owned = super::super::AgentRateLimitNotInitializedError;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        let __elem = ::core::cell::Cell::new(::buffa::DEFAULT_ELEMENT_MEMORY_LIMIT);
         <Self as ::buffa::MessageView>::decode_view_ctx(
             buf,
-            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit)
+                .with_element_memory(&__elem),
         )
     }
     fn decode_view_with_ctx(
@@ -484,9 +488,11 @@ impl<'a> ::buffa::MessageView<'a> for AgentRateLimitAlreadyInitializedErrorView<
     type Owned = super::super::AgentRateLimitAlreadyInitializedError;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        let __elem = ::core::cell::Cell::new(::buffa::DEFAULT_ELEMENT_MEMORY_LIMIT);
         <Self as ::buffa::MessageView>::decode_view_ctx(
             buf,
-            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit)
+                .with_element_memory(&__elem),
         )
     }
     fn decode_view_with_ctx(
@@ -721,9 +727,11 @@ impl<'a> ::buffa::MessageView<'a> for AgentRateLimitIdentityMismatchErrorView<'a
     type Owned = super::super::AgentRateLimitIdentityMismatchError;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        let __elem = ::core::cell::Cell::new(::buffa::DEFAULT_ELEMENT_MEMORY_LIMIT);
         <Self as ::buffa::MessageView>::decode_view_ctx(
             buf,
-            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit)
+                .with_element_memory(&__elem),
         )
     }
     fn decode_view_with_ctx(
