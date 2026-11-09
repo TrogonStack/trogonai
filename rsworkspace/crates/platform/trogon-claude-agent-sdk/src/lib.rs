@@ -37,4 +37,4 @@ pub use message_id::{MessageId, MessageIdError};
 
 pub use tool_use_id::{ToolUseId, ToolUseIdError};
 
-pub use control_request_id::{ControlRequestId, ControlRequestIdError};
+pub use control_request_id::ControlRequestId;
