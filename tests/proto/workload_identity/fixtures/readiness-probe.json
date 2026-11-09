@@ -1,0 +1,87 @@
+{
+  "templates": {
+    "probe": {
+      "type": "trogonai.platform.audit.v1.WriterLifecycle",
+      "payload": {
+        "kind": 3
+      }
+    },
+    "record": {
+      "type": "trogonai.platform.audit.v1.AuditRecord",
+      "payload": {
+        "recordId": "018f05a5-8d50-7000-8000-000000000001",
+        "class": 1,
+        "occurredAt": "2030-01-01T00:00:00Z",
+        "recordedAt": "2030-01-01T00:00:00Z",
+        "tenant": {
+          "value": "tenant_1"
+        },
+        "project": {
+          "value": "project_1"
+        },
+        "actor": {
+          "unattributed": {}
+        },
+        "writerLifecycle": {
+          "kind": 3
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "readiness probe has a distinct integrity event",
+      "template": "probe"
+    },
+    {
+      "name": "readiness probe envelope requires durable audit",
+      "template": "record"
+    },
+    {
+      "name": "readiness probe cannot reset the chain",
+      "template": "probe",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/resetReason",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "a chain reset states its reason, and no other kind has one"
+      ]
+    },
+    {
+      "name": "readiness probe cannot select best effort",
+      "template": "record",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/class",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "readiness probes are must-audit integrity records without decision attribution"
+      ]
+    },
+    {
+      "name": "readiness probe cannot claim a traffic decision",
+      "template": "record",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/attribution",
+          "value": {
+            "decision": 1,
+            "enforcementMode": 1,
+            "wouldDeny": false
+          }
+        }
+      ],
+      "violations": [
+        "readiness probes are must-audit integrity records without decision attribution"
+      ]
+    }
+  ]
+}

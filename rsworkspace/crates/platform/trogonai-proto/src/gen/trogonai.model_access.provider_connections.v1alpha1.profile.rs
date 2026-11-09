@@ -7,6 +7,7 @@
 /// Existing pinned Sessions, replacement attempts, and their grants remain
 /// subject to live authorization and revocation, unaffected by this switch.
 /// Re-enabling never revives a revoked connection or binding.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum ProviderRoutingEligibility {
