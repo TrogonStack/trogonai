@@ -4,7 +4,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{
     ContainerAsync, ContainerRequest, ImageExt, TestcontainersError,
@@ -114,25 +114,27 @@ impl FixtureDiagnostics {
         }
     }
 
-    async fn observe_startup<F>(&self, connect: &impl Fn() -> F)
+    fn observe_startup<F>(&self, connect: &impl Fn() -> F) -> impl Future<Output = ()>
     where
         F: Future<Output = Result<Docker, ClientError>>,
     {
         // Snapshots race alongside the original runner future, so collection cannot
         // defer polling its timeout. These are request-relative observations, not phase timings.
-        for seconds in [1, 30, 55] {
-            tokio::time::sleep_until(self.started + Duration::from_secs(seconds)).await;
-            if timeout(constants::COLLECTION_BUDGET, self.snapshot(connect()))
-                .await
-                .is_err()
-            {
-                self.record(FixtureObservation::Collection {
-                    operation: CollectionOperation::StartupSnapshot,
-                    outcome: CollectionOutcome::CollectionTimeout,
-                });
+        async {
+            for seconds in [1, 30, 55] {
+                tokio::time::sleep_until(self.started + Duration::from_secs(seconds)).await;
+                if timeout(constants::COLLECTION_BUDGET, self.snapshot(connect()))
+                    .await
+                    .is_err()
+                {
+                    self.record(FixtureObservation::Collection {
+                        operation: CollectionOperation::StartupSnapshot,
+                        outcome: CollectionOutcome::CollectionTimeout,
+                    });
+                }
             }
         }
-        std::future::pending().await
+        .then(|()| std::future::pending())
     }
 
     pub(crate) async fn capture(&self, container: &ContainerAsync<Nats>) -> String {

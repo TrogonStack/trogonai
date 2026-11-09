@@ -4,7 +4,8 @@ use std::process::Command;
 use super::*;
 use futures::FutureExt;
 use testcontainers_modules::testcontainers::{
-    bollard::errors::Error as DockerError, bollard::query_parameters::RemoveContainerOptionsBuilder, core::WaitFor,
+    bollard::errors::Error as DockerError, bollard::models::NetworkDisconnectRequest,
+    bollard::query_parameters::RemoveContainerOptionsBuilder, core::WaitFor, core::error::ExecError,
 };
 use trogon_std::env::{ReadEnv, SystemEnv};
 
@@ -120,6 +121,53 @@ async fn docker_start_failure_suppresses_caller_controlled_error_context() {
     assert!(!stderr.contains("sensitive-fixture-marker"));
     assert!(stderr.contains("connection_not_attempted"));
     assert_removed(&stderr).await;
+}
+
+#[tokio::test]
+async fn sdk_error_categories_retain_only_the_static_startup_contract() {
+    let container = plain().with_network("bridge").start().await.unwrap();
+    let port_error = container.get_host_port_ipv4(64221).await.unwrap_err();
+    docker_client_instance()
+        .await
+        .unwrap()
+        .disconnect_network(
+            "bridge",
+            NetworkDisconnectRequest {
+                container: container.id().to_owned(),
+                force: Some(true),
+            },
+        )
+        .await
+        .unwrap();
+    let missing_info = container.get_bridge_ip_address().await.unwrap_err();
+    assert!(matches!(port_error, TestcontainersError::PortNotExposed { .. }));
+    assert!(matches!(missing_info, TestcontainersError::MissingInfo(_)));
+    for (error, expected) in [
+        (port_error, "port_not_exposed"),
+        (missing_info, "missing_container_info"),
+        (
+            TestcontainersError::Exec(ExecError::ExitCodeMismatch { expected: 0, actual: 7 }),
+            "exec_error",
+        ),
+        (
+            TestcontainersError::Io(std::io::Error::other("sensitive-fixture-marker")),
+            "io_error",
+        ),
+        (TestcontainersError::other("sensitive-fixture-marker"), "other_error"),
+    ] {
+        let diagnostics = FixtureDiagnostics::for_request(&plain()).unwrap();
+        diagnostics.record(FixtureObservation::StartupResult {
+            startup_result: startup_error(&error),
+            client_phase: "connection_not_attempted",
+        });
+        let report = diagnostics.report();
+        assert!(report.contains(&format!("\"startup_result\":\"{expected}\"")));
+        assert!(report.contains("connection_not_attempted"));
+        assert!(!report.contains("sensitive-fixture-marker"));
+        assert!(!report.contains(container.id()));
+        assert!(!report.contains("NetworkSettings"));
+        assert!(!report.contains("64221"));
+    }
 }
 
 fn child(test: &str, mode: &str) -> std::process::Output {
