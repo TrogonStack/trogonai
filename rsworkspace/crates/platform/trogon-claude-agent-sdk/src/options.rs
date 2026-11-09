@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, num::NonZeroUsize, path::PathBuf};
 
-use crate::{AgentName, EffortLevel, PermissionMode, SettingSource, ToolRule, UsdBudget};
+use crate::{AgentName, EffortLevel, PermissionMode, SessionId, SettingSource, ToolRule, UsdBudget};
 
 #[derive(Clone, Default)]
 pub struct ClaudeAgentOptions {
@@ -18,6 +18,7 @@ pub struct ClaudeAgentOptions {
     pub agent: Option<AgentName>,
     pub allowed_tools: Vec<ToolRule>,
     pub disallowed_tools: Vec<ToolRule>,
+    pub resume: Option<SessionId>,
 }
 
 impl std::fmt::Debug for ClaudeAgentOptions {
