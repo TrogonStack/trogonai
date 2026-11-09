@@ -1,7 +1,7 @@
-use trogon_claude_agent_sdk::{ClaudeAgentOptions, ToolRule, ToolRuleError};
+use trogon_claude_agent_sdk::{ClaudeAgentOptions, ToolRule};
 
-fn preserves_rule_storage(input: &str) -> Result<(), ToolRuleError> {
-    let rule = ToolRule::new(input)?;
+fn preserves_rule_storage(input: &str) {
+    let rule = ToolRule::new(input);
     let options = ClaudeAgentOptions {
         allowed_tools: vec![rule.clone()],
         ..ClaudeAgentOptions::default()
@@ -9,25 +9,24 @@ fn preserves_rule_storage(input: &str) -> Result<(), ToolRuleError> {
     assert_eq!(rule.as_str(), input);
     assert_eq!(rule.to_string(), input);
     assert_eq!(options.clone().allowed_tools[0].as_str(), input);
-    Ok(())
 }
 
 #[test]
-fn empty_tool_rule_is_preserved_during_configuration() -> Result<(), ToolRuleError> {
+fn empty_tool_rule_is_preserved_during_configuration() {
     preserves_rule_storage("")
 }
 
 #[test]
-fn comma_in_a_tool_rule_is_preserved_during_configuration() -> Result<(), ToolRuleError> {
+fn comma_in_a_tool_rule_is_preserved_during_configuration() {
     preserves_rule_storage("Bash(echo a,b)")
 }
 
 #[test]
-fn newline_in_a_tool_rule_is_preserved_during_configuration() -> Result<(), ToolRuleError> {
+fn newline_in_a_tool_rule_is_preserved_during_configuration() {
     preserves_rule_storage("Read\nWrite")
 }
 
 #[test]
-fn nul_in_a_tool_rule_is_preserved_during_configuration() -> Result<(), ToolRuleError> {
+fn nul_in_a_tool_rule_is_preserved_during_configuration() {
     preserves_rule_storage("Read\0Write")
 }
