@@ -27,6 +27,25 @@ fn exact_binding_vector_matches_the_current_contract() {
 }
 
 #[test]
+fn binding_can_be_reconstructed_from_its_public_components() {
+    let original = binding("tenant", "document", "resource", "purpose");
+    assert_eq!(original.tenant().as_str(), "tenant");
+    assert_eq!(original.resource_type().as_str(), "document");
+    assert_eq!(original.resource().as_str(), "resource");
+    assert_eq!(original.purpose().as_str(), "purpose");
+    assert_eq!(original.version(), BindingVersion::new(1).unwrap());
+    let reconstructed = AuthenticatedBinding::new(
+        original.tenant().clone(),
+        original.resource_type().clone(),
+        original.resource().clone(),
+        original.purpose().clone(),
+        original.version(),
+    );
+    assert_eq!(reconstructed, original);
+    assert_eq!(reconstructed.canonical_bytes(), original.canonical_bytes());
+}
+
+#[test]
 fn binding_encoding_separates_resource_type_and_field_boundaries() {
     assert_ne!(
         binding("a", "bc", "r", "p").canonical_bytes(),
@@ -60,6 +79,7 @@ fn versions_suites_and_payloads_are_closed() {
     assert!(BindingVersion::new(0).is_err());
     assert!(BindingVersion::new(2).is_err());
     assert_eq!(MaterialSuite::Dek32V1.get(), 1);
+    assert_eq!(MaterialSuite::try_from(1).unwrap(), MaterialSuite::Dek32V1);
     assert_eq!(BindingVersion::new(1).unwrap().get(), 1);
     assert!(MaterialSuite::try_from(0).is_err());
     assert!(MaterialSuite::try_from(2).is_err());
