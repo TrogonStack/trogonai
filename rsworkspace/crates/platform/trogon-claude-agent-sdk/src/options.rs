@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{num::NonZeroUsize, path::PathBuf};
 
 use crate::{PermissionMode, SettingSource};
 
@@ -10,4 +10,5 @@ pub struct ClaudeAgentOptions {
     pub permission_mode: Option<PermissionMode>,
     /// Filesystem settings to load: `None` inherits CLI defaults; an empty list disables them.
     pub setting_sources: Option<Vec<SettingSource>>,
+    pub max_turns: Option<NonZeroUsize>,
 }
