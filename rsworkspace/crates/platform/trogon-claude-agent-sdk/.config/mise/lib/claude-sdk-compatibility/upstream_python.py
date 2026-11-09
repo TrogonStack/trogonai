@@ -14,6 +14,23 @@ def extract(contents, expected_hash):
     options = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "ClaudeAgentOptions"]
     if len(options) != 1:
         raise GateError(Code.FORMAT, "ClaudeAgentOptions")
+    if options[0].bases or options[0].keywords or options[0].type_params:
+        raise GateError(Code.FORMAT, "ClaudeAgentOptions.inheritance-or-generics")
+    selected = {"ClaudeAgentOptions", "PermissionMode", "SettingSource"}
+    for statement in tree.body:
+        if isinstance(statement, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            if statement.name in selected and statement is not options[0]:
+                raise GateError(Code.FORMAT, statement.name)
+        elif isinstance(statement, ast.TypeAlias) and statement.name.id in selected:
+            raise GateError(Code.FORMAT, statement.name.id)
+        elif isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+            names = {n.id for target in targets for n in ast.walk(target) if isinstance(n, ast.Name)} & selected
+            if names and (len(targets) != 1 or not isinstance(targets[0], ast.Name) or "ClaudeAgentOptions" in names):
+                raise GateError(Code.FORMAT, "selected-python-rebinding")
+        elif isinstance(statement, (ast.Import, ast.ImportFrom)):
+            if any((alias.asname or alias.name.split(".")[0]) in selected for alias in statement.names):
+                raise GateError(Code.FORMAT, "selected-python-import")
     result = {"ClaudeAgentOptions": {"kind": "class"}}
     for node in options[0].body:
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
