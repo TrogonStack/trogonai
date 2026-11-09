@@ -121,18 +121,21 @@ impl ::buffa::Message for Delivery {
         self.kind = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for Delivery {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for Delivery {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = Delivery;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct Delivery")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<Delivery, A::Error> {
@@ -153,7 +156,7 @@ impl<'de> serde::Deserialize<'de> for Delivery {
                             if let Some(v) = v {
                                 if __oneof_kind.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'kind'",
                                         ),
                                     );
@@ -166,7 +169,7 @@ impl<'de> serde::Deserialize<'de> for Delivery {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -512,21 +515,21 @@ pub mod delivery {
                 self.kind = ::core::option::Option::None;
             }
         }
-        impl<'de> serde::Deserialize<'de> for Source {
-            fn deserialize<D: serde::Deserializer<'de>>(
+        impl<'de> ::serde::Deserialize<'de> for Source {
+            fn deserialize<D: ::serde::Deserializer<'de>>(
                 d: D,
             ) -> ::core::result::Result<Self, D::Error> {
                 struct _V;
-                impl<'de> serde::de::Visitor<'de> for _V {
+                impl<'de> ::serde::de::Visitor<'de> for _V {
                     type Value = Source;
                     fn expecting(
                         &self,
-                        f: &mut core::fmt::Formatter<'_>,
-                    ) -> core::fmt::Result {
+                        f: &mut ::core::fmt::Formatter<'_>,
+                    ) -> ::core::fmt::Result {
                         f.write_str("struct Source")
                     }
                     #[allow(clippy::field_reassign_with_default)]
-                    fn visit_map<A: serde::de::MapAccess<'de>>(
+                    fn visit_map<A: ::serde::de::MapAccess<'de>>(
                         self,
                         mut map: A,
                     ) -> ::core::result::Result<Source, A::Error> {
@@ -551,7 +554,7 @@ pub mod delivery {
                                     if let Some(v) = v {
                                         if __oneof_kind.is_some() {
                                             return Err(
-                                                serde::de::Error::custom(
+                                                ::serde::de::Error::custom(
                                                     "multiple oneof fields set for 'kind'",
                                                 ),
                                             );
@@ -564,7 +567,7 @@ pub mod delivery {
                                     }
                                 }
                                 _ => {
-                                    map.next_value::<serde::de::IgnoredAny>()?;
+                                    map.next_value::<::serde::de::IgnoredAny>()?;
                                 }
                             }
                         }
