@@ -754,7 +754,7 @@ async fn new_bounds_the_presenting_token_expiry_by_the_clock_tolerance() {
     let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
     let verifier = verifier_at(jwks, 5000, "resource.example");
 
-    let within = agent_jwt_expiring(&fixture, "k1", "agent-provider.example", 4970);
+    let within = agent_jwt_expiring(&fixture, "k1", "agent-provider.example", 4971);
     let mut req = base_request(&signature_key_header(&within));
     sign_request(&fixture, &mut req, 5000, &REQUIRED_COMPONENTS);
     verifier
@@ -762,11 +762,13 @@ async fn new_bounds_the_presenting_token_expiry_by_the_clock_tolerance() {
         .await
         .expect("token expired within the tolerance verifies");
 
-    let beyond = agent_jwt_expiring(&fixture, "k1", "agent-provider.example", 4969);
-    let mut req = base_request(&signature_key_header(&beyond));
-    sign_request(&fixture, &mut req, 5000, &REQUIRED_COMPONENTS);
-    let err = verifier.verify(&req).await.unwrap_err();
-    assert!(matches!(err, HttpPopError::Agent(TokenError::Expired)));
+    for exp in [4970, 4969] {
+        let expired = agent_jwt_expiring(&fixture, "k1", "agent-provider.example", exp);
+        let mut req = base_request(&signature_key_header(&expired));
+        sign_request(&fixture, &mut req, 5000, &REQUIRED_COMPONENTS);
+        let err = verifier.verify(&req).await.unwrap_err();
+        assert!(matches!(err, HttpPopError::Agent(TokenError::Expired)));
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
