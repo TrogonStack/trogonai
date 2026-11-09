@@ -3,6 +3,7 @@
 mod agent_name;
 mod client;
 mod config_value;
+mod control_request_id;
 mod effort_level;
 mod environment;
 mod error;
@@ -43,3 +44,5 @@ pub use session_id::SessionId;
 pub use message_id::MessageId;
 
 pub use tool_use_id::ToolUseId;
+
+pub use control_request_id::{ControlRequestId, ControlRequestIdError};
