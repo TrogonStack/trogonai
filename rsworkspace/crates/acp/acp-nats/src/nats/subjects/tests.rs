@@ -369,6 +369,35 @@ fn custom_prefix_session() {
 }
 
 #[test]
+fn new_session_commands_convert_to_nats_subjects() {
+    let prefix = p("acp");
+    let session = sid("s1");
+
+    assert_eq!(
+        commands::ArchiveSubject::new(&prefix, &session)
+            .to_subject()
+            .to_string(),
+        "acp.v1.session.s1.agent.archive"
+    );
+    assert_eq!(
+        commands::SetTitleSubject::new(&prefix, &session)
+            .to_subject()
+            .to_string(),
+        "acp.v1.session.s1.agent.set_title"
+    );
+    assert_eq!(
+        commands::StatusSubject::new(&prefix, &session).to_subject().to_string(),
+        "acp.v1.session.s1.agent.status"
+    );
+    assert_eq!(
+        commands::UnarchiveSubject::new(&prefix, &session)
+            .to_subject()
+            .to_string(),
+        "acp.v1.session.s1.agent.unarchive"
+    );
+}
+
+#[test]
 fn stream_assignments() {
     assert_eq!(commands::LoadSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::PromptSubject::STREAM, Some(AcpStream::Commands));
