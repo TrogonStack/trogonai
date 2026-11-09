@@ -8,6 +8,7 @@ mod dialog_kind;
 mod effort_level;
 mod error;
 mod mcp_server_name;
+mod mcp_tool_name;
 mod message_id;
 mod options;
 mod permission_mode;
@@ -49,5 +50,7 @@ pub use tool_name::ToolName;
 pub use builtin_tool_name::BuiltinToolName;
 
 pub use mcp_server_name::McpServerName;
+
+pub use mcp_tool_name::McpToolName;
 
 pub use dialog_kind::DialogKind;
