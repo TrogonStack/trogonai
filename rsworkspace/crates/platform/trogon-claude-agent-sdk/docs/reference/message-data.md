@@ -104,5 +104,7 @@ run completion, queued-turn accounting, cancellation or process shutdown.
 | event | dict[str, Any] | event: BetaRawMessageStreamEvent | Raw JsonObject rather than a recreated event union. |
 | parent_tool_use_id | optional str | string or null | Optional ToolUseId. |
 
+| additional_fields | No separate dataclass field | ttft_ms, user_message_uuid, user_message_uuids, resume_reason and future envelope fields | Explicit JsonObject retains manually supplied outer metadata separately from event. |
+
 This declaration does not enable partial messages, decode deltas or reconstruct
 assistant content. Those are separate operational review boundaries.
