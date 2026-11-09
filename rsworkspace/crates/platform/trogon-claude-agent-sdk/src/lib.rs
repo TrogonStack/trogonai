@@ -46,4 +46,4 @@ pub use task_id::{TaskId, TaskIdError};
 
 pub use tool_name::{ToolName, ToolNameError};
 
-pub use builtin_tool_name::{BuiltinToolName, BuiltinToolNameError};
+pub use builtin_tool_name::BuiltinToolName;

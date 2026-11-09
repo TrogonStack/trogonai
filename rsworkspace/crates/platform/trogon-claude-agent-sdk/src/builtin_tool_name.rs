@@ -3,32 +3,9 @@ use crate::ToolName;
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct BuiltinToolName(String);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum BuiltinToolNameError {
-    #[error("a built-in tool name cannot be empty")]
-    Empty,
-    #[error("a built-in tool name cannot contain whitespace, controls or list separators")]
-    InvalidCharacter,
-    #[error("default names a tool preset, not an individual built-in tool")]
-    ReservedPreset,
-}
-
 impl BuiltinToolName {
-    pub fn new(value: impl Into<String>) -> Result<Self, BuiltinToolNameError> {
-        let value = value.into();
-        if value.is_empty() {
-            return Err(BuiltinToolNameError::Empty);
-        }
-        if value
-            .chars()
-            .any(|character| character.is_whitespace() || character.is_control() || character == ',')
-        {
-            return Err(BuiltinToolNameError::InvalidCharacter);
-        }
-        if value == "default" {
-            return Err(BuiltinToolNameError::ReservedPreset);
-        }
-        Ok(Self(value))
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
     }
 
     pub fn as_str(&self) -> &str {
@@ -36,10 +13,8 @@ impl BuiltinToolName {
     }
 }
 
-impl TryFrom<ToolName> for BuiltinToolName {
-    type Error = BuiltinToolNameError;
-
-    fn try_from(value: ToolName) -> Result<Self, Self::Error> {
+impl From<ToolName> for BuiltinToolName {
+    fn from(value: ToolName) -> Self {
         Self::new(value.as_str())
     }
 }
