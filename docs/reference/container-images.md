@@ -12,11 +12,5 @@ Images follow the
 | `canary` | The newest build of `main` |
 | `<commit>` | The first build of that full commit SHA, never moved |
 
-## Deprecated
-
-| Image | Replaced by |
-|---|---|
-| `ghcr.io/trogonstack/trogonai/trogon-gateway` | `ghcr.io/trogonstack/images/trogonai/trogon-gateway` |
-
-Deprecated images no longer receive builds. Their existing tags stay until
-nothing pulls them, then the package is deleted.
+The legacy package was removed after all tracked deployments migrated to the
+ADR-compliant path above.
