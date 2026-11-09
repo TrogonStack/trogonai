@@ -1,3 +1,5 @@
+use crate::PeerMcpErrorCode;
+
 #[derive(Debug, thiserror::Error)]
 pub enum PeerMcpError {
     #[error("Peer hook deadline elapsed; retry the same prompt identity. Remote outcome is uncertain.")]
@@ -32,8 +34,6 @@ pub enum PeerMcpError {
 
 impl PeerMcpError {
     pub const fn code(&self) -> crate::PeerMcpErrorCode {
-        use crate::PeerMcpErrorCode;
-
         match self {
             Self::PromptDeadline => PeerMcpErrorCode::PromptDeadline,
             Self::Unbound => PeerMcpErrorCode::Unbound,
