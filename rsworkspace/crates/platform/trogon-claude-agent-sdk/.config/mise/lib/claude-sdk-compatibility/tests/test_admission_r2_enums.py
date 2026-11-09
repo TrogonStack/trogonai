@@ -8,6 +8,7 @@ class DiscriminantAdmissionTests(unittest.TestCase):
         for value in ({"future_expression": {}}, {"expr": "2", "value": 2}, {"expr": None, "value": "2"}):
             d = enum_document()
             d["index"]["2"]["inner"]["variant"]["discriminant"] = value
-            with self.subTest(value=value), self.assertRaises(GateError) as caught:
-                extract(d)
-            self.assertEqual(caught.exception.code, Code.FORMAT)
+            with self.subTest(value=value):
+                with self.assertRaises(GateError) as caught:
+                    extract(d)
+                self.assertEqual(caught.exception.code, Code.FORMAT)
