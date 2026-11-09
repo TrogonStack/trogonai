@@ -3111,7 +3111,6 @@ async fn public_preparation_rejects_a_leap_clock_before_allocating_or_opening_co
 
 impl Fixture {
     pub async fn history(&self, peer: &PeerId) -> TestResult<trogonai_proto::peers::state_v1alpha1::PeerState> {
-        use trogon_decider_runtime::{ReadFrom, ReadStreamRequest, StreamRead};
         let read = self
             .store
             .read_stream(ReadStreamRequest {
