@@ -3,6 +3,7 @@ use std::fmt;
 use nats_jwt_rs::Claims;
 use nats_jwt_rs::authorization::AuthRequest;
 use serde::Deserialize;
+use x509_parser::pem::Pem;
 
 use super::NkeyPublic;
 use crate::account_resolver::RequestedAccount;
@@ -105,39 +106,61 @@ impl ServerAuthRequestClaims {
 
     pub fn client_tls_pem_certs(&self) -> Vec<ClientCertPem> {
         #[derive(Deserialize)]
-        struct Tls {
+        struct ClientTlsWire {
             certs: Option<Vec<String>>,
             verified_chains: Option<Vec<Vec<String>>>,
         }
-        let tls: Option<Tls> = match self.nats_json.get("client_tls") {
+        let tls: Option<ClientTlsWire> = match self.nats_json.get("client_tls") {
             Some(v) => serde_json::from_value(v.clone()).ok(),
             None => None,
         };
-        let tls = tls.filter(|t| {
-            t.certs.as_ref().is_some_and(|c| !c.is_empty()) || t.verified_chains.as_ref().is_some_and(|c| !c.is_empty())
-        });
         let Some(tls) = tls else {
             return Vec::new();
         };
-        let mut out = Vec::new();
-        if let Some(certs) = tls.certs {
-            for pem in certs {
-                out.push(ClientCertPem::new(pem));
-            }
+        let verified = tls.verified_chains.unwrap_or_default();
+        let selected = tls
+            .certs
+            .filter(|certs| !certs.is_empty())
+            .or_else(|| verified.first().cloned());
+        let Some(selected) = selected else {
+            return Vec::new();
+        };
+        let Some(leaf) = selected.first() else {
+            return Vec::new();
+        };
+        if selected.iter().any(|pem| pem.trim().is_empty())
+            || verified
+                .iter()
+                .any(|chain| chain.first().is_none_or(|other| !same_leaf_certificate(leaf, other)))
+        {
+            return Vec::new();
         }
-        if let Some(chains) = tls.verified_chains {
-            for chain in chains {
-                for pem in chain {
-                    out.push(ClientCertPem::new(pem));
-                }
-            }
-        }
-        out
+        selected.into_iter().map(ClientCertPem::new).collect()
     }
 
     pub fn primary_client_cert(&self) -> Option<ClientCertPem> {
-        self.client_tls_pem_certs().into_iter().next()
+        let chain = self.client_tls_pem_certs();
+        let mut pem = chain.first()?.as_str().to_owned();
+        for certificate in &chain[1..] {
+            pem.push('\n');
+            pem.push_str(certificate.as_str());
+        }
+        Some(ClientCertPem::new(pem))
     }
+}
+
+fn same_leaf_certificate(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    let leaf_der = |pem: &str| {
+        Pem::iter_from_buffer(pem.as_bytes())
+            .next()?
+            .ok()
+            .filter(|certificate| certificate.label == "CERTIFICATE")
+            .map(|certificate| certificate.contents)
+    };
+    matches!((leaf_der(left), leaf_der(right)), (Some(left), Some(right)) if left == right)
 }
 
 impl fmt::Debug for ServerAuthRequestClaims {
