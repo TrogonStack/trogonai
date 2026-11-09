@@ -10,7 +10,7 @@ class GenericValueTests(unittest.TestCase):
         self.const = {"expr": "2", "value": "2", "is_literal": True}
 
     def test_every_argument_and_binding_keeps_supported_scope(self):
-        args = {"angle_bracketed": {"args": [{"type": path(1)}, {"lifetime": "'a"}, {"const": self.const}, {"infer": None}], "constraints": []}}
+        args = {"angle_bracketed": {"args": [{"type": path(1)}, {"lifetime": "'a"}, {"const": self.const}, "infer"], "constraints": []}}
         result = self.r.arguments(args)
         self.assertEqual(result["angle_bracketed"]["args"][1:], args["angle_bracketed"]["args"][1:])
         self.assertEqual(result["angle_bracketed"]["args"][0]["type"]["resolved_path"]["path"], "Public")

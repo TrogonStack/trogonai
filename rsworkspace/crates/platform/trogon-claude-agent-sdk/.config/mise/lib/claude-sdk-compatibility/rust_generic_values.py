@@ -14,15 +14,15 @@ def term(reader, value):
 
 
 def argument(reader, value):
-    kind, body = tagged(value, ("type", "lifetime", "const", "infer"), "rust-generic-argument")
+    if isinstance(value, str) and value == "infer":
+        return "infer"
+    kind, body = tagged(value, ("type", "lifetime", "const"), "rust-generic-argument")
     if kind == "type":
         reader.type(body)
     elif kind == "const":
         constant(body)
     elif kind == "lifetime":
         require(text(body), "rust-lifetime-argument")
-    else:
-        require(body is None, "rust-infer-argument")
     return reader.normalize(value)
 
 
