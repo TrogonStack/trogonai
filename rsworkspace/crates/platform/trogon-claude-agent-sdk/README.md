@@ -21,6 +21,7 @@ pinned [TypeScript `0.3.319` declaration archive](https://registry.npmjs.org/@an
 | `effort: Option<EffortLevel>` | [`effort`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2741) | `effort` |
 | `env: BTreeMap<String, String>` | [`env`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2492) | `env` |
 | `additional_directories: Vec<PathBuf>` | [`add_dirs`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2486) | `additionalDirectories` |
+| `agent: Option<AgentName>` | Not exposed in pinned Python | `agent` |
 
 `PermissionMode` mirrors Python's
 [`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L25)
@@ -82,6 +83,11 @@ Options debug output omits environment entries and model strings.
 empty. Paths are not canonicalized, deduplicated, or restricted during
 configuration assembly. The Rust field follows TypeScript
 `additionalDirectories`; Python calls this option `add_dirs`.
+
+`agent` follows the pinned TypeScript `Options.agent` selection field;
+the reviewed Python options do not expose a counterpart. `AgentName` keeps
+the runtime draft's nonempty, control-free name boundary without rewriting
+valid Unicode names. This draft stores the selection without starting an agent.
 
 The example checks API composition; it does not run a session. Further options
 and runtime behavior belong in separate review slices.
