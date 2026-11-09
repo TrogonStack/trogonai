@@ -16,3 +16,31 @@ fn empty_and_control_values_are_typed_construction_errors() {
         assert!(matches!(TaskId::new(input), Err(TaskIdError)));
     }
 }
+
+#[test]
+fn empty_value_is_stored_as_received() {
+    let input = "";
+    let value = TaskId::new(input).unwrap_or_else(|_| panic!("empty value was rejected"));
+    assert_eq!(value.as_str(), input);
+}
+
+#[test]
+fn newline_value_is_stored_as_received() {
+    let input = "value\nidentifier";
+    let value = TaskId::new(input).unwrap_or_else(|_| panic!("newline value was rejected"));
+    assert_eq!(value.as_str(), input);
+}
+
+#[test]
+fn nul_value_is_stored_as_received() {
+    let input = "value\0identifier";
+    let value = TaskId::new(input).unwrap_or_else(|_| panic!("NUL value was rejected"));
+    assert_eq!(value.as_str(), input);
+}
+
+#[test]
+fn delete_value_is_stored_as_received() {
+    let input = "value\u{7f}";
+    let value = TaskId::new(input).unwrap_or_else(|_| panic!("DEL value was rejected"));
+    assert_eq!(value.as_str(), input);
+}
