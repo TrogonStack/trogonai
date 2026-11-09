@@ -27,5 +27,114 @@ replicas share the load. A mint request must carry a sealed credential. A
 request that is malformed, unsealed or refused gets a reply naming only a
 refusal category, never a JWT.
 
-This crate is being landed in slices on `main`; see
-`.trogonai/todos/a2a-auth-callout-pr-plan.internal.trogonai.md`.
+Both subscribers share a default budget of 16 in-flight admissions in the binary.
+Each request acquires capacity before creating a worker and retains it through
+reply publication. Overload receives an opaque `service_unavailable` denial and
+no credential. Library embedders can supply one validated `AdmissionBudget` to
+both subscribers. Configure broker payload and connection limits alongside this
+worker budget, and size replica capacity using measured reconnect demand.
+
+## Tenant admission authority
+
+Credential verification does not grant tenant membership. Every dispatcher
+requires a `TenantAdmission` authority, and both direct and bridge mint requests
+must receive an explicit permit for the exact tenant account and verified
+principal. A configured tenant signing key or tenant-scoped caller hash does not
+provide that permit. Failed admission cannot select another credential scheme.
+
+The binary requires `AUTH_CALLOUT_TENANT_MEMBERSHIPS` to name a trusted local JSON
+registry. It validates the registry before connecting and rereads it for every
+mint. Missing, invalid, oversized or unavailable registry state refuses admission
+without reusing an earlier decision. An empty membership list denies all callers.
+The registry is limited to 1 MiB and 4096 exact bindings. Reads have a one-second
+deadline and at most 16 workers; saturation refuses new admissions.
+That deadline bounds the admission's wait, not the lifetime of a kernel I/O
+operation. A blocking read retains its worker slot until it finishes. Persistent
+storage faults require I/O recovery or process replacement; admission continues
+to refuse unavailable authority.
+
+```json
+{
+  "version": 1,
+  "memberships": [
+    {
+      "account": "<tenant account public NKey>",
+      "identity": {
+        "type": "oidc",
+        "issuer": "https://issuer.example",
+        "subject": "<administratively approved OIDC subject>"
+      }
+    }
+  ]
+}
+```
+
+Provision the file through the administrative deployment boundary, inaccessible
+to callers and workload guests. The tagged `identity` selects an exact source:
+`oidc` requires `issuer` and `subject`; `legacy_mtls` and `legacy_api_key` require
+an administratively approved `subject`. OIDC issuer strings match exactly and
+must use HTTPS. No selector interprets wildcards or accepts an implicit source.
+
+For an existing verified identity, `identity.type=principal` requires
+`principal_kind` and canonical `principal_id`. Obtain those fields with
+`TenantMembership::from_verified_credential` after the configured verifier has
+authenticated the credential: use the binding's `principal().kind()` and
+`principal().id()`. Do not copy caller-provided principal IDs, token claims or
+unverified certificate subjects. The tenant is an explicit administrative membership decision, even
+when the credential is valid. Never write credentials or private keys to this
+registry or logs.
+
+Use an atomic file replacement to apply membership changes. Removal affects the
+next mint; already issued broker tokens retain their bounded validity and require
+the session-revocation integration for immediate termination. The
+legacy mTLS and API-key subject helpers reproduce their existing identity
+namespaces and do not supply SPIFFE attestation. Protect legacy certificate
+issuance so a subject cannot be reassigned across accepted issuers.
+
+## OIDC issuer and discovery profile
+
+Issuer configuration requires HTTPS without URL credentials, query or fragment.
+The configured issuer, discovery document and signed token must match exactly,
+including a trailing slash. Discovery endpoint construction does not change that
+identity. JWKS URLs must stay on the issuer origin and also exclude credentials,
+query and fragment; redirects are refused.
+
+Discovery and JWKS responses must have successful HTTP status and fit within
+256 KiB, including responses without a content length. Connection and complete
+request deadlines bound remote work. Static test fixtures do not weaken the
+production HTTPS requirement.
+
+## Certificate verification and admission lifetime
+
+CA trust uses standard certificate-path validation with explicit signing-key
+usage checks. Eligible CA anchors have `CA:TRUE` and, when key usage is present,
+`keyCertSign`. Expired CAs, non-CAs and CAs with incompatible signing usage are
+excluded from issuer candidates without blocking other eligible anchors.
+A configured end-entity pin trusts exactly that certificate's DER,
+not another certificate with the same subject or public key. Pins still enforce
+leaf validity, purpose and critical-extension checks. Legacy certificates may
+omit key/extended-key usage; a present incompatible usage is refused.
+
+Present a leaf-first certificate chain containing the required intermediates.
+The callout preserves one ordered chain and never combines alternate verified
+paths. Presented and verified alternatives must name the same leaf identity.
+Certificate evidence must come from an authenticated transport or adapter that
+has verified possession of the client's private key. The native HTTP bridge
+accepts bearer credentials; adding certificate forwarding requires that trusted
+adapter boundary.
+
+Derived NATS credentials are bounded by verified OIDC or selected certificate-path
+expiry as well as the configured broker TTL. Expiry is checked again immediately
+before minting. OIDC not-before dates are enforced without early-activation
+leeway; malformed dates and unsupported critical JOSE extensions are refused.
+This profile requires representable integer Unix-second dates.
+Every broker mint requires at least one whole second of authorized lifetime.
+Zero or subsecond maxima are refused, including legacy API-key and direct mint
+calls; positive fractional maxima are rounded down.
+Finite verification evidence is separate from serialized identity
+claims. Deprecated API-key admission remains an explicit compatibility branch,
+not a fallback after another verifier refuses a credential.
+
+DN-based mTLS identity is separate from the proposed
+[workload identity profile](../../../../docs/reference/workload-identity.md).
+These verification rules do not implement SPIRE attestation or credential rotation.
