@@ -10,9 +10,10 @@ class GenericSchemaAdmissionTests(unittest.TestCase):
             g["where_predicates"] = [{"eq_predicate": {"lhs": value, "rhs": {"type": {"primitive": "u8"}}}}]
             d = document()
             add(d, node(1, "Value", "struct", {"kind": "unit", "generics": g, "impls": []}))
-            with self.subTest(value=value), self.assertRaises(GateError) as caught:
-                extract(d)
-            self.assertEqual(caught.exception.code, Code.FORMAT)
+            with self.subTest(value=value):
+                with self.assertRaises(GateError) as caught:
+                    extract(d)
+                self.assertEqual(caught.exception.code, Code.FORMAT)
 
     def test_constant_and_static_schemas_are_admitted_before_normalizing(self):
         bodies = [("constant", {"const": None}),
@@ -22,6 +23,7 @@ class GenericSchemaAdmissionTests(unittest.TestCase):
         for kind, body in bodies:
             d = document()
             add(d, node(1, "VALUE", kind, {"type": {"primitive": "u8"}, **body}))
-            with self.subTest(kind=kind, body=body), self.assertRaises(GateError) as caught:
-                extract(d)
-            self.assertEqual(caught.exception.code, Code.FORMAT)
+            with self.subTest(kind=kind, body=body):
+                with self.assertRaises(GateError) as caught:
+                    extract(d)
+                self.assertEqual(caught.exception.code, Code.FORMAT)
