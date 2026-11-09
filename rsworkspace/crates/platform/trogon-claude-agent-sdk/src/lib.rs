@@ -47,4 +47,4 @@ pub use message_id::MessageId;
 pub use control_request_id::ControlRequestId;
 pub use tool_use_id::ToolUseId;
 
-pub use task_id::{TaskId, TaskIdError};
+pub use task_id::TaskId;
