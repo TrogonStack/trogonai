@@ -60,6 +60,35 @@ class RustDocument:
                                       "output": None if body["output"] is None else self.type(body["output"])}}
         raise GateError(Code.FORMAT, "rust-generics")
 
+    def attributes(self, item):
+        values = item.get("attrs")
+        require(isinstance(values, list), "rust-attributes")
+        for value in values:
+            if isinstance(value, str):
+                require(value in ("non_exhaustive", "macro_export", "automatically_derived", "no_mangle"), "rust-attribute")
+                continue
+            require(isinstance(value, dict) and len(value) == 1, "rust-attribute")
+            kind, body = next(iter(value.items()))
+            if kind in ("other", "export_name", "link_section"):
+                require(isinstance(body, str), "rust-attribute")
+            elif kind == "must_use":
+                require(isinstance(body, dict) and set(body) == {"reason"}
+                        and (body["reason"] is None or isinstance(body["reason"], str)), "rust-attribute")
+            elif kind == "target_feature":
+                require(isinstance(body, dict) and set(body) == {"enable"}
+                        and isinstance(body["enable"], list)
+                        and all(isinstance(v, str) for v in body["enable"]), "rust-attribute")
+            elif kind == "repr":
+                require(isinstance(body, dict) and set(body) == {"kind", "align", "packed", "int"}
+                        and body["kind"] in ("rust", "c", "transparent", "simd")
+                        and (body["int"] is None or isinstance(body["int"], str)), "rust-attribute")
+                require(all(body[k] is None or (type(body[k]) is int and 0 <= body[k] < 2 ** 64)
+                            for k in ("align", "packed")), "rust-attribute")
+            else:
+                raise GateError(Code.FORMAT, "rust-attribute")
+        return values
+
+
     def normalize(self, value):
         if isinstance(value, list):
             return [self.normalize(v) for v in value]
