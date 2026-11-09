@@ -20,6 +20,7 @@ pinned [TypeScript `0.3.319` declaration archive](https://registry.npmjs.org/@an
 | `max_budget_usd: Option<UsdBudget>` | [`max_budget_usd`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2424) | `maxBudgetUsd` |
 | `effort: Option<EffortLevel>` | [`effort`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2741) | `effort` |
 | `env: BTreeMap<String, String>` | [`env`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2492) | `env` |
+| `additional_directories: Vec<PathBuf>` | [`add_dirs`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2486) | `additionalDirectories` |
 
 `PermissionMode` mirrors Python's
 [`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L25)
@@ -77,6 +78,11 @@ reading or changing the process environment. Like Python, Rust stores string
 values; the pinned TypeScript declaration additionally admits `undefined`.
 Options debug output shows the other settings but omits environment entries
 and model strings.
+
+`additional_directories` stores an ordered path list and defaults to
+empty. Paths are not canonicalized, deduplicated, or restricted during
+configuration assembly. The Rust field follows TypeScript
+`additionalDirectories`; Python calls this option `add_dirs`.
 
 The example checks API composition; it does not run a session. Further options
 and runtime behavior belong in separate review slices.

@@ -14,6 +14,7 @@ pub struct ClaudeAgentOptions {
     pub max_budget_usd: Option<UsdBudget>,
     pub effort: Option<EffortLevel>,
     pub env: BTreeMap<String, String>,
+    pub additional_directories: Vec<PathBuf>,
 }
 
 impl std::fmt::Debug for ClaudeAgentOptions {
