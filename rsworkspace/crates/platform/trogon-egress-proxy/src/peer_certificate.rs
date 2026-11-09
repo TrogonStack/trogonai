@@ -34,6 +34,8 @@ pub fn agent_id_from_certificate(der: &[u8], trust_domain: &TrustDomain) -> Resu
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PeerIdentityError {
+    #[error("client certificate has no remaining supported validity")]
+    Validity,
     #[error("client certificate could not be parsed")]
     Unparsable,
     #[error("client certificate has no URI subject alternative name")]

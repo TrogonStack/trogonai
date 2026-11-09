@@ -127,7 +127,7 @@ async fn start_subscriber(
     client: &async_nats::Client,
     signer: &FixtureServer,
     callout: &KeyPair,
-    dispatcher: RecordingDispatcher,
+    dispatcher: impl AuthDispatcher,
     readiness: &Path,
 ) -> JoinHandle<Result<(), AuthCalloutError>> {
     let wire = AuthCalloutWireCodec::new(
@@ -301,4 +301,97 @@ async fn subscriber_stays_unready_while_no_server_has_accepted_its_connection() 
 
     assert!(!readiness.path().join("ready").exists());
     task.abort();
+}
+
+struct ClosingDispatcher {
+    client: async_nats::Client,
+    closed: Arc<tokio::sync::Notify>,
+    calls: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl AuthDispatcher for ClosingDispatcher {
+    async fn dispatch(&self, _: ServerAuthRequestClaims) -> Result<MintedUserJwt, AuthCalloutError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.client.drain().await.unwrap();
+        tokio::time::timeout(WAIT, self.closed.notified()).await.unwrap();
+        self.client
+            .flush()
+            .await
+            .expect_err("connection is closed before replying");
+        Err(CredentialError::InvalidCredentials("refused".into()).into())
+    }
+}
+
+#[tokio::test]
+async fn subscriber_reports_both_reply_failures_when_dispatch_outlives_the_connection() {
+    let server = CoreTestServer::start().await;
+    let closed = Arc::new(tokio::sync::Notify::new());
+    let observed = closed.clone();
+    let client = async_nats::ConnectOptions::new()
+        .event_callback(move |event| {
+            let observed = observed.clone();
+            async move {
+                if matches!(event, async_nats::Event::Closed) {
+                    observed.notify_one();
+                }
+            }
+        })
+        .connect(server.address())
+        .await
+        .unwrap();
+    let publisher = async_nats::connect(server.address()).await.unwrap();
+    let signer = FixtureServer::generate();
+    let callout = KeyPair::new_account();
+    let readiness = tempfile::tempdir().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _capture = events.install(trogon_std::log_capture::LevelFilter::ERROR);
+    let task = start_subscriber(
+        &client,
+        &signer,
+        &callout,
+        ClosingDispatcher {
+            client: client.clone(),
+            closed,
+            calls: calls.clone(),
+        },
+        &readiness.path().join("ready"),
+    )
+    .await;
+    let inbox = publisher.new_inbox();
+    let mut replies = publisher.subscribe(inbox.clone()).await.unwrap();
+    publisher
+        .publish_with_reply(
+            AUTH_CALLOUT_SUBJECT,
+            inbox,
+            signer.sign(&KeyPair::new_user(), |_| {}).into(),
+        )
+        .await
+        .unwrap();
+    publisher.flush().await.unwrap();
+    tokio::time::timeout(WAIT, async {
+        loop {
+            if events
+                .events()
+                .iter()
+                .any(|event| event.message() == Some("failed to publish empty fallback reply"))
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("both failed publishes must be reported");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(events.events().len(), 2);
+    assert!(events.events().iter().all(|event| event.field("error").is_some()));
+    tokio::time::timeout(WAIT, task).await.unwrap().unwrap().unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), replies.next())
+            .await
+            .is_err()
+    );
+    publisher.drain().await.unwrap();
 }

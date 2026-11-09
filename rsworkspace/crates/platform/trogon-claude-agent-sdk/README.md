@@ -13,6 +13,7 @@ terminology, with Rust acronym casing. Its optional fields default to `None`:
 | `cwd: Option<PathBuf>` | [`cwd`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2464) | `cwd` |
 | `model: Option<String>` | [`model`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2438) | `model` |
 | `permission_mode: Option<PermissionMode>` | [`permission_mode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2393) | `permissionMode` |
+| `setting_sources: Option<Vec<SettingSource>>` | [`setting_sources`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2666) | `settingSources` |
 
 `PermissionMode` mirrors Python's
 [`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L25)
@@ -22,6 +23,12 @@ Serde uses their literal names: `default`, `acceptEdits`, `plan`,
 `bypassPermissions`, `dontAsk`, and `auto`. `None` leaves the mode unset;
 `Some(PermissionMode::Default)` explicitly selects `default`. The API draft
 stores this choice without applying a permission policy.
+
+`SettingSource` uses the exact serde literals `user`, `project`, and `local`.
+Python's pinned `setting_sources` docs and TypeScript `0.3.319`'s `Options.settingSources`
+docs both describe omission as loading all CLI sources and an empty list as
+disabling filesystem settings. Rust preserves `None`, `Some(vec![])`, and caller
+order without applying those choices in this API draft.
 
 Model strings and paths are stored without extra identifier restrictions.
 Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L93)
