@@ -85,3 +85,13 @@ run completion, queued-turn accounting, cancellation or process shutdown.
 | parent_tool_use_id / session_id / uuid | optional strings | nullable parent ID, required session_id and UUID | Optional validated identifiers also represent missing legacy metadata. |
 | error / usage / stop_reason | optional error literal / object / string | error enum and nested BetaMessage usage/stop_reason | Optional String/object/String preserve unknown error strings without a new restriction. |
 | additional_fields / message_fields | No separate typed extension fields | Envelope and nested message have different scopes | Separate JsonObject values retain manually supplied extension data. |
+
+## User messages
+
+| Rust field family | Python UserMessage | TypeScript SDKUserMessage | Stored representation |
+| --- | --- | --- | --- |
+| content | str or list[ContentBlock] | message: MessageParam | Content text or block data, flattened from the envelope. |
+| parent_tool_use_id / session_id / uuid | optional parent ID and uuid; no separate session_id field | nullable parent ID and optional session_id/UUID | Optional validated identifiers. |
+| origin | optional MessageOrigin | origin?: SDKMessageOrigin | Optional validated origin object. |
+| tool_use_result | optional dict[str, Any] | tool_use_result?: unknown | Option<JsonObject>; scalar TypeScript values are not represented by this object-only field. |
+| additional_fields / message_fields | No separate typed extension fields | Envelope and MessageParam scopes differ | Explicit maps preserve manually supplied outer and nested extension data. |
