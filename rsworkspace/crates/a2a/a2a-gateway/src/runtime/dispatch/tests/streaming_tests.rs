@@ -133,6 +133,7 @@ async fn resubscribe_uses_task_cursor_and_shutdown_releases_caller_capacity() ->
     let try_restart = || {
         spawn_streaming_ingress_pump(
             fixture.client.clone(),
+            async_nats::jetstream::new(fixture.client.clone()),
             fixture.config.a2a_prefix.clone(),
             fixture.streaming_config,
             fixture.streaming_gate.clone(),
@@ -195,6 +196,7 @@ async fn the_streaming_gate_holds_the_subject_principal_whatever_caller_the_hint
     let try_spawn = |caller: SubjectPrincipal| {
         spawn_streaming_ingress_pump(
             fixture.client.clone(),
+            async_nats::jetstream::new(fixture.client.clone()),
             fixture.config.a2a_prefix.clone(),
             fixture.streaming_config,
             fixture.streaming_gate.clone(),

@@ -2,6 +2,7 @@
 // source: trogonai/peers/v1alpha1/preparation_outcome.proto
 
 /// Exactly one recipient decision wins. Preparation is not host insertion.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum PreparationOutcome {

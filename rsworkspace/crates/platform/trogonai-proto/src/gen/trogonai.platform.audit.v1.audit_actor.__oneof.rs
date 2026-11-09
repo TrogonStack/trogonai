@@ -78,28 +78,28 @@ pub mod audit_actor {
             Self::Some(Kind::from(v))
         }
     }
-    impl serde::Serialize for Kind {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Kind {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Unattributed(v) => {
-                    map.serialize_entry("unattributed", v)?;
+                    map.serialize_entry("unattributed", &**v)?;
                 }
                 Self::ApiKey(v) => {
-                    map.serialize_entry("apiKey", v)?;
+                    map.serialize_entry("apiKey", &**v)?;
                 }
                 Self::HumanSession(v) => {
-                    map.serialize_entry("humanSession", v)?;
+                    map.serialize_entry("humanSession", &**v)?;
                 }
                 Self::BreakGlass(v) => {
-                    map.serialize_entry("breakGlass", v)?;
+                    map.serialize_entry("breakGlass", &**v)?;
                 }
                 Self::Agent(v) => {
-                    map.serialize_entry("agent", v)?;
+                    map.serialize_entry("agent", &**v)?;
                 }
             }
             map.end()
