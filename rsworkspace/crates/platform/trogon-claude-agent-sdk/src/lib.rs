@@ -63,3 +63,6 @@ pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 pub use timeout::{Timeout, TimeoutError};
 
 pub use stderr_tail::StderrTail;
+
+/// A JSON object whose schema is owned by an individual tool or upstream event.
+pub type JsonObject = serde_json::Map<String, serde_json::Value>;
