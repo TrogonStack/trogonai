@@ -29,6 +29,18 @@ fn result_messages_keep_optional_payloads_costs_identity_and_extensions() -> Tes
         queued_turn_count: Some(0),
         additional_fields: metadata.clone(),
     };
+    let unreported = ResultMessage {
+        errors: Default::default(),
+        ..result.clone()
+    };
+    let unreported_errors: Option<Vec<String>> = unreported.clone().errors.into();
+    assert_eq!(unreported_errors, None);
+    let reported_empty = ResultMessage {
+        errors: Vec::new().into(),
+        ..result.clone()
+    };
+    let empty_errors: Option<Vec<String>> = reported_empty.clone().errors.into();
+    assert_eq!(empty_errors, Some(Vec::new()));
     assert_eq!(result.clone().status, ResultStatus::Error);
     assert_eq!(result.structured_output.as_ref(), Some(&serde_json::Value::Null));
     assert!(result.result.is_none());
