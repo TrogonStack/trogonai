@@ -129,6 +129,8 @@ def extract(contents, expected_hash):
             result[name] = {"literals": literals}
             result.update({name + "." + literal: {"kind": "literal"} for literal in literals})
         elif isinstance(value, (ast.BinOp, ast.Name, ast.Subscript)):
+            if any(isinstance(node, ast.BinOp) and not isinstance(node.op, ast.BitOr) for node in ast.walk(value)):
+                raise GateError(Code.FORMAT, name)
             result[name] = {"kind": "alias", "annotation": ast.unparse(value)}
         else:
             raise GateError(Code.FORMAT, name)
