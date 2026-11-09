@@ -32,16 +32,17 @@ impl AsyncRead for NativePipe {
             return Poll::Ready(Ok(()));
         }
         loop {
-            let mut guard = ready!(self.fd.poll_read_ready(cx))?;
-            match guard
-                .try_io(|fd| rustix::io::read(fd.get_ref(), buffer.initialize_unfilled()).map_err(io::Error::from))
-            {
-                Ok(Ok(count)) => {
+            // Descriptor errors can occur without a read-readiness event.
+            match rustix::io::read(self.fd.get_ref(), buffer.initialize_unfilled()) {
+                Ok(count) => {
                     buffer.advance(count);
                     return Poll::Ready(Ok(()));
                 }
-                Ok(Err(error)) => return Poll::Ready(Err(error)),
-                Err(_) => {}
+                Err(error) if error == rustix::io::Errno::WOULDBLOCK => {
+                    let mut guard = ready!(self.fd.poll_read_ready(cx))?;
+                    guard.clear_ready();
+                }
+                Err(error) => return Poll::Ready(Err(error.into())),
             }
         }
     }
