@@ -37,7 +37,7 @@ rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs"
 rustls = { workspace = true, features = ["ring"] }
 tempfile = { workspace = true }
 testcontainers-modules = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tracing-subscriber = { workspace = true }
 trogon-std = { workspace = true, features = ["test-support"] }
 

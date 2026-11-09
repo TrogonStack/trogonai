@@ -1,6 +1,7 @@
 # Generated code: collapse in diffs and exclude from language stats.
 rsworkspace/crates/platform/trogonai-proto/src/gen/** linguist-generated=true
 rsworkspace/crates/platform/trogon-semconv/src/gen/** linguist-generated=true
+goworkspace/internal/spirepolicy/testdata/deployment.json linguist-generated=true
 
 # Descriptor sets are regenerated from proto/, never diffed or hand-merged.
 *.binpb binary
