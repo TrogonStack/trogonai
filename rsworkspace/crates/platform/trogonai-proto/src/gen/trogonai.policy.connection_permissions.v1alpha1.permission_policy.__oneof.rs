@@ -42,19 +42,19 @@ pub mod connection_target {
             Self::Some(Target::from(v))
         }
     }
-    impl serde::Serialize for Target {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Target {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::ConnectionId(v) => {
-                    map.serialize_entry("connectionId", v)?;
+                    map.serialize_entry("connectionId", &**v)?;
                 }
                 Self::Under(v) => {
-                    map.serialize_entry("under", v)?;
+                    map.serialize_entry("under", &**v)?;
                 }
             }
             map.end()
