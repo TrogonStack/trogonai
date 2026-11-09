@@ -14,6 +14,8 @@ Images follow the
 
 ## Migration
 
-The legacy image reference `ghcr.io/trogonstack/trogonai/trogon-gateway` was
-retired after tracked deployments moved to the ADR-compliant path above. The
-legacy package is no longer published; update consumers to the new path.
+| Image | Replaced by |
+|---|---|
+| `ghcr.io/trogonstack/trogonai/trogon-gateway` | `ghcr.io/trogonstack/images/trogonai/trogon-gateway` |
+
+The legacy package is no longer published. Update consumers to the new path.
