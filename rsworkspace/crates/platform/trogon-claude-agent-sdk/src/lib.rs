@@ -2,7 +2,6 @@
 
 mod agent_name;
 mod client;
-mod control_request_id;
 mod effort_level;
 mod error;
 mod message_id;
@@ -13,6 +12,7 @@ mod session_id;
 mod setting_source;
 mod tool_rule;
 mod tool_use_id;
+mod control_request_id;
 mod usd_budget;
 
 pub use client::ClaudeSdkClient;
@@ -25,16 +25,15 @@ pub use usd_budget::{UsdBudget, UsdBudgetError};
 
 pub use effort_level::EffortLevel;
 
-pub use agent_name::{AgentName, AgentNameError};
+pub use agent_name::AgentName;
 
-pub use tool_rule::{ToolRule, ToolRuleError};
+pub use tool_rule::ToolRule;
 
-pub use prompt::{Prompt, PromptError};
+pub use prompt::Prompt;
 
-pub use session_id::{SessionId, SessionIdError};
+pub use session_id::SessionId;
 
-pub use message_id::{MessageId, MessageIdError};
+pub use message_id::MessageId;
 
-pub use tool_use_id::{ToolUseId, ToolUseIdError};
-
+pub use tool_use_id::ToolUseId;
 pub use control_request_id::ControlRequestId;
