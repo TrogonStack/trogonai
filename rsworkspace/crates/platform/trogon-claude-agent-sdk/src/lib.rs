@@ -33,4 +33,4 @@ pub use agent_name::AgentName;
 
 pub use tool_rule::ToolRule;
 
-pub use prompt::{Prompt, PromptError};
+pub use prompt::Prompt;
