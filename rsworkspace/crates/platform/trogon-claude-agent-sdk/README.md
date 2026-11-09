@@ -139,3 +139,6 @@ operations have separate UUID requirements at their respective boundaries.
 | `QueueCapacity` | Rust host-side bounded-channel policy; not an upstream SDK class | Positive and no larger than Tokio's `Semaphore::MAX_PERMITS`; Rust defaults are 32, or 256 for `DEFAULT_MESSAGES`. The value creates no channel. |
 | `Timeout` | Rust host-side wait policy; not an upstream SDK class | Positive and at most 24 hours; Rust defaults are 60 seconds, or 5 seconds for `SHUTDOWN_DEFAULT`. These are host policies, not upstream SDK restrictions; no clock is read. |
 | `StderrTail` | Rust diagnostic byte container for later child-process failures; not an upstream SDK class | Read-only public bytes and a content-free debug representation. Only the empty default is publicly constructible in this API slice. |
+
+Message data declarations are reviewed separately in the
+[message data reference](docs/reference/message-data.md).
