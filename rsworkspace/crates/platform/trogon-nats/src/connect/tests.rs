@@ -1,4 +1,7 @@
 use async_nats::connection::State;
+
+mod inbox_prefix_tests;
+mod reconnect_quarantine_tests;
 use async_nats::{ClientError, ConnectErrorKind, ServerError};
 
 use super::*;

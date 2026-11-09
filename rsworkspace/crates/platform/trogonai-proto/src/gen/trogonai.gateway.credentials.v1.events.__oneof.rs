@@ -138,43 +138,43 @@ pub mod credential_event {
             Self::Some(Event::from(v))
         }
     }
-    impl serde::Serialize for Event {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Event {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::WriteRequested(v) => {
-                    map.serialize_entry("writeRequested", v)?;
+                    map.serialize_entry("writeRequested", &**v)?;
                 }
                 Self::WriteFailed(v) => {
-                    map.serialize_entry("writeFailed", v)?;
+                    map.serialize_entry("writeFailed", &**v)?;
                 }
                 Self::Activated(v) => {
-                    map.serialize_entry("activated", v)?;
+                    map.serialize_entry("activated", &**v)?;
                 }
                 Self::RotationRequested(v) => {
-                    map.serialize_entry("rotationRequested", v)?;
+                    map.serialize_entry("rotationRequested", &**v)?;
                 }
                 Self::RotationFailed(v) => {
-                    map.serialize_entry("rotationFailed", v)?;
+                    map.serialize_entry("rotationFailed", &**v)?;
                 }
                 Self::Rotated(v) => {
-                    map.serialize_entry("rotated", v)?;
+                    map.serialize_entry("rotated", &**v)?;
                 }
                 Self::Revoked(v) => {
-                    map.serialize_entry("revoked", v)?;
+                    map.serialize_entry("revoked", &**v)?;
                 }
                 Self::DestroyRequested(v) => {
-                    map.serialize_entry("destroyRequested", v)?;
+                    map.serialize_entry("destroyRequested", &**v)?;
                 }
                 Self::Destroyed(v) => {
-                    map.serialize_entry("destroyed", v)?;
+                    map.serialize_entry("destroyed", &**v)?;
                 }
                 Self::DestroyFailed(v) => {
-                    map.serialize_entry("destroyFailed", v)?;
+                    map.serialize_entry("destroyFailed", &**v)?;
                 }
             }
             map.end()
