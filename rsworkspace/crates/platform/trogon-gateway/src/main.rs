@@ -85,7 +85,7 @@ async fn serve_with_env(
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
     env: &impl ReadEnv,
 ) -> anyhow::Result<()> {
-    if !resolved.has_any_source() {
+    if !resolved.has_any_source() && !resolved.allow_empty_sources {
         anyhow::bail!("no sources configured — provide a config file with at least one source");
     }
 

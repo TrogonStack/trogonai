@@ -426,6 +426,8 @@ pub enum ConfigError {
 
 #[derive(Config)]
 struct GatewayConfig {
+    #[config(env = "TROGON_GATEWAY_ALLOW_EMPTY_SOURCES", default = false)]
+    allow_empty_sources: bool,
     #[config(nested)]
     http_server: HttpServerConfig,
     #[config(nested)]
@@ -758,6 +760,7 @@ impl<T> SourceIntegration<T> {
 }
 
 pub struct ResolvedConfig {
+    pub allow_empty_sources: bool,
     pub http_server: ResolvedHttpServerConfig,
     pub nats: trogon_nats::NatsConfig,
     pub github: Vec<SourceIntegration<crate::source::github::GithubConfig>>,
@@ -875,6 +878,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) ->
     }
 
     Ok(ResolvedConfig {
+        allow_empty_sources: cfg.allow_empty_sources,
         http_server: ResolvedHttpServerConfig {
             port: cfg.http_server.port,
         },
