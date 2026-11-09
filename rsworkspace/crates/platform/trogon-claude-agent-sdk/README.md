@@ -128,4 +128,4 @@ operations have separate UUID requirements at their respective boundaries.
 | Rust value | Upstream scalar or purpose | Rust boundary |
 | --- | --- | --- |
 | `MessageId` | [Python `UserMessage.uuid`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1378) / TypeScript `SDKUserMessage.uuid` | Stores Python string values unchanged, including empty and control-bearing text. TypeScript declares `UUID`; Rust keeps opaque text without UUID syntax checks. |
-| `ToolUseId` | [Python `ToolUseBlock.id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1223) / TypeScript `UserDialogRequest.toolUseID` | Nonempty, control-free opaque text; valid spelling is preserved. |
+| `ToolUseId` | [Python `ToolUseBlock.id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1223) / TypeScript `UserDialogRequest.toolUseID` | Stores strings unchanged, including empty and control-bearing text. Optionality belongs to the containing message. |
