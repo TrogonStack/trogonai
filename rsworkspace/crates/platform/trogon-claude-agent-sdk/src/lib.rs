@@ -5,6 +5,7 @@ mod builtin_tool_name;
 mod client;
 mod config_value;
 mod control_request_id;
+mod dialog_kind;
 mod effort_level;
 mod environment;
 mod error;
@@ -56,3 +57,5 @@ pub use tool_name::ToolName;
 pub use builtin_tool_name::BuiltinToolName;
 
 pub use mcp_server_name::McpServerName;
+
+pub use dialog_kind::{DialogKind, DialogKindError};
