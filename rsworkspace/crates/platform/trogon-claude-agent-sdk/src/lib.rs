@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 mod client;
+mod effort_level;
 mod error;
 mod options;
 mod permission_mode;
@@ -14,3 +15,5 @@ pub use permission_mode::PermissionMode;
 pub use setting_source::SettingSource;
 
 pub use usd_budget::{UsdBudget, UsdBudgetError};
+
+pub use effort_level::EffortLevel;
