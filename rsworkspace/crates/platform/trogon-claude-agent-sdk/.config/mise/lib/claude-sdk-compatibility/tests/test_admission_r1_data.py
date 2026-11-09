@@ -9,6 +9,7 @@ class FieldContainerAdmissionTests(unittest.TestCase):
             for shape in ({"plain": {"fields": value, "has_stripped_fields": False}}, {"tuple": value}):
                 d = document()
                 add(d, node(1, "Value", "struct", {"kind": shape, "generics": generics(), "impls": []}))
-                with self.subTest(shape=shape), self.assertRaises(GateError) as caught:
-                    extract(d)
-                self.assertEqual(caught.exception.code, Code.FORMAT)
+                with self.subTest(shape=shape):
+                    with self.assertRaises(GateError) as caught:
+                        extract(d)
+                    self.assertEqual(caught.exception.code, Code.FORMAT)
