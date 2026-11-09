@@ -1,21 +1,21 @@
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ToolRule(String);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-#[error("invalid tool rule")]
-pub struct ToolRuleError;
-
 impl ToolRule {
-    pub fn new(value: impl Into<String>) -> Result<Self, ToolRuleError> {
-        let value = value.into();
-        if value.is_empty() || value.chars().any(char::is_control) || value.contains(',') {
-            return Err(ToolRuleError);
-        }
-        Ok(Self(value))
-    }
-
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl From<String> for ToolRule {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for ToolRule {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
     }
 }
 
