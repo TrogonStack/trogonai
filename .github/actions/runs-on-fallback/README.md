@@ -34,11 +34,8 @@ jobs:
       - id: pick
         uses: ./.github/actions/runs-on-fallback
         with:
-          # A token that can list the organization's runners, see "The token".
           github-token: ${{ secrets.RUNNER_STATUS_TOKEN }}
-          # The labels your self-hosted runners register with, the same ones
-          # you would put in runs-on to target them.
-          primary-labels: my-scale-set-linux-x64
+          primary-labels: ${{ vars.SELF_HOSTED_RUNNER_LABELS }}
           scope: organization
           jobs: build lint
 
@@ -71,12 +68,9 @@ reads an empty string.
 
 ## The token
 
-The default `GITHUB_TOKEN` cannot list self-hosted runners. Organization
-runners and runner groups belong to the organization, and that token is scoped
-to one repository. Repository runners need the Administration permission, which
-the workflow `permissions:` block does not offer. Without a token of your own
-this always selects the fallback. Use a GitHub App installation token or a
-fine-grained personal access token with:
+Listing self-hosted runners is not something the default `GITHUB_TOKEN` can do,
+so without a token of your own this always selects the fallback. Use a GitHub
+App installation token or a fine-grained personal access token with:
 
 - `repository` scope: repository permission Administration, read.
 - `organization` scope: organization permission Self-hosted runners, read.
