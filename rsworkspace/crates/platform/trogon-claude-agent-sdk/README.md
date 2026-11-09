@@ -22,6 +22,7 @@ pinned [TypeScript `0.3.319` declaration archive](https://registry.npmjs.org/@an
 | `env: BTreeMap<String, String>` | [`env`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2492) | `env` |
 | `additional_directories: Vec<PathBuf>` | [`add_dirs`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2486) | `additionalDirectories` |
 | `agent: Option<AgentName>` | Not exposed in pinned Python | `agent` |
+| `allowed_tools: Vec<ToolRule>` | [`allowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2353) | `allowedTools` |
 
 `PermissionMode` mirrors Python's
 [`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L25)
@@ -88,6 +89,11 @@ configuration assembly. The Rust field follows TypeScript
 the reviewed Python options do not expose a counterpart. `AgentName` keeps
 the runtime draft's nonempty, control-free name boundary without rewriting
 valid Unicode names. This draft stores the selection without starting an agent.
+
+`allowed_tools` stores ordered tool rules and defaults to empty.
+`ToolRule` preserves rule patterns while refusing empty values, control
+characters, and commas that could split a single rule at the CLI boundary.
+Duplicate rules remain present; this draft applies no permission policy.
 
 The example checks API composition; it does not run a session. Further options
 and runtime behavior belong in separate review slices.
