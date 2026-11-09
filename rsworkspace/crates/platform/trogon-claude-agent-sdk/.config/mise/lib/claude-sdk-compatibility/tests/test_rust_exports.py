@@ -45,6 +45,13 @@ class ExportTests(unittest.TestCase):
         add(doc, node(2, "X", "struct", {}))
         with self.assertRaises(GateError):
             inventory(doc)
+
+    def test_missing_or_unknown_visibility_is_not_silently_private(self):
+        for visibility in (None, "future-visibility"):
+            doc = document()
+            add(doc, node(1, "Hidden", "struct", {}, visibility))
+            with self.assertRaises(GateError):
+                inventory(doc)
         doc = document()
         add(doc, node(1, "cycle", "module", {"items": [1]}))
         with self.assertRaises(GateError):
