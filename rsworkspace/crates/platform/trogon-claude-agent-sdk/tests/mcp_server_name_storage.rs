@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use trogon_claude_agent_sdk::McpServerName;
 
 fn preserves_mcp_server_name(input: &str) {
-    let name = McpServerName::new(input).expect("MCP server names must preserve upstream map keys");
+    let name = McpServerName::new(input);
     assert_eq!(name.as_str(), input);
     assert_eq!(name.to_string(), input);
     assert_eq!(name.clone(), name);
@@ -30,8 +30,8 @@ fn delete_in_an_mcp_server_name_is_preserved() {
 
 #[test]
 fn ordered_mcp_server_keys_preserve_distinct_text() {
-    let control = McpServerName::new("server\0name").expect("control characters belong to the key");
-    let plain = McpServerName::new("servername").expect("ordinary key");
+    let control = McpServerName::new("server\0name");
+    let plain = McpServerName::new("servername");
     let entries = BTreeMap::from([(control, 1), (plain, 2)]);
     let stored: Vec<_> = entries
         .into_iter()

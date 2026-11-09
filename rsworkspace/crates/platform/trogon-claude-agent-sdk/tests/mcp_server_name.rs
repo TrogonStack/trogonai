@@ -1,19 +1,19 @@
-use trogon_claude_agent_sdk::{McpServerName, McpServerNameError};
+use trogon_claude_agent_sdk::McpServerName;
 
 #[test]
-fn valid_opaque_values_are_preserved_without_format_restrictions() -> Result<(), McpServerNameError> {
+fn valid_opaque_values_are_preserved_without_format_restrictions() {
     for input in ["opaque-value", "unicode café value", "  "] {
-        let value = McpServerName::new(input)?;
+        let value = McpServerName::new(input);
         assert_eq!(value.as_str(), input);
         assert_eq!(value.clone(), value);
         assert_eq!(value.to_string(), input);
     }
-    Ok(())
 }
 
 #[test]
-fn empty_and_control_values_are_typed_construction_errors() {
-    for input in ["", "value\nidentifier", "value\0identifier", "value\u{7f}"] {
-        assert!(matches!(McpServerName::new(input), Err(McpServerNameError)));
-    }
+fn owned_mcp_server_names_preserve_the_original_text() {
+    let input = String::from("owned\0server");
+    let value = McpServerName::new(input.clone());
+    assert_eq!(value.as_str(), input);
+    assert_eq!(value.to_string(), input);
 }
