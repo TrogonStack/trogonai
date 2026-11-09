@@ -138,43 +138,43 @@ pub mod peer_event {
             Self::Some(Event::from(v))
         }
     }
-    impl serde::Serialize for Event {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Event {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::PeerEnrolled(v) => {
-                    map.serialize_entry("peerEnrolled", v)?;
+                    map.serialize_entry("peerEnrolled", &**v)?;
                 }
                 Self::PeerAttached(v) => {
-                    map.serialize_entry("peerAttached", v)?;
+                    map.serialize_entry("peerAttached", &**v)?;
                 }
                 Self::PeerHeartbeatRecorded(v) => {
-                    map.serialize_entry("peerHeartbeatRecorded", v)?;
+                    map.serialize_entry("peerHeartbeatRecorded", &**v)?;
                 }
                 Self::PeerDetached(v) => {
-                    map.serialize_entry("peerDetached", v)?;
+                    map.serialize_entry("peerDetached", &**v)?;
                 }
                 Self::PeerMessageAccepted(v) => {
-                    map.serialize_entry("peerMessageAccepted", v)?;
+                    map.serialize_entry("peerMessageAccepted", &**v)?;
                 }
                 Self::PeerMessageIntakeRecorded(v) => {
-                    map.serialize_entry("peerMessageIntakeRecorded", v)?;
+                    map.serialize_entry("peerMessageIntakeRecorded", &**v)?;
                 }
                 Self::PeerBatchPrepared(v) => {
-                    map.serialize_entry("peerBatchPrepared", v)?;
+                    map.serialize_entry("peerBatchPrepared", &**v)?;
                 }
                 Self::PeerBatchAcknowledged(v) => {
-                    map.serialize_entry("peerBatchAcknowledged", v)?;
+                    map.serialize_entry("peerBatchAcknowledged", &**v)?;
                 }
                 Self::PeerMessageDisposed(v) => {
-                    map.serialize_entry("peerMessageDisposed", v)?;
+                    map.serialize_entry("peerMessageDisposed", &**v)?;
                 }
                 Self::PeerMessageSettled(v) => {
-                    map.serialize_entry("peerMessageSettled", v)?;
+                    map.serialize_entry("peerMessageSettled", &**v)?;
                 }
             }
             map.end()

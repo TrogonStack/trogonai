@@ -18,6 +18,9 @@ use futures::{Stream, StreamExt};
 use tracing::{debug, warn};
 use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsDoubleAck, JsMessageRef};
+use trogon_nats::jetstream::traits::{
+    JetStreamConsumer, JetStreamCreateConsumer, JetStreamDeleteConsumer, JetStreamGetStream,
+};
 
 use crate::constants::STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS;
 pub use crate::constants::{
@@ -257,17 +260,23 @@ pub enum StreamingIngressSpawnError {
 /// Cancellation may already be set when this is called. A cancelled pump returns
 /// its permit without starting consumption. Once created, its ephemeral consumer
 /// is explicitly deleted on exit, with a bounded best-effort cleanup request.
-pub fn spawn_streaming_ingress_pump(
+pub fn spawn_streaming_ingress_pump<J>(
     client: async_nats::Client,
+    jetstream: J,
     prefix: A2aPrefix,
     config: GatewayStreamingIngressConfig,
     gate: StreamingIngressGate,
     spawn: StreamingIngressSpawn,
     shutdown: CancellationToken,
-) -> Result<(), StreamingIngressSpawnError> {
+) -> Result<(), StreamingIngressSpawnError>
+where
+    J: JetStreamGetStream,
+    J::Stream:
+        JetStreamCreateConsumer<Consumer: JetStreamConsumer<Message = jetstream::Message>> + JetStreamDeleteConsumer,
+{
     let permit = try_acquire_streaming_permit(&gate, &spawn)?;
     tokio::spawn(async move {
-        run_streaming_ingress_pump(client, prefix, config, permit, spawn, shutdown).await;
+        run_streaming_ingress_pump(client, jetstream, prefix, config, permit, spawn, shutdown).await;
     });
     Ok(())
 }
@@ -287,11 +296,6 @@ fn try_acquire_streaming_permit(
 }
 
 /// Publish a JetStream-delivered payload to the caller's reply subject.
-///
-/// Generic over `trogon_nats::PublishClient` so the unit tests can drive
-/// this through `MockNatsClient` without standing up NATS. The pump itself
-/// keeps its concrete `async_nats::Client` because JetStream binding still
-/// uses the concrete type — only the forward step is mockable.
 async fn publish_to_caller_reply<C: trogon_nats::PublishClient>(
     client: &C,
     reply: &async_nats::Subject,
@@ -324,18 +328,22 @@ pub async fn events_stream_last_seq(client: &async_nats::Client, prefix: &A2aPre
     }
 }
 
-async fn run_streaming_ingress_pump(
+async fn run_streaming_ingress_pump<J>(
     client: async_nats::Client,
+    jetstream: J,
     prefix: A2aPrefix,
     config: GatewayStreamingIngressConfig,
     _permit: CallerInflightPermit,
     spawn: StreamingIngressSpawn,
     shutdown: CancellationToken,
-) {
+) where
+    J: JetStreamGetStream,
+    J::Stream:
+        JetStreamCreateConsumer<Consumer: JetStreamConsumer<Message = jetstream::Message>> + JetStreamDeleteConsumer,
+{
     if shutdown.is_cancelled() {
         return;
     }
-    let jetstream = jetstream::new(client.clone());
     let stream_name = events_stream_name(&prefix);
     let opened = tokio::select! {
         biased;
@@ -405,7 +413,7 @@ async fn run_streaming_ingress_pump(
 
 /// The SDK's response timeout starts after enqueueing. Bound the whole deletion
 /// so a saturated command queue cannot retain the caller permit after cancellation.
-async fn delete_streaming_consumer<I>(stream: &jetstream::stream::Stream<I>, name: &str) {
+async fn delete_streaming_consumer<S: JetStreamDeleteConsumer>(stream: &S, name: &str) {
     match tokio::time::timeout(std::time::Duration::from_secs(5), stream.delete_consumer(name)).await {
         Ok(Ok(_)) => {}
         Ok(Err(error)) => warn!(%error, "gateway streaming consumer cleanup failed"),
