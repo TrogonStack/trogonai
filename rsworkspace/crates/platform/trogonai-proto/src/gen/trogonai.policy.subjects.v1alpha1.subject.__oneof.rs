@@ -54,19 +54,19 @@ pub mod policy_subject {
             Self::Some(Subject::from(v))
         }
     }
-    impl serde::Serialize for Subject {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Subject {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::AgentId(v) => {
-                    map.serialize_entry("agentId", v)?;
+                    map.serialize_entry("agentId", &**v)?;
                 }
                 Self::Node(v) => {
-                    map.serialize_entry("node", v)?;
+                    map.serialize_entry("node", &**v)?;
                 }
             }
             map.end()
