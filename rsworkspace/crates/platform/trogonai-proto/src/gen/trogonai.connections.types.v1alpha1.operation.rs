@@ -4,6 +4,7 @@
 /// How a permit authorizes use of a connection (ADR#0096 Decision 3).
 /// Empty permit modes mean HTTP_PROXY only. Unknown values and the retired
 /// typed-operation mode are refused, never interpreted as proxy authority.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum ConnectionUseMode {
