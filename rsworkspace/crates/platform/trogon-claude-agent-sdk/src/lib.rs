@@ -45,4 +45,4 @@ pub use message_id::MessageId;
 
 pub use tool_use_id::ToolUseId;
 
-pub use control_request_id::{ControlRequestId, ControlRequestIdError};
+pub use control_request_id::ControlRequestId;
