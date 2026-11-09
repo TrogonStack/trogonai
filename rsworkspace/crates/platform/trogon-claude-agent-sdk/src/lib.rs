@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 mod agent_name;
+mod builtin_tool_name;
 mod client;
 mod control_request_id;
 mod effort_level;
@@ -44,3 +45,5 @@ pub use control_request_id::{ControlRequestId, ControlRequestIdError};
 pub use task_id::{TaskId, TaskIdError};
 
 pub use tool_name::{ToolName, ToolNameError};
+
+pub use builtin_tool_name::{BuiltinToolName, BuiltinToolNameError};
