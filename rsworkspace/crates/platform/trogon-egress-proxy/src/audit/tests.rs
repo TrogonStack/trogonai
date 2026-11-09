@@ -19,6 +19,7 @@ impl AuditSink for Silent {
 
 #[tokio::test]
 async fn a_sink_without_background_work_returns_from_run_at_once() {
+    assert_eq!(Silent.readiness().await, AuditReadiness::Unavailable);
     let shutdown = CancellationToken::new();
     Silent.run(shutdown).await;
 }
