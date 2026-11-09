@@ -9,7 +9,7 @@ pub enum BuiltinToolNameError {
     Empty,
     #[error("a built-in tool name cannot contain whitespace, controls or list separators")]
     InvalidCharacter,
-    #[error("the default tool preset must be selected through ToolSet::CliDefault")]
+    #[error("default names a tool preset, not an individual built-in tool")]
     ReservedPreset,
 }
 
