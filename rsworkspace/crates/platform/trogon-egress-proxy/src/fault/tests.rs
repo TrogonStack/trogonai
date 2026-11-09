@@ -1,6 +1,7 @@
 use super::*;
 
-const ALL: [Fault; 8] = [
+const ALL: [Fault; 9] = [
+    Fault::AuthorityExpired,
     Fault::NoPermit,
     Fault::AddressForbidden,
     Fault::SniMismatch,

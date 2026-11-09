@@ -13,12 +13,12 @@ use crate::trust_domain::TrustDomain;
 fn config(policy_file: &Path) -> Config {
     Config {
         listen: "127.0.0.1:0".parse().expect("addr"),
-        policy_file: policy_file.to_owned(),
-        tls: TlsFiles {
+        policy: PolicyInput::StaticFile(policy_file.to_owned()),
+        tls: crate::config::TlsInput::Files(TlsFiles {
             certificate_chain: "unused-server.pem".into(),
             private_key: "unused-server.key".into(),
             client_trust_anchors: "unused-ca.pem".into(),
-        },
+        }),
         trust_domain: TrustDomain::new("trogon.example").expect("trust domain"),
         audit: AuditConfig {
             nats: NatsConfig::from_url("nats://127.0.0.1:1"),
@@ -97,4 +97,79 @@ async fn audit_settings_that_cannot_build_a_connection_stop_startup() {
 #[test]
 fn the_only_mode_is_enforce() {
     assert_eq!(EnforcementMode::Enforce.as_str(), "enforce");
+}
+
+#[tokio::test]
+async fn direct_workload_runtime_configuration_cannot_select_static_policy_or_another_scope() {
+    let dir = tempfile::tempdir().expect("directory");
+    let mut configured = config(&dir.path().join("unused.toml"));
+    configured.tls = TlsInput::Workload(
+        crate::workload_identity_config::WorkloadIdentityConfig::new(
+            "unix:///run/identity/api.sock",
+            "spiffe://trogon.example/service/egress",
+            "REGISTRATIONS",
+            std::num::NonZeroU64::MIN,
+            &configured.trust_domain,
+            &configured.audit,
+        )
+        .expect("workload profile"),
+    );
+    assert!(matches!(
+        start(configured.clone()).await,
+        Err(StartupError::WorkloadPolicyRequired)
+    ));
+    configured.policy = PolicyInput::NatsKv(
+        KvPolicyConfig::new(
+            "POLICIES",
+            configured.audit.identity.tenant().clone(),
+            configured.audit.identity.project().clone(),
+            std::num::NonZeroU64::MIN,
+        )
+        .expect("policy scope"),
+    );
+    configured.trust_domain = TrustDomain::new("other.example").expect("other domain");
+    assert!(matches!(start(configured).await, Err(StartupError::WorkloadScope)));
+}
+
+#[tokio::test]
+async fn direct_runtime_configuration_cannot_bypass_live_transport_requirements() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = config(&dir.path().join("unused.toml"));
+    config.policy = PolicyInput::NatsKv(
+        KvPolicyConfig::new(
+            "egress_policy",
+            AuditName::new("acme").unwrap(),
+            NatsToken::new("payments").unwrap(),
+            std::num::NonZeroU64::new(1).unwrap(),
+        )
+        .unwrap(),
+    );
+    let error = start(config.clone()).await.err().unwrap();
+    assert!(matches!(
+        error,
+        StartupError::LivePolicyTransport(PolicyTransportError::ClientAuthenticationRequired)
+    ));
+    config.audit.nats.tls = Ok(trogon_nats::NatsTls::Disabled);
+    let error = start(config).await.err().unwrap();
+    assert!(matches!(
+        error,
+        StartupError::LivePolicyTransport(PolicyTransportError::TlsRequired)
+    ));
+}
+
+#[tokio::test]
+async fn direct_runtime_configuration_cannot_select_another_policy_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = config(&dir.path().join("unused.toml"));
+    config.policy = PolicyInput::NatsKv(
+        KvPolicyConfig::new(
+            "egress_policy",
+            AuditName::new("another-tenant").unwrap(),
+            NatsToken::new("payments").unwrap(),
+            std::num::NonZeroU64::new(1).unwrap(),
+        )
+        .unwrap(),
+    );
+    let error = start(config).await.err().unwrap();
+    assert!(matches!(error, StartupError::LivePolicyScope));
 }
