@@ -25,8 +25,14 @@ The result is one MCP text item containing native hook JSON with
 `hookSpecificOutput.additionalContext`. The adapter returns the backend's same
 unacknowledged assignment on retry and records no acknowledgment of its own.
 
-Tool failures become MCP application error results with bounded static messages,
-so a native hook can report failure without blocking an ordinary prompt. Typed
+Prompt hooks have one total two-second budget covering lock acquisition,
+enrollment, preparation and rendering. A deadline does not confirm whether a
+remote operation completed. Retry with the same native session and prompt
+identifiers; the reserved identity and any existing preparation remain intact.
+
+Tool failures become MCP application error results with bounded static messages
+and a stable per-variant `structuredContent.code` from `PeerMcpError::code()`,
+so callers can distinguish failures without matching diagnostic text. Typed
 backend sources remain available through the direct `invoke` API; peer bodies
 are excluded from adapter `Debug` output. The backend remains responsible for
 durability, current authorization, generation fencing, content retrieval and

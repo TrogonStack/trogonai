@@ -82,12 +82,16 @@ pub fn server_config(
         .build()
         .map_err(TlsError::Verifier)?;
     let verifier = SingleAgentVerifier { inner, trust_domain };
-    ServerConfig::builder_with_provider(provider)
+    let mut config = ServerConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
         .map_err(TlsError::Configuration)?
         .with_client_cert_verifier(Arc::new(verifier))
         .with_single_cert(chain, key)
-        .map_err(TlsError::Configuration)
+        .map_err(TlsError::Configuration)?;
+    // Resumption bypasses client certificate verification on a new connection.
+    config.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
+    config.send_tls13_tickets = 0;
+    Ok(config)
 }
 
 /// The caller of an established connection: the single URI SAN of the leaf
