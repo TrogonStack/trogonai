@@ -16,6 +16,7 @@ mod prompt;
 mod queue_capacity;
 mod session_id;
 mod setting_source;
+mod stderr_tail;
 mod task_id;
 mod timeout;
 mod tool_name;
@@ -62,3 +63,5 @@ pub use mcp_tool_name::{McpToolName, McpToolNameError};
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 
 pub use timeout::{Timeout, TimeoutError};
+
+pub use stderr_tail::StderrTail;
