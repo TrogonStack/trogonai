@@ -1,6 +1,6 @@
 use std::{num::NonZeroUsize, path::PathBuf};
 
-use crate::{PermissionMode, SettingSource, UsdBudget};
+use crate::{EffortLevel, PermissionMode, SettingSource, UsdBudget};
 
 #[derive(Clone, Debug, Default)]
 pub struct ClaudeAgentOptions {
@@ -12,4 +12,5 @@ pub struct ClaudeAgentOptions {
     pub setting_sources: Option<Vec<SettingSource>>,
     pub max_turns: Option<NonZeroUsize>,
     pub max_budget_usd: Option<UsdBudget>,
+    pub effort: Option<EffortLevel>,
 }
