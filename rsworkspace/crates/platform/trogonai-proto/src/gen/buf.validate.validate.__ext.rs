@@ -13,9 +13,23 @@ pub const __MESSAGE_JSON_EXT: ::buffa::type_registry::JsonExtEntry = ::buffa::ty
     to_json: ::buffa::extension_registry::helpers::message_to_json::<
         super::super::MessageRules,
     >,
-    from_json: ::buffa::extension_registry::helpers::message_from_json::<
-        super::super::MessageRules,
-    >,
+    from_json: {
+        fn __from_json(
+            value: ::buffa::serde_json::Value,
+            number: u32,
+        ) -> ::core::result::Result<
+            ::buffa::alloc::vec::Vec<::buffa::UnknownField>,
+            ::buffa::alloc::string::String,
+        > {
+            if value.is_null() {
+                return ::core::result::Result::Ok(::buffa::alloc::vec::Vec::new());
+            }
+            ::buffa::extension_registry::helpers::message_from_json::<
+                super::super::MessageRules,
+            >(value, number)
+        }
+        __from_json
+    },
 };
 ///Extension `oneof` on `.google.protobuf.OneofOptions` (field 1159).
 pub const ONEOF: ::buffa::Extension<
@@ -29,9 +43,23 @@ pub const __ONEOF_JSON_EXT: ::buffa::type_registry::JsonExtEntry = ::buffa::type
     to_json: ::buffa::extension_registry::helpers::message_to_json::<
         super::super::OneofRules,
     >,
-    from_json: ::buffa::extension_registry::helpers::message_from_json::<
-        super::super::OneofRules,
-    >,
+    from_json: {
+        fn __from_json(
+            value: ::buffa::serde_json::Value,
+            number: u32,
+        ) -> ::core::result::Result<
+            ::buffa::alloc::vec::Vec<::buffa::UnknownField>,
+            ::buffa::alloc::string::String,
+        > {
+            if value.is_null() {
+                return ::core::result::Result::Ok(::buffa::alloc::vec::Vec::new());
+            }
+            ::buffa::extension_registry::helpers::message_from_json::<
+                super::super::OneofRules,
+            >(value, number)
+        }
+        __from_json
+    },
 };
 ///Extension `field` on `.google.protobuf.FieldOptions` (field 1159).
 pub const FIELD: ::buffa::Extension<
@@ -45,9 +73,23 @@ pub const __FIELD_JSON_EXT: ::buffa::type_registry::JsonExtEntry = ::buffa::type
     to_json: ::buffa::extension_registry::helpers::message_to_json::<
         super::super::FieldRules,
     >,
-    from_json: ::buffa::extension_registry::helpers::message_from_json::<
-        super::super::FieldRules,
-    >,
+    from_json: {
+        fn __from_json(
+            value: ::buffa::serde_json::Value,
+            number: u32,
+        ) -> ::core::result::Result<
+            ::buffa::alloc::vec::Vec<::buffa::UnknownField>,
+            ::buffa::alloc::string::String,
+        > {
+            if value.is_null() {
+                return ::core::result::Result::Ok(::buffa::alloc::vec::Vec::new());
+            }
+            ::buffa::extension_registry::helpers::message_from_json::<
+                super::super::FieldRules,
+            >(value, number)
+        }
+        __from_json
+    },
 };
 ///Extension `predefined` on `.google.protobuf.FieldOptions` (field 1160).
 pub const PREDEFINED: ::buffa::Extension<
@@ -61,7 +103,21 @@ pub const __PREDEFINED_JSON_EXT: ::buffa::type_registry::JsonExtEntry = ::buffa:
     to_json: ::buffa::extension_registry::helpers::message_to_json::<
         super::super::PredefinedRules,
     >,
-    from_json: ::buffa::extension_registry::helpers::message_from_json::<
-        super::super::PredefinedRules,
-    >,
+    from_json: {
+        fn __from_json(
+            value: ::buffa::serde_json::Value,
+            number: u32,
+        ) -> ::core::result::Result<
+            ::buffa::alloc::vec::Vec<::buffa::UnknownField>,
+            ::buffa::alloc::string::String,
+        > {
+            if value.is_null() {
+                return ::core::result::Result::Ok(::buffa::alloc::vec::Vec::new());
+            }
+            ::buffa::extension_registry::helpers::message_from_json::<
+                super::super::PredefinedRules,
+            >(value, number)
+        }
+        __from_json
+    },
 };

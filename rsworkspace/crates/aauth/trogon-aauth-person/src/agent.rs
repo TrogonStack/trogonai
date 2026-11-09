@@ -8,12 +8,12 @@
 //! crate-level docs' "Deviations" note. This module verifies the JWTs carried
 //! in the request body and the trust/binding relationships between them.
 
-use trogon_aauth_verify::{JwksResolver, TimeSource, TokenVerifier, VerifiedAuth};
+use trogon_aauth_verify::{JwksResolver, TimeSource, TokenError, TokenVerifier, VerifiedAuth};
 use trogon_identity_types::aauth::person_server::TokenRequest;
 use trogon_identity_types::aauth::{AgentClaims, ResourceClaims};
 
 use crate::error::RequestVerificationError;
-use crate::mint::BindingAgent;
+use crate::mint::{AuthTokenTtl, BindingAgent};
 use crate::subagent::parent_agent_of;
 
 /// Everything verified out of one [`TokenRequest`], before policy runs.
@@ -25,6 +25,32 @@ pub struct VerifiedRequest {
     pub upstream: Option<VerifiedAuth>,
     pub binding: BindingAgent,
     pub justification: Option<String>,
+}
+
+impl VerifiedRequest {
+    pub(crate) fn auth_token_ttl(
+        &self,
+        now: i64,
+        maximum: AuthTokenTtl,
+    ) -> Result<AuthTokenTtl, RequestVerificationError> {
+        let mut ttl = maximum
+            .bounded_by(now, self.agent_claims.exp)
+            .map_err(RequestVerificationError::AgentToken)?;
+        if self.resource_claims.exp <= now {
+            return Err(RequestVerificationError::ResourceToken(TokenError::Expired));
+        }
+        if let Some(subagent) = &self.subagent_claims {
+            ttl = ttl
+                .bounded_by(now, subagent.exp)
+                .map_err(RequestVerificationError::SubagentToken)?;
+        }
+        if let Some(upstream) = &self.upstream {
+            ttl = ttl
+                .bounded_by(now, upstream.claims.exp)
+                .map_err(RequestVerificationError::UpstreamToken)?;
+        }
+        Ok(ttl)
+    }
 }
 
 /// Verifies an agent's token request against this Person Server's own
@@ -93,6 +119,9 @@ where
             }
         }
         None => {
+            if resource.claims.agent != agent.claims.sub {
+                return Err(RequestVerificationError::ResourceTokenAgentIdentifierMismatch);
+            }
             if resource.claims.agent_jkt != agent.jkt {
                 return Err(RequestVerificationError::ResourceTokenAgentKeyMismatch);
             }
