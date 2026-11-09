@@ -1,0 +1,203 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/workload_federation/v1alpha1/inbound_admission.proto";
+import "trogonai/platform/workload_federation/v1alpha1/provider_identity.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+import "trogonai/platform/workload_federation/v1alpha1/source_identity.proto";
+import "trogonai/platform/workload_identity/v1alpha1/credential_activation.proto";
+
+// Safe provenance captured from the trusted authority owner, never supplied as
+// a bearer grant by a guest. Ingress verifies actual current registration,
+// activation acknowledgement, policy and holder before/after every await and use.
+// The original deadline is retained across retries; a new assertion cannot reset
+// it. Actual monotonic deadlines and usable credentials remain process-owned.
+message FederationAuthorityEvidence {
+  option (buf.validate.message).cel = {
+    id: "federation_authority.interval"
+    message: "original authority must have a positive finite validity interval"
+    expression: "this.original_authority_expires_at > this.admitted_at"
+  };
+  option (buf.validate.message).cel = {
+    id: "federation_authority.local_activation"
+    message: "local authority requires matching activation evidence within its certificate lifetime"
+    expression: "has(this.source.local_workload) ? (has(this.local_activation) && has(this.source_registration_expires_at) && !has(this.inbound_admission) && this.local_activation.binding == this.source.local_workload && this.original_authority_expires_at <= this.local_activation.expires_at && this.original_authority_expires_at <= this.source_registration_expires_at && this.source_registration_expires_at <= this.admitted_at + duration('330s') && this.admitted_at >= this.local_activation.not_before) : (!has(this.local_activation) && !has(this.source_registration_expires_at) && has(this.inbound_admission) && this.inbound_admission.subject_binding_ref == this.source.subject_binding_ref && this.admitted_at >= this.inbound_admission.admitted_at && this.original_authority_expires_at <= this.inbound_admission.expires_at)"
+  };
+  option (buf.validate.message).cel = {
+    id: "federation_authority.source_scope"
+    message: "the original source must share the exact recipient_binding_ref scope"
+    expression: "has(this.source.local_workload) ? (this.source.local_workload.tenant == this.recipient_binding_ref.scope.tenant && this.source.local_workload.project == this.recipient_binding_ref.scope.project) : this.source.subject_binding_ref.scope == this.recipient_binding_ref.scope"
+  };
+  SourceIdentityRequirement source = 1 [features.field_presence = LEGACY_REQUIRED];
+  RecipientBindingRef recipient_binding_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  FederationAuthorizationId authorization_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  FederationPolicyRevisionId policy_revision_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  FederationAuthorityHolderId authority_holder_id = 5 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp admitted_at = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp original_authority_expires_at = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  trogonai.platform.workload_identity.v1alpha1.CredentialActivation local_activation = 8;
+  InboundAdmissionEvidence inbound_admission = 9;
+  // Actual original registration expiry from the trusted owner, never a new
+  // 330-second lease minted by observing the same registration again.
+  google.protobuf.Timestamp source_registration_expires_at = 10 [(buf.validate.field).timestamp.gt = {seconds: 0}];
+}
+
+enum ProviderRequestIdAbsence {
+  PROVIDER_REQUEST_ID_ABSENCE_UNSPECIFIED = 0;
+  PROVIDER_REQUEST_ID_ABSENCE_NOT_RETURNED = 1;
+  PROVIDER_REQUEST_ID_ABSENCE_TRANSPORT_UNOBSERVED = 2;
+  PROVIDER_REQUEST_ID_ABSENCE_NOT_DISPATCHED = 3;
+}
+
+// A provider identifier is retained exactly as actually returned. Absence is
+// explicit; the platform must never invent one or claim an unproved audit join.
+message ProviderRequestEvidence {
+  oneof correlation {
+    option (buf.validate.oneof).required = true;
+    string provider_request_id = 1 [(buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }];
+    ProviderRequestIdAbsence absence = 2 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+}
+
+enum IssuedCredentialDisposition {
+  ISSUED_CREDENTIAL_DISPOSITION_UNSPECIFIED = 0;
+  ISSUED_CREDENTIAL_DISPOSITION_BROKER_HELD = 1;
+  ISSUED_CREDENTIAL_DISPOSITION_DISCARDED_AUTHORITY_ENDED = 2;
+  ISSUED_CREDENTIAL_DISPOSITION_DISCARDED_INTEGRITY_FAILURE = 3;
+}
+
+// Public metadata about a provider credential, never the credential or an
+// exchange assertion. Discarding it or ending local use does not remotely revoke
+// it. Provider validity and original permitted-use validity remain independent.
+message IssuedResourceCredentialEvidence {
+  option (buf.validate.message).cel = {
+    id: "issued_credential.local_bound"
+    message: "local permitted use must not outlive the provider credential"
+    expression: "this.permitted_local_use_until <= this.provider_expires_at"
+  };
+  google.protobuf.Timestamp provider_expires_at = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp permitted_local_use_until = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  IssuedCredentialDisposition disposition = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum FederationExchangeFailureKind {
+  FEDERATION_EXCHANGE_FAILURE_KIND_UNSPECIFIED = 0;
+  FEDERATION_EXCHANGE_FAILURE_KIND_DENIED = 1;
+  FEDERATION_EXCHANGE_FAILURE_KIND_UNAVAILABLE = 2;
+  FEDERATION_EXCHANGE_FAILURE_KIND_THROTTLED = 3;
+  FEDERATION_EXCHANGE_FAILURE_KIND_INVALID_ASSERTION = 4;
+  FEDERATION_EXCHANGE_FAILURE_KIND_RECIPIENT_REJECTED = 5;
+  FEDERATION_EXCHANGE_FAILURE_KIND_INTEGRITY = 6;
+  FEDERATION_EXCHANGE_FAILURE_KIND_AUTHORITY_WITHDRAWN = 7;
+  FEDERATION_EXCHANGE_FAILURE_KIND_DEADLINE = 8;
+  FEDERATION_EXCHANGE_FAILURE_KIND_SIGNER_UNAVAILABLE = 9;
+  FEDERATION_EXCHANGE_FAILURE_KIND_UNSUPPORTED_PROFILE = 10;
+}
+
+message FederationExchangeFailure {
+  FederationExchangeFailureKind kind = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum FederationUncertainReason {
+  FEDERATION_UNCERTAIN_REASON_UNSPECIFIED = 0;
+  FEDERATION_UNCERTAIN_REASON_TIMEOUT_AFTER_DISPATCH = 1;
+  FEDERATION_UNCERTAIN_REASON_CANCELLED_AFTER_DISPATCH = 2;
+  FEDERATION_UNCERTAIN_REASON_ACKNOWLEDGEMENT_LOST = 3;
+}
+
+// Cancellation/timeout does not retract a dispatched request. Reconciliation
+// uses actual provider semantics; uncertainty never authorizes blind replay.
+message FederationUncertainEffect {
+  FederationUncertainReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+message FederationExchangeRecord {
+  // A refusal observed after expiry is legitimate audit. It proves no dispatch
+  // and does not mint a new authority interval merely to record that refusal.
+  option (buf.validate.message).cel = {
+    id: "federation_exchange.dispatch_authority"
+    message: "an exchange outside original authority must be an explicit undispatched expiry or withdrawal refusal"
+    expression: "this.started_at < this.authority.original_authority_expires_at || (has(this.failed) && has(this.provider_request.absence) && this.provider_request.absence == 3 && (this.failed.kind == 7 || this.failed.kind == 8))"
+  };
+  option (buf.validate.message).cel = {
+    id: "federation_exchange.dispatch_evidence"
+    message: "issued or uncertain exchanges cannot claim that no request was dispatched"
+    expression: "(!has(this.issued) && !has(this.uncertain)) || !has(this.provider_request.absence) || this.provider_request.absence != 3"
+  };
+  option (buf.validate.message).cel = {
+    id: "federation_exchange.interval"
+    message: "exchange completion cannot precede its observation start"
+    expression: "this.finished_at >= this.started_at && this.started_at >= this.authority.admitted_at"
+  };
+  option (buf.validate.message).cel = {
+    id: "federation_exchange.original_bound"
+    message: "issued credentials cannot extend original authority and retained credentials require current post-exchange authority"
+    expression: "!has(this.issued) || (this.issued.permitted_local_use_until <= this.authority.original_authority_expires_at && (this.issued.disposition != 1 || this.finished_at < this.issued.permitted_local_use_until))"
+  };
+  FederationExchangeId exchange_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 attempt_number = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  FederationAuthorityEvidence authority = 3 [features.field_presence = LEGACY_REQUIRED];
+  RecipientOperationId operation_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp started_at = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp finished_at = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  ProviderRequestEvidence provider_request = 7 [features.field_presence = LEGACY_REQUIRED];
+  FederationRequestId request_id = 11 [features.field_presence = LEGACY_REQUIRED];
+  bytes holder_public_key_sha256 = 12 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    IssuedResourceCredentialEvidence issued = 8;
+    FederationExchangeFailure failed = 9;
+    FederationUncertainEffect uncertain = 10;
+  }
+}

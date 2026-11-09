@@ -7,6 +7,13 @@ date: 2026-08-07
 
 # ADR#0053: External OIDC Federation Surface for Agent Identity
 
+> **Related research:** The [federation proposal](../research/workload-identity/federation.md)
+> separates native SPIFFE trust, inbound workload admission and outbound resource
+> exchange; evaluates SPIRE JWT/discovery reuse; and records provider proof gates.
+> Current Entra documentation confirms RS256 assertions. The stronger RSA-only
+> JWKS claim below remains an explicit evidence/review question in that proposal;
+> this note does not remove it or change this ADR's draft status.
+
 ## Context
 
 [ADR#0036](./0036-agent-self-certifying-identity.md) anchors an

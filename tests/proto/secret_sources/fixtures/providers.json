@@ -1,0 +1,555 @@
+{
+  "templates": {
+    "aws": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretSourceDefinition",
+      "payload": {
+        "scope": {
+          "tenantId": {
+            "value": "tenant_1"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "project_1"
+            }
+          }
+        },
+        "aws": {
+          "accountId": {
+            "value": "123456789012"
+          },
+          "region": {
+            "value": "us-east-1"
+          },
+          "assumeRole": {
+            "role": {
+              "value": "arn:aws:iam::123456789012:role/secret-reader"
+            },
+            "externalId": {
+              "value": "external_1"
+            }
+          }
+        },
+        "entries": [
+          {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "selection": 1,
+            "aws": {
+              "secretArn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:credential-abcdef"
+            }
+          }
+        ],
+        "contractVersion": 1
+      }
+    },
+    "google": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretSourceDefinition",
+      "payload": {
+        "scope": {
+          "tenantId": {
+            "value": "tenant_1"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "project_1"
+            }
+          }
+        },
+        "google": {
+          "projectId": {
+            "value": "cloud-project-1"
+          },
+          "federation": {
+            "workloadIdentityProvider": {
+              "value": "projects/123456789012/locations/global/workloadIdentityPools/pool-1/providers/provider-1"
+            }
+          }
+        },
+        "entries": [
+          {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "selection": 2,
+            "google": {
+              "secretResource": "projects/cloud-project-1/secrets/credential"
+            }
+          }
+        ],
+        "contractVersion": 1
+      }
+    },
+    "openbao": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretSourceDefinition",
+      "payload": {
+        "scope": {
+          "tenantId": {
+            "value": "tenant_1"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "project_1"
+            }
+          }
+        },
+        "openBao": {
+          "endpoint": {
+            "baseUrl": "https://secrets.example.test/"
+          },
+          "trustRoots": [
+            {
+              "certificate": "AA=="
+            }
+          ],
+          "mount": {
+            "value": "customer-kv"
+          },
+          "workloadIdentity": {
+            "jwt": {
+              "role": {
+                "value": "secret-reader"
+              }
+            }
+          }
+        },
+        "entries": [
+          {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "selection": 3,
+            "openBao": {
+              "path": "services/worker",
+              "fieldName": "value"
+            }
+          }
+        ],
+        "contractVersion": 1
+      }
+    },
+    "private": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretSourcePrivateConfiguration",
+      "payload": {
+        "sourceRef": {
+          "scope": {
+            "tenantId": {
+              "value": "tenant_1"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "project_1"
+              }
+            }
+          },
+          "sourceId": {
+            "value": "source_1"
+          },
+          "definitionRevision": "1",
+          "recoveryFence": "1",
+          "definitionDigest": {
+            "algorithm": "sha256",
+            "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenantId": {
+              "value": "tenant_1"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "project_1"
+              }
+            }
+          },
+          "aws": {
+            "accountId": {
+              "value": "123456789012"
+            },
+            "region": {
+              "value": "us-east-1"
+            },
+            "assumeRole": {
+              "role": {
+                "value": "arn:aws:iam::123456789012:role/secret-reader"
+              },
+              "externalId": {
+                "value": "external_1"
+              }
+            }
+          },
+          "entries": [
+            {
+              "entryId": {
+                "value": "entry_1"
+              },
+              "selection": 1,
+              "aws": {
+                "secretArn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:credential-abcdef"
+              }
+            }
+          ],
+          "contractVersion": 1
+        },
+        "artifact": {
+          "definitionBytes": "ChsKCgoIdGVuYW50XzESDQoLCglwcm9qZWN0XzEqVwoJCgdlbnRyeV8xEAEaSApGYXJuOmF3czpzZWNyZXRzbWFuYWdlcjp1cy1lYXN0LTE6MTIzNDU2Nzg5MDEyOnNlY3JldDpjcmVkZW50aWFsLWFiY2RlZjABEl0KDgoMMTIzNDU2Nzg5MDEyEgsKCXVzLWVhc3QtMRo+Ci4KLGFybjphd3M6aWFtOjoxMjM0NTY3ODkwMTI6cm9sZS9zZWNyZXQtcmVhZGVyEgwKCmV4dGVybmFsXzE="
+        }
+      }
+    },
+    "bootstrap": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretSourceDefinition",
+      "payload": {
+        "scope": {
+          "tenantId": {
+            "value": "tenant_1"
+          },
+          "resourceParent": {
+            "projectId": {
+              "value": "project_1"
+            }
+          }
+        },
+        "aws": {
+          "accountId": {
+            "value": "123456789012"
+          },
+          "region": {
+            "value": "us-east-1"
+          },
+          "storedCredentialsRef": {
+            "bootstrapCredentialRef": {
+              "id": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+            },
+            "approvalId": {
+              "value": "bootstrap_exception_1"
+            }
+          }
+        },
+        "entries": [
+          {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "selection": 1,
+            "aws": {
+              "secretArn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:credential-abcdef"
+            }
+          }
+        ],
+        "contractVersion": 1
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "aws current-only source definition",
+      "template": "aws"
+    },
+    {
+      "name": "google current-only source definition",
+      "template": "google"
+    },
+    {
+      "name": "openbao current-only source definition",
+      "template": "openbao"
+    },
+    {
+      "name": "private source definition retains exact artifact",
+      "template": "private"
+    },
+    {
+      "name": "source entries cannot cross provider families",
+      "template": "aws",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries/0",
+          "value": {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "selection": 2,
+            "google": {
+              "secretResource": "projects/cloud-project-1/secrets/credential"
+            }
+          }
+        }
+      ],
+      "violations": [
+        "every entry locator must match its registered provider"
+      ]
+    },
+    {
+      "name": "source entry IDs cannot be duplicated",
+      "template": "aws",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/entries/1",
+          "value": {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "selection": 1,
+            "aws": {
+              "secretArn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:credential-abcdef"
+            }
+          }
+        }
+      ],
+      "violations": [
+        "selected source entry identities must be unique"
+      ]
+    },
+    {
+      "name": "same source location cannot mint duplicate selected entries",
+      "template": "aws",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/entries/1",
+          "value": {
+            "entryId": {
+              "value": "entry_2"
+            },
+            "selection": 1,
+            "aws": {
+              "secretArn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:credential-abcdef"
+            }
+          }
+        }
+      ],
+      "violations": [
+        "selected source entry locations must be unique"
+      ]
+    },
+    {
+      "name": "source must select an entry",
+      "template": "aws",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item(s)"
+      ]
+    },
+    {
+      "name": "AWS source account is literal not a regex",
+      "template": "aws",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/aws/accountId/value",
+          "value": ".*"
+        }
+      ],
+      "violations": [
+        "AWS source account and region must be literal provider identities"
+      ]
+    },
+    {
+      "name": "AWS assumed role cannot cross configured account",
+      "template": "aws",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/aws/assumeRole/role/value",
+          "value": "arn:aws:iam::999999999999:role/secret-reader"
+        }
+      ],
+      "violations": [
+        "AWS source account and region must be literal provider identities"
+      ]
+    },
+    {
+      "name": "AWS entry cannot cross configured account",
+      "template": "aws",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries/0/aws/secretArn",
+          "value": "arn:aws:secretsmanager:us-east-1:999999999999:secret:credential-abcdef"
+        }
+      ],
+      "violations": [
+        "AWS and Google entries must stay within the configured account or project"
+      ]
+    },
+    {
+      "name": "AWS entry cannot cross configured region",
+      "template": "aws",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries/0/aws/secretArn",
+          "value": "arn:aws:secretsmanager:us-west-2:123456789012:secret:credential-abcdef"
+        }
+      ],
+      "violations": [
+        "AWS and Google entries must stay within the configured account or project"
+      ]
+    },
+    {
+      "name": "AWS selection cannot request another version policy",
+      "template": "aws",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries/0/selection",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "the provider entry must use its fixed current-version selection"
+      ]
+    },
+    {
+      "name": "Google source cannot pin a secret version",
+      "template": "google",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries/0/google/secretResource",
+          "value": "projects/cloud-project-1/secrets/credential/versions/17"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "Google entry cannot cross configured project",
+      "template": "google",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries/0/google/secretResource",
+          "value": "projects/cloud-project-2/secrets/credential"
+        }
+      ],
+      "violations": [
+        "AWS and Google entries must stay within the configured account or project"
+      ]
+    },
+    {
+      "name": "Google source requires explicit auth profile",
+      "template": "google",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/google/federation"
+        }
+      ],
+      "violations": [
+        "exactly one field is required"
+      ]
+    },
+    {
+      "name": "OpenBao requires authenticated HTTPS endpoint",
+      "template": "openbao",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/openBao/endpoint/baseUrl",
+          "value": "http://secrets.example.test/"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "OpenBao source cannot omit explicit trust roots",
+      "template": "openbao",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/openBao/trustRoots",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item(s)"
+      ]
+    },
+    {
+      "name": "OpenBao selected path cannot traverse parent",
+      "template": "openbao",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries/0/openBao/path",
+          "value": "services/../worker"
+        }
+      ],
+      "violations": [
+        "OpenBao entry paths cannot contain dot segments"
+      ]
+    },
+    {
+      "name": "OpenBao entry chooses an exact data field",
+      "template": "openbao",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries/0/openBao/fieldName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "private definition cannot cross source scope",
+      "template": "private",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/sourceRef/scope/resourceParent/projectId/value",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "private source definition must match its registered scope"
+      ]
+    },
+    {
+      "name": "stored bootstrap reference shape requires independent provenance admission",
+      "template": "bootstrap"
+    },
+    {
+      "name": "stored bootstrap credential still uses opaque SecretRef",
+      "template": "bootstrap",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/aws/storedCredentialsRef/bootstrapCredentialRef/id",
+          "value": "raw-credential"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "stored bootstrap exception approval is required",
+      "template": "bootstrap",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/aws/storedCredentialsRef/approvalId/value",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    }
+  ]
+}

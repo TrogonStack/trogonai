@@ -10,6 +10,7 @@ import "trogonai/workflows/runs/v1alpha1/occurrence.proto";
 import "trogonai/workflows/runs/v1alpha1/receipt.proto";
 import "trogonai/workflows/runs/v1alpha1/run.proto";
 import "trogonai/workflows/runs/v1alpha1/wait.proto";
+import "trogonai/workflows/runs/v1alpha1/workload_identity_control.proto";
 
 // Unknown event arms fail replay closed. Logical ordering belongs to the run
 // aggregate; child Session histories retain their independent ownership.
@@ -274,5 +275,7 @@ message RunEvent {
     RemainingPlanRevised remaining_plan_revised = 27;
     RunTerminated run_terminated = 28;
     FailedWorkflowWorkRetried failed_workflow_work_retried = 29;
+    RunIdentityAdmissionRenewed run_identity_admission_renewed = 30;
+    RunIdentityAdmissionWithdrawn run_identity_admission_withdrawn = 31;
   }
 }

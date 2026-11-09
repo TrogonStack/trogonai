@@ -7,6 +7,13 @@ date: 2026-11-06
 
 # ADR#0098: Workload Identity Requires Attested Issuance, Rotating X.509 Credentials and Independent Authorization
 
+> **Related proposals:** [Workload identity and portable trust](../architecture/workload-identity.md)
+> explains the foundation. The [federation proposal](../research/workload-identity/federation.md)
+> and [adapter roadmap](../research/workload-identity/adapter-roadmap.md) describe
+> explicit foreign-domain trust, optional environment/provider profiles and
+> custody decisions still needed. They do not qualify another issuer, change
+> production requirements or advance this ADR's draft status.
+
 ## Context
 
 Cryptographic identity, runtime attestation and authorization answer different

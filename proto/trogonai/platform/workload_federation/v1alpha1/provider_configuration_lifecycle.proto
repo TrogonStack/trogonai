@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+// Withdrawal blocks local admission immediately, independently of later audit
+// bookkeeping or remote credential expiry. Retirement permanently ends identity.
+enum OutboundWithdrawalReason {
+  OUTBOUND_WITHDRAWAL_REASON_UNSPECIFIED = 0;
+  OUTBOUND_WITHDRAWAL_REASON_OPERATOR = 1;
+  OUTBOUND_WITHDRAWAL_REASON_POLICY_REVOKED = 2;
+  OUTBOUND_WITHDRAWAL_REASON_KEY_COMPROMISED = 3;
+  OUTBOUND_WITHDRAWAL_REASON_QUALIFICATION_EXPIRED = 4;
+  OUTBOUND_WITHDRAWAL_REASON_CONFIGURATION_CHANGED = 5;
+  OUTBOUND_WITHDRAWAL_REASON_RECOVERY_FENCE_ADVANCED = 6;
+}

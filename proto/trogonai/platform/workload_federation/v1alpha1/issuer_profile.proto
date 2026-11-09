@@ -1,0 +1,119 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "trogonai/platform/workload_federation/v1alpha1/assertion_algorithm.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+import "trogonai/platform/workload_federation/v1alpha1/provider_identity.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+
+// Upstream SPIRE JWT issuance plus its public discovery helper is evaluated
+// before an equivalent issuer is built. This issuer_profile_ref grants no socket access.
+message NativeSpireJwtIssuer {
+  IssuerDeploymentId issuer_deployment_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  bytes oidc_helper_artifact_sha256 = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}
+
+// The referenced decision records why native issuance cannot preserve the
+// required governance, namespace or recipient algorithm. This is not a new CA.
+message SeparateAssertionIssuer {
+  IncompatibilityDecisionId incompatibility_decision_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum PublishedKeySetProfile {
+  PUBLISHED_KEY_SET_PROFILE_UNSPECIFIED = 0;
+  PUBLISHED_KEY_SET_PROFILE_SINGLE_ALGORITHM = 1;
+  // Conservative ADR#0053 profile. Real recipient/JWKS qualification remains
+  // required; current provider documentation alone has not established it.
+  PUBLISHED_KEY_SET_PROFILE_RSA_ONLY = 2;
+}
+
+// The issuer and public endpoints are administrator-approved exact HTTPS URLs.
+// Admission validates discovery/JWKS equality, signer purpose and algorithm,
+// access isolation, key rotation overlap and recipient cache behavior. Tokens
+// have one recipient audience selected from a current binding, never a wildcard.
+message IssuerProfileDefinition {
+  option (buf.validate.message).cel = {
+    id: "issuer_profile.rsa_keys"
+    message: "an RSA-only published key set requires RS256 assertions"
+    expression: "this.published_key_set_profile != 2 || this.algorithm == 1"
+  };
+  option (buf.validate.message).cel = {
+    id: "issuer_profile.signing_scope"
+    message: "the issuer signing profile must share its exact scope"
+    expression: "this.signing_profile_ref.scope == this.scope"
+  };
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  string issuer = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      uri: true
+      pattern: "^https://[^/?#@]+(/[^?#]*)?$"
+    }
+  ];
+  string discovery_uri = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      uri: true
+      pattern: "^https://[^/?#@]+(/[^?#]*)?$"
+    }
+  ];
+  string jwks_uri = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      uri: true
+      pattern: "^https://[^/?#@]+(/[^?#]*)?$"
+    }
+  ];
+  AssertionAlgorithm algorithm = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  SigningProfileRef signing_profile_ref = 6 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Duration max_assertion_lifetime = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gt = {}
+  ];
+  PublishedKeySetProfile published_key_set_profile = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  oneof implementation {
+    option (buf.validate.oneof).required = true;
+    NativeSpireJwtIssuer native_spire = 9;
+    SeparateAssertionIssuer separate_issuer = 10;
+  }
+  uint32 contract_version = 11 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
+}
+
+message IssuerProfileConfiguration {
+  option (buf.validate.message).cel = {
+    id: "issuer_configuration.scope"
+    message: "issuer issuer_profile_ref and definition must share the exact scope"
+    expression: "this.issuer_profile_ref.scope == this.definition.scope"
+  };
+  IssuerProfileRef issuer_profile_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  IssuerProfileDefinition definition = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Encodes IssuerProfileDefinition, never this self-referencing wrapper.
+  ConfigurationArtifact artifact = 3 [features.field_presence = LEGACY_REQUIRED];
+}

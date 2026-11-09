@@ -1,0 +1,884 @@
+{
+  "templates": {
+    "spiffe": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.TrustRegistration",
+      "payload": {
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "contractVersion": 1,
+          "spiffe": {
+            "trustDomain": {
+              "value": "example.test"
+            },
+            "httpsWeb": {
+              "endpoint": {
+                "url": "https://federation.example.test/bundle"
+              }
+            },
+            "refresh": {
+              "refreshInterval": "30s",
+              "maxStaleness": "60s",
+              "rotationOverlap": "10s"
+            }
+          }
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpKCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
+        }
+      }
+    },
+    "oidc": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.TrustRegistration",
+      "payload": {
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "oidc_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "hqXYGlm/Drg12xge5OxIefvWwSDVg7TccfE1AEeYWgk="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "contractVersion": 1,
+          "oidc": {
+            "issuer": {
+              "url": "https://issuer.example.test"
+            },
+            "audiences": [
+              "trogon-workflows"
+            ],
+            "discovery": {
+              "discovery": {
+                "url": "https://issuer.example.test/.well-known/openid-configuration"
+              },
+              "jwks": {
+                "url": "https://issuer.example.test/keys"
+              }
+            },
+            "verification": {
+              "allowedAlgorithms": [
+                1
+              ],
+              "maxTokenLifetime": "3600s",
+              "clockSkew": "30s",
+              "maxTokenBytes": 16384,
+              "maxJwksKeys": 16,
+              "maxClaims": 32,
+              "requestTimeout": "5s"
+            },
+            "refresh": {
+              "refreshInterval": "30s",
+              "maxStaleness": "60s",
+              "rotationOverlap": "10s"
+            }
+          }
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQASK/AQodChtodHRwczovL2lzc3Vlci5leGFtcGxlLnRlc3QSEHRyb2dvbi13b3JrZmxvd3MqGAoBARIDCJAcGgIIHiCAgAEoEDAgOgIIBTIMCgIIHhICCDwaAggKGmQKPgo8aHR0cHM6Ly9pc3N1ZXIuZXhhbXBsZS50ZXN0Ly53ZWxsLWtub3duL29wZW5pZC1jb25maWd1cmF0aW9uEiIKIGh0dHBzOi8vaXNzdWVyLmV4YW1wbGUudGVzdC9rZXlz"
+        }
+      }
+    },
+    "activation": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.TrustRegistrationActivation",
+      "payload": {
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+          }
+        },
+        "approvalRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+          },
+          "approvalId": {
+            "value": "approval_1"
+          },
+          "ownerKind": 1,
+          "operationPurpose": 1
+        },
+        "validationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+          },
+          "validationId": {
+            "value": "validation_1"
+          },
+          "ownerKind": 1,
+          "operationPurpose": 1
+        }
+      }
+    },
+    "pending": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.TrustRegistrationState",
+      "payload": {
+        "configuration": {
+          "trustRegistrationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "trust_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            }
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "contractVersion": 1,
+            "spiffe": {
+              "trustDomain": {
+                "value": "example.test"
+              },
+              "httpsWeb": {
+                "endpoint": {
+                  "url": "https://federation.example.test/bundle"
+                }
+              },
+              "refresh": {
+                "refreshInterval": "30s",
+                "maxStaleness": "60s",
+                "rotationOverlap": "10s"
+              }
+            }
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpKCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
+          }
+        },
+        "lifecycle": 1,
+        "admission": 1
+      }
+    },
+    "active": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.TrustRegistrationState",
+      "payload": {
+        "configuration": {
+          "trustRegistrationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "trust_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            }
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "contractVersion": 1,
+            "spiffe": {
+              "trustDomain": {
+                "value": "example.test"
+              },
+              "httpsWeb": {
+                "endpoint": {
+                  "url": "https://federation.example.test/bundle"
+                }
+              },
+              "refresh": {
+                "refreshInterval": "30s",
+                "maxStaleness": "60s",
+                "rotationOverlap": "10s"
+              }
+            }
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpKCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
+          }
+        },
+        "lifecycle": 2,
+        "admission": 1,
+        "activation": {
+          "trustRegistrationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "trust_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            }
+          },
+          "approvalRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "trust_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            },
+            "approvalId": {
+              "value": "approval_1"
+            },
+            "ownerKind": 1,
+            "operationPurpose": 1
+          },
+          "validationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "trust_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            },
+            "validationId": {
+              "value": "validation_1"
+            },
+            "ownerKind": 1,
+            "operationPurpose": 1
+          }
+        }
+      }
+    },
+    "list": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ListTrustRegistrationsResponse",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "states": [
+          {
+            "configuration": {
+              "trustRegistrationRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "trust_1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+                }
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "contractVersion": 1,
+                "spiffe": {
+                  "trustDomain": {
+                    "value": "example.test"
+                  },
+                  "httpsWeb": {
+                    "endpoint": {
+                      "url": "https://federation.example.test/bundle"
+                    }
+                  },
+                  "refresh": {
+                    "refreshInterval": "30s",
+                    "maxStaleness": "60s",
+                    "rotationOverlap": "10s"
+                  }
+                }
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpKCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
+              }
+            },
+            "lifecycle": 1,
+            "admission": 1
+          }
+        ]
+      }
+    },
+    "page": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ListTrustRegistrationsRequest",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "pageSize": 25
+      }
+    },
+    "revision": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.TrustRegistrationRevision",
+      "payload": {
+        "currentTrustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+          }
+        },
+        "proposed": {
+          "trustRegistrationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "trust_1",
+              "revision": "2",
+              "recoveryFence": "1",
+              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            }
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "contractVersion": 1,
+            "spiffe": {
+              "trustDomain": {
+                "value": "example.test"
+              },
+              "httpsWeb": {
+                "endpoint": {
+                  "url": "https://federation.example.test/bundle"
+                }
+              },
+              "refresh": {
+                "refreshInterval": "30s",
+                "maxStaleness": "60s",
+                "rotationOverlap": "10s"
+              }
+            }
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpKCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
+          }
+        }
+      }
+    },
+    "tls": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.TrustRegistration",
+      "payload": {
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_tls",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "qOimNJH2u4FymkNLinGEbENwNob1MV+IWLw0YqKjUiE="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "contractVersion": 1,
+          "spiffe": {
+            "trustDomain": {
+              "value": "example.test"
+            },
+            "refresh": {
+              "refreshInterval": "30s",
+              "maxStaleness": "60s",
+              "rotationOverlap": "10s"
+            },
+            "httpsSpiffe": {
+              "endpoint": {
+                "url": "https://federation.example.test/bundle"
+              },
+              "expectedSpiffeId": "spiffe://publisher.test/server",
+              "bootstrapRoots": [
+                {
+                  "der": "AQID"
+                }
+              ]
+            }
+          }
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpxCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKGlEKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGUSHnNwaWZmZTovL3B1Ymxpc2hlci50ZXN0L3NlcnZlchoFCgMBAgM="
+        }
+      }
+    },
+    "pinned": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.TrustRegistration",
+      "payload": {
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_pinned_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "SyEM0QwFwZEB0JKbJfb05nSfWCKeGdJY18yqyFVtKPQ="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "contractVersion": 1,
+          "oidc": {
+            "issuer": {
+              "url": "https://issuer.example.test"
+            },
+            "audiences": [
+              "trogon-workflows"
+            ],
+            "verification": {
+              "allowedAlgorithms": [
+                1
+              ],
+              "maxTokenLifetime": "3600s",
+              "clockSkew": "30s",
+              "maxTokenBytes": 16384,
+              "maxJwksKeys": 16,
+              "maxClaims": 32,
+              "requestTimeout": "5s"
+            },
+            "refresh": {
+              "refreshInterval": "30s",
+              "maxStaleness": "60s",
+              "rotationOverlap": "10s"
+            },
+            "pinnedJwks": {
+              "jwksJson": "eyJrZXlzIjpbXX0="
+            }
+          }
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQASJoCh0KG2h0dHBzOi8vaXNzdWVyLmV4YW1wbGUudGVzdBIQdHJvZ29uLXdvcmtmbG93cyoYCgEBEgMIkBwaAggeIICAASgQMCA6AggFMgwKAggeEgIIPBoCCAoiDQoLeyJrZXlzIjpbXX0="
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "trust/trust spiffe schema positive",
+      "template": "spiffe"
+    },
+    {
+      "name": "trust/trust oidc schema positive",
+      "template": "oidc"
+    },
+    {
+      "name": "trust/trust activation schema positive",
+      "template": "activation"
+    },
+    {
+      "name": "trust/trust pending schema positive",
+      "template": "pending"
+    },
+    {
+      "name": "trust/trust active schema positive",
+      "template": "active"
+    },
+    {
+      "name": "trust/trust list schema positive",
+      "template": "list"
+    },
+    {
+      "name": "trust/trust page schema positive",
+      "template": "page"
+    },
+    {
+      "name": "trust/trust revision schema positive",
+      "template": "revision"
+    },
+    {
+      "name": "trust/trust exact reference scope",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/trustRegistrationRef/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "trust registration reference and definition must have the same scope"
+      ]
+    },
+    {
+      "name": "trust/trust domain refuses noncanonical upper case",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/trustDomain/value",
+          "value": "Other.Test"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "trust/trust endpoint refuses bearer userinfo",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/httpsWeb/endpoint/url",
+          "value": "https://user:password@example.test/bundle"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "trust/trust refresh cannot exceed staleness",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/refreshInterval",
+          "value": "61s"
+        }
+      ],
+      "violations": [
+        "refresh interval must fit within the approved staleness bound"
+      ]
+    },
+    {
+      "name": "trust/trust reference requires full digest",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/trustRegistrationRef/version/configurationSha256",
+          "value": "AA=="
+        }
+      ],
+      "violations": [
+        "must be 32 bytes"
+      ]
+    },
+    {
+      "name": "trust/trust fence cannot be zero",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/trustRegistrationRef/version/recoveryFence",
+          "value": "0"
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
+      ]
+    },
+    {
+      "name": "trust/oidc issuer refuses transport downgrade",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/issuer/url",
+          "value": "http://issuer.example.test"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "trust/oidc audience list cannot be empty",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/audiences",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item"
+      ]
+    },
+    {
+      "name": "trust/oidc duplicate algorithms refused",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/verification/allowedAlgorithms",
+          "value": [
+            1,
+            1
+          ]
+        }
+      ],
+      "violations": [
+        "must contain unique items"
+      ]
+    },
+    {
+      "name": "trust/oidc token byte ceiling",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/verification/maxTokenBytes",
+          "value": 65537
+        }
+      ],
+      "violations": [
+        "less than or equal to 65536"
+      ]
+    },
+    {
+      "name": "trust/oidc request deadline ceiling",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/verification/requestTimeout",
+          "value": "31s"
+        }
+      ],
+      "violations": [
+        "less than or equal to 30s"
+      ]
+    },
+    {
+      "name": "trust/oidc clock skew ceiling",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/verification/clockSkew",
+          "value": "121s"
+        }
+      ],
+      "violations": [
+        "less than or equal to 120s"
+      ]
+    },
+    {
+      "name": "trust/trust cannot activate under another owner kind",
+      "template": "activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvalRef/ownerKind",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "activation receipts must bind the exact target scope and version"
+      ]
+    },
+    {
+      "name": "trust/trust cannot activate wrong approval revision",
+      "template": "activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvalRef/version/revision",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "activation receipts must bind the exact target scope and version"
+      ]
+    },
+    {
+      "name": "trust/trust cannot activate wrong validation scope",
+      "template": "activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/validationRef/scope/tenant",
+          "value": "tenant_2"
+        }
+      ],
+      "violations": [
+        "activation receipts must bind the exact target scope and version"
+      ]
+    },
+    {
+      "name": "trust/trust staged revision cannot change fence",
+      "template": "revision",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/proposed/trustRegistrationRef/version/recoveryFence",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "a staged revision must preserve owner scope and fence and advance the revision"
+      ]
+    },
+    {
+      "name": "trust/trust staged revision cannot go backwards",
+      "template": "revision",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/proposed/trustRegistrationRef/version/revision",
+          "value": "1"
+        }
+      ],
+      "violations": [
+        "a staged revision must preserve owner scope and fence and advance the revision"
+      ]
+    },
+    {
+      "name": "trust/retired trust cannot be enabled",
+      "template": "pending",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/lifecycle",
+          "value": 3
+        }
+      ],
+      "violations": [
+        "a retired configuration cannot admit use"
+      ]
+    },
+    {
+      "name": "trust/active trust needs exact activation",
+      "template": "active",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/activation"
+        }
+      ],
+      "violations": [
+        "an active configuration requires its exact activation evidence"
+      ]
+    },
+    {
+      "name": "trust/trust page size bounded",
+      "template": "page",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/pageSize",
+          "value": 101
+        }
+      ],
+      "violations": [
+        "less than or equal to 100"
+      ]
+    },
+    {
+      "name": "trust/trust list cannot cross scope",
+      "template": "list",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/scope/tenant",
+          "value": "tenant_2"
+        }
+      ],
+      "violations": [
+        "every trust registration result must belong to the response scope"
+      ]
+    },
+    {
+      "name": "trust/trust separate endpoint domain is explicit and allowed",
+      "template": "tls"
+    },
+    {
+      "name": "trust/trust authenticated bootstrap cannot be empty",
+      "template": "tls",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/httpsSpiffe/bootstrapRoots",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item"
+      ]
+    },
+    {
+      "name": "trust/pinned JWKS schema shape requires separate key admission",
+      "template": "pinned"
+    },
+    {
+      "name": "trust/pinned JWKS cannot be empty bytes",
+      "template": "pinned",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/pinnedJwks/jwksJson",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 byte"
+      ]
+    }
+  ]
+}

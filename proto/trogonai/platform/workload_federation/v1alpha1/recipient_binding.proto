@@ -1,0 +1,112 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+import "trogonai/platform/workload_federation/v1alpha1/provider_identity.proto";
+import "trogonai/platform/workload_federation/v1alpha1/provider_recipient.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+import "trogonai/platform/workload_federation/v1alpha1/source_identity.proto";
+
+// The operation id resolves in the qualified adapter's operation catalogue.
+// Provider-native resource identifiers/scopes are exact and enumerable. The
+// executor, not the caller, derives the actual request and enforces this ceiling.
+message RecipientOperation {
+  RecipientOperationId operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated string resource_ids = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 128
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 2048
+        pattern: "^[^*]+$"
+      }
+    }
+  }];
+  repeated string scopes = 3 [(buf.validate.field).repeated = {
+    max_items: 64
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 2048
+        pattern: "^[^*]+$"
+      }
+    }
+  }];
+}
+
+// Only this delivery profile is declared. Provider credentials stay in the
+// trusted custody/executor boundary; token issuance to another process is a
+// separately reviewed capability, not an implicit alternative (ADR#0053).
+enum FederationCredentialDelivery {
+  FEDERATION_CREDENTIAL_DELIVERY_UNSPECIFIED = 0;
+  FEDERATION_CREDENTIAL_DELIVERY_BROKER_HELD = 1;
+}
+
+message RecipientBindingDefinition {
+  option (buf.validate.message).cel = {
+    id: "recipient_binding.source_scope"
+    message: "the source identity must share the recipient binding scope"
+    expression: "has(this.source.local_workload) ? (this.source.local_workload.tenant == this.scope.tenant && this.source.local_workload.project == this.scope.project) : this.source.subject_binding_ref.scope == this.scope"
+  };
+  option (buf.validate.message).cel = {
+    id: "recipient_binding.issuer_scope"
+    message: "recipient issuer and Preview qualification references must share the binding scope"
+    expression: "(!has(this.recipient.aws_web_identity) || this.recipient.aws_web_identity.issuer_profile_ref.scope == this.scope) && (!has(this.recipient.google_cloud_oidc) || this.recipient.google_cloud_oidc.issuer_profile_ref.scope == this.scope) && (!has(this.recipient.entra) || this.recipient.entra.issuer_profile_ref.scope == this.scope) && (!has(this.recipient.google_cloud_certificate_bound_oidc) || (this.recipient.google_cloud_certificate_bound_oidc.oidc.issuer_profile_ref.scope == this.scope && this.recipient.google_cloud_certificate_bound_oidc.preview_approval_ref.scope == this.scope && this.recipient.google_cloud_certificate_bound_oidc.resource_binding_qualification_ref.scope == this.scope))"
+  };
+  option (buf.validate.message).cel = {
+    id: "recipient_binding.certificate_source"
+    message: "certificate exchange requires the exact local workload certificate identity"
+    expression: "(!has(this.recipient.aws_roles_anywhere) || (has(this.source.local_workload) && this.recipient.aws_roles_anywhere.certificate_spiffe_id == this.source.local_workload.spiffe_id)) && (!has(this.recipient.google_cloud_x509) || (has(this.source.local_workload) && this.recipient.google_cloud_x509.certificate_spiffe_id == this.source.local_workload.spiffe_id)) && (!has(this.recipient.google_cloud_certificate_bound_oidc) || (has(this.source.local_workload) && this.recipient.google_cloud_certificate_bound_oidc.certificate_spiffe_id == this.source.local_workload.spiffe_id))"
+  };
+  option (buf.validate.message).cel = {
+    id: "recipient_binding.unique_operations"
+    message: "recipient operation identities must be unique"
+    expression: "this.operations.map(operation, operation.operation_id.value).unique()"
+  };
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  SourceIdentityRequirement source = 2 [features.field_presence = LEGACY_REQUIRED];
+  FederationPurposeId purpose_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  ExternalRecipient recipient = 4 [features.field_presence = LEGACY_REQUIRED];
+  repeated RecipientOperation operations = 5 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 128
+  }];
+  // Local reuse is additionally bounded by original authority, current binding
+  // and provider expiry. A later exchange cannot reset the original deadline.
+  google.protobuf.Duration max_local_use = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gt = {}
+  ];
+  FederationCredentialDelivery delivery = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      in: [1]
+    }
+  ];
+  uint32 contract_version = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
+}
+
+// Source identity, purpose and recipient security boundary cannot be retargeted
+// in place. A different one is a new binding identity. Revision changes withdraw
+// admission until the exact new artifact is independently approved/validated.
+message RecipientBindingConfiguration {
+  option (buf.validate.message).cel = {
+    id: "recipient_configuration.scope"
+    message: "recipient recipient_binding_ref and definition must share the exact scope"
+    expression: "this.recipient_binding_ref.scope == this.definition.scope"
+  };
+  RecipientBindingRef recipient_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  RecipientBindingDefinition definition = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Encodes RecipientBindingDefinition; verification never re-encodes protobuf.
+  ConfigurationArtifact artifact = 3 [features.field_presence = LEGACY_REQUIRED];
+}
