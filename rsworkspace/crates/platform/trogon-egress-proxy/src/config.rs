@@ -1,13 +1,13 @@
 //! Command line and environment configuration, validated into typed values.
 //!
 //! There is deliberately no switch that turns enforcement off or that starts
-//! without a policy (ADR#0084): the policy file is required. Audit is required
+//! without a policy (ADR#0084): an explicit policy source is required. Audit is required
 //! for the same reason (ADR#0085 Decision 5): the tenant, the project, the
 //! instance name and the NATS servers have no default, and the NATS connection
 //! settings are read the way every NATS client here reads them.
 
 use std::net::SocketAddr;
-use std::num::NonZeroU16;
+use std::num::{NonZeroU16, NonZeroU64};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -17,10 +17,13 @@ use trogon_nats::{NatsConfig, NatsToken, SubjectTokenViolationError};
 use trogon_std::env::{ReadEnv, SystemEnv};
 
 use crate::audit_config::AuditConfig;
+use crate::connection_limit::{ConnectionLimit, ConnectionLimitError};
 use crate::constants::{AUDIT_COMPONENT, MIN_HEAD_BYTES, WRITER_ID_PREFIX};
 use crate::limits::Limits;
+use crate::live_policy::{KvPolicyConfig, PolicyConfigError, PolicyTransportError};
 use crate::mtls::TlsFiles;
 use crate::trust_domain::{TrustDomain, TrustDomainError};
+use crate::workload_identity_config::{WorkloadIdentityConfig, WorkloadIdentityConfigError};
 
 #[derive(Debug, Clone, Parser)]
 #[command(
@@ -28,25 +31,78 @@ use crate::trust_domain::{TrustDomain, TrustDomainError};
     about = "Agent egress proxy: mTLS HTTP CONNECT by exact destination"
 )]
 pub struct Args {
+    /// Restricted HTTP readiness listener. Reports workload component readiness.
+    #[arg(long, env = "TROGON_EGRESS_READINESS_LISTEN", default_value = "127.0.0.1:8081")]
+    pub readiness_listen: SocketAddr,
+
     /// Address the mTLS listener binds.
     #[arg(long, env = "TROGON_EGRESS_LISTEN", default_value = "127.0.0.1:3128")]
     pub listen: SocketAddr,
 
-    /// Static policy snapshot (TOML). The proxy refuses to start without it.
-    #[arg(long, env = "TROGON_EGRESS_POLICY_FILE")]
-    pub policy_file: PathBuf,
+    /// Explicit static compatibility policy (TOML).
+    #[arg(
+        long,
+        env = "TROGON_EGRESS_POLICY_FILE",
+        required_unless_present = "policy_bucket",
+        conflicts_with = "policy_bucket"
+    )]
+    pub policy_file: Option<PathBuf>,
+
+    /// Existing bounded NATS KV policy bucket. Uses the configured tenant/project key.
+    #[arg(
+        long,
+        env = "TROGON_EGRESS_POLICY_BUCKET",
+        requires = "policy_incarnation",
+        conflicts_with = "policy_file"
+    )]
+    pub policy_bucket: Option<String>,
+
+    /// Independently provisioned producer incarnation. Never adopted from the bucket.
+    #[arg(long, env = "TROGON_EGRESS_POLICY_INCARNATION", requires = "policy_bucket")]
+    pub policy_incarnation: Option<NonZeroU64>,
 
     /// PEM certificate chain the proxy presents, leaf first.
-    #[arg(long, env = "TROGON_EGRESS_TLS_CERT")]
-    pub tls_cert: PathBuf,
+    #[arg(
+        long,
+        env = "TROGON_EGRESS_TLS_CERT",
+        required_unless_present = "workload_api_endpoint",
+        conflicts_with = "workload_api_endpoint"
+    )]
+    pub tls_cert: Option<PathBuf>,
 
     /// PEM private key of the proxy certificate.
-    #[arg(long, env = "TROGON_EGRESS_TLS_KEY")]
-    pub tls_key: PathBuf,
+    #[arg(
+        long,
+        env = "TROGON_EGRESS_TLS_KEY",
+        required_unless_present = "workload_api_endpoint",
+        conflicts_with = "workload_api_endpoint"
+    )]
+    pub tls_key: Option<PathBuf>,
 
     /// PEM bundle of the trust anchors client certificates must chain to.
-    #[arg(long, env = "TROGON_EGRESS_CLIENT_CA")]
-    pub client_ca: PathBuf,
+    #[arg(
+        long,
+        env = "TROGON_EGRESS_CLIENT_CA",
+        required_unless_present = "workload_api_endpoint",
+        conflicts_with = "workload_api_endpoint"
+    )]
+    pub client_ca: Option<PathBuf>,
+
+    /// Isolated Unix SPIFFE Workload API socket owned by the trusted runtime.
+    #[arg(long, env = "TROGON_EGRESS_WORKLOAD_API_ENDPOINT", requires_all = ["workload_spiffe_id", "registration_bucket", "registration_fence", "policy_bucket"])]
+    pub workload_api_endpoint: Option<String>,
+
+    /// Exact governed identity this proxy must receive from the Workload API.
+    #[arg(long, env = "TROGON_EGRESS_WORKLOAD_SPIFFE_ID", requires = "workload_api_endpoint")]
+    pub workload_spiffe_id: Option<String>,
+
+    /// Existing scoped registration projection. Never provisioned by this process.
+    #[arg(long, env = "TROGON_EGRESS_REGISTRATION_BUCKET", requires = "workload_api_endpoint")]
+    pub registration_bucket: Option<String>,
+
+    /// Independently provisioned recovery fence, never adopted from projection data.
+    #[arg(long, env = "TROGON_EGRESS_REGISTRATION_FENCE", requires = "workload_api_endpoint")]
+    pub registration_fence: Option<NonZeroU64>,
 
     /// Trust domain of the agent URI SAN: spiffe://<trust-domain>/agent/<agent-id>.
     #[arg(long, env = "TROGON_EGRESS_TRUST_DOMAIN")]
@@ -82,6 +138,10 @@ pub struct Args {
     #[arg(long, env = "TROGON_EGRESS_MAX_HEAD_BYTES", default_value_t = Limits::default().max_head_bytes)]
     pub max_head_bytes: usize,
 
+    /// Maximum active connections, including handshakes and established tunnels.
+    #[arg(long, env = "TROGON_EGRESS_MAX_CONNECTIONS", default_value_t = Limits::default().max_connections.get())]
+    pub max_connections: usize,
+
     /// Seconds a client has to send its first TLS record after the tunnel opens.
     #[arg(long, env = "TROGON_EGRESS_FIRST_RECORD_TIMEOUT_SECS", default_value_t = Limits::default().first_record_timeout.as_secs())]
     pub first_record_timeout_secs: u64,
@@ -90,16 +150,38 @@ pub struct Args {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub listen: SocketAddr,
-    pub policy_file: PathBuf,
-    pub tls: TlsFiles,
+    pub policy: PolicyInput,
+    pub tls: TlsInput,
     pub trust_domain: TrustDomain,
     pub audit: AuditConfig,
     pub non_tls_ports: Vec<NonZeroU16>,
     pub limits: Limits,
 }
 
+#[derive(Debug, Clone)]
+pub enum PolicyInput {
+    StaticFile(PathBuf),
+    NatsKv(KvPolicyConfig),
+}
+
+#[derive(Debug, Clone)]
+pub enum TlsInput {
+    Files(TlsFiles),
+    Workload(WorkloadIdentityConfig),
+}
+
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ConfigError {
+    #[error("select exactly one complete TLS identity source")]
+    TlsSource,
+    #[error("invalid workload identity configuration")]
+    WorkloadIdentity(#[source] WorkloadIdentityConfigError),
+    #[error("select exactly one policy source and configure its incarnation")]
+    PolicySource,
+    #[error("invalid live policy configuration")]
+    LivePolicy(#[source] PolicyConfigError),
+    #[error("live policy transport is not authenticated")]
+    LivePolicyTransport(#[source] PolicyTransportError),
     #[error("invalid trust domain")]
     TrustDomain(#[source] TrustDomainError),
     #[error("invalid tenant")]
@@ -118,6 +200,8 @@ pub enum ConfigError {
     HeadLimitTooSmall,
     #[error("the first record timeout must be at least one second")]
     FirstRecordTimeoutTooSmall,
+    #[error("invalid connection limit")]
+    ConnectionLimit(#[source] ConnectionLimitError),
 }
 
 impl TryFrom<Args> for Config {
@@ -133,6 +217,22 @@ impl Config {
     pub fn resolve<E: ReadEnv>(args: Args, env: &E) -> Result<Self, ConfigError> {
         let trust_domain = TrustDomain::new(&args.trust_domain).map_err(ConfigError::TrustDomain)?;
         let audit = audit_config(&args, env)?;
+        let policy = match (&args.policy_file, &args.policy_bucket, args.policy_incarnation) {
+            (Some(path), None, None) => PolicyInput::StaticFile(path.clone()),
+            (None, Some(bucket), Some(incarnation)) => PolicyInput::NatsKv(
+                KvPolicyConfig::new(
+                    bucket,
+                    audit.identity.tenant().clone(),
+                    audit.identity.project().clone(),
+                    incarnation,
+                )
+                .map_err(ConfigError::LivePolicy)?,
+            ),
+            _ => return Err(ConfigError::PolicySource),
+        };
+        if matches!(policy, PolicyInput::NatsKv(_)) {
+            KvPolicyConfig::validate_transport(&audit.nats).map_err(ConfigError::LivePolicyTransport)?;
+        }
         let non_tls_ports = args
             .non_tls_ports
             .iter()
@@ -144,18 +244,41 @@ impl Config {
         if args.first_record_timeout_secs == 0 {
             return Err(ConfigError::FirstRecordTimeoutTooSmall);
         }
+        let tls = match (
+            &args.tls_cert,
+            &args.tls_key,
+            &args.client_ca,
+            &args.workload_api_endpoint,
+            &args.workload_spiffe_id,
+            &args.registration_bucket,
+            args.registration_fence,
+        ) {
+            (Some(certificate_chain), Some(private_key), Some(client_trust_anchors), None, None, None, None) => {
+                TlsInput::Files(TlsFiles {
+                    certificate_chain: certificate_chain.clone(),
+                    private_key: private_key.clone(),
+                    client_trust_anchors: client_trust_anchors.clone(),
+                })
+            }
+            (None, None, None, Some(endpoint), Some(identity), Some(bucket), Some(fence))
+                if matches!(policy, PolicyInput::NatsKv(_)) =>
+            {
+                TlsInput::Workload(
+                    WorkloadIdentityConfig::new(endpoint, identity, bucket, fence, &trust_domain, &audit)
+                        .map_err(ConfigError::WorkloadIdentity)?,
+                )
+            }
+            _ => return Err(ConfigError::TlsSource),
+        };
         Ok(Self {
             listen: args.listen,
-            policy_file: args.policy_file,
-            tls: TlsFiles {
-                certificate_chain: args.tls_cert,
-                private_key: args.tls_key,
-                client_trust_anchors: args.client_ca,
-            },
+            policy,
+            tls,
             trust_domain,
             audit,
             non_tls_ports,
             limits: Limits {
+                max_connections: ConnectionLimit::new(args.max_connections).map_err(ConfigError::ConnectionLimit)?,
                 max_head_bytes: args.max_head_bytes,
                 first_record_timeout: Duration::from_secs(args.first_record_timeout_secs),
                 ..Limits::default()
