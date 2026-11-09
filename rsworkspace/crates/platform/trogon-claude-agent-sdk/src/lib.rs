@@ -43,4 +43,4 @@ pub use control_request_id::{ControlRequestId, ControlRequestIdError};
 
 pub use task_id::{TaskId, TaskIdError};
 
-pub use tool_name::{ToolName, ToolNameError};
+pub use tool_name::ToolName;
