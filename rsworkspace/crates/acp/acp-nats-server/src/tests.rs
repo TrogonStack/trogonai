@@ -69,10 +69,7 @@ impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
 fn test_config() -> Config {
     Config::new(
         acp_nats::AcpPrefix::new("acp").unwrap(),
-        acp_nats::NatsConfig {
-            servers: vec!["localhost:4222".to_string()],
-            auth: trogon_nats::NatsAuth::None,
-        },
+        acp_nats::NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None),
     )
 }
 

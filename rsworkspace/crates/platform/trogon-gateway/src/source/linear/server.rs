@@ -18,6 +18,11 @@ use trogon_nats::jetstream::{
 use trogon_semconv::span::LINEAR_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
+use crate::source_integration_id::SourceIntegrationId;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RejectReason {
     InvalidJson,
@@ -84,6 +89,16 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     nats_ack_timeout: NonZeroDuration,
 }
 
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
+    subject_prefix: NatsToken,
+    timestamp_tolerance: Option<NonZeroDuration>,
+    nats_ack_timeout: NonZeroDuration,
+}
+
 pub async fn provision<C: JetStreamContext>(js: &C, config: &LinearConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.to_string(),
@@ -117,12 +132,51 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &LinearConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Linear, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        timestamp_tolerance: config.timestamp_tolerance,
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, G>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     State(state): State<AppState<P, S>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Pin<Box<dyn Future<Output = StatusCode> + Send>> {
     Box::pin(handle_webhook_inner(state, headers, body))
+}
+
+fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Pin<Box<dyn Future<Output = StatusCode> + Send>>
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    Box::pin(handle_runtime_webhook_inner(state, headers, body))
 }
 
 #[instrument(
@@ -155,30 +209,103 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     }
 
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.timestamp_tolerance,
+        state.nats_ack_timeout,
+        body,
+    )
+    .await
+}
+
+#[instrument(
+    name = LINEAR_WEBHOOK,
+    skip_all,
+    fields(
+        event_type = tracing::field::Empty,
+        action = tracing::field::Empty,
+        webhook_id = tracing::field::Empty,
+        subject = tracing::field::Empty,
+        messaging.message.body.size = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook_inner<P, S, G>(
+    state: RuntimeAppState<P, S, G>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let sig = headers.get("linear-signature").and_then(|v| v.to_str().ok());
+    let webhook_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::WebhookSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Linear runtime credential resolution failed");
+            return error.http_status();
+        }
+    };
+
+    match sig {
+        Some(sig) if signature::verify(webhook_secret.as_str(), &body, sig) => {}
+        Some(_) => {
+            warn!("Invalid Linear webhook signature");
+            return StatusCode::UNAUTHORIZED;
+        }
+        None => {
+            warn!("Missing linear-signature header");
+            return StatusCode::UNAUTHORIZED;
+        }
+    }
+
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.timestamp_tolerance,
+        state.nats_ack_timeout,
+        body,
+    )
+    .await
+}
+
+async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    subject_prefix: NatsToken,
+    timestamp_tolerance: Option<NonZeroDuration>,
+    nats_ack_timeout: NonZeroDuration,
+    body: Bytes,
+) -> StatusCode {
     let parsed: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
             warn!(error = %e, "Failed to parse Linear webhook body as JSON");
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 RejectReason::InvalidJson,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         }
     };
 
-    if let Some(tolerance) = state.timestamp_tolerance {
+    if let Some(tolerance) = timestamp_tolerance {
         let Some(ts_ms) = parsed.get("webhookTimestamp").and_then(|v| v.as_u64()) else {
             warn!("Missing or malformed 'webhookTimestamp' field");
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 RejectReason::MissingWebhookTimestamp,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         };
@@ -187,18 +314,15 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
             .unwrap_or_default()
             .as_millis() as u64;
         let age_ms = now_ms.saturating_sub(ts_ms);
-        if age_ms > Duration::from(tolerance).as_millis() as u64 {
-            warn!(
-                age_ms,
-                tolerance_ms = Duration::from(tolerance).as_millis() as u64,
-                "Stale webhookTimestamp — potential replay attack"
-            );
+        let tolerance_ms = Duration::from(tolerance).as_millis() as u64;
+        if age_ms > tolerance_ms {
+            warn!(age_ms, tolerance_ms, "Stale webhookTimestamp - potential replay attack");
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 RejectReason::StaleWebhookTimestamp,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         }
@@ -207,22 +331,22 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     let Some(raw_type) = parsed.get("type").and_then(|v| v.as_str()) else {
         warn!("Missing 'type' field in Linear webhook payload");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
+            &publisher,
+            &subject_prefix,
             RejectReason::MissingType,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
     let Ok(event_type) = NatsToken::new(raw_type) else {
         warn!("Invalid 'type' field in Linear webhook payload");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
+            &publisher,
+            &subject_prefix,
             RejectReason::InvalidType,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
@@ -230,22 +354,22 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     let Some(raw_action) = parsed.get("action").and_then(|v| v.as_str()) else {
         warn!("Missing 'action' field in Linear webhook payload");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
+            &publisher,
+            &subject_prefix,
             RejectReason::MissingAction,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
     let Ok(action) = NatsToken::new(raw_action) else {
         warn!("Invalid 'action' field in Linear webhook payload");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
+            &publisher,
+            &subject_prefix,
             RejectReason::InvalidAction,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
@@ -256,7 +380,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
         .unwrap_or("unknown")
         .to_owned();
 
-    let subject = format!("{}.{}.{}", state.subject_prefix, event_type, action);
+    let subject = format!("{}.{}.{}", subject_prefix, event_type, action);
 
     let span = tracing::Span::current();
     span.record(trogon_semconv::attribute::EVENT_TYPE, event_type.as_str());
@@ -268,9 +392,8 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert("Nats-Msg-Id", webhook_id.as_str());
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, nats_headers, body, nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)

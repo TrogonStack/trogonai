@@ -1,11 +1,9 @@
-#[cfg(feature = "spicedb")]
 use std::error::Error as _;
 
 use trogon_std::env::InMemoryEnv;
 
 use super::*;
 
-#[cfg(feature = "spicedb")]
 #[tokio::test]
 async fn a_closed_ingress_finishes_after_dispatching_its_final_envelope() {
     let prefix = a2a_nats::A2aPrefix::new("a2a").unwrap();
@@ -32,21 +30,33 @@ async fn a_closed_ingress_finishes_after_dispatching_its_final_envelope() {
     );
 }
 
-#[cfg(feature = "spicedb")]
+type ExpectedStartupFailure = fn(&RuntimeError) -> bool;
+
 #[tokio::test]
 async fn startup_preserves_enabled_policy_configuration_failures() {
     let server = trogon_nats::test_support::CoreTestServer::start().await;
-    for setting in [
-        ("A2A_GATEWAY_TIER1_SPICEDB_ENABLED", "true"),
-        ("A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED", "true"),
-        ("A2A_GATEWAY_AAUTH_MODE", "invalid"),
-    ] {
+    let cases: &[(&str, ExpectedStartupFailure)] = &[
+        ("A2A_GATEWAY_TIER1_SPICEDB_ENABLED", |error| {
+            matches!(error, RuntimeError::Tier1Config(_))
+        }),
+        ("A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED", |error| {
+            matches!(error, RuntimeError::Tier1DeclarativeConfig(_))
+        }),
+        ("A2A_GATEWAY_TIER3_REDACTION_ENABLED", |error| {
+            matches!(error, RuntimeError::PolicyStack(_))
+        }),
+        ("A2A_GATEWAY_TIER2_CEL_ENABLED", |error| {
+            matches!(error, RuntimeError::PolicyStack(_))
+        }),
+    ];
+    for (setting, expected) in cases {
         let env = InMemoryEnv::new();
+        env.set("NATS_TLS_DISABLED", "true");
         env.set(
-            "AUTH_CALLOUT_SIGNING_SECRET",
-            nkeys::KeyPair::new_account().seed().unwrap(),
+            "A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS",
+            nkeys::KeyPair::new_account().public_key(),
         );
-        env.set(setting.0, setting.1);
+        env.set(*setting, "true");
         let error = run_with_args(
             Args {
                 nats_url: server.address().to_owned(),
@@ -57,27 +67,41 @@ async fn startup_preserves_enabled_policy_configuration_failures() {
         )
         .await
         .unwrap_err();
-        match setting.0 {
-            "A2A_GATEWAY_TIER1_SPICEDB_ENABLED" => assert!(matches!(error, RuntimeError::Tier1Config(_))),
-            "A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED" => {
-                assert!(matches!(error, RuntimeError::Tier1DeclarativeConfig(_)))
-            }
-            _ => assert!(matches!(error, RuntimeError::AAuthConfig(_))),
-        }
+        assert!(expected(&error), "{setting}: {error}");
         assert!(error.source().is_some());
     }
 }
 
 #[cfg(not(feature = "spicedb"))]
-#[tokio::test(flavor = "current_thread")]
-async fn run_with_args_resolves_config_and_returns_ok() {
+#[tokio::test]
+async fn enabled_spicedb_tier1_is_a_startup_error_in_the_default_build() {
+    let server = trogon_nats::test_support::CoreTestServer::start().await;
     let env = InMemoryEnv::new();
-    let args = Args {
-        nats_url: "localhost:4222".to_string(),
-        prefix: "a2a".to_string(),
-        queue_group: None,
-    };
-    run_with_args(args, &env).await.expect("bootstrap config seam");
+    env.set("NATS_TLS_DISABLED", "true");
+    env.set(
+        "A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS",
+        nkeys::KeyPair::new_account().public_key(),
+    );
+    env.set("A2A_GATEWAY_TIER1_SPICEDB_ENABLED", "true");
+    let error = run_with_args(
+        Args {
+            nats_url: server.address().to_owned(),
+            prefix: "a2a".to_owned(),
+            queue_group: None,
+        },
+        &env,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            RuntimeError::Tier1Config(crate::policy::Tier1SpiceDbBuildError::NotCompiledIn {
+                enabled_var: "A2A_GATEWAY_TIER1_SPICEDB_ENABLED"
+            })
+        ),
+        "{error}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -92,14 +116,14 @@ async fn run_with_args_surfaces_config_error() {
     assert!(matches!(err, RuntimeError::Config(ConfigError::InvalidPrefix(_))));
 }
 
-#[cfg(feature = "spicedb")]
 #[tokio::test]
 async fn run_with_args_preserves_subscription_error_source() {
     let server = trogon_nats::test_support::CoreTestServer::start().await;
     let env = InMemoryEnv::new();
+    env.set("NATS_TLS_DISABLED", "true");
     env.set(
-        "AUTH_CALLOUT_SIGNING_SECRET",
-        nkeys::KeyPair::new_account().seed().expect("account signing seed"),
+        "A2A_GATEWAY_CALLER_JWT_ISSUER_KEYS",
+        nkeys::KeyPair::new_account().public_key(),
     );
     let args = Args {
         nats_url: server.address().to_owned(),

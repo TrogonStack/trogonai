@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#MISE description="Report whether an image tag already exists, so a rerun never moves an immutable tag"
+set -euo pipefail
+
+: "${IMAGE_REF:?IMAGE_REF is required}"
+: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+
+if output="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$IMAGE_REF" 2>&1)"; then
+    {
+        echo "published=true"
+        echo "digest=${output}"
+    } >>"$GITHUB_OUTPUT"
+    echo "::notice title=Image already published::${IMAGE_REF} is ${output}; skipping the build"
+elif [[ "$output" =~ ": not found"|"403 Forbidden"|"denied"|"NAME_UNKNOWN"|"MANIFEST_UNKNOWN" ]]; then
+    echo "published=false" >>"$GITHUB_OUTPUT"
+    echo "::notice title=Image not published yet::${IMAGE_REF}: ${output}"
+else
+    echo "::error title=Image lookup failed::${IMAGE_REF}: ${output}"
+    exit 1
+fi

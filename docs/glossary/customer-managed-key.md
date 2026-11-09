@@ -1,7 +1,7 @@
 ---
 term: "Customer managed key"
 section: "Identity, security, and multi-tenancy"
-order: 4
+order: 5
 ---
 
 # Customer managed key
@@ -11,4 +11,4 @@ customer controls (their AWS KMS key, Google Cloud KMS key, or their own
 OpenBao), so the customer keeps an independent operational veto over future
 wrap and unwrap operations. See
 [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) and
-[ADR#0033](../adr/0033-two-tier-key-custody-product-model.md).
+[ADR#0033](../adr/0033-key-custody-product-model.md).

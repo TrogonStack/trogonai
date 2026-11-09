@@ -240,7 +240,7 @@ threat timeline, not an emergency response to an already-broken algorithm.
   profile is conditional rather than default.
 - Private key custody is unaffected by this ADR and remains on the security
   plane defined by [ADR#0023](./0023-secret-management-and-key-custody-direction.md)
-  and [ADR#0033](./0033-two-tier-key-custody-product-model.md). This ADR
+  and [ADR#0033](./0033-key-custody-product-model.md). This ADR
   governs public-key algorithms, encodings, and signature formats only; it
   says nothing about where or how the corresponding private keys are stored
   or protected.
@@ -249,7 +249,7 @@ threat timeline, not an emergency response to an already-broken algorithm.
 
 - [ADR#0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)
 - [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
-- [ADR#0033: Two-Tier Key Custody Product Model](./0033-two-tier-key-custody-product-model.md)
+- [ADR#0033: Key Custody Product Model](./0033-key-custody-product-model.md)
 - [ADR#0036: Agent Self-Certifying Cryptographic Identity](./0036-agent-self-certifying-identity.md)
 - [ADR#0037: Agent Identity Governance](./0037-agent-identity-governance.md)
 - [ADR#0039: Self-Authenticating Event Provenance](./0039-self-authenticating-event-provenance.md)

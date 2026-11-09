@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+// WriterLifecycleKind is which event in a writer's chain a lifecycle record
+// marks. Unspecified and unknown values are invalid.
+enum WriterLifecycleKind {
+  WRITER_LIFECYCLE_KIND_UNSPECIFIED = 0;
+  // A writer started its chain. Reserved for a writer that can prove it is the
+  // first of its writer id.
+  WRITER_LIFECYCLE_KIND_START = 1;
+  // A writer began a new chain without resuming a previous one. The record
+  // states why.
+  WRITER_LIFECYCLE_KIND_CHAIN_RESET = 2;
+  // A readiness check requires a fresh durable acknowledgement on this chain.
+  WRITER_LIFECYCLE_KIND_READINESS_PROBE = 3;
+}

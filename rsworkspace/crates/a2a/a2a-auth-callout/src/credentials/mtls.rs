@@ -1,3 +1,7 @@
+use crate::{CredentialExpiry, VerifiedCredential};
+use std::time::Duration;
+
+use rustls_pki_types::{CertificateDer, UnixTime};
 use serde::Serialize;
 use time::OffsetDateTime;
 use x509_parser::pem::Pem;
@@ -10,6 +14,9 @@ use crate::jwt::{
     AudienceAccount, CallerNamespace, ExternalSubject, UserJwtClaims, derive_caller_id, external_subject_from_der,
     spicedb_bundle_for_opaque,
 };
+
+mod certificate_verification_error;
+pub use certificate_verification_error::CertificateVerificationError;
 
 /// Principal document minted for an mTLS-authenticated caller: the SpiceDB
 /// subject derived from the certificate, tagged with the scheme that proved it.
@@ -107,7 +114,7 @@ impl X509MtlsVerifier {
         cert: &ClientCertPem,
         account: &AudienceAccount,
         now: OffsetDateTime,
-    ) -> Result<UserJwtClaims, AuthCalloutError> {
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         let chain_ders = Self::chain_ders(cert.as_str())?;
         let leaf_der = chain_ders[0].clone();
         let chain: Vec<X509Certificate<'_>> = chain_ders
@@ -119,7 +126,6 @@ impl X509MtlsVerifier {
             })
             .collect::<Result<_, _>>()?;
         let leaf = &chain[0];
-        let intermediates = &chain[1..];
         let anchor_pems = Self::anchor_pems(self.anchors.as_str())?;
         let cas = Self::parse_cas(&anchor_pems)?;
 
@@ -131,60 +137,10 @@ impl X509MtlsVerifier {
             ));
         }
 
-        // Refuse to mint for a CA or intermediate that someone presented as
-        // an "end entity" — only certs explicitly marked non-CA can be the
-        // client identity. RFC 5280 §4.2.1.9: basicConstraints.cA=false (or
-        // absent) means end-entity. We treat "absent" as end-entity since
-        // it's the common shape for client certs.
-        if let Ok(Some(bc)) = leaf.basic_constraints()
-            && bc.value.ca
-        {
-            return Err(AuthCalloutError::CredentialVerification(
-                CredentialError::InvalidCredentials("client certificate is a CA, expected end-entity".into()),
-            ));
-        }
-
-        let asn1_now = ASN1Time::from(now);
-        // Walk leaf → intermediates → trust anchor. At each step, find a
-        // currently-valid issuer (preferring trust anchors so a chain that
-        // could short-circuit to a configured anchor does so) and verify
-        // the signature. The walk caps at chain.len()+1 hops to bound the
-        // loop independently of input length.
-        let mut current = leaf;
-        let mut trusted = false;
-        for _ in 0..=chain.len() {
-            // If the current cert is itself a configured trust anchor
-            // (subject + key match) we're done.
-            if cas.iter().any(|ca| {
-                ca.subject() == current.subject()
-                    && ca.tbs_certificate.subject_pki == current.tbs_certificate.subject_pki
-            }) {
-                trusted = true;
-                break;
-            }
-            // Look in trust anchors first, then in supplied intermediates.
-            let issuer = cas.iter().chain(intermediates.iter()).find(|c| {
-                c.subject() == current.issuer()
-                    && c.validity().is_valid_at(asn1_now)
-                    && current.verify_signature(Some(&c.tbs_certificate.subject_pki)).is_ok()
-            });
-            let Some(issuer) = issuer else { break };
-            if cas.iter().any(|ca| {
-                ca.subject() == issuer.subject() && ca.tbs_certificate.subject_pki == issuer.tbs_certificate.subject_pki
-            }) {
-                trusted = true;
-                break;
-            }
-            current = issuer;
-        }
-
-        if !trusted {
-            return Err(AuthCalloutError::CredentialVerification(
-                CredentialError::InvalidCredentials(
-                    "client certificate does not chain to a configured trust anchor".into(),
-                ),
-            ));
-        }
+        let expires_at = Self::verify_client_chain(&chain_ders, &chain, &anchor_pems, &cas, now)
+            .map_err(CredentialError::MtlsCertificate)?;
+        let expires_at =
+            CredentialExpiry::from_unix_seconds(expires_at.unix_timestamp()).map_err(CredentialError::Validity)?;
 
         let sub = ExternalSubject::from_x509(leaf, &leaf_der)
             .map_err(|e| CredentialError::InvalidCredentials(format!("mTLS subject extraction failed: {e}")))?;
@@ -195,18 +151,114 @@ impl X509MtlsVerifier {
         let data = spicedb_bundle_for_opaque(
             serde_json::to_value(principal).map_err(CredentialError::PrincipalSerialization)?,
         );
-        let caller_id = derive_caller_id(CallerNamespace::Mtls, sub.as_str(), account)
+        let namespace = CallerNamespace::Mtls;
+        let caller_id = derive_caller_id(namespace, sub.as_str(), account)
             .map_err(|e| CredentialError::InvalidCredentials(format!("caller_id derivation failed: {e}")))?;
+        Ok(VerifiedCredential::new(
+            UserJwtClaims {
+                kid: crate::signing_key_source::unminted_placeholder(),
+                sub,
+                aud: account.clone(),
+                data,
+                caller_id,
+                principal_kind: namespace.principal_kind(),
+                nats_permissions: crate::permissions::IssuedPermissions::none(),
+            },
+            expires_at,
+        ))
+    }
 
-        let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
-        Ok(UserJwtClaims {
-            kid: crate::signing_key_source::unminted_placeholder(),
-            sub,
-            aud: account.clone(),
-            data,
-            caller_id,
-            nats_permissions,
-        })
+    fn verify_client_chain(
+        chain_ders: &[Vec<u8>],
+        chain: &[X509Certificate<'_>],
+        anchor_pems: &[Pem],
+        cas: &[X509Certificate<'_>],
+        now: OffsetDateTime,
+    ) -> Result<OffsetDateTime, CertificateVerificationError> {
+        let certificates: Vec<_> = chain_ders
+            .iter()
+            .map(|der| CertificateDer::from(der.as_slice()))
+            .collect();
+        let end_entity = webpki::EndEntityCert::try_from(&certificates[0])?;
+        let leaf = &chain[0];
+        if leaf
+            .basic_constraints()?
+            .is_some_and(|constraints| constraints.value.ca)
+        {
+            return Err(webpki::Error::CaUsedAsEndEntity.into());
+        }
+        if leaf.key_usage()?.is_some_and(|usage| !usage.value.digital_signature()) {
+            return Err(CertificateVerificationError::LeafKeyUsage);
+        }
+        if leaf.extended_key_usage()?.is_some_and(|usage| !usage.value.client_auth) {
+            return Err(CertificateVerificationError::ClientAuthUsage);
+        }
+
+        // A configured end-entity certificate pins exactly those bytes. It
+        // cannot become a CA for another certificate, even with the same key.
+        if anchor_pems
+            .iter()
+            .filter(|pem| pem.label.to_uppercase().contains("CERTIFICATE"))
+            .any(|pem| pem.contents == chain_ders[0])
+        {
+            return Ok(leaf.validity().not_after.to_datetime());
+        }
+
+        for issuer in &chain[1..] {
+            if issuer.key_usage()?.is_some_and(|usage| !usage.value.key_cert_sign()) {
+                return Err(CertificateVerificationError::IssuerKeyUsage);
+            }
+        }
+
+        let mut anchor_ders = Vec::new();
+        let mut anchor_expiries = Vec::new();
+        let certificate_pems = anchor_pems
+            .iter()
+            .filter(|pem| pem.label.to_uppercase().contains("CERTIFICATE"));
+        for (ca, pem) in cas.iter().zip(certificate_pems) {
+            if !ca.validity().is_valid_at(ASN1Time::from(now))
+                || !ca.basic_constraints()?.is_some_and(|constraints| constraints.value.ca)
+            {
+                continue;
+            }
+            if ca.key_usage()?.is_some_and(|usage| !usage.value.key_cert_sign()) {
+                continue;
+            }
+            anchor_ders.push(CertificateDer::from(pem.contents.as_slice()));
+            anchor_expiries.push(ca.validity().not_after.to_datetime());
+        }
+        let anchors = anchor_ders
+            .iter()
+            .map(webpki::anchor_from_trusted_cert)
+            .collect::<Result<Vec<_>, _>>()?;
+        let timestamp = u64::try_from(now.unix_timestamp())?;
+        let path = end_entity.verify_for_usage(
+            webpki::ALL_VERIFICATION_ALGS,
+            &anchors,
+            &certificates[1..],
+            UnixTime::since_unix_epoch(Duration::from_secs(timestamp)),
+            webpki::KeyUsage::client_auth(),
+            None,
+            None,
+        )?;
+        let mut expires_at = leaf.validity().not_after.to_datetime();
+        for certificate in path.intermediate_certificates() {
+            let der = certificate.der();
+            let parsed = chain
+                .iter()
+                .zip(chain_ders)
+                .find(|(_, candidate)| candidate.as_slice() == der.as_ref())
+                .map(|(parsed, _)| parsed)
+                .ok_or(CertificateVerificationError::PathMetadata)?;
+            expires_at = expires_at.min(parsed.validity().not_after.to_datetime());
+        }
+        let anchor_expiry = anchors
+            .iter()
+            .zip(anchor_expiries)
+            .find(|(anchor, _)| std::ptr::eq(*anchor, path.anchor()))
+            .map(|(_, expiry)| expiry)
+            .ok_or(CertificateVerificationError::PathMetadata)?;
+        Ok(expires_at.min(anchor_expiry))
     }
 }
 
@@ -234,12 +286,20 @@ impl ExternalSubjectExt for ExternalSubject {
 
 #[async_trait::async_trait]
 pub trait MTlsVerifier: Send + Sync + 'static {
-    async fn verify(&self, cert: &ClientCertPem, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError>;
+    async fn verify(
+        &self,
+        cert: &ClientCertPem,
+        account: &AudienceAccount,
+    ) -> Result<VerifiedCredential, AuthCalloutError>;
 }
 
 #[async_trait::async_trait]
 impl MTlsVerifier for X509MtlsVerifier {
-    async fn verify(&self, cert: &ClientCertPem, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError> {
+    async fn verify(
+        &self,
+        cert: &ClientCertPem,
+        account: &AudienceAccount,
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         let now = OffsetDateTime::now_utc();
         Ok(self.verify_sync(cert, account, now)?)
     }

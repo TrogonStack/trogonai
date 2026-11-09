@@ -1,0 +1,39 @@
+edition = "2024";
+
+package trogonai.model_access.provider_connections.v1alpha1;
+
+// Advertised configuration vocabulary only. A protocol flag does not prove
+// that a pinned driver implements it or authenticates a particular provider.
+// Unspecified and unknown values are invalid wherever these enums are used.
+enum ProviderProtocol {
+  PROVIDER_PROTOCOL_UNSPECIFIED = 0;
+  PROVIDER_PROTOCOL_OPENAI_CHAT_COMPLETIONS = 1;
+  PROVIDER_PROTOCOL_OPENAI_RESPONSES = 2;
+  PROVIDER_PROTOCOL_ANTHROPIC_MESSAGES = 3;
+  PROVIDER_PROTOCOL_GEMINI_GENERATE_CONTENT = 4;
+  PROVIDER_PROTOCOL_BEDROCK_MODEL_INVOKE = 5;
+  PROVIDER_PROTOCOL_BEDROCK_CONVERSE = 6;
+  PROVIDER_PROTOCOL_GOOGLE_GENERATE_CONTENT = 7;
+  PROVIDER_PROTOCOL_GOOGLE_RAW_PREDICT = 8;
+}
+
+// Explicit inference differs from omission. Applies only to OpenAI protocol
+// translation, whose exact behavior must be proved by the pinned driver.
+enum OpenAiOutputLimitField {
+  OPEN_AI_OUTPUT_LIMIT_FIELD_UNSPECIFIED = 0;
+  OPEN_AI_OUTPUT_LIMIT_FIELD_INFER_FROM_MODEL = 1;
+  OPEN_AI_OUTPUT_LIMIT_FIELD_MAX_TOKENS = 2;
+  OPEN_AI_OUTPUT_LIMIT_FIELD_MAX_COMPLETION_TOKENS = 3;
+}
+
+// Names observed authorization choices, not arbitrary headers or an SDK API.
+// Wire spelling, precedence, and protocol compatibility require a validated
+// driver contract; selecting an enum never establishes runtime support.
+enum AuthorizationScheme {
+  AUTHORIZATION_SCHEME_UNSPECIFIED = 0;
+  AUTHORIZATION_SCHEME_BEARER_TOKEN = 1;
+  AUTHORIZATION_SCHEME_X_API_KEY = 2;
+  AUTHORIZATION_SCHEME_X_GOOG_API_KEY = 3;
+  AUTHORIZATION_SCHEME_HEC_TOKEN = 4;
+  AUTHORIZATION_SCHEME_CLOUDFLARE_AI_GATEWAY = 5;
+}

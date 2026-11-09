@@ -69,6 +69,7 @@ continue application traces between services.
 The following binaries initialize `trogon-telemetry`:
 
 - `trogon-gateway`
+- `trogon-provider-gateway`
 - `acp-nats-server`
 - `acp-nats-stdio`
 - `mcp-nats-server`
@@ -179,6 +180,7 @@ with the lifecycle distinctions documented below.
 | MCP stdio | `mcp-nats-stdio` initializes OpenTelemetry and forwards typed MCP messages. Stdio has no transport headers, so SEP-414 `_meta` is the applicable carrier. The bridge preserves it but does not extract or inject it. Its NATS side still performs outbound-only header injection. | Pass-through only plus outbound only |
 | ACP remote HTTP and WebSocket | `acp-nats-server` initializes OpenTelemetry and wraps the official ACP HTTP server with `instrument_router`. The wrapper creates an HTTP server span but does not extract W3C HTTP headers. ACP models preserve `_meta`, but the bridge does not connect those keys to OpenTelemetry. WebSocket messages have the same ACP `_meta` requirement; the HTTP upgrade span is not a per-message trace parent. | Instrumented only plus pass-through only |
 | ACP stdio | `acp-nats-stdio` initializes OpenTelemetry. ACP `_meta` is representable and preserved, but it is not extracted or injected. Selected Core NATS reply and notification paths inject current context, while direct JetStream prompt and request paths do not. | Pass-through only with partial outbound injection |
+| Provider gateway HTTP | `trogon-provider-gateway` extracts W3C `traceparent` and `tracestate` as the server span's remote parent, emits request duration metrics and correlated completion logs, and excludes all `/-/` paths. It does not extract baggage. Provider egress is not implemented yet. | Inbound extraction implemented; no outbound provider hop |
 | Gateway HTTP webhooks | `trogon-gateway` initializes OpenTelemetry and `instrument_router` creates HTTP server spans. It does not extract incoming W3C headers. Source handlers construct JetStream headers for routing and deduplication, and `ClaimCheckPublisher` preserves those supplied headers, but neither layer injects the current OpenTelemetry context. | Instrumented only |
 | Gateway WebSocket sources | Discord Gateway and Slack Socket Mode run inside the OTel-enabled gateway. No remote message context is extracted and their JetStream publishes do not receive injected trace headers. | Instrumented only |
 | Decider event store | `CommandExecution::with_headers` can attach validated operational metadata to every emitted event. `trogon-decider-nats` persists and restores those values using the `Trogon-Header-` physical prefix. It does not capture the active OpenTelemetry context automatically. No non-test production call that supplies trace headers through `with_headers` was present at this review. | Carrier available |

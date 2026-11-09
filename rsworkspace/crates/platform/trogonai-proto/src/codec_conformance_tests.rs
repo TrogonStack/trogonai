@@ -14,22 +14,37 @@ mod error_options_tests;
 mod error_retained_tests;
 #[cfg(any(feature = "decider", feature = "grpc-nats-micro", feature = "schedules"))]
 mod json_write_tests;
+#[cfg(any(feature = "decider", feature = "grpc-nats-micro", feature = "schedules"))]
 mod registry_codec_tests;
 mod retained_fixture;
 #[cfg(feature = "grpc-nats-micro")]
 mod transport_retained_tests;
 mod wire_boundary_tests;
 
+#[cfg(feature = "audit")]
+mod audit_tests;
 #[cfg(all(feature = "decider", feature = "schedules"))]
 mod decider_retained_tests;
 #[cfg(all(feature = "decider", feature = "schedules"))]
 mod decider_tests;
 #[cfg(feature = "decider")]
 mod fault_codec_tests;
+#[cfg(feature = "gateway")]
+mod gateway_retained_tests;
+#[cfg(feature = "gateway")]
+mod gateway_surface_tests;
+#[cfg(feature = "gateway")]
+mod gateway_tests;
+#[cfg(feature = "gateway")]
+mod gateway_wire_tests;
 #[cfg(any(feature = "decider", feature = "grpc-nats-micro"))]
 mod google_rpc_tests;
 #[cfg(any(feature = "decider", feature = "grpc-nats-micro"))]
 mod map_boundary_tests;
+#[cfg(feature = "model-access")]
+mod model_access_tests;
+#[cfg(feature = "policy")]
+mod policy_tests;
 #[cfg(feature = "grpc-nats-micro")]
 mod protocol_tests;
 #[cfg(feature = "schedules")]

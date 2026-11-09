@@ -7,6 +7,23 @@ date: 2026-07-11
 
 # ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service
 
+> **Proposed connector refinement:** [ADR#0095](./0095-connection-credential-custody-and-refresh.md) remains a draft. The connector custody draft specifies token bundles, broker-only operations and attempt-authorized identity fingerprinting behind the same secrets boundary. This note does not change either ADR's status.
+
+
+> **Refined by [ADR#0083](./0083-sealed-content-envelope.md) (2026-10-30).**
+> Under Decision 3, a reply carrying a secret value or a sealing lease is
+> xkey-sealed to the requester's ephemeral xkey, and a submitted value to the
+> secrets service's xkey, so no value crosses the bus or reaches a debug log in
+> plaintext; values still never enter JetStream, and the credential records it
+> does hold are sealed. Under Decision 6, a sealer or opener holds a sealing
+> data key for at most sixty seconds after its provider unwrap rather than for
+> one in-flight operation, invalidation reaches every holder through the
+> `SEALING_KEY_INVALIDATIONS` bucket, and a holder whose watch is down takes no
+> new lease. Destroying a tenant's sealing key follows the scheduled, reviewable
+> destruction of Decision 6, starts only after the business audit record is
+> written, and, once no OpenBao backup still holds the key, erases every copy of
+> the tenant's sealed content.
+
 ## Context
 
 The platform is accumulating credentials it must hold on behalf of [tenants](../glossary/tenant),
@@ -258,8 +275,9 @@ callers.
   operation, not as ambient state.
 - **Dual audit, built once.** The service records the business context
   (caller, tenant, vault, ref, purpose, outcome) with a correlation ID
-  threaded into the OpenBao request, so the provider's own audit log joins
-  back to who asked and why. Neither log substitutes for the other.
+  threaded into the OpenBao request, so the provider's own audit log can join
+  back to who asked and why once adoption proves the identifier reaches that
+  log. Neither log substitutes for the other.
 - **Key state is explicit** (active, decrypt-only, disabled, pending
   destruction, destroyed), destruction is scheduled and reviewable rather
   than an immediate API operation, and a compromised KEK means re-encryption
@@ -306,8 +324,8 @@ callers.
   cross-tenant and cross-purpose access, rotation with old ciphertext still
   readable, fail-closed startup when the service cannot authenticate to
   OpenBao, a rotation event observed to evict every replica's cache, correct
-  behavior when audit sinks fail, and acceptable latency on the resolve
-  path.
+  behavior when audit sinks fail, the correlation ID observed in OpenBao's
+  own audit log, and acceptable latency on the resolve path.
 
 ## References
 

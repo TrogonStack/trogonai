@@ -600,11 +600,11 @@ the burden of proof sits on any alternative.
 
 ### 6.9 Custody tiers are already decided
 
-[ADR#0033](../../adr/0033-two-tier-key-custody-product-model.md) fixes exactly two customer-facing tiers, managed key and customer
-managed key, and states that tier is registration ownership rather than provider
-choice. Nothing in this study disturbs that, and no vendor offers a comparable
+[ADR#0033](../../adr/0033-key-custody-product-model.md) fixes the customer-facing tiers (managed key, dedicated key, and customer
+managed key) and states that tier is registration ownership and dedication
+rather than provider choice. Nothing in this study disturbs that, and no vendor offers a comparable
 customer-controlled-KEK story for agent credentials. The vault plane consumes
-[ADR#0033](../../adr/0033-two-tier-key-custody-product-model.md); it does not restate or extend it.
+[ADR#0033](../../adr/0033-key-custody-product-model.md); it does not restate or extend it.
 
 ### 6.10 [ADR#0048](../../adr/0048-one-time-plaintext-exposure.md) is externally validated
 

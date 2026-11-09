@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "http.unclassified.unknown_shape",
+  "kind": "malformed",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "hand written valid JSON that Bolt cannot classify: an object with none of the fields Bolt classifies on; test/unit/receivers/HTTPModuleFunctions.spec.ts and verify-request.spec.ts request verification vectors",
+    "wire_source": "https://docs.slack.dev/apis/events-api/",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "application/json",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=4131b50794ba9201c2de4c84fa457a6bfeb060d9231b201332c484538f9aa4c9"
+    },
+    "body": "{\"unrecognized\":\"shape\"}"
+  },
+  "bolt": {
+    "outcome": "rejected",
+    "status": 404,
+    "body": null,
+    "content_type": null,
+    "reason": null,
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "reject",
+    "nats": null,
+    "request": null,
+    "http": {
+      "status": 404,
+      "body": null,
+      "content_type": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

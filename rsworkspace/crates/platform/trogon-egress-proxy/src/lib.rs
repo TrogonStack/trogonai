@@ -1,0 +1,80 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+
+//! Agent egress proxy: an mTLS HTTP CONNECT forward proxy that tunnels only to
+//! the exact destinations a policy snapshot permits for the calling agent
+//! (ADR#0085).
+//!
+//! The decision logic is pure and lives apart from the sockets:
+//! [`admission::admit`] answers from a [`policy_snapshot::PolicySnapshot`],
+//! [`dial_targets::dial_targets`] filters resolved addresses, and
+//! [`client_hello::server_name`] reads the SNI. [`connection::Proxy`] sequences
+//! them and [`server::Server`] owns the listener. Every decision is recorded
+//! through [`writer_audit::WriterAudit`] into the platform audit stream, and a
+//! permit that cannot be recorded is refused rather than forwarded.
+
+pub mod address_class;
+pub mod admission;
+pub mod agent_id;
+pub mod agent_uri;
+pub mod audit;
+pub(crate) mod audit_budget;
+pub mod audit_capacity;
+pub mod audit_config;
+pub mod audit_error;
+pub mod audit_readiness;
+pub mod client_hello;
+pub mod config;
+pub mod connect_request;
+pub mod connection;
+pub mod connection_limit;
+mod constants;
+mod decision_record;
+pub mod destination;
+pub mod destination_host;
+pub mod dial_targets;
+pub mod fault;
+pub mod first_record;
+pub mod host_name;
+pub mod limits;
+pub mod live_policy;
+mod live_policy_config;
+mod live_policy_error;
+mod live_policy_wire;
+pub mod mtls;
+pub mod peer_certificate;
+pub mod peer_identity;
+pub mod policy_revision;
+pub mod policy_snapshot;
+pub mod policy_source;
+pub mod readiness;
+mod readiness_http;
+mod readiness_request;
+pub mod readiness_status;
+pub mod resolver;
+pub mod runtime;
+mod runtime_activity;
+mod runtime_phase;
+mod scoped_snapshot_key;
+mod scoped_stream;
+pub mod server;
+mod snapshot_bucket;
+pub mod static_snapshot;
+mod telemetry;
+pub mod trust_domain;
+pub mod workload_activation_audit;
+pub mod workload_identity_config;
+pub mod workload_registration;
+pub mod workload_registration_driver;
+pub mod writer_audit;
+
+pub use agent_id::AgentId;
+pub use config::{Args, Config};
+pub use readiness::Readiness;
+pub use readiness_status::ReadinessStatus;
+pub use runtime::{StartupError, start};
+pub use scoped_snapshot_key::ScopedSnapshotKey;
+pub use server::Server;
+pub use snapshot_bucket::{SnapshotBucket, SnapshotBucketError};
+
+#[cfg(test)]
+mod live_policy_tests;

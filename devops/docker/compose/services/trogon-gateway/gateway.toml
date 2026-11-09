@@ -7,13 +7,16 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # Source configuration lives in this TOML file. Put secrets in
 # devops/docker/compose/.env and reference them with `{ env = "..." }`.
 #
+# Compose already connects the gateway through NATS_URL, NATS_CREDS, NATS_CA,
+# NATS_CERT and NATS_KEY. A [nats] table here takes precedence over them, and
+# the local server accepts nothing but TLS with a client certificate and creds.
+#
 # [nats]
-# url = "nats://nats:4222"
-# creds = "/path/to/nats.creds"
-# nkey = "SU..."
-# user = "my-user"
-# password = "my-pass"
-# token = "my-token"
+# url = "tls://nats:4222"
+# creds = "/run/secrets/nats/nats.creds"
+# tls_ca = "/run/secrets/nats/ca.pem"
+# tls_cert = "/run/secrets/nats/client.pem"
+# tls_key = "/run/secrets/nats/client-key.pem"
 #
 # [sources.github.integrations.primary]
 # subject_prefix = "github-primary"
@@ -92,6 +95,28 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # webhook_token_header = "X-Datadog-Webhook-Token"  # optional; override the custom header name
 # timestamp_tolerance_secs = 300  # optional anti-replay window; requires "timestamp": "$DATE_POSIX" in the payload
 #
+# [sources.zoom.integrations.primary]
+# subject_prefix = "zoom-primary"
+# stream_name = "ZOOM_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.zoom.integrations.primary.webhook]
+# secret_token = { env = "ZOOM_PRIMARY_SECRET_TOKEN" }
+# timestamp_tolerance_secs = 300  # optional; max drift of x-zm-request-timestamp
+#
+# [sources.plaid.integrations.primary]
+# subject_prefix = "plaid-primary"
+# stream_name = "PLAID_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.plaid.integrations.primary.webhook]
+# client_id = "your-plaid-client-id"  # or { env = "PLAID_PRIMARY_CLIENT_ID" }
+# secret = { env = "PLAID_PRIMARY_SECRET" }
+# environment = "production"  # sandbox or production
+# timestamp_tolerance_secs = 300  # optional; max drift of the JWT iat claim
+#
 # [sources.discord]
 # bot_token = { env = "DISCORD_BOT_TOKEN" }
 # gateway_intents = "guilds,guild_members,guild_messages,guild_message_reactions,direct_messages,message_content,guild_voice_states"
@@ -131,5 +156,25 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # signing_secret = { env = "SLACK_PRIMARY_SIGNING_SECRET" }
 # timestamp_max_drift_secs = 300
 #
+# Socket Mode is for development or apps behind a firewall, not for widely
+# distributed apps. Prefer the webhook transport in production.
+#
 # [sources.slack.integrations.primary.socket_mode]
 # app_token = { env = "SLACK_PRIMARY_APP_TOKEN" }
+# intended_use = "development"
+#
+# Google Cloud Pub/Sub is consumed over an outbound StreamingPull connection. It
+# needs no public URL. Each integration supplies its own Google credentials JSON
+# document, either a service_account key or an external_account (workload
+# identity federation) configuration. Other types are rejected.
+#
+# [sources.google_pubsub.integrations.primary]
+# subject_prefix = "google-pubsub-primary"
+# stream_name = "GOOGLE_PUBSUB_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.google_pubsub.integrations.primary.streaming_pull]
+# subscription = "projects/my-project/subscriptions/my-subscription"
+# max_outstanding_messages = 1000
+# credentials = { env = "GOOGLE_PUBSUB_PRIMARY_CREDENTIALS" }

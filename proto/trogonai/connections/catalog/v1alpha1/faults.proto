@@ -1,0 +1,87 @@
+edition = "2024";
+
+package trogonai.connections.catalog.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only Decider error templates, never encoded. Definition bytes and
+// digests are never copied into public error detail. Concurrency faults use
+// the Decider channel.
+message ConnectorReleaseCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.catalog"
+    reason: "CONNECTOR_RELEASE_COMMAND_INVALID"
+    message: "The command violates the connector release contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectorReleaseAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.catalog"
+    reason: "CONNECTOR_RELEASE_ALREADY_EXISTS"
+    message: "The release identity has already been published."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectorReleaseNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.catalog"
+    reason: "CONNECTOR_RELEASE_NOT_FOUND"
+    message: "The release must be published before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// Deprecating a release that is not Published, or blocking one that is
+// already Blocked.
+message ConnectorReleaseLifecycleConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.catalog"
+    reason: "CONNECTOR_RELEASE_LIFECYCLE_CONFLICT"
+    message: "The release's standing does not admit this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The digest does not cover definition_bytes, or the typed definition does
+// not equal the decoded bytes.
+message ConnectorReleaseDefinitionDigestMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.catalog"
+    reason: "CONNECTOR_RELEASE_DEFINITION_DIGEST_MISMATCH"
+    message: "The definition digest does not cover the exact definition bytes."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// A route or declared endpoint host outside the release's egress hosts, an
+// identity probe containing an unsafe or unreviewed request, a credential role of
+// an undeclared method, or an ProxyLimits value above the platform
+// ceiling.
+message ConnectorReleaseDefinitionInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.catalog"
+    reason: "CONNECTOR_RELEASE_DEFINITION_INVALID"
+    message: "The definition is not internally consistent or exceeds a platform ceiling."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The successor is the release itself or a release of another connector.
+message ConnectorReleaseSuccessorInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.catalog"
+    reason: "CONNECTOR_RELEASE_SUCCESSOR_INVALID"
+    message: "A successor must be a different release of the same connector."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

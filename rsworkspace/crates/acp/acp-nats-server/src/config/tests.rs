@@ -63,7 +63,9 @@ fn test_nats_config_from_env() {
     env.set("NATS_TOKEN", "my-token");
     let server = config_from_env(&env);
     assert_eq!(server.acp.nats().servers, vec!["host1:4222", "host2:4222"]);
-    assert!(matches!(&server.acp.nats().auth, acp_nats::NatsAuth::Token(t) if t == "my-token"));
+    assert!(
+        matches!(&server.acp.nats().auth, acp_nats::NatsAuth::Token(trogon_nats::CredentialValue::Literal(t)) if t.as_str() == "my-token")
+    );
 }
 
 #[test]

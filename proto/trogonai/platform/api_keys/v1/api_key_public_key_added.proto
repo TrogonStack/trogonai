@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "trogonai/platform/api_keys/v1/public_key.proto";
+
+// ApiKeyPublicKeyAdded registers an additional verification key.
+//
+// From here until the old one is revoked, two private keys can act as this
+// identity. That is the rotation window, and the cap of 2 active keys is what
+// bounds it.
+message ApiKeyPublicKeyAdded {
+  PublicKey public_key = 1 [features.field_presence = LEGACY_REQUIRED];
+}

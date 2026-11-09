@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+// A typed capability a bound key must support. The baseline is envelope
+// wrapping; a later need adds a typed optional capability rather than widening
+// the baseline into a provider-shaped interface (ADR#0030). Unspecified and
+// unknown values are invalid.
+enum KeyCapability {
+  KEY_CAPABILITY_UNSPECIFIED = 0;
+  KEY_CAPABILITY_ENVELOPE_WRAPPING = 1;
+}

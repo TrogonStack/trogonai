@@ -11,6 +11,13 @@ use trogon_nats::jetstream::{
 };
 use trogon_std::NonZeroDuration;
 
+use crate::credential::commands::domain::{CredentialOwnerId, CredentialRef, CredentialScope};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::secret_store::{
+    MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate,
+};
+
 const TEST_SECRET: &str = "test-secret";
 
 fn test_config() -> TelegramSourceConfig {
@@ -38,6 +45,70 @@ fn tracing_guard() -> tracing::subscriber::DefaultGuard {
 
 fn mock_app(publisher: MockJetStreamPublisher) -> Router {
     router(wrap_publisher(publisher), &test_config())
+}
+
+struct RuntimeFixture {
+    publisher: MockJetStreamPublisher,
+    store: MockOpenBaoSecretStore,
+    registry: RuntimeCredentialRegistry,
+    integration_id: SourceIntegrationId,
+    registered_credentials: TelegramRegisteredWebhookCredentials,
+}
+
+impl RuntimeFixture {
+    fn new(publisher: MockJetStreamPublisher) -> Self {
+        Self {
+            publisher,
+            store: MockOpenBaoSecretStore::default(),
+            registry: RuntimeCredentialRegistry::default(),
+            integration_id: SourceIntegrationId::new("primary").unwrap(),
+            registered_credentials: TelegramRegisteredWebhookCredentials::default(),
+        }
+    }
+
+    async fn put(&self, secret: &str) -> CredentialRef {
+        self.store
+            .put(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Telegram,
+                    self.integration_id.clone(),
+                ),
+                CredentialKind::WebhookSecret,
+                trogon_std::SecretString::new(secret).unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn activate(&self, credential: CredentialRef, version: u64) {
+        self.registry
+            .projections()
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, version).unwrap())
+            .await;
+    }
+
+    fn app(&self) -> Router {
+        runtime_router(
+            wrap_publisher(self.publisher.clone()),
+            &test_config(),
+            self.integration_id.clone(),
+            self.registry.resolver(self.store.clone()),
+            self.registered_credentials.clone(),
+        )
+    }
+
+    fn register(&self, credential: CredentialRef) {
+        self.registered_credentials
+            .record(self.integration_id.clone(), credential);
+    }
+}
+
+async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+    let fixture = RuntimeFixture::new(publisher);
+    let credential = fixture.put(secret).await;
+    fixture.activate(credential, 1).await;
+    fixture.app()
 }
 
 fn webhook_request(body: &[u8], secret: Option<&str>) -> Request<Body> {
@@ -106,6 +177,95 @@ async fn valid_message_update_publishes_to_nats() {
         messages[0].headers.get(NATS_HEADER_UPDATE_ID).map(|v| v.as_str()),
         Some("12345"),
     );
+}
+
+#[tokio::test]
+async fn runtime_webhook_secret_publishes_to_nats_and_rejects_static_secret() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app(publisher.clone(), "runtime-secret").await;
+    let body = update_json("message");
+
+    let static_response = app
+        .clone()
+        .oneshot(webhook_request(&body, Some(TEST_SECRET)))
+        .await
+        .unwrap();
+
+    assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+
+    let runtime_response = app
+        .oneshot(webhook_request(&body, Some("runtime-secret")))
+        .await
+        .unwrap();
+
+    assert_eq!(runtime_response.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "telegram.message");
+}
+
+async fn status_of(app: &Router, body: &[u8], token: &str) -> StatusCode {
+    app.clone()
+        .oneshot(webhook_request(body, Some(token)))
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn runtime_webhook_accepts_the_registered_secret_until_the_rotated_one_is_registered() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let fixture = RuntimeFixture::new(publisher.clone());
+    let previous = fixture.put("previous-secret").await;
+    let rotated = fixture
+        .store
+        .rotate(&previous, trogon_std::SecretString::new("rotated-secret").unwrap())
+        .await
+        .unwrap();
+    fixture.activate(rotated.clone(), 2).await;
+    fixture.register(previous);
+    let app = fixture.app();
+    let body = update_json("message");
+
+    assert_eq!(status_of(&app, &body, "previous-secret").await, StatusCode::OK);
+    assert_eq!(status_of(&app, &body, "rotated-secret").await, StatusCode::OK);
+    assert_eq!(status_of(&app, &body, "unknown-secret").await, StatusCode::UNAUTHORIZED);
+    assert_eq!(publisher.published_messages().len(), 2);
+
+    fixture.register(rotated);
+
+    assert_eq!(
+        status_of(&app, &body, "previous-secret").await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(status_of(&app, &body, "rotated-secret").await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn runtime_webhook_rejects_a_revoked_registered_secret_when_the_replacement_is_not_registered() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let fixture = RuntimeFixture::new(publisher.clone());
+    let revoked = fixture.put("revoked-secret").await;
+    fixture.register(revoked.clone());
+    fixture.store.revoke(&revoked).await.unwrap();
+    fixture
+        .store
+        .destroy(&revoked, &SecretDestroyReason::new("revoked by operator").unwrap())
+        .await
+        .unwrap();
+    let replacement = fixture.put("replacement-secret").await;
+    fixture.activate(replacement, 2).await;
+    let app = fixture.app();
+    let body = update_json("message");
+
+    assert_eq!(status_of(&app, &body, "revoked-secret").await, StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+    assert_eq!(status_of(&app, &body, "replacement-secret").await, StatusCode::OK);
+    assert_eq!(publisher.published_messages().len(), 1);
 }
 
 #[tokio::test]

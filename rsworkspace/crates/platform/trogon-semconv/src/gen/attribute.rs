@@ -6,6 +6,9 @@
 //! Each attribute is exposed as its dotted key string. Enumerated attributes
 //! additionally expose a typed value object for their allowed values.
 
+/// Admission scope, either global or caller. Never contains an identity
+pub const A2A_GATEWAY_RELAY_LIMIT: &str = "a2a.gateway.relay.limit";
+
 /// ACP NATS subject prefix for the service instance. Resource attribute in acp-nats-server / acp-nats-stdio
 pub const ACP_PREFIX: &str = "acp.prefix";
 
@@ -50,6 +53,9 @@ pub const HTTP_REQUEST_METHOD: &str = "http.request.method";
 
 /// Standard OTel http.response.status_code. Emitted by http.server.request
 pub const HTTP_RESPONSE_STATUS_CODE: &str = "http.response.status_code";
+
+/// Matched HTTP route template; never a raw request path
+pub const HTTP_ROUTE: &str = "http.route";
 
 /// Direction of the MCP NATS transport message
 pub const MCP_NATS_DIRECTION: &str = "mcp.nats.direction";
@@ -255,8 +261,14 @@ impl GuestPhase {
     }
 }
 
+/// Credential recovery command kind (all, write, rotation)
+pub const KIND: &str = "kind";
+
 /// MCP servers configured for a new ACP session
 pub const MCP_SERVERS: &str = "mcp_servers";
+
+/// Google Cloud Pub/Sub message identifier
+pub const MESSAGE_ID: &str = "message_id";
 
 /// Operation method. OVERLOADED today: the listed values are the ACP request methods on acp.requests / acp.request.duration; the same `method` key is also emitted with free-form values by acp.ext / acp.ext.notification and with HTTP methods by http.server.request
 pub const METHOD: &str = "method";
@@ -342,7 +354,7 @@ pub const NEW_SESSION_ID: &str = "new_session_id";
 /// Microsoft Graph notification batch count
 pub const NOTIFICATION_COUNT: &str = "notification_count";
 
-/// ACP operation where an error occurred
+/// Operation discriminator. OVERLOADED today: the listed values are the ACP operations where an error occurred on acp.errors; the same `operation` key is also emitted with credential write operations by gateway.credential.store.write.failures
 pub const OPERATION: &str = "operation";
 
 /// Allowed values for the `operation` attribute
@@ -381,7 +393,7 @@ impl Operation {
     }
 }
 
-/// Reconciliation outcome for a processed schedule event record
+/// Outcome discriminator. OVERLOADED today: the listed values are the trogon-scheduler reconciliation outcomes for a processed schedule event record; the same `outcome` key is also emitted with credential recovery pass outcomes by gateway.credential.recovery.passes
 pub const OUTCOME: &str = "outcome";
 
 /// Allowed values for the `outcome` attribute
@@ -435,7 +447,7 @@ pub const PAYLOAD_KIND: &str = "payload_kind";
 /// ACP protocol version negotiated on initialize
 pub const PROTOCOL_VERSION: &str = "protocol_version";
 
-/// Reason code for the ACP error
+/// Reason code. OVERLOADED today: the listed values are the ACP error reasons on acp.errors; the same `reason` key is also emitted with credential recovery worker failures by gateway.credential.recovery.errors and with runtime release denials by gateway.credential.delivery.denied
 pub const REASON: &str = "reason";
 
 /// Allowed values for the `reason` attribute
@@ -540,6 +552,12 @@ impl SnapshotOutcome {
 /// Whether a decider snapshot write succeeded
 pub const SNAPSHOT_WRITE_SUCCESS: &str = "snapshot_write_success";
 
+/// Integration source the credential belongs to
+pub const SOURCE: &str = "source";
+
+/// Credential recovery command status (planned, recovered, failed)
+pub const STATUS: &str = "status";
+
 /// Identifier of the event stream the schedule record belongs to
 pub const STREAM_ID: &str = "stream_id";
 
@@ -641,6 +659,9 @@ pub const TROGON_CLAIM_CHECK_USED: &str = "trogon.claim_check.used";
 
 /// Standard OTel url.path. Emitted by http.server.request
 pub const URL_PATH: &str = "url.path";
+
+/// URL scheme of the HTTP listener
+pub const URL_SCHEME: &str = "url.scheme";
 
 /// Standard OTel user_agent.original. Emitted by http.server.request
 pub const USER_AGENT_ORIGINAL: &str = "user_agent.original";

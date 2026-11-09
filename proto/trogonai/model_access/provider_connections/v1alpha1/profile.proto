@@ -1,0 +1,41 @@
+edition = "2024";
+
+package trogonai.model_access.provider_connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Mutable descriptive metadata, excluded from admitted configuration digests.
+// Replacement clears fields omitted from the new profile; empty text is valid.
+message ProviderConnectionProfile {
+  string display_name = 1;
+  string description = 2;
+}
+
+// Unknown and unspecified values are invalid. Disabled blocks NEW route
+// admission and hides this connection's offerings from gateway /v1/models and
+// provider discovery. Another eligible connection may still list the same model.
+// Existing pinned Sessions, replacement attempts, and their grants remain
+// subject to live authorization and revocation, unaffected by this switch.
+// Re-enabling never revives a revoked connection or binding.
+enum ProviderRoutingEligibility {
+  PROVIDER_ROUTING_ELIGIBILITY_UNSPECIFIED = 0;
+  PROVIDER_ROUTING_ELIGIBILITY_ENABLED = 1;
+  PROVIDER_ROUTING_ELIGIBILITY_DISABLED = 2;
+}
+
+// Mutable selection-policy input, never authorization or an implicit default.
+// Preference is an integer, zero neutral, higher preferred, negative permitted.
+// It ranks only connections authorized and eligible for the same exact model.
+// Managed routing still requires an explicitly requested connection or the
+// single applicable policy default under ADR#0032. Policy owns tie resolution;
+// an ambiguous default rejects admission. This never rewrites pinned routes.
+message ProviderRoutingPolicy {
+  sint32 preference = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderRoutingEligibility eligibility = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}

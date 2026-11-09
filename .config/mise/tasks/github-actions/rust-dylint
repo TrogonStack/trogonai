@@ -12,4 +12,11 @@ unset RUSTUP_TOOLCHAIN
 export RUSTC_WRAPPER=""
 export CARGO_BUILD_RUSTC_WRAPPER=""
 
+# dylint 6.0.x checks out Clippy's `master`, which rust-lang/rust-clippy no
+# longer has. Naming the clone's remote `master` makes that ref resolve to the
+# remote HEAD. Drop this once dylint is on a release that checks out `main`.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=clone.defaultRemoteName
+export GIT_CONFIG_VALUE_0=master
+
 cargo dylint --all --workspace --no-deps -- --all-features --all-targets

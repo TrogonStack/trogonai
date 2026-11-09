@@ -7,6 +7,17 @@ date: 2026-07-23
 
 # ADR#0035: Session Store as a Decider Aggregate on NATS JetStream
 
+> **Refined by [ADR#0083](./0083-sealed-content-envelope.md) (2026-10-30).** For
+> customer managed tenants the session streams are sensitive: from each tenant's
+> cutover, events and the artifact bytes they reference are stored in
+> `SealedContent`, and those bytes are named by a keyed digest rather than the
+> plaintext sha256 of Decision 3, which moves inside the sealed event. Under
+> Decision 7, destroying such a tenant's sealing key is erasure-grade deletion
+> at tenant granularity, reaching every incarnation, mirror and backup once no
+> OpenBao backup still holds the key. Per-session erasure, tenants outside that
+> tier and history before a cutover stay deferred, with redaction masks and
+> artifact-byte erasure as their interim story.
+
 ## Context
 
 A platform [Session](../glossary/session) ([ADR#0031](./0031-agent-implementation-and-session-plan.md))

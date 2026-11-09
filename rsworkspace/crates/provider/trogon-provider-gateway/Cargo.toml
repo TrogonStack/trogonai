@@ -1,0 +1,46 @@
+[package]
+name = "trogon-provider-gateway"
+version = "0.0.1"
+edition = "2024"
+license = "Apache-2.0"
+description = "HTTP surface of the provider gateway"
+publish = false
+
+[lib]
+name = "trogon_provider_gateway"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-provider-gateway"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+axum = { workspace = true, features = ["http2"] }
+clap = { workspace = true }
+http-body = "=1.1.0"
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+pin-project-lite = "=0.2.17"
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt-multi-thread", "macros", "net", "signal"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+trogon-semconv = { workspace = true }
+trogon-std = { workspace = true, features = ["signal", "tls"] }
+trogon-telemetry = { workspace = true }
+
+[dev-dependencies]
+futures-util = { workspace = true }
+h2 = "=0.4.14"
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "sync", "time", "process"] }
+tower = { workspace = true, features = ["util"] }
+tracing-subscriber = { workspace = true }
+trogon-std = { workspace = true, features = ["test-support"] }

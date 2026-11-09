@@ -120,6 +120,7 @@ today, and the vocabulary is deliberately channel-neutral ahead of the second.
 - [PoP](./pop)
 - [OpenBao](./openbao)
 - [Managed key](./managed-key)
+- [Dedicated key](./dedicated-key)
 - [Customer managed key](./customer-managed-key)
 
 ## Observability

@@ -17,9 +17,18 @@ use trogon_nats::jetstream::{
 };
 use trogon_nats::mocks::MockError;
 
+use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
+use crate::source_integration_id::SourceIntegrationId;
+
 type HmacSha256 = Hmac<Sha256>;
 
 const TEST_SECRET: &str = "test-secret";
+
+fn random_secret() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
@@ -45,6 +54,35 @@ fn tracing_guard() -> tracing::subscriber::DefaultGuard {
 
 fn mock_app(publisher: MockJetStreamPublisher) -> Router {
     router(wrap_publisher(publisher), &test_config())
+}
+
+async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+    let integration_id = SourceIntegrationId::new("primary").unwrap();
+    let store = MockOpenBaoSecretStore::default();
+    let credential = store
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::Twitter,
+                integration_id.clone(),
+            ),
+            CredentialKind::ConsumerSecret,
+            trogon_std::SecretString::new(secret).unwrap(),
+        )
+        .await
+        .unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+
+    runtime_router(
+        wrap_publisher(publisher),
+        &test_config(),
+        integration_id,
+        registry.resolver(store),
+    )
 }
 
 fn compute_sig(secret: &str, body: &[u8]) -> String {
@@ -126,6 +164,32 @@ async fn crc_request_returns_response_token() {
 }
 
 #[tokio::test]
+async fn runtime_consumer_secret_handles_crc() {
+    let runtime_secret = random_secret();
+    let _guard = tracing_guard();
+    let app = runtime_app(MockJetStreamPublisher::new(), &runtime_secret).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/webhook?crc_token=challenge")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        payload["response_token"],
+        signature::crc_response_token(&runtime_secret, "challenge").unwrap(),
+    );
+}
+
+#[tokio::test]
 async fn crc_request_without_token_returns_bad_request() {
     let _guard = tracing_guard();
     let app = mock_app(MockJetStreamPublisher::new());
@@ -150,14 +214,14 @@ async fn x_activity_event_publishes_to_event_type_subject() {
     let publisher = MockJetStreamPublisher::new();
     let app = mock_app(publisher.clone());
     let body = br#"{
-            "data": {
-                "event_type": "profile.update.bio",
-                "payload": {
-                    "before": "Mars & Cars",
-                    "after": "Mars, Cars & AI"
-                }
+        "data": {
+            "event_type": "profile.update.bio",
+            "payload": {
+                "before": "Mars & Cars",
+                "after": "Mars, Cars & AI"
             }
-        }"#;
+        }
+    }"#;
     let signature = compute_sig(TEST_SECRET, body);
 
     let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
@@ -183,17 +247,55 @@ async fn x_activity_event_publishes_to_event_type_subject() {
 }
 
 #[tokio::test]
+async fn runtime_consumer_secret_publishes_to_nats_and_rejects_static_secret() {
+    let runtime_secret = random_secret();
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app(publisher.clone(), &runtime_secret).await;
+    let body = br#"{
+        "data": {
+            "event_type": "profile.update.bio",
+            "payload": {
+                "before": "Mars & Cars",
+                "after": "Mars, Cars & AI"
+            }
+        }
+    }"#;
+    let static_signature = compute_sig(TEST_SECRET, body);
+
+    let static_response = app
+        .clone()
+        .oneshot(webhook_request(body, Some(&static_signature)))
+        .await
+        .unwrap();
+
+    assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+
+    let runtime_signature = compute_sig(&runtime_secret, body);
+    let runtime_response = app
+        .oneshot(webhook_request(body, Some(&runtime_signature)))
+        .await
+        .unwrap();
+
+    assert_eq!(runtime_response.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "twitter.profile.update.bio");
+}
+
+#[tokio::test]
 async fn account_activity_event_publishes_to_event_bucket_subject() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
     let app = mock_app(publisher.clone());
     let body = br#"{
-            "for_user_id": "2244994945",
-            "favorite_events": [{
-                "id": "fav-1",
-                "created_at": "Mon Mar 26 16:33:26 +0000 2018"
-            }]
-        }"#;
+        "for_user_id": "2244994945",
+        "favorite_events": [{
+            "id": "fav-1",
+            "created_at": "Mon Mar 26 16:33:26 +0000 2018"
+        }]
+    }"#;
     let signature = compute_sig(TEST_SECRET, body);
 
     let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
@@ -224,14 +326,14 @@ async fn generic_account_activity_fallback_omits_message_id() {
     let publisher = MockJetStreamPublisher::new();
     let app = mock_app(publisher.clone());
     let body = br#"{
-            "for_user_id": "2244994945",
-            "favorite_events": [{
-                "id": "fav-1"
-            }],
-            "follow_events": [{
-                "id": "follow-1"
-            }]
-        }"#;
+        "for_user_id": "2244994945",
+        "favorite_events": [{
+            "id": "fav-1"
+        }],
+        "follow_events": [{
+            "id": "follow-1"
+        }]
+    }"#;
     let signature = compute_sig(TEST_SECRET, body);
 
     let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
@@ -249,14 +351,14 @@ async fn filtered_stream_payload_publishes_to_filtered_stream_subject() {
     let publisher = MockJetStreamPublisher::new();
     let app = mock_app(publisher.clone());
     let body = br#"{
-            "data": {
-                "id": "1234567890",
-                "text": "hello world"
-            },
-            "matching_rules": [
-                { "id": "rule-1", "tag": "cats" }
-            ]
-        }"#;
+        "data": {
+            "id": "1234567890",
+            "text": "hello world"
+        },
+        "matching_rules": [
+            { "id": "rule-1", "tag": "cats" }
+        ]
+    }"#;
     let signature = compute_sig(TEST_SECRET, body);
 
     let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();
@@ -333,10 +435,10 @@ async fn invalid_event_type_publishes_unroutable() {
     let publisher = MockJetStreamPublisher::new();
     let app = mock_app(publisher.clone());
     let body = br#"{
-            "data": {
-                "event_type": "invalid token"
-            }
-        }"#;
+        "data": {
+            "event_type": "invalid token"
+        }
+    }"#;
     let signature = compute_sig(TEST_SECRET, body);
 
     let response = app.oneshot(webhook_request(body, Some(&signature))).await.unwrap();

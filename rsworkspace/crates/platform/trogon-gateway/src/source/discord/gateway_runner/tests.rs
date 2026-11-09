@@ -13,7 +13,7 @@ use crate::source::discord::config::{DiscordBotToken, DiscordConfig};
 
 fn config() -> DiscordConfig {
     DiscordConfig {
-        bot_token: DiscordBotToken::new("fixture-token").unwrap(),
+        bot_token: Some(DiscordBotToken::new("fixture-token").unwrap()),
         intents: twilight_model::gateway::Intents::GUILDS,
         subject_prefix: NatsToken::new("discord").unwrap(),
         stream_name: NatsToken::new("DISCORD").unwrap(),

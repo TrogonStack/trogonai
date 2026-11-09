@@ -1,7 +1,7 @@
 groups:
   # acp-nats: ACP-over-NATS agent and client. Span group ids are `span.` + the
-  # emitted span name, except where noted. The shared `method` and `subject`
-  # attributes are defined in common.yaml.
+  # emitted span name, except where noted. The shared `method`, `operation`,
+  # `reason`, and `subject` attributes are defined in common.yaml.
   - id: registry.trogonai.acp
     type: attribute_group
     display_name: ACP Attributes
@@ -11,92 +11,6 @@ groups:
         type: boolean
         stability: development
         brief: Whether the ACP request succeeded.
-      - id: operation
-        type:
-          members:
-            - id: prompt
-              value: "prompt"
-              brief: Prompt operation.
-              stability: development
-            - id: cancel
-              value: "cancel"
-              brief: Cancel operation.
-              stability: development
-            - id: ext_method
-              value: "ext_method"
-              brief: Extension method operation.
-              stability: development
-            - id: ext_notification
-              value: "ext_notification"
-              brief: Extension notification operation.
-              stability: development
-            - id: session_validate
-              value: "session_validate"
-              brief: Session validation.
-              stability: development
-            - id: session_ready
-              value: "session_ready"
-              brief: Session readiness signal.
-              stability: development
-            - id: client
-              value: "client"
-              brief: Client-directed operation.
-              stability: development
-        stability: development
-        brief: ACP operation where an error occurred.
-      - id: reason
-        type:
-          members:
-            - id: invalid_session_id
-              value: "invalid_session_id"
-              brief: Session id was invalid.
-              stability: development
-            - id: invalid_method_name
-              value: "invalid_method_name"
-              brief: Method name was invalid.
-              stability: development
-            - id: cancel_publish_failed
-              value: "cancel_publish_failed"
-              brief: Publishing the cancel failed.
-              stability: development
-            - id: ext_notification_publish_failed
-              value: "ext_notification_publish_failed"
-              brief: Publishing the extension notification failed.
-              stability: development
-            - id: notification_stream_closed
-              value: "notification_stream_closed"
-              brief: Notification stream closed.
-              stability: development
-            - id: notification_consumer_error
-              value: "notification_consumer_error"
-              brief: Notification consumer errored.
-              stability: development
-            - id: bad_response_payload
-              value: "bad_response_payload"
-              brief: Response payload was malformed.
-              stability: development
-            - id: response_consumer_error
-              value: "response_consumer_error"
-              brief: Response consumer errored.
-              stability: development
-            - id: response_stream_closed
-              value: "response_stream_closed"
-              brief: Response stream closed.
-              stability: development
-            - id: prompt_timeout
-              value: "prompt_timeout"
-              brief: Prompt timed out.
-              stability: development
-            - id: session_ready_publish_failed
-              value: "session_ready_publish_failed"
-              brief: Publishing session readiness failed.
-              stability: development
-            - id: client_backpressure_rejected
-              value: "client_backpressure_rejected"
-              brief: Rejected due to client backpressure.
-              stability: development
-        stability: development
-        brief: Reason code for the ACP error.
       - id: session_id
         type: string
         stability: development

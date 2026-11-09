@@ -1,0 +1,169 @@
+edition = "2024";
+
+package trogonai.model_access.provider_connections.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only Decider error templates, never encoded. External validation and
+// authorization failures are distinguished from fold lifecycle rejections.
+// Secret material, backend locators, headers, and provider errors are never
+// copied into public error detail. Concurrency faults use the Decider channel.
+message ProviderCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "PROVIDER_COMMAND_INVALID"
+    message: "The command violates the provider connection contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderConnectionAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "PROVIDER_CONNECTION_ALREADY_EXISTS"
+    message: "The connection identity has already been registered."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderConnectionNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "PROVIDER_CONNECTION_NOT_FOUND"
+    message: "The connection has not been registered."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderConnectionNotPendingError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "PROVIDER_CONNECTION_NOT_PENDING"
+    message: "Activation requires a pending connection."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderConnectionNotActiveError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "PROVIDER_CONNECTION_NOT_ACTIVE"
+    message: "Binding replacement requires an active connection."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderConnectionRevokedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "PROVIDER_CONNECTION_REVOKED"
+    message: "The connection has been permanently revoked."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message CredentialBindingNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "CREDENTIAL_BINDING_NOT_FOUND"
+    message: "The binding does not belong to this connection."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message CredentialBindingIdentityReusedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "CREDENTIAL_BINDING_IDENTITY_REUSED"
+    message: "The binding identity has already been used."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message CredentialBindingNotActiveError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "CREDENTIAL_BINDING_NOT_ACTIVE"
+    message: "The previous binding is not the active binding."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message CredentialBindingRevokedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "CREDENTIAL_BINDING_REVOKED"
+    message: "The binding has been permanently revoked."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message CredentialBindingInUseError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "CREDENTIAL_BINDING_IN_USE"
+    message: "A live Session still pins the previous binding."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderValidationRejectedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "PROVIDER_VALIDATION_REJECTED"
+    message: "Trusted validation does not prove this exact configuration."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderAuthenticationUnsupportedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "PROVIDER_AUTHENTICATION_UNSUPPORTED"
+    message: "The authentication configuration is unsupported for this scope or endpoint."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderModelMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "PROVIDER_MODEL_MISMATCH"
+    message: "The provider offering cannot prove the exact catalog model release."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderSubjectMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "PROVIDER_SUBJECT_MISMATCH"
+    message: "Provider subject or billing continuity could not be proved."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message CredentialDrainNotPermittedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "model_access.provider_connections"
+    reason: "CREDENTIAL_DRAIN_NOT_PERMITTED"
+    message: "Policy does not permit credential overlap."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

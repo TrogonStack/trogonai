@@ -5,4 +5,4 @@ pub mod server;
 
 pub use client_state::MicrosoftGraphClientState;
 pub use config::MicrosoftGraphConfig;
-pub use server::{provision, router};
+pub use server::{provision, router, runtime_router};

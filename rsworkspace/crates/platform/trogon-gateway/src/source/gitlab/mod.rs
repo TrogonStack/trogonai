@@ -43,4 +43,4 @@ pub mod server;
 pub mod signature;
 pub use config::GitlabConfig;
 pub use gitlab_signing_token::GitLabSigningToken;
-pub use server::{provision, router};
+pub use server::{provision, router, runtime_router};

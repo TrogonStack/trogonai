@@ -38,3 +38,44 @@ fn slack_app_token_rejects_empty_token() {
     assert_eq!(error.to_string(), "secret must not be empty");
     assert!(error.source().is_some());
 }
+
+#[test]
+fn api_base_url_joins_the_connections_open_method() {
+    let url = SlackApiBaseUrl::new("https://slack.com/api/").unwrap();
+    assert_eq!(
+        url.connections_open_url().as_str(),
+        "https://slack.com/api/apps.connections.open"
+    );
+}
+
+#[test]
+fn api_base_url_without_a_trailing_slash_keeps_its_path() {
+    let url = SlackApiBaseUrl::new("https://slack-gov.com/api").unwrap();
+    assert_eq!(
+        url.connections_open_url().as_str(),
+        "https://slack-gov.com/api/apps.connections.open"
+    );
+}
+
+#[test]
+fn api_base_url_accepts_plain_http_for_local_gateways() {
+    let url = SlackApiBaseUrl::new("http://127.0.0.1:8080").unwrap();
+    assert_eq!(
+        url.connections_open_url().as_str(),
+        "http://127.0.0.1:8080/apps.connections.open"
+    );
+}
+
+#[test]
+fn api_base_url_must_be_an_absolute_url() {
+    let error = SlackApiBaseUrl::new("slack.com/api").unwrap_err();
+    assert!(matches!(error, SlackApiBaseUrlError::Parse(_)));
+    assert!(error.source().is_some());
+}
+
+#[test]
+fn api_base_url_must_use_http_or_https() {
+    let error = SlackApiBaseUrl::new("ftp://slack.com/api/").unwrap_err();
+    assert!(matches!(error, SlackApiBaseUrlError::UnsupportedScheme));
+    assert!(error.source().is_none());
+}

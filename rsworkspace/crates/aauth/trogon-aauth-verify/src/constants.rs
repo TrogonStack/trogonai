@@ -33,6 +33,60 @@ pub const DEFAULT_MAX_RESPONSE_BYTES: u64 = 256 * 1024;
 /// Default request timeout for a single well-known fetch attempt.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// NATS KV bucket every HTTP edge instance shares for replay records, so a
+/// signed request admitted by one instance is refused by every other.
+pub const AAUTH_REPLAY_BUCKET: &str = "AAUTH_REPLAY";
+
+/// One revision per key: a replay record is written once and never updated,
+/// so any older revision would only be dead weight.
+pub const AAUTH_REPLAY_HISTORY: i64 = 1;
+
+/// Upper bound on the span between a signature's `created` and `expires`
+/// (ADR#0051 Decision 2).
+pub const MAX_SIGNATURE_VALIDITY_SECS: u32 = 120;
+
+/// Signature validity a verifier assumes when none is configured.
+pub const DEFAULT_SIGNATURE_VALIDITY_SECS: u32 = 60;
+
+/// Upper bound on the clock skew, and on the expiry leeway, a verifier
+/// tolerates (ADR#0051 Decision 2).
+pub const MAX_CLOCK_SKEW_SECS: u32 = 30;
+
+/// Clock skew a verifier tolerates when none is configured.
+pub const DEFAULT_CLOCK_SKEW_SECS: u32 = 30;
+
+/// Lifetime of a replay record and maximum age of [`AAUTH_REPLAY_BUCKET`]:
+/// skew is bidirectional, so a signature admitted at `created - skew` stays
+/// admissible until `expires + skew`, and its record has to outlive that
+/// whole span (ADR#0051 Decision 4).
+pub const REPLAY_RECORD_LIFETIME_SECS: u32 = MAX_SIGNATURE_VALIDITY_SECS + 2 * MAX_CLOCK_SKEW_SECS;
+
+/// Longest `jti` a verifier accepts. Its replay record is keyed by a digest
+/// of the `jti`, so the bound caps the work an unauthenticated request can
+/// ask for rather than the size of the record.
+pub const MAX_JTI_BYTES: usize = 256;
+
+/// Header a resource sends a fresh server-issued nonce in (ADR#0051
+/// Decision 3), and a client sends it back in on its retry.
+pub const SERVER_NONCE_HEADER: &str = "AAuth-Nonce";
+
+/// RFC 9421 component identifier under which a signature covers
+/// [`SERVER_NONCE_HEADER`], binding the nonce into that signature.
+pub const SERVER_NONCE_COMPONENT: &str = "aauth-nonce";
+
+/// JWS `typ` of a server-issued nonce, so no other token signed with the
+/// challenge key can stand in for one.
+pub const TYP_SERVER_NONCE: &str = "aauth-nonce+jwt";
+
+/// Upper bound on how long a server-issued nonce stays usable. Held to the
+/// signature validity ceiling so the record of an issued nonce, which lives
+/// for the nonce lifetime plus the skew on either side, still fits within
+/// [`REPLAY_RECORD_LIFETIME_SECS`].
+pub const MAX_SERVER_NONCE_TTL_SECS: u32 = MAX_SIGNATURE_VALIDITY_SECS;
+
+/// How long a server-issued nonce stays usable when none is configured.
+pub const DEFAULT_SERVER_NONCE_TTL_SECS: u32 = 60;
+
 /// Floor for the replay-store TTL. The derived TTL is
 /// `max(MIN_REPLAY_TTL_SECS, max_skew_secs * 2)` so a zero-skew configuration
 /// still keeps nonce entries long enough to refuse the same signed request
@@ -51,6 +105,7 @@ pub(crate) const HTTP_SECURITY_HEADERS: &[&str] = &[
     headers::SIGNATURE,
     headers::CONTENT_DIGEST,
     headers::MISSION,
+    SERVER_NONCE_HEADER,
 ];
 
 /// Security-sensitive headers that drive PoP verification. If any appears more

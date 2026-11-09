@@ -1,6 +1,7 @@
 use async_nats::jetstream::stream::RetentionPolicy;
 
 use crate::jetstream::stream_options::{EventsStreamMaxAge, PushDlqDuplicateWindow, StreamProvisionOptions};
+use crate::nats::subjects::A2aStream;
 
 use super::*;
 use trogon_nats::jetstream::MockJetStreamContext;
@@ -41,7 +42,7 @@ async fn provision_returns_error_on_failure() {
     assert!(result.is_err());
     assert_eq!(
         result.unwrap_err().to_string(),
-        "stream provisioning failed: A2A_EVENTS: simulated stream creation failure"
+        "stream provisioning failed: A2A_EVENTS: simulated stream reconciliation failure"
     );
 }
 
@@ -64,5 +65,29 @@ async fn provision_is_idempotent() {
     let ctx = MockJetStreamContext::new();
     provision_streams(&ctx, &p("a2a")).await.unwrap();
     provision_streams(&ctx, &p("a2a")).await.unwrap();
-    assert_eq!(ctx.created_streams().len(), 4);
+    assert_eq!(ctx.created_streams().len(), 2);
+    assert_eq!(ctx.stream_writes(), 2);
+}
+
+#[tokio::test]
+async fn provision_moves_an_existing_push_dlq_stream_onto_the_current_subjects() {
+    let ctx = MockJetStreamContext::new();
+    let prefix = p("a2a");
+    let mut legacy = A2aStream::push_dlq_config(
+        &prefix,
+        std::time::Duration::from_secs(crate::constants::DEFAULT_PUSH_DLQ_DEDUP_WINDOW_SECS),
+    );
+    legacy.subjects = vec![
+        "a2a.v1.push.dlq.*.*".to_string(),
+        "a2a.v1.push.dlq.mirror.*.*".to_string(),
+    ];
+    legacy.num_replicas = 3;
+    ctx.get_or_create_stream(legacy).await.unwrap();
+
+    provision_streams(&ctx, &prefix).await.unwrap();
+
+    let streams = ctx.created_streams();
+    let dlq = streams.iter().find(|c| c.name == "A2A_PUSH_DLQ").expect("A2A_PUSH_DLQ");
+    assert_eq!(dlq.subjects, A2aStream::PushDlq.subject_patterns(&prefix));
+    assert_eq!(dlq.num_replicas, 3);
 }

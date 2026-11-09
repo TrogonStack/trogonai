@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ApiKeyExpired records the first use of the key after its expiry passed.
+//
+// observed_at is when somebody tried, which is deliberately not the same as
+// expires_at. The gap between them is how long a key sat expired before anyone
+// noticed, and that is the interesting number for an operator deciding whether
+// a key was still wired into something.
+message ApiKeyExpired {
+  google.protobuf.Timestamp expires_at = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}

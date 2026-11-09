@@ -13,10 +13,18 @@ use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
 
+use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
+
 type HmacSha256 = Hmac<Sha256>;
 
 fn test_secret() -> String {
     ["whsec_", "dGVzdC1zZWNyZXQ="].concat()
+}
+
+fn runtime_secret() -> String {
+    ["whsec_", "cnVudGltZS1zZWNyZXQ="].concat()
 }
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
@@ -46,8 +54,42 @@ fn mock_app(publisher: MockJetStreamPublisher) -> Router {
     router(wrap_publisher(publisher), &test_config())
 }
 
+async fn runtime_app(publisher: MockJetStreamPublisher, secret: String) -> Router {
+    let config = test_config();
+    let store = MockOpenBaoSecretStore::default();
+    let integration_id = SourceIntegrationId::new("primary").unwrap();
+    let credential = store
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::Incidentio,
+                integration_id.clone(),
+            ),
+            CredentialKind::SigningSecret,
+            trogon_std::SecretString::new(secret).unwrap(),
+        )
+        .await
+        .unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+
+    runtime_router(
+        wrap_publisher(publisher),
+        &config,
+        integration_id,
+        registry.resolver(store),
+    )
+}
+
 fn sign(body: &[u8], webhook_id: &str, timestamp: &str) -> String {
-    let secret = test_config().signing_secret;
+    sign_with_secret(&test_secret(), body, webhook_id, timestamp)
+}
+
+fn sign_with_secret(secret: &str, body: &[u8], webhook_id: &str, timestamp: &str) -> String {
+    let secret = IncidentioSigningSecret::new(secret).unwrap();
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
     let signed = format!("{webhook_id}.{timestamp}.").into_bytes();
     mac.update(&signed);
@@ -152,6 +194,44 @@ async fn valid_public_event_publishes() {
             .map(|v| v.as_str()),
         Some("msg-1"),
     );
+}
+
+#[tokio::test]
+async fn runtime_signing_secret_publishes_and_rejects_static_secret() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app(publisher.clone(), runtime_secret()).await;
+    let body = br#"{"event_type":"public_incident.incident_created_v2","data":{"id":"01ABC"}}"#;
+    let timestamp = valid_timestamp();
+
+    let static_response = app
+        .clone()
+        .oneshot(webhook_request(
+            body,
+            "msg-runtime",
+            &timestamp,
+            &sign_with_secret(&test_secret(), body, "msg-runtime", &timestamp),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+
+    let runtime_response = app
+        .oneshot(webhook_request(
+            body,
+            "msg-runtime",
+            &timestamp,
+            &sign_with_secret(&runtime_secret(), body, "msg-runtime", &timestamp),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(runtime_response.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "incidentio.public_incident.incident_created_v2");
 }
 
 #[tokio::test]

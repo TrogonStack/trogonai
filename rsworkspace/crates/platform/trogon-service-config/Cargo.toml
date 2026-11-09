@@ -10,7 +10,10 @@ workspace = true
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
 confique = { workspace = true }
+thiserror = { workspace = true }
 trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+trogon-std = { workspace = true, features = ["test-support"] }

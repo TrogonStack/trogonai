@@ -18,6 +18,11 @@ use trogon_semconv::span::TWITTER_CRC;
 use trogon_semconv::span::TWITTER_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
+use crate::source_integration_id::SourceIntegrationId;
+
 use super::config::{TwitterConfig, TwitterConsumerSecret};
 use super::constants::{
     ACCOUNT_ACTIVITY_EVENT_TYPES, HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_TYPE,
@@ -63,6 +68,15 @@ impl PayloadKind {
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     consumer_secret: TwitterConsumerSecret,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+}
+
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
     subject_prefix: NatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
@@ -143,6 +157,34 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &TwitterConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Twitter, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route(
+            "/webhook",
+            get(handle_runtime_crc::<P, S, G>).post(handle_runtime_webhook::<P, S, G>),
+        )
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 #[instrument(name = TWITTER_CRC, skip_all)]
 async fn handle_crc<P: JetStreamPublisher, S: ObjectStorePut>(
     State(state): State<AppState<P, S>>,
@@ -154,6 +196,38 @@ async fn handle_crc<P: JetStreamPublisher, S: ObjectStorePut>(
     }
 
     let response_token = signature::crc_response_token(state.consumer_secret.as_str(), &query.crc_token)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(CrcResponse { response_token }))
+}
+
+#[instrument(name = TWITTER_CRC, skip_all)]
+async fn handle_runtime_crc<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    Query(query): Query<CrcQuery>,
+) -> Result<Json<CrcResponse>, StatusCode>
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    if query.crc_token.is_empty() {
+        warn!("Empty crc_token query parameter");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let consumer_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::ConsumerSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Twitter/X runtime credential resolution failed");
+            return Err(error.http_status());
+        }
+    };
+
+    let response_token = signature::crc_response_token(consumer_secret.as_str(), &query.crc_token)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(CrcResponse { response_token }))
 }
@@ -182,16 +256,69 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         return StatusCode::UNAUTHORIZED;
     }
 
+    publish_verified_webhook(state.publisher, state.subject_prefix, state.nats_ack_timeout, body).await
+}
+
+#[instrument(
+    name = TWITTER_WEBHOOK,
+    skip_all,
+    fields(
+        event_type = tracing::field::Empty,
+        payload_kind = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let Some(signature_header) = headers.get(HEADER_SIGNATURE).and_then(|value| value.to_str().ok()) else {
+        warn!("Missing x-twitter-webhooks-signature header");
+        return StatusCode::UNAUTHORIZED;
+    };
+
+    let consumer_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::ConsumerSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Twitter/X runtime credential resolution failed");
+            return error.http_status();
+        }
+    };
+
+    if let Err(error) = signature::verify(consumer_secret.as_str(), &body, signature_header) {
+        warn!(reason = %error, "Twitter/X webhook signature validation failed");
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    publish_verified_webhook(state.publisher, state.subject_prefix, state.nats_ack_timeout, body).await
+}
+
+async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+    body: Bytes,
+) -> StatusCode {
     let payload = match serde_json::from_slice::<serde_json::Value>(&body) {
         Ok(payload) => payload,
         Err(error) => {
             warn!(error = %error, "Failed to parse Twitter/X webhook payload");
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 RejectReason::InvalidJson,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         }
@@ -201,18 +328,11 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         Ok(event_type) => event_type,
         Err(reason) => {
             warn!(reason = reason.as_str(), "Unable to classify Twitter/X webhook payload");
-            return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
-                reason,
-                body,
-                state.nats_ack_timeout,
-            )
-            .await;
+            return publish_unroutable(&publisher, &subject_prefix, reason, body, nats_ack_timeout).await;
         }
     };
 
-    let subject = format!("{}.{}", state.subject_prefix, event_type);
+    let subject = format!("{}.{}", subject_prefix, event_type);
     let span = tracing::Span::current();
     span.record(trogon_semconv::attribute::EVENT_TYPE, event_type.as_str());
     span.record(trogon_semconv::attribute::PAYLOAD_KIND, payload_kind.as_str());
@@ -226,9 +346,8 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, message_id.as_str());
     }
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, nats_headers, body, nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)

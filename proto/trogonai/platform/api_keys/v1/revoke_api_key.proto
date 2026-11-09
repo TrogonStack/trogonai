@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+// RevokeApiKey takes effect at the next verification, with no grace window.
+//
+// This is the containment action. It is legal from every live state, including
+// mid-reroll: revoking a key that is currently rotating stops it immediately
+// and does not wait out the grace window it was already in.
+message RevokeApiKey {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Free text for the operator record. Carried into the audit fact, never into
+  // a denial response, so a revoked caller learns it was denied and not why.
+  string reason = 2;
+}

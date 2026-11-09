@@ -1,0 +1,21 @@
+{
+  "name": "@trogonai/slack-bolt-fixtures",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "export": "node src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint ."
+  },
+  "dependencies": {
+    "raw-body": "3.0.2",
+    "tsscmp": "1.0.6",
+    "typescript": "6.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "@types/tsscmp": "1.0.2",
+    "vitest": "5.0.0"
+  }
+}

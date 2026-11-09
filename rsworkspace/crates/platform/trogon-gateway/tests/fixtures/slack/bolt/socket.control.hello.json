@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "socket.control.hello",
+  "kind": "control",
+  "transport": "socket_mode",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "hand written Socket Mode control frame: hello",
+    "wire_source": "https://docs.slack.dev/apis/events-api/using-socket-mode",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "frame": "{\"type\":\"hello\",\"num_connections\":1,\"debug_info\":{\"host\":\"applink-1\",\"build_number\":10,\"approximate_connection_time\":18060},\"connection_info\":{\"app_id\":\"A1234\"}}"
+  },
+  "bolt": {
+    "outcome": "ignored",
+    "ack": null,
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "ignore",
+    "nats": null,
+    "request": null,
+    "http": null,
+    "socket_ack": null
+  }
+}

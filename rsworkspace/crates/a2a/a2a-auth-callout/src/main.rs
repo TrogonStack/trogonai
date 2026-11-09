@@ -1,18 +1,20 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use {
+    a2a_auth_callout::admission_keys::{TenantAccount, admission_keys_from_env},
+    a2a_auth_callout::constants::NATS_CONNECT_TIMEOUT,
     a2a_auth_callout::credentials::mtls::MTlsVerifier,
     a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier},
     a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier},
     a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig},
-    a2a_auth_callout::error::AuthCalloutError,
-    a2a_auth_callout::signing_key_source::signing_key_source_from_env,
-    a2a_auth_callout::{
-        AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, StaticAccountResolver, Subscriber, XkeyPublic,
-    },
+    a2a_auth_callout::tenant_admission::{ENV_TENANT_MEMBERSHIPS, FileTenantAdmission, TenantAdmission},
+    a2a_auth_callout::{AdmissionBudget, AuthCalloutWireCodec, BridgeMintResponder, BridgeMintSubscriber, Subscriber},
+    a2a_nats::{A2aPrefix, A2aPrefixError, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
+    std::future::Future,
     std::sync::Arc,
     std::time::Duration,
     tracing::{info, warn},
+    trogon_nats::NatsConfig,
     trogon_std::env::{ReadEnv, SystemEnv},
 };
 
@@ -32,19 +34,40 @@ fn split_env_list(env: &impl ReadEnv, name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn env_required(env: &impl ReadEnv, name: &'static str) -> Result<String, AuthCalloutError> {
-    env.var(name).map_err(|_| AuthCalloutError::MissingEnvVar(name))
+fn resolve_a2a_prefix(env: &impl ReadEnv) -> Result<A2aPrefix, A2aPrefixError> {
+    A2aPrefix::new(
+        env.var(ENV_A2A_PREFIX)
+            .unwrap_or_else(|_| DEFAULT_A2A_PREFIX.to_owned()),
+    )
 }
 
-fn load_nkey_seed_env(env: &impl ReadEnv, name: &'static str) -> Result<NkeySeed, AuthCalloutError> {
-    NkeySeed::parse(env_required(env, name)?)
+fn nats_config(env: &impl ReadEnv) -> Option<NatsConfig> {
+    let config = NatsConfig::from_env(env);
+    (!config.servers.is_empty()).then_some(config)
 }
 
-fn load_nkey_public_env(env: &impl ReadEnv, name: &'static str) -> Result<NkeyPublic, AuthCalloutError> {
-    NkeyPublic::parse(env_required(env, name)?)
+async fn build_tenant_admission(
+    env: &impl ReadEnv,
+) -> Result<Arc<dyn TenantAdmission>, a2a_auth_callout::AuthCalloutError> {
+    let path = env
+        .var(ENV_TENANT_MEMBERSHIPS)
+        .map_err(|_| a2a_auth_callout::AuthCalloutError::MissingEnvVar(ENV_TENANT_MEMBERSHIPS))?;
+    let authority = FileTenantAdmission::new(path);
+    authority.validate().await?;
+    Ok(Arc::new(authority))
 }
 
 async fn build_oidc_verifier(env: &impl ReadEnv) -> Option<Arc<dyn OidcVerifier>> {
+    build_oidc_verifier_with_discovery(env, JwksOidcVerifier::discover).await
+}
+
+async fn build_oidc_verifier_with_discovery<F>(
+    env: &impl ReadEnv,
+    discover: impl FnOnce(OidcIssuerUrl, Vec<String>) -> F,
+) -> Option<Arc<dyn OidcVerifier>>
+where
+    F: Future<Output = Result<JwksOidcVerifier, a2a_auth_callout::AuthCalloutError>>,
+{
     let issuer_raw = env.var("AUTH_CALLOUT_OIDC_ISSUER").ok()?;
     let issuer = match OidcIssuerUrl::parse(&issuer_raw) {
         Ok(i) => i,
@@ -58,7 +81,7 @@ async fn build_oidc_verifier(env: &impl ReadEnv) -> Option<Arc<dyn OidcVerifier>
         warn!("AUTH_CALLOUT_OIDC_ISSUER set but AUTH_CALLOUT_OIDC_AUDIENCES empty; OIDC disabled");
         return None;
     }
-    match JwksOidcVerifier::discover(issuer, audiences).await {
+    match discover(issuer, audiences).await {
         Ok(v) => Some(Arc::new(v)),
         Err(e) => {
             warn!(error = %e, "OIDC discovery failed; OIDC disabled");
@@ -91,21 +114,30 @@ async fn main() {
 
     let env = SystemEnv;
 
-    let nats_url = env.var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let signing_key_source = match signing_key_source_from_env(&env) {
-        Ok(s) => s,
+    let Some(nats) = nats_config(&env) else {
+        tracing::error!("NATS_URL must list at least one server");
+        std::process::exit(1);
+    };
+    let admission_keys = match admission_keys_from_env(&env).await {
+        Ok(keys) => keys,
         Err(e) => {
-            tracing::error!(error = %e, "invalid signing key source configuration");
+            tracing::error!(error = %e, "invalid admission key configuration");
             std::process::exit(1);
         }
     };
-    let allowed_accounts = split_env_list(&env, "AUTH_CALLOUT_ALLOWED_ACCOUNTS");
-    if allowed_accounts.is_empty() {
-        tracing::error!("AUTH_CALLOUT_ALLOWED_ACCOUNTS must list at least one tenant account");
-        std::process::exit(1);
-    }
+    let tenant_admission = match build_tenant_admission(&env).await {
+        Ok(authority) => authority,
+        Err(error) => {
+            tracing::error!(error = %error, "invalid tenant admission authority");
+            std::process::exit(1);
+        }
+    };
     let user_jwt_ttl = match env.var("AUTH_CALLOUT_USER_JWT_TTL_SECS") {
         Ok(raw) => match raw.parse::<u64>() {
+            Ok(0) => {
+                tracing::error!("AUTH_CALLOUT_USER_JWT_TTL_SECS must be at least 1");
+                std::process::exit(1);
+            }
             Ok(secs) => Duration::from_secs(secs),
             Err(e) => {
                 tracing::error!(error = %e, raw = %raw, "invalid AUTH_CALLOUT_USER_JWT_TTL_SECS");
@@ -114,56 +146,20 @@ async fn main() {
         },
         Err(_) => Duration::from_secs(a2a_auth_callout::constants::DEFAULT_USER_JWT_TTL_SECS),
     };
-
-    let server_issuer = match load_nkey_public_env(&env, "AUTH_CALLOUT_SERVER_NKEY_PUBLIC") {
-        Ok(k) => k,
+    let a2a_prefix = match resolve_a2a_prefix(&env) {
+        Ok(prefix) => prefix,
         Err(e) => {
-            tracing::error!(error = %e, "invalid server NKey configuration");
-            std::process::exit(1);
-        }
-    };
-    let callout_issuer_seed = match load_nkey_seed_env(&env, "AUTH_CALLOUT_ISSUER_NKEY_SEED") {
-        Ok(k) => k,
-        Err(e) => {
-            tracing::error!(error = %e, "invalid callout issuer NKey seed");
-            std::process::exit(1);
-        }
-    };
-    let account_xkey_seed = match env.var("AUTH_CALLOUT_XKEY_SEED").ok().map(NkeySeed::parse).transpose() {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(error = %e, "invalid AUTH_CALLOUT_XKEY_SEED");
+            tracing::error!(error = %e, variable = ENV_A2A_PREFIX, "invalid A2A prefix");
             std::process::exit(1);
         }
     };
 
-    let server_xkey_public = match env
-        .var("AUTH_CALLOUT_SERVER_XKEY_PUBLIC")
-        .ok()
-        .map(XkeyPublic::parse)
-        .transpose()
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(error = %e, "invalid AUTH_CALLOUT_SERVER_XKEY_PUBLIC");
-            std::process::exit(1);
-        }
-    };
+    let wire = AuthCalloutWireCodec::new(
+        admission_keys.auth_account().clone(),
+        admission_keys.response_signing_key().clone(),
+        admission_keys.callout_xkey().cloned(),
+    );
 
-    let wire = match AuthCalloutWireCodec::new(
-        server_issuer,
-        callout_issuer_seed,
-        account_xkey_seed,
-        server_xkey_public,
-    ) {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to build auth callout wire codec");
-            std::process::exit(1);
-        }
-    };
-
-    let resolver: Arc<dyn AccountResolver> = Arc::new(StaticAccountResolver::new(allowed_accounts.clone()));
     let oidc = build_oidc_verifier(&env).await;
     let mtls = build_mtls_verifier(&env);
 
@@ -177,41 +173,75 @@ async fn main() {
         std::process::exit(1);
     }
 
-    info!(nats_url = %nats_url, accounts = ?allowed_accounts, "connecting to NATS for auth callout");
+    let tenants: Vec<&str> = admission_keys
+        .tenant_signing_keys()
+        .tenants()
+        .map(TenantAccount::as_str)
+        .collect();
+    info!(
+        nats_url = %nats.servers.join(","),
+        auth_account = %admission_keys.auth_account(),
+        tenants = ?tenants,
+        a2a_prefix = %a2a_prefix,
+        "connecting to NATS for auth callout"
+    );
 
-    let connect_opts = match (env.var("NATS_USER").ok(), env.var("NATS_PASSWORD").ok()) {
-        (Some(user), Some(password)) => async_nats::ConnectOptions::new().user_and_password(user, password),
-        _ => async_nats::ConnectOptions::new(),
-    };
-    let client = connect_opts.connect(&nats_url).await.unwrap_or_else(|e| {
-        tracing::error!(error = %e, "failed to connect to NATS");
-        std::process::exit(1);
-    });
+    let client = trogon_nats::connect(&nats, NATS_CONNECT_TIMEOUT)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!(error = %e, "failed to connect to NATS");
+            std::process::exit(1);
+        });
 
-    let dispatcher = CalloutDispatcher::new(CalloutDispatcherConfig {
-        signing_key_source,
+    let dispatcher = Arc::new(CalloutDispatcher::new(CalloutDispatcherConfig {
+        tenant_signing_keys: admission_keys.tenant_signing_keys().clone(),
+        tenant_admission,
         user_jwt_ttl,
-        account_resolver: resolver,
+        a2a_prefix,
         oidc,
         mtls,
         api_key: None,
-    });
-    let subscriber = Subscriber::new(client, dispatcher, wire);
+    }));
+    let admission_budget = AdmissionBudget::default();
+    // The bridge mints its per-caller users over this subject, so a callout
+    // that did not answer it would leave every bridge caller refused. It
+    // verifies through the same dispatcher as the server callout. Queued before
+    // that loop starts; a socket flush alone does not acknowledge broker interest.
+    let bridge_mint = BridgeMintSubscriber::subscribe(
+        client.clone(),
+        BridgeMintResponder::new(Arc::clone(&dispatcher), admission_keys.callout_xkey().cloned()),
+        &env,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!(error = %e, "failed to subscribe to the bridge mint subject");
+        std::process::exit(1);
+    })
+    .with_admission_budget(admission_budget.clone());
+    let bridge_mint_subject = bridge_mint.subject().to_owned();
+    let bridge_mint_task = tokio::spawn(bridge_mint.serve());
+    let subscriber = Subscriber::new(client, dispatcher, wire).with_admission_budget(admission_budget);
 
-    info!("auth callout subscriber running");
+    info!(bridge_mint_subject = %bridge_mint_subject, "auth callout subscriber running");
 
     // `Subscriber::run` returns `Ok(())` when the NATS subscription closes
     // (connection drop, shutdown, etc.) — that is never a healthy steady
     // state for this process, so exit non-zero in both arms so the
     // orchestrator restarts the pod instead of treating the silent exit
     // as a clean shutdown.
-    match subscriber.run(&env).await {
-        Ok(()) => {
-            tracing::error!("auth callout subscriber exited cleanly; NATS subscription closed");
-            std::process::exit(1);
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "auth callout subscriber exited with error");
+    tokio::select! {
+        result = subscriber.run(&env) => match result {
+            Ok(()) => {
+                tracing::error!("auth callout subscriber exited cleanly; NATS subscription closed");
+                std::process::exit(1);
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "auth callout subscriber exited with error");
+                std::process::exit(1);
+            }
+        },
+        _ = bridge_mint_task => {
+            tracing::error!("bridge mint subscriber exited; NATS subscription closed");
             std::process::exit(1);
         }
     }

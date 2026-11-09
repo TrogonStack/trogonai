@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use nkeys::KeyPair;
 use serde_json::json;
+use trogon_identity_types::PrincipalKind;
 
 use crate::jwt::{
     AudienceAccount, CallerId, ExternalSubject, MintedUserJwt, SigningKey, SpiceDbPrincipal, UserJwtClaims,
@@ -11,6 +12,13 @@ use crate::jwt::{
 };
 use crate::permissions::IssuedPermissions;
 use crate::signing_key_source::{KeyVersion, MintingMaterial};
+
+pub fn verified_test_credential(claims: UserJwtClaims) -> crate::VerifiedCredential {
+    let expires_at =
+        crate::CredentialExpiry::from_unix_seconds(time::OffsetDateTime::now_utc().unix_timestamp() + 3600)
+            .expect("fixture credential expiry");
+    crate::VerifiedCredential::new(claims, expires_at)
+}
 
 /// Mints a short-lived User JWT suitable for gateway ingress header tests.
 pub fn mint_test_user_jwt(caller_id: &str, audience_account: &str, ttl: Duration) -> MintedUserJwt {
@@ -29,8 +37,12 @@ pub fn mint_test_user_jwt(caller_id: &str, audience_account: &str, ttl: Duration
         data: SpiceDbPrincipal(json!({"spicedb_subject": "test-sub"})),
         nats_permissions: IssuedPermissions::default_for_caller(&caller),
         caller_id: caller,
+        principal_kind: PrincipalKind::Person,
     };
     let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let issued_at = std::time::SystemTime::now();
     claims.mint(&material, &subject, issued_at, ttl).expect("mint test jwt")
 }
+
+#[cfg(test)]
+mod tests;

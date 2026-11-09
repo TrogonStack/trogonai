@@ -106,10 +106,7 @@ impl FlushClient for CapturingNatsClient {
 fn mcp_config() -> Config {
     Config::new(
         mcp_nats::McpPrefix::new("mcp").unwrap(),
-        trogon_nats::NatsConfig {
-            servers: vec!["localhost:4222".to_string()],
-            auth: trogon_nats::NatsAuth::None,
-        },
+        trogon_nats::NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None),
     )
 }
 

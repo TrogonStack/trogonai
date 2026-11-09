@@ -10,4 +10,4 @@ pub mod signature;
 pub use config::IncidentioConfig;
 pub use incidentio_event_type::IncidentioEventType;
 pub use incidentio_signing_secret::IncidentioSigningSecret;
-pub use server::{provision, router};
+pub use server::{provision, router, runtime_router};

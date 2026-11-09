@@ -1,0 +1,95 @@
+edition = "2024";
+
+package trogonai.model_access.provider_connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/authentication.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/identity.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/lifecycle.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/profile.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/registration.proto";
+
+// model_access.provider_connections owns one stream per connection, including
+// every attached binding. Registration uses NoStream, a stable nonempty Decider
+// command_id, and no expected_revision. All later commands use StreamUnchanged,
+// a positive observed expected_revision, and stable nonempty command_id; retries
+// preserve both. Dispatch authenticates and authorizes every operation. Identity
+// reuse rejects, including revoked bindings. No command rewrites Session routes.
+// Registration creates PENDING connection and binding, ineligible for use.
+message RegisterProviderConnection {
+  ProviderConnectionRegistration registration = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// PENDING only. Trusted validation must cover the exact registered configuration
+// and initial binding. Subject discovered by validation must agree with the
+// immutable configuration or registration must restart with a new identity.
+// Activation atomically makes connection and initial binding ACTIVE, retaining
+// routing eligibility. Failed validation leaves both PENDING and ineligible.
+message ActivateProviderConnection {
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderValidationRef validation = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ACTIVE connection and exact ACTIVE previous binding required. Replacement
+// must have a never-used binding ID and preserve provider subject/billing
+// boundary, custody owner, and compatible authentication scope. Otherwise a new
+// connection is required. Trusted validation proves the new immutable binding.
+// Dispatch fences admissions and checks authoritative live Session use across
+// the decision/append boundary; a receipt alone is not a concurrency fence.
+// Drain activates the new binding, limits the old to already-pinned Sessions
+// (including replacement attempts), and requires policy-authorized bounded
+// overlap. FailIfInUse rejects with no changes if any live Session pins the old;
+// otherwise it revokes the old and activates the new atomically. No new Session
+// selects a draining binding. When its last pinned Session ends, revoke it.
+message ReplaceCredentialBinding {
+  option (buf.validate.message).cel = {
+    id: "replace_binding.new_identity"
+    message: "replacement must have a different identity from the previous binding"
+    expression: "this.previous_binding_id.value != this.replacement.id.value"
+  };
+
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CredentialBindingId previous_binding_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  CredentialBinding replacement = 3 [features.field_presence = LEGACY_REQUIRED];
+  BindingReplacementMode mode = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ProviderValidationRef validation = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ACTIVE connection and ACTIVE or DRAINING target binding required. Cancelling
+// a PENDING connection uses RevokeProviderConnection, revoking both together.
+// Immediate terminal revocation of that binding. Security
+// revocation never drains and fails closed on the next request. Revoking the
+// active binding leaves no binding eligible; it never selects a draining one.
+// This also completes a drain once authoritative coordination proves no pinned
+// live Sessions remain. Revocation never changes the secret resource itself.
+message RevokeCredentialBinding {
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CredentialBindingId binding_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// PENDING or ACTIVE only. Terminally revokes connection and every non-revoked
+// binding atomically. Existing use fails closed on the next model request;
+// Sessions never switch provider, credential, or billing boundary.
+message RevokeProviderConnection {
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// PENDING or ACTIVE only. Full profile replacement, separate from immutable
+// configuration. Omitted optional fields clear the previous display metadata.
+message SetProviderConnectionProfile {
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderConnectionProfile profile = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// PENDING or ACTIVE only. Full replacement of selection-policy input and
+// discovery eligibility. Does not grant use, activate a binding, or revoke use.
+message SetProviderRoutingPolicy {
+  ProviderConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderRoutingPolicy routing_policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

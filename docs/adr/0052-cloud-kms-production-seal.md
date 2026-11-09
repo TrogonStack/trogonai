@@ -23,7 +23,7 @@ provider's hardware, every unwrap is an IAM-gated and audit-logged API
 call, and a restart becomes an automated unwrap instead of a quorum of
 humans typing shares at whatever hour a node restarts. The dependency
 points outward to a third party, so it satisfies
-[ADR#0033](./0033-two-tier-key-custody-product-model.md)'s rule that
+[ADR#0033](./0033-key-custody-product-model.md)'s rule that
 platform boot keys are deployment-provisioned and never cycle back through
 the platform's own services.
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md) noted
@@ -84,7 +84,7 @@ dev-mode story. The mandate applies to production only.
 ### 5. Provisioning
 
 The seal stanza is deployment configuration under
-[ADR#0033](./0033-two-tier-key-custody-product-model.md)'s bootstrap rule,
+[ADR#0033](./0033-key-custody-product-model.md)'s bootstrap rule,
 outside the `SecretStore` and `KeyManagement` ports. No platform code
 depends on which seal a deployment uses.
 
@@ -115,5 +115,5 @@ depends on which seal a deployment uses.
 
 - [ADR#0023: Secret Management and Key Custody Direction](./0023-secret-management-and-key-custody-direction.md)
 - [ADR#0030: Customer-Controlled Key Backend Routing](./0030-customer-controlled-key-backend-routing.md)
-- [ADR#0033: Two-Tier Key Custody Product Model](./0033-two-tier-key-custody-product-model.md)
+- [ADR#0033: Key Custody Product Model](./0033-key-custody-product-model.md)
 - OpenBao seal configuration and seal migration documentation

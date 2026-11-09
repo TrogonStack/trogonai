@@ -1,0 +1,70 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.audit.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/key_custody/v1alpha1/failure.proto";
+import "trogonai/platform/key_custody/v1alpha1/identity.proto";
+
+// Why an attempt has no provider request identifier. The platform never
+// synthesizes one, so its absence is always recorded explicitly. Unspecified
+// and unknown values are invalid.
+enum ProviderRequestAbsence {
+  PROVIDER_REQUEST_ABSENCE_UNSPECIFIED = 0;
+  // The provider answered without returning a request identifier.
+  PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER = 1;
+  // No provider response arrived, so no identifier could have been returned.
+  PROVIDER_REQUEST_ABSENCE_NO_RESPONSE = 2;
+}
+
+// One call to the provider within an operation. The attempt number counts from
+// one in the order the platform made the calls. A recorded request identifier
+// is only the identifier the provider returned; joining it to the provider's own
+// audit log is claimed for a provider only after a conformance case proves the
+// join. No per-attempt value ever enters the authenticated binding, which must
+// be identical at wrap and unwrap (ADR#0030).
+message ProviderAttempt {
+  option (buf.validate.message).cel = {
+    id: "provider_attempt.success_response"
+    message: "a successful attempt received a provider response"
+    expression: "!has(this.succeeded) || this.absence != trogonai.platform.key_custody.audit.v1alpha1.ProviderRequestAbsence.PROVIDER_REQUEST_ABSENCE_NO_RESPONSE"
+  };
+
+  uint32 attempt_number = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.gt = 0
+  ];
+  google.protobuf.Timestamp started_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Duration duration = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gte = {}
+  ];
+
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty succeeded = 4;
+    trogonai.platform.key_custody.v1alpha1.OperationFailureCategory failed = 5 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [
+        0,
+        4,
+        7
+      ]
+    }];
+  }
+
+  oneof provider_request {
+    option (buf.validate.oneof).required = true;
+    trogonai.platform.key_custody.v1alpha1.ProviderRequestId provider_request_id = 6;
+    ProviderRequestAbsence absence = 7 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+}

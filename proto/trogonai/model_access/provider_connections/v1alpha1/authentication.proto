@@ -1,0 +1,103 @@
+edition = "2024";
+
+package trogonai.model_access.provider_connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/identity.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/protocol.proto";
+
+// Managed API-key authentication only. No prefix or encoding is inferred.
+// The exact driver must support this scheme for the provider and protocol.
+message StoredApiKeyAuthentication {
+  SecretRef secret_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationScheme authorization = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// Gateway form input with optional configured key. Absence is representable,
+// not an instruction to discover credentials or use a platform-funded account.
+message GatewayConfiguredKey {
+  SecretRef secret_ref = 1;
+}
+
+message GatewayOverrideKey {
+  SecretRef secret_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Gateway-only configuration vocabulary. Default/override precedence, missing
+// key behavior, and passthrough forwarding are not established by the UI.
+// Activation must reject modes without an explicitly supported gateway driver
+// contract; these fields alone promise no runtime implementation. Authorization
+// may be retained for passthrough because persisted UI input includes it; its
+// applicability requires the exact gateway driver contract. For no-auth it is
+// ignored and never causes credential injection or forwarding. Exactly one
+// known mode is required. Key modes require authorization; when present for any
+// mode, authorization must be a known nonzero value.
+message GatewayAuthentication {
+  option (buf.validate.message).cel = {
+    id: "gateway_auth.key_scheme_required"
+    message: "configured and override key modes require authorization"
+    expression: "!(has(this.configured_key) || has(this.override_key)) || has(this.authorization)"
+  };
+
+  AuthorizationScheme authorization = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  oneof mode {
+    option (buf.validate.oneof).required = true;
+    GatewayConfiguredKey configured_key = 2;
+    GatewayOverrideKey override_key = 3;
+    google.protobuf.Empty passthrough = 4;
+    google.protobuf.Empty no_authentication = 5;
+  }
+}
+
+// Immutable binding configuration under one connection stream. Exactly one
+// known authentication method is required. Managed admission accepts stored
+// API keys only with verified driver support, or no credential exclusively for
+// deployment-created auth-free local endpoints. It always rejects gateway auth.
+// Other ADR#0032 methods remain unsupported here pending typed contracts and
+// authoritative implementation evidence, rather than speculative SDK fields.
+message CredentialBindingConfiguration {
+  // Version of this exact nonsecret protobuf configuration contract, included
+  // in retained bytes and their digest. Only version 1 is supported.
+  string contract_version = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.const = "1"
+  ];
+
+  oneof authentication {
+    option (buf.validate.oneof).required = true;
+    StoredApiKeyAuthentication stored_api_key = 1;
+    google.protobuf.Empty deployment_no_credential = 2;
+    GatewayAuthentication gateway = 3;
+  }
+}
+
+// New identity and digest for any authentication configuration/SecretRef change.
+// The digest excludes lifecycle and current material versions. Secret custody,
+// material ingestion, encryption, and rotation are outside this contract.
+// configuration_bytes is the authoritative exact binary encoding of
+// CredentialBindingConfiguration, retained for the binding's entire lifetime,
+// including revoked history. Verify configuration_digest before decoding;
+// reject unknown fields/behavior and require configuration to equal its fully
+// validated typed projection. Never hash a re-encoding to recover identity.
+// Alternate encodings are distinct artifacts. Bytes contain only the typed
+// nonsecret configuration above, never credential material or backend locators.
+message CredentialBinding {
+  CredentialBindingId id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CredentialBindingConfiguration configuration = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.agents.agents.v1alpha1.Digest configuration_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  bytes configuration_bytes = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+}

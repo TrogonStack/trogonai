@@ -1,5 +1,8 @@
-use super::super::client_state::MicrosoftGraphClientState;
 use super::*;
+use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
+use crate::source_integration_id::SourceIntegrationId;
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
 use tower::ServiceExt;
@@ -11,6 +14,7 @@ use trogon_nats::jetstream::{
 };
 
 const TEST_CLIENT_STATE: &str = "secret-client-state";
+const RUNTIME_CLIENT_STATE: &str = "runtime-client-state";
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
@@ -38,16 +42,60 @@ fn mock_app(publisher: MockJetStreamPublisher) -> Router {
     router(wrap_publisher(publisher), &test_config())
 }
 
+async fn runtime_app(publisher: MockJetStreamPublisher, client_state: &str) -> Router {
+    let config = test_config();
+    let store = MockOpenBaoSecretStore::default();
+    let integration_id = SourceIntegrationId::new("primary").unwrap();
+    let credential = store
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::MicrosoftGraph,
+                integration_id.clone(),
+            ),
+            CredentialKind::ClientState,
+            trogon_std::SecretString::new(client_state).unwrap(),
+        )
+        .await
+        .unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+
+    runtime_router(
+        wrap_publisher(publisher),
+        &config,
+        integration_id,
+        registry.resolver(store),
+    )
+}
+
+fn runtime_app_without_credential(publisher: MockJetStreamPublisher) -> Router {
+    let registry = RuntimeCredentialRegistry::default();
+    runtime_router(
+        wrap_publisher(publisher),
+        &test_config(),
+        SourceIntegrationId::new("primary").unwrap(),
+        registry.resolver(MockOpenBaoSecretStore::default()),
+    )
+}
+
 fn webhook_request(uri: &str, body: impl Into<Body>) -> Request<Body> {
     Request::builder().method("POST").uri(uri).body(body.into()).unwrap()
 }
 
 fn notification_value() -> Value {
+    notification_value_with_client_state(TEST_CLIENT_STATE)
+}
+
+fn notification_value_with_client_state(client_state: &str) -> Value {
     serde_json::json!({
         "id": "notification-1",
         "subscriptionId": "subscription-1",
         "subscriptionExpirationDateTime": "2026-04-28T17:00:00Z",
-        "clientState": TEST_CLIENT_STATE,
+        "clientState": client_state,
         "changeType": "created",
         "tenantId": "tenant-1",
         "resource": "users('user-1')/messages('message-1')",
@@ -115,6 +163,72 @@ async fn validation_token_challenge_returns_plain_text_token() {
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert_eq!(body.as_ref(), b"hello world");
+    assert_no_publishes(&publisher);
+}
+
+#[tokio::test]
+async fn runtime_client_state_publishes_and_rejects_static_client_state() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app(publisher.clone(), RUNTIME_CLIENT_STATE).await;
+
+    let static_response = app
+        .clone()
+        .oneshot(webhook_request(
+            "/webhook",
+            collection_body(notification_value_with_client_state(TEST_CLIENT_STATE)),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+    assert_no_publishes(&publisher);
+
+    let runtime_response = app
+        .oneshot(webhook_request(
+            "/webhook",
+            collection_body(notification_value_with_client_state(RUNTIME_CLIENT_STATE)),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(runtime_response.status(), StatusCode::ACCEPTED);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "microsoft-graph.change_notification_collection");
+}
+
+#[tokio::test]
+async fn runtime_validation_token_challenge_returns_plain_text_token_without_a_credential() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app_without_credential(publisher.clone());
+
+    let response = app
+        .oneshot(webhook_request("/webhook?validationToken=hello%20world", Body::empty()))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(body.as_ref(), b"hello world");
+    assert_no_publishes(&publisher);
+}
+
+#[tokio::test]
+async fn runtime_webhook_without_a_resolvable_credential_returns_401() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app_without_credential(publisher.clone());
+
+    let response = app
+        .oneshot(webhook_request(
+            "/webhook",
+            collection_body(notification_value_with_client_state(RUNTIME_CLIENT_STATE)),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_no_publishes(&publisher);
 }
 

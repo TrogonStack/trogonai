@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "http.content_type.form_mixed_case_charset_command",
+  "kind": "command",
+  "transport": "http",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "test/unit/helpers/events.ts:createDummyCommandMiddlewareArgs with a mixed case content type",
+    "wire_source": "https://docs.slack.dev/interactivity/implementing-slash-commands",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "headers": {
+      "content-type": "Application/X-WWW-Form-Urlencoded; Charset=UTF-8",
+      "x-slack-request-timestamp": "1700000000",
+      "x-slack-signature": "v0=b59d5f62401a7bc340069a0a2be8b999866f5a28502a12c1205612d782486848"
+    },
+    "body": "token=xoxb-1234&command=%2Fslash&text=yo&response_url=https%3A%2F%2Fslack.com&trigger_id=1234.56&user_id=U1234&user_name=filmaj&team_id=T1234&team_domain=slack.com&channel_id=C1234&channel_name=%23random&api_app_id=A1234"
+  },
+  "bolt": {
+    "outcome": "rejected",
+    "status": 400,
+    "body": null,
+    "content_type": null,
+    "reason": "Malformed request body: Unexpected token 'o', \"token=xoxb-\"... is not valid JSON",
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "reject",
+    "nats": null,
+    "request": null,
+    "http": {
+      "status": 400,
+      "body": null,
+      "content_type": null,
+      "challenge": null
+    },
+    "socket_ack": null
+  }
+}

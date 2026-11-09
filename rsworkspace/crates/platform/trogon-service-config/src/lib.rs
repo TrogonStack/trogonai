@@ -1,11 +1,18 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-use std::fmt;
+mod env_var_name;
+mod secret_reference;
+
 use std::path::{Path, PathBuf};
 
 use clap::Args;
 use confique::Config;
-use trogon_nats::{NatsAuth, NatsConfig};
+use trogon_nats::{NatsAuth, NatsConfig, NatsSettings};
+use trogon_std::env::ReadEnv;
+use trogon_std::secret_string::SecretString;
+
+pub use env_var_name::{EnvVarName, EnvVarNameError};
+pub use secret_reference::{SecretReference, SecretReferenceError};
 
 #[derive(Args, Clone, Debug, Default)]
 pub struct RuntimeConfigArgs {
@@ -16,62 +23,70 @@ pub struct RuntimeConfigArgs {
     pub nats: NatsArgs,
 }
 
-#[derive(Args, Clone, Default)]
+#[derive(Args, Clone, Debug, Default)]
 pub struct NatsArgs {
     #[arg(long, global = true)]
     pub nats_url: Option<String>,
     #[arg(long, global = true)]
     pub nats_creds: Option<String>,
-    #[arg(long, global = true)]
-    pub nats_nkey: Option<String>,
+    /// Reference to the NKey seed: env://NAME or file:///path
+    #[arg(long, global = true, value_name = "REFERENCE")]
+    pub nats_nkey: Option<SecretReference>,
+    /// User name, used together with a password
     #[arg(long, global = true)]
     pub nats_user: Option<String>,
+    /// Reference to the password: env://NAME or file:///path
+    #[arg(long, global = true, value_name = "REFERENCE")]
+    pub nats_password: Option<SecretReference>,
+    /// Reference to the token: env://NAME or file:///path
+    #[arg(long, global = true, value_name = "REFERENCE")]
+    pub nats_token: Option<SecretReference>,
+    /// Reference to the user JWT: env://NAME or file:///path
+    #[arg(long, global = true, value_name = "REFERENCE")]
+    pub nats_jwt: Option<SecretReference>,
+    /// Reference to the seed that signs the JWT: env://NAME or file:///path
+    #[arg(long, global = true, value_name = "REFERENCE")]
+    pub nats_seed: Option<SecretReference>,
     #[arg(long, global = true)]
-    pub nats_password: Option<String>,
+    pub nats_tls_cert: Option<String>,
     #[arg(long, global = true)]
-    pub nats_token: Option<String>,
+    pub nats_tls_key: Option<String>,
+    #[arg(long, global = true)]
+    pub nats_tls_ca: Option<String>,
 }
 
-impl fmt::Debug for NatsArgs {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NatsArgs")
-            .field("nats_url", &self.nats_url)
-            .field("nats_creds", &self.nats_creds)
-            .field("nats_nkey", &self.nats_nkey.as_ref().map(|_| "<redacted>"))
-            .field("nats_user", &self.nats_user)
-            .field("nats_password", &self.nats_password.as_ref().map(|_| "<redacted>"))
-            .field("nats_token", &self.nats_token.as_ref().map(|_| "<redacted>"))
-            .finish()
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum NatsArgsError {
+    #[error(
+        "--nats-user without a password would be sent as a token; give --nats-password or --nats-token as env://NAME or file:///path"
+    )]
+    UserSentAsToken,
 }
 
-#[derive(Config, Clone)]
+#[derive(Config, Clone, Debug)]
 pub struct NatsConfigSection {
     #[config(env = "NATS_URL", default = "localhost:4222")]
     pub url: String,
     #[config(env = "NATS_CREDS")]
     pub creds: Option<String>,
     #[config(env = "NATS_NKEY")]
-    pub nkey: Option<String>,
+    pub nkey: Option<SecretString>,
     #[config(env = "NATS_USER")]
     pub user: Option<String>,
     #[config(env = "NATS_PASSWORD")]
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     #[config(env = "NATS_TOKEN")]
-    pub token: Option<String>,
-}
-
-impl fmt::Debug for NatsConfigSection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NatsConfigSection")
-            .field("url", &self.url)
-            .field("creds", &self.creds)
-            .field("nkey", &self.nkey.as_ref().map(|_| "<redacted>"))
-            .field("user", &self.user)
-            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
-            .field("token", &self.token.as_ref().map(|_| "<redacted>"))
-            .finish()
-    }
+    pub token: Option<SecretString>,
+    #[config(env = "NATS_JWT")]
+    pub jwt: Option<SecretString>,
+    #[config(env = "NATS_SEED")]
+    pub seed: Option<SecretString>,
+    #[config(env = "NATS_CERT")]
+    pub tls_cert: Option<String>,
+    #[config(env = "NATS_KEY")]
+    pub tls_key: Option<String>,
+    #[config(env = "NATS_CA")]
+    pub tls_ca: Option<String>,
 }
 
 pub fn load_config<T: Config>(config_path: Option<&Path>) -> Result<T, confique::Error> {
@@ -82,37 +97,44 @@ pub fn load_config<T: Config>(config_path: Option<&Path>) -> Result<T, confique:
     builder.env().load()
 }
 
-pub fn resolve_nats(section: &NatsConfigSection, overrides: &NatsArgs) -> NatsConfig {
-    let auth = if let Some(creds) = first_non_empty(overrides.nats_creds.as_ref(), section.creds.as_ref()) {
-        NatsAuth::Credentials(creds.clone().into())
-    } else if let Some(nkey) = first_non_empty(overrides.nats_nkey.as_ref(), section.nkey.as_ref()) {
-        NatsAuth::NKey(nkey.clone())
-    } else if let (Some(user), Some(password)) = (
-        first_non_empty(overrides.nats_user.as_ref(), section.user.as_ref()),
-        first_non_empty(overrides.nats_password.as_ref(), section.password.as_ref()),
-    ) {
-        NatsAuth::UserPassword {
-            user: user.clone(),
-            password: password.clone(),
-        }
-    } else if let Some(token) = first_non_empty(overrides.nats_token.as_ref(), section.token.as_ref()) {
-        NatsAuth::Token(token.clone())
-    } else {
-        NatsAuth::None
+/// `overrides` win over `section`. `NATS_TLS_DISABLED` is read from `env`
+/// alone, so neither a config file nor a CLI flag can disable TLS.
+pub fn resolve_nats<E: ReadEnv>(
+    section: &NatsConfigSection,
+    overrides: &NatsArgs,
+    env: &E,
+) -> Result<NatsConfig, NatsArgsError> {
+    let pick = |primary: &Option<String>, fallback: &Option<String>| {
+        first_non_empty(primary.as_ref(), fallback.as_ref()).cloned()
+    };
+    let pick_secret = |primary: &Option<SecretReference>, fallback: &Option<SecretString>| {
+        primary
+            .as_ref()
+            .and_then(|reference| SecretString::new(reference.to_string()).ok())
+            .or_else(|| fallback.clone())
     };
 
-    let raw_url = first_non_empty(overrides.nats_url.as_ref(), Some(&section.url))
-        .map(|value| value.as_str())
-        .unwrap_or("localhost:4222");
+    let settings = NatsSettings {
+        url: pick(&overrides.nats_url, &Some(section.url.clone())),
+        user: pick(&overrides.nats_user, &section.user),
+        password: pick_secret(&overrides.nats_password, &section.password),
+        token: pick_secret(&overrides.nats_token, &section.token),
+        creds: pick(&overrides.nats_creds, &section.creds),
+        nkey: pick_secret(&overrides.nats_nkey, &section.nkey),
+        jwt: pick_secret(&overrides.nats_jwt, &section.jwt),
+        seed: pick_secret(&overrides.nats_seed, &section.seed),
+        cert: pick(&overrides.nats_tls_cert, &section.tls_cert),
+        key: pick(&overrides.nats_tls_key, &section.tls_key),
+        ca: pick(&overrides.nats_tls_ca, &section.tls_ca),
+    };
+    let user_from_flag = overrides.nats_user.as_deref().is_some_and(|user| !user.is_empty());
+    let user_sent_as_token = user_from_flag && settings.password.is_none() && settings.token.is_none();
 
-    let servers = raw_url
-        .split(',')
-        .map(str::trim)
-        .filter(|server| !server.is_empty())
-        .map(ToOwned::to_owned)
-        .collect();
-
-    NatsConfig::new(servers, auth)
+    let config = settings.resolve(env);
+    if user_sent_as_token && matches!(config.auth, NatsAuth::Token(_)) {
+        return Err(NatsArgsError::UserSentAsToken);
+    }
+    Ok(config)
 }
 
 fn first_non_empty<'a>(primary: Option<&'a String>, fallback: Option<&'a String>) -> Option<&'a String> {

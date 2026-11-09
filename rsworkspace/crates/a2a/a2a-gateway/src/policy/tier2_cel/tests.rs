@@ -37,6 +37,26 @@ fn bundle_with_rule(name: &str, source: &str) -> (tempfile::TempDir, Tier2Compil
 }
 
 #[test]
+fn a_staged_bundle_refreshes_before_and_after_its_directory_is_created() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("tier2");
+    let mut bundle = Tier2CompiledBundle::load_from_dir(&path).unwrap();
+    bundle.refresh_if_stale().unwrap();
+    assert_eq!(bundle.rules().count(), 0);
+
+    fs::create_dir(&path).unwrap();
+    fs::write(path.join("access.cel"), "false").unwrap();
+    bundle.refresh_if_stale().unwrap();
+    let evaluator = RealTier2CelEvaluator::new(bundle);
+    assert_eq!(
+        evaluator.evaluate(&sample_ctx("message/send")),
+        Tier2Decision::Deny {
+            rule: RuleName::new("access").unwrap()
+        }
+    );
+}
+
+#[test]
 fn compile_valid_cel_source_ok() {
     let handle = compile_cel_source("true").expect("valid cel");
     assert!(handle.program().execute(&cel_interpreter::Context::default()).is_ok());

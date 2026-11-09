@@ -305,8 +305,9 @@ need implementation and are not established by a nonempty byte field.
 
 ## Contract validation and remaining implementation
 
-The schema fixture task is `mise run proto:validate-workflows`. It builds a
-descriptor image, checks that each fixture parses, then runs the pinned Buf
+The schema fixture task is
+`mise run proto:validate -- --suite workflows`. It builds a descriptor image,
+checks that each fixture parses, then runs the pinned Buf
 Protovalidate implementation. Invalid fixtures must fail for their expected
 constraints. Buf formatting, lint, build, and breaking checks also cover the
 packages despite their code generation exclusion.

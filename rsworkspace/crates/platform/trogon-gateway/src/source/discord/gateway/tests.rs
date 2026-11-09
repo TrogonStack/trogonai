@@ -23,7 +23,7 @@ fn bridge() -> GatewayBridge<MockJetStreamPublisher, MockObjectStore> {
 
 fn discord_config() -> DiscordConfig {
     DiscordConfig {
-        bot_token: super::super::config::DiscordBotToken::new("Bot token").unwrap(),
+        bot_token: Some(super::super::config::DiscordBotToken::new("Bot token").unwrap()),
         intents: twilight_model::gateway::Intents::GUILDS,
         subject_prefix: NatsToken::new("discord").unwrap(),
         stream_name: NatsToken::new("DISCORD").unwrap(),

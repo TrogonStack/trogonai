@@ -1,39 +1,55 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+use crate::secret_store::{StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError};
 use crate::source::datadog::DatadogWebhookToken;
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
 use crate::source::gitlab::GitLabSigningToken;
+use crate::source::google_pubsub::config::{GooglePubSubTransportConfig, StreamingPullConfig};
+use crate::source::google_pubsub::credentials::GoogleCredentials;
+use crate::source::google_pubsub::{MaxOutstandingMessages, PubSubSubscriptionName};
 use crate::source::incidentio::config::IncidentioConfig as IncidentioSourceConfig;
 use crate::source::incidentio::incidentio_signing_secret::IncidentioSigningSecret;
 use crate::source::linear::config::LinearWebhookSecret;
 use crate::source::microsoft_graph::MicrosoftGraphClientState;
 use crate::source::notion::NotionVerificationToken;
+use crate::source::plaid::config::PlaidConfig as PlaidSourceConfig;
+use crate::source::plaid::{PlaidApiBaseUrl, PlaidClientId, PlaidEnvironment, PlaidSecret};
 use crate::source::sentry::SentryClientSecret;
+use crate::source::slack::ack_budget::AckBudget;
 use crate::source::slack::config::{
-    SlackAppToken, SlackSigningSecret, SlackSocketModeConfig as SlackSocketModeSourceConfig, SlackTransportConfig,
-    SlackWebhookConfig as SlackWebhookSourceConfig,
+    SlackApiBaseUrl, SlackAppToken, SlackSigningSecret, SlackSocketModeConfig as SlackSocketModeSourceConfig,
+    SlackTransportConfig, SlackWebhookConfig as SlackWebhookSourceConfig,
+};
+use crate::source::slack::constants::{DEFAULT_API_BASE_URL, DEFAULT_HTTP_BODY_SIZE_MAX};
+use crate::source::slack::slack_socket_mode_intended_use::{
+    SlackSocketModeIntendedUse, SlackSocketModeIntendedUseError,
 };
 use crate::source::telegram::config::{
     TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
 };
 use crate::source::twitter::config::TwitterConsumerSecret;
+use crate::source::zoom::config::ZoomConfig as ZoomSourceConfig;
+use crate::source::zoom::zoom_secret_token::ZoomSecretToken;
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 use axum::http::HeaderName;
 use confique::Config;
+use trogon_config_value::{ConfigValue, ConfigValueError};
 #[cfg(test)]
 use trogon_nats::NatsAuth;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
-use trogon_service_config::{NatsArgs, NatsConfigSection, load_config, resolve_nats};
+use trogon_service_config::{NatsArgs, NatsArgsError, NatsConfigSection, load_config, resolve_nats};
 use trogon_std::env::{ReadEnv, SystemEnv};
-use trogon_std::{NonZeroDuration, ZeroDurationError};
+use trogon_std::{ByteSize, HttpBodySizeMax, NonZeroDuration, ZeroDurationError};
 
 use crate::constants::{
     DEFAULT_GITLAB_TIMESTAMP_TOLERANCE_SECS, DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS,
-    DEFAULT_LINEAR_TIMESTAMP_TOLERANCE_SECS, DEFAULT_NATS_ACK_TIMEOUT_SECS, DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS,
-    DEFAULT_STREAM_MAX_AGE_SECS, SENTRY_MAX_ACK_TIMEOUT_SECS,
+    DEFAULT_LINEAR_TIMESTAMP_TOLERANCE_SECS, DEFAULT_NATS_ACK_TIMEOUT_SECS, DEFAULT_PLAID_TIMESTAMP_TOLERANCE_SECS,
+    DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS, DEFAULT_STREAM_MAX_AGE_SECS, DEFAULT_ZOOM_TIMESTAMP_TOLERANCE_SECS,
+    SENTRY_MAX_ACK_TIMEOUT_SECS,
 };
 use crate::source_status::SourceStatus;
 
@@ -67,31 +83,128 @@ enum SecretInput {
 }
 
 impl SecretInput {
-    fn resolve(self, env: &impl ReadEnv) -> Result<String, SecretInputError> {
-        match self {
-            Self::Literal(value) => Ok(value),
+    fn resolve(
+        self,
+        scope: CredentialScope,
+        kind: CredentialKind,
+        env: &impl ReadEnv,
+    ) -> Result<String, SecretInputError> {
+        let secret = StaticConfigSecretStore::resolve(scope, kind, self.into(), env)?;
+        let plaintext = secret.into_plaintext()?;
+        ConfigValue::parse(plaintext.as_str().to_string())
+            .map(ConfigValue::into_string)
+            .map_err(SecretInputError::InvalidValue)
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum ByteCountInput {
+    Literal(u64),
+    Env { env: String },
+}
+
+impl ByteCountInput {
+    fn resolve(self, env: &impl ReadEnv) -> Result<HttpBodySizeMax, ByteCountInputError> {
+        let bytes = match self {
+            Self::Literal(bytes) => bytes,
             Self::Env { env: var_name } => {
                 let name = var_name.trim();
                 if name.is_empty() {
-                    return Err(SecretInputError::EmptyEnvName);
+                    return Err(ByteCountInputError::EmptyEnvName);
                 }
-                env.var(name).map_err(|error| match error {
-                    std::env::VarError::NotPresent => SecretInputError::MissingEnv { name: name.to_string() },
-                    std::env::VarError::NotUnicode(_) => SecretInputError::InvalidUnicodeEnv { name: name.to_string() },
-                })
+                let raw = env.var(name).map_err(|error| match error {
+                    std::env::VarError::NotPresent => ByteCountInputError::MissingEnv { name: name.to_string() },
+                    std::env::VarError::NotUnicode(_) => {
+                        ByteCountInputError::InvalidUnicodeEnv { name: name.to_string() }
+                    }
+                })?;
+                let value = ConfigValue::parse(raw)
+                    .map(ConfigValue::into_string)
+                    .map_err(ByteCountInputError::InvalidValue)?;
+                value
+                    .trim()
+                    .parse::<u64>()
+                    .map_err(|_| ByteCountInputError::NotAWholeNumber { value })?
             }
-        }
+        };
+        HttpBodySizeMax::new(ByteSize::b(bytes)).ok_or(ByteCountInputError::Zero)
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-enum SecretInputError {
+enum ByteCountInputError {
     #[error("env var name must not be empty")]
     EmptyEnvName,
     #[error("env var '{name}' is not set")]
     MissingEnv { name: String },
     #[error("env var '{name}' is not valid unicode")]
     InvalidUnicodeEnv { name: String },
+    #[error("'{value}' is not a whole number of bytes")]
+    NotAWholeNumber { value: String },
+    #[error("must not be zero")]
+    Zero,
+    #[error(transparent)]
+    InvalidValue(ConfigValueError),
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum IdentifierInput {
+    Literal(String),
+    Env { env: String },
+}
+
+impl IdentifierInput {
+    fn resolve(self, env: &impl ReadEnv) -> Result<String, IdentifierInputError> {
+        match self {
+            Self::Literal(value) => Ok(value),
+            Self::Env { env: var_name } => {
+                let name = var_name.trim();
+                if name.is_empty() {
+                    return Err(IdentifierInputError::EmptyEnvName);
+                }
+                let raw = env.var(name).map_err(|error| match error {
+                    std::env::VarError::NotPresent => IdentifierInputError::MissingEnv { name: name.to_string() },
+                    std::env::VarError::NotUnicode(_) => {
+                        IdentifierInputError::InvalidUnicodeEnv { name: name.to_string() }
+                    }
+                })?;
+                ConfigValue::parse(raw)
+                    .map(ConfigValue::into_string)
+                    .map_err(IdentifierInputError::InvalidValue)
+            }
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum IdentifierInputError {
+    #[error("env var name must not be empty")]
+    EmptyEnvName,
+    #[error("env var '{name}' is not set")]
+    MissingEnv { name: String },
+    #[error("env var '{name}' is not valid unicode")]
+    InvalidUnicodeEnv { name: String },
+    #[error(transparent)]
+    InvalidValue(ConfigValueError),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum SecretInputError {
+    #[error(transparent)]
+    StaticConfig(#[from] StaticConfigSecretStoreError),
+    #[error(transparent)]
+    InvalidValue(ConfigValueError),
+}
+
+impl From<SecretInput> for StaticConfigSecretInput {
+    fn from(input: SecretInput) -> Self {
+        match input {
+            SecretInput::Literal(value) => Self::Literal(value),
+            SecretInput::Env { env } => Self::Env { name: env },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -307,6 +420,8 @@ pub enum ConfigError {
     Load(#[source] confique::Error),
     #[error(transparent)]
     Validation(AggregateValidationError),
+    #[error(transparent)]
+    Nats(NatsArgsError),
 }
 
 #[derive(Config)]
@@ -330,8 +445,7 @@ struct HttpServerConfig {
 struct SourcesConfig {
     #[config(nested)]
     github: GithubConfig,
-    #[config(nested)]
-    discord: DiscordConfig,
+    discord: Option<DiscordConfig>,
     #[config(nested)]
     slack: SlackConfig,
     #[config(nested)]
@@ -340,6 +454,8 @@ struct SourcesConfig {
     twitter: TwitterConfig,
     #[config(nested)]
     gitlab: GitlabConfig,
+    #[config(nested)]
+    google_pubsub: GooglePubSubConfigInput,
     #[config(nested)]
     incidentio: IncidentioConfig,
     #[config(nested)]
@@ -352,6 +468,10 @@ struct SourcesConfig {
     sentry: SentryConfig,
     #[config(nested)]
     datadog: DatadogConfig,
+    #[config(nested)]
+    zoom: ZoomConfig,
+    #[config(nested)]
+    plaid: PlaidConfig,
 }
 
 #[derive(Config)]
@@ -362,20 +482,16 @@ struct GithubConfig {
     integrations: BTreeMap<String, SourceIntegrationInput<GithubWebhookConfig>>,
 }
 
-#[derive(Config)]
-#[config(layer_attr(serde(deny_unknown_fields)))]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DiscordConfig {
     status: Option<String>,
     bot_token: Option<SecretInput>,
     gateway_intents: Option<String>,
-    #[config(default = "discord")]
-    subject_prefix: String,
-    #[config(default = "DISCORD")]
-    stream_name: String,
-    #[config(default = 604_800)]
-    stream_max_age_secs: u64,
-    #[config(default = 10)]
-    nats_ack_timeout_secs: u64,
+    subject_prefix: Option<String>,
+    stream_name: Option<String>,
+    stream_max_age_secs: Option<u64>,
+    nats_ack_timeout_secs: Option<u64>,
 }
 
 #[derive(Config)]
@@ -408,6 +524,14 @@ struct GitlabConfig {
     status: Option<String>,
     #[config(default = {})]
     integrations: BTreeMap<String, SourceIntegrationInput<GitlabWebhookConfig>>,
+}
+
+#[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
+struct GooglePubSubConfigInput {
+    status: Option<String>,
+    #[config(default = {})]
+    integrations: BTreeMap<String, GooglePubSubIntegrationInput>,
 }
 
 #[derive(Config)]
@@ -458,6 +582,22 @@ struct DatadogConfig {
     integrations: BTreeMap<String, SourceIntegrationInput<DatadogWebhookConfig>>,
 }
 
+#[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
+struct ZoomConfig {
+    status: Option<String>,
+    #[config(default = {})]
+    integrations: BTreeMap<String, SourceIntegrationInput<ZoomWebhookConfig>>,
+}
+
+#[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
+struct PlaidConfig {
+    status: Option<String>,
+    #[config(default = {})]
+    integrations: BTreeMap<String, SourceIntegrationInput<PlaidWebhookConfig>>,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SourceIntegrationInput<T> {
@@ -483,6 +623,25 @@ struct SlackIntegrationInput {
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+struct GooglePubSubIntegrationInput {
+    status: Option<String>,
+    subject_prefix: Option<String>,
+    stream_name: Option<String>,
+    stream_max_age_secs: Option<u64>,
+    nats_ack_timeout_secs: Option<u64>,
+    streaming_pull: Option<GooglePubSubStreamingPullInput>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GooglePubSubStreamingPullInput {
+    subscription: Option<String>,
+    max_outstanding_messages: Option<u32>,
+    credentials: Option<SecretInput>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GithubWebhookConfig {
     webhook_secret: Option<SecretInput>,
 }
@@ -492,12 +651,15 @@ struct GithubWebhookConfig {
 struct SlackWebhookConfig {
     signing_secret: Option<SecretInput>,
     timestamp_max_drift_secs: Option<u64>,
+    max_body_bytes: Option<ByteCountInput>,
 }
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SlackSocketModeConfig {
     app_token: Option<SecretInput>,
+    api_base_url: Option<String>,
+    intended_use: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -562,10 +724,28 @@ struct DatadogWebhookConfig {
     timestamp_tolerance_secs: Option<u64>,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ZoomWebhookConfig {
+    secret_token: Option<SecretInput>,
+    timestamp_tolerance_secs: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlaidWebhookConfig {
+    client_id: Option<IdentifierInput>,
+    secret: Option<SecretInput>,
+    environment: Option<String>,
+    api_base_url: Option<String>,
+    timestamp_tolerance_secs: Option<u64>,
+}
+
 pub struct ResolvedHttpServerConfig {
     pub port: u16,
 }
 
+#[derive(Clone)]
 pub struct SourceIntegration<T> {
     pub id: SourceIntegrationId,
     pub config: T,
@@ -586,12 +766,15 @@ pub struct ResolvedConfig {
     pub telegram: Vec<SourceIntegration<crate::source::telegram::TelegramSourceConfig>>,
     pub twitter: Vec<SourceIntegration<crate::source::twitter::TwitterConfig>>,
     pub gitlab: Vec<SourceIntegration<crate::source::gitlab::GitlabConfig>>,
+    pub google_pubsub: Vec<SourceIntegration<crate::source::google_pubsub::GooglePubSubConfig>>,
     pub incidentio: Vec<SourceIntegration<crate::source::incidentio::IncidentioConfig>>,
     pub linear: Vec<SourceIntegration<crate::source::linear::LinearConfig>>,
     pub microsoft_graph: Vec<SourceIntegration<crate::source::microsoft_graph::MicrosoftGraphConfig>>,
     pub notion: Vec<SourceIntegration<crate::source::notion::NotionConfig>>,
     pub sentry: Vec<SourceIntegration<crate::source::sentry::SentryConfig>>,
     pub datadog: Vec<SourceIntegration<crate::source::datadog::DatadogConfig>>,
+    pub zoom: Vec<SourceIntegration<crate::source::zoom::ZoomConfig>>,
+    pub plaid: Vec<SourceIntegration<crate::source::plaid::PlaidConfig>>,
 }
 
 impl ResolvedConfig {
@@ -613,12 +796,15 @@ impl ResolvedConfig {
             .chain(self.telegram.iter().map(|i| i.config.stream_max_age))
             .chain(self.twitter.iter().map(|i| i.config.stream_max_age))
             .chain(self.gitlab.iter().map(|i| i.config.stream_max_age))
+            .chain(self.google_pubsub.iter().map(|i| i.config.stream_max_age))
             .chain(self.incidentio.iter().map(|i| i.config.stream_max_age))
             .chain(self.linear.iter().map(|i| i.config.stream_max_age))
             .chain(self.microsoft_graph.iter().map(|i| i.config.stream_max_age))
             .chain(self.notion.iter().map(|i| i.config.stream_max_age))
             .chain(self.sentry.iter().map(|i| i.config.stream_max_age))
             .chain(self.datadog.iter().map(|i| i.config.stream_max_age))
+            .chain(self.zoom.iter().map(|i| i.config.stream_max_age))
+            .chain(self.plaid.iter().map(|i| i.config.stream_max_age))
     }
 
     pub fn has_any_source(&self) -> bool {
@@ -628,12 +814,15 @@ impl ResolvedConfig {
             || !self.telegram.is_empty()
             || !self.twitter.is_empty()
             || !self.gitlab.is_empty()
+            || !self.google_pubsub.is_empty()
             || !self.incidentio.is_empty()
             || !self.linear.is_empty()
             || !self.microsoft_graph.is_empty()
             || !self.notion.is_empty()
             || !self.sentry.is_empty()
             || !self.datadog.is_empty()
+            || !self.zoom.is_empty()
+            || !self.plaid.is_empty()
     }
 }
 
@@ -658,26 +847,28 @@ pub fn load_with_overrides(
     nats_overrides: &NatsArgs,
 ) -> Result<ResolvedConfig, ConfigError> {
     let cfg = load_config::<GatewayConfig>(config_path).map_err(ConfigError::Load)?;
-    resolve(cfg, nats_overrides)
+    resolve(cfg, nats_overrides, &SystemEnv)
 }
 
-fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConfig, ConfigError> {
-    let nats = resolve_nats(&cfg.nats, nats_overrides);
-    let env = SystemEnv;
+fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) -> Result<ResolvedConfig, ConfigError> {
+    let nats = resolve_nats(&cfg.nats, nats_overrides, env).map_err(ConfigError::Nats)?;
     let mut errors = Vec::new();
 
-    let github = resolve_github_integrations(cfg.sources.github, &env, &mut errors);
-    let discord = resolve_discord(cfg.sources.discord, &env, &mut errors);
-    let slack = resolve_slack_integrations(cfg.sources.slack, &env, &mut errors);
-    let telegram = resolve_telegram_integrations(cfg.sources.telegram, &env, &mut errors);
-    let twitter = resolve_twitter_integrations(cfg.sources.twitter, &env, &mut errors);
-    let gitlab = resolve_gitlab_integrations(cfg.sources.gitlab, &env, &mut errors);
-    let incidentio = resolve_incidentio_integrations(cfg.sources.incidentio, &env, &mut errors);
-    let linear = resolve_linear_integrations(cfg.sources.linear, &env, &mut errors);
-    let microsoft_graph = resolve_microsoft_graph_integrations(cfg.sources.microsoft_graph, &env, &mut errors);
-    let notion = resolve_notion_integrations(cfg.sources.notion, &env, &mut errors);
-    let sentry = resolve_sentry_integrations(cfg.sources.sentry, &env, &mut errors);
-    let datadog = resolve_datadog_integrations(cfg.sources.datadog, &env, &mut errors);
+    let github = resolve_github_integrations(cfg.sources.github, env, &mut errors);
+    let discord = resolve_discord(cfg.sources.discord, env, &mut errors);
+    let slack = resolve_slack_integrations(cfg.sources.slack, env, &mut errors);
+    let telegram = resolve_telegram_integrations(cfg.sources.telegram, env, &mut errors);
+    let twitter = resolve_twitter_integrations(cfg.sources.twitter, env, &mut errors);
+    let gitlab = resolve_gitlab_integrations(cfg.sources.gitlab, env, &mut errors);
+    let google_pubsub = resolve_google_pubsub_integrations(cfg.sources.google_pubsub, env, &mut errors);
+    let incidentio = resolve_incidentio_integrations(cfg.sources.incidentio, env, &mut errors);
+    let linear = resolve_linear_integrations(cfg.sources.linear, env, &mut errors);
+    let microsoft_graph = resolve_microsoft_graph_integrations(cfg.sources.microsoft_graph, env, &mut errors);
+    let notion = resolve_notion_integrations(cfg.sources.notion, env, &mut errors);
+    let sentry = resolve_sentry_integrations(cfg.sources.sentry, env, &mut errors);
+    let datadog = resolve_datadog_integrations(cfg.sources.datadog, env, &mut errors);
+    let zoom = resolve_zoom_integrations(cfg.sources.zoom, env, &mut errors);
+    let plaid = resolve_plaid_integrations(cfg.sources.plaid, env, &mut errors);
 
     if !errors.is_empty() {
         return Err(ConfigError::Validation(AggregateValidationError(errors)));
@@ -694,12 +885,15 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
         telegram,
         twitter,
         gitlab,
+        google_pubsub,
         incidentio,
         linear,
         microsoft_graph,
         notion,
         sentry,
         datadog,
+        zoom,
+        plaid,
     })
 }
 
@@ -727,9 +921,15 @@ fn resolve_github_integrations(
             errors.push(ConfigValidationError::missing_integration("github", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("github", &id, "webhook_secret", webhook.webhook_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::GitHub,
+            &id,
+            "webhook_secret",
+            CredentialKind::WebhookSecret,
+            webhook.webhook_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let webhook_secret = match GitHubWebhookSecret::new(secret) {
@@ -775,7 +975,7 @@ fn resolve_github_integrations(
 }
 
 fn resolve_discord(
-    section: DiscordConfig,
+    section: Option<DiscordConfig>,
     env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<crate::source::discord::DiscordConfig> {
@@ -787,28 +987,31 @@ fn resolve_discord(
         stream_name,
         stream_max_age_secs,
         nats_ack_timeout_secs,
-    } = section;
+    } = section?;
 
     if !resolve_source_status("discord", status.as_deref(), errors) {
         return None;
     }
 
-    let token_str = match bot_token {
-        Some(input) => match input.resolve(env) {
-            Ok(value) => value,
+    let bot_token = match bot_token {
+        Some(input) => match input.resolve(
+            static_config_source_scope(SourceKind::Discord),
+            CredentialKind::BotToken,
+            env,
+        ) {
+            Ok(value) => match DiscordBotToken::new(value) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    errors.push(ConfigValidationError::invalid("discord", "bot_token", e));
+                    return None;
+                }
+            },
             Err(error) => {
                 errors.push(ConfigValidationError::invalid("discord", "bot_token", error));
                 return None;
             }
         },
-        None => return None,
-    };
-    let bot_token = match DiscordBotToken::new(token_str) {
-        Ok(s) => s,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid("discord", "bot_token", e));
-            return None;
-        }
+        None => None,
     };
 
     let intents = if let Some(s) = gateway_intents.as_deref().filter(|s| !s.is_empty()) {
@@ -823,7 +1026,7 @@ fn resolve_discord(
         crate::source::discord::config::default_intents()
     };
 
-    let subject_prefix = match NatsToken::new(subject_prefix) {
+    let subject_prefix = match NatsToken::new(subject_prefix.as_deref().unwrap_or("discord")) {
         Ok(t) => t,
         Err(e) => {
             errors.push(ConfigValidationError::invalid_subject_token(
@@ -835,7 +1038,7 @@ fn resolve_discord(
         }
     };
 
-    let stream_name = match NatsToken::new(stream_name) {
+    let stream_name = match NatsToken::new(stream_name.as_deref().unwrap_or("DISCORD")) {
         Ok(t) => t,
         Err(e) => {
             errors.push(ConfigValidationError::invalid_subject_token(
@@ -847,15 +1050,16 @@ fn resolve_discord(
         }
     };
 
-    let nats_ack_timeout = match NonZeroDuration::from_secs(nats_ack_timeout_secs) {
-        Ok(d) => d,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("discord", "nats_ack_timeout_secs", err));
-            return None;
-        }
-    };
+    let nats_ack_timeout =
+        match NonZeroDuration::from_secs(nats_ack_timeout_secs.unwrap_or(DEFAULT_NATS_ACK_TIMEOUT_SECS)) {
+            Ok(d) => d,
+            Err(err) => {
+                errors.push(ConfigValidationError::invalid("discord", "nats_ack_timeout_secs", err));
+                return None;
+            }
+        };
 
-    let stream_max_age = match StreamMaxAge::from_secs(stream_max_age_secs) {
+    let stream_max_age = match StreamMaxAge::from_secs(stream_max_age_secs.unwrap_or(DEFAULT_STREAM_MAX_AGE_SECS)) {
         Ok(age) => age,
         Err(err) => {
             errors.push(ConfigValidationError::invalid("discord", "stream_max_age_secs", err));
@@ -893,6 +1097,7 @@ fn resolve_slack_integrations(
         if !resolve_integration_source_status("slack", &id, integration.status.as_deref(), errors) {
             continue;
         }
+        let requested_nats_ack_timeout = integration.nats_ack_timeout_secs.is_some();
         let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
             CommonIntegrationFieldsInput {
                 source: "slack",
@@ -913,13 +1118,14 @@ fn resolve_slack_integrations(
             Some(transport) => transport,
             None => continue,
         };
+        let ack_budget = AckBudget::new(requested_nats_ack_timeout.then_some(nats_ack_timeout));
         integrations.push(SourceIntegration::new(
             id,
             crate::source::slack::SlackConfig {
                 subject_prefix,
                 stream_name,
                 stream_max_age,
-                nats_ack_timeout,
+                ack_budget,
                 transport,
             },
         ));
@@ -959,7 +1165,15 @@ fn resolve_slack_webhook_transport(
     env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<SlackTransportConfig> {
-    let secret = require_integration_value("slack", id, "signing_secret", webhook.signing_secret, env, errors)?;
+    let secret = require_integration_value(
+        SourceKind::Slack,
+        id,
+        "signing_secret",
+        CredentialKind::SigningSecret,
+        webhook.signing_secret,
+        env,
+        errors,
+    )?;
     let signing_secret = match SlackSigningSecret::new(secret) {
         Ok(secret) => secret,
         Err(error) => {
@@ -989,9 +1203,26 @@ fn resolve_slack_webhook_transport(
         }
     };
 
+    let max_body_size = match webhook.max_body_bytes {
+        Some(input) => match input.resolve(env) {
+            Ok(size) => size,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "slack",
+                    id,
+                    "max_body_bytes",
+                    error,
+                ));
+                return None;
+            }
+        },
+        None => DEFAULT_HTTP_BODY_SIZE_MAX,
+    };
+
     Some(SlackTransportConfig::Webhook(SlackWebhookSourceConfig {
         signing_secret,
         timestamp_max_drift,
+        max_body_size,
     }))
 }
 
@@ -1001,7 +1232,15 @@ fn resolve_slack_socket_mode_transport(
     env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<SlackTransportConfig> {
-    let token = require_integration_value("slack", id, "app_token", socket_mode.app_token, env, errors)?;
+    let token = require_integration_value(
+        SourceKind::Slack,
+        id,
+        "app_token",
+        CredentialKind::AppToken,
+        socket_mode.app_token,
+        env,
+        errors,
+    )?;
     let app_token = match SlackAppToken::new(token) {
         Ok(token) => token,
         Err(error) => {
@@ -1015,8 +1254,40 @@ fn resolve_slack_socket_mode_transport(
         }
     };
 
+    let api_base_url = match SlackApiBaseUrl::new(socket_mode.api_base_url.as_deref().unwrap_or(DEFAULT_API_BASE_URL)) {
+        Ok(url) => url,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_integration(
+                "slack",
+                id,
+                "api_base_url",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    let intended_use = match socket_mode
+        .intended_use
+        .ok_or(SlackSocketModeIntendedUseError::Missing)
+        .and_then(|value| value.parse::<SlackSocketModeIntendedUse>())
+    {
+        Ok(intended_use) => intended_use,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_integration(
+                "slack",
+                id,
+                "intended_use",
+                error,
+            ));
+            return None;
+        }
+    };
+
     Some(SlackTransportConfig::SocketMode(SlackSocketModeSourceConfig {
         app_token,
+        api_base_url,
+        intended_use,
     }))
 }
 
@@ -1044,9 +1315,15 @@ fn resolve_telegram_integrations(
             errors.push(ConfigValidationError::missing_integration("telegram", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("telegram", &id, "webhook_secret", webhook.webhook_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Telegram,
+            &id,
+            "webhook_secret",
+            CredentialKind::WebhookSecret,
+            webhook.webhook_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let webhook_secret = match TelegramWebhookSecret::new(secret) {
@@ -1131,7 +1408,11 @@ fn resolve_telegram_integration_registration(
 
     let public_webhook_url = public_webhook_url.filter(|value| !value.is_empty());
     let bot_token = match bot_token {
-        Some(input) => match input.resolve(env) {
+        Some(input) => match input.resolve(
+            static_config_integration_scope(SourceKind::Telegram, id),
+            CredentialKind::BotToken,
+            env,
+        ) {
             Ok(value) => Some(value),
             Err(error) => {
                 errors.push(ConfigValidationError::invalid_integration(
@@ -1227,9 +1508,15 @@ fn resolve_twitter_integrations(
             errors.push(ConfigValidationError::missing_integration("twitter", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("twitter", &id, "consumer_secret", webhook.consumer_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Twitter,
+            &id,
+            "consumer_secret",
+            CredentialKind::ConsumerSecret,
+            webhook.consumer_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let consumer_secret = match TwitterConsumerSecret::new(secret) {
@@ -1298,8 +1585,15 @@ fn resolve_gitlab_integrations(
             errors.push(ConfigValidationError::missing_integration("gitlab", &id, "webhook"));
             continue;
         };
-        let Some(token) = require_integration_value("gitlab", &id, "signing_token", webhook.signing_token, env, errors)
-        else {
+        let Some(token) = require_integration_value(
+            SourceKind::Gitlab,
+            &id,
+            "signing_token",
+            CredentialKind::SigningToken,
+            webhook.signing_token,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let signing_token = match GitLabSigningToken::new(token) {
@@ -1385,9 +1679,15 @@ fn resolve_linear_integrations(
             errors.push(ConfigValidationError::missing_integration("linear", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("linear", &id, "webhook_secret", webhook.webhook_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Linear,
+            &id,
+            "webhook_secret",
+            CredentialKind::WebhookSecret,
+            webhook.webhook_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let webhook_secret = match LinearWebhookSecret::new(secret) {
@@ -1438,6 +1738,146 @@ fn resolve_linear_integrations(
     integrations
 }
 
+fn resolve_google_pubsub_integrations(
+    section: GooglePubSubConfigInput,
+    env: &impl ReadEnv,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Vec<SourceIntegration<crate::source::google_pubsub::GooglePubSubConfig>> {
+    let GooglePubSubConfigInput {
+        status,
+        integrations: configured_integrations,
+    } = section;
+    let mut integrations = Vec::new();
+    if !resolve_source_status("google_pubsub", status.as_deref(), errors) {
+        return integrations;
+    }
+    for (raw_id, integration) in configured_integrations {
+        let Some(id) = resolve_integration_id("google_pubsub", raw_id, errors) else {
+            continue;
+        };
+        if !resolve_integration_source_status("google_pubsub", &id, integration.status.as_deref(), errors) {
+            continue;
+        }
+        let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
+            CommonIntegrationFieldsInput {
+                source: "google_pubsub",
+                id: &id,
+                subject_source_prefix: "google-pubsub",
+                stream_source_prefix: "GOOGLE_PUBSUB",
+                subject_prefix: integration.subject_prefix,
+                stream_name: integration.stream_name,
+                stream_max_age_secs: integration.stream_max_age_secs,
+                nats_ack_timeout_secs: integration.nats_ack_timeout_secs,
+                default_nats_ack_timeout_secs: DEFAULT_NATS_ACK_TIMEOUT_SECS,
+            },
+            errors,
+        ) else {
+            continue;
+        };
+        let Some(transport) = resolve_google_pubsub_transport(&id, integration.streaming_pull, env, errors) else {
+            continue;
+        };
+        integrations.push(SourceIntegration::new(
+            id,
+            crate::source::google_pubsub::GooglePubSubConfig {
+                subject_prefix,
+                stream_name,
+                stream_max_age,
+                nats_ack_timeout,
+                transport,
+            },
+        ));
+    }
+    integrations
+}
+
+fn resolve_google_pubsub_transport(
+    id: &SourceIntegrationId,
+    streaming_pull: Option<GooglePubSubStreamingPullInput>,
+    env: &impl ReadEnv,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<GooglePubSubTransportConfig> {
+    let Some(streaming_pull) = streaming_pull else {
+        errors.push(ConfigValidationError::missing_integration(
+            "google_pubsub",
+            id,
+            "transport",
+        ));
+        return None;
+    };
+
+    let subscription = match streaming_pull.subscription {
+        Some(raw) => match PubSubSubscriptionName::new(raw) {
+            Ok(subscription) => Some(subscription),
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "google_pubsub",
+                    id,
+                    "subscription",
+                    error,
+                ));
+                None
+            }
+        },
+        None => {
+            errors.push(ConfigValidationError::missing_integration(
+                "google_pubsub",
+                id,
+                "subscription",
+            ));
+            None
+        }
+    };
+
+    let (max_outstanding_messages, max_outstanding_messages_valid) =
+        match streaming_pull.max_outstanding_messages.map(MaxOutstandingMessages::new) {
+            Some(Ok(max)) => (Some(max), true),
+            Some(Err(error)) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "google_pubsub",
+                    id,
+                    "max_outstanding_messages",
+                    error,
+                ));
+                (None, false)
+            }
+            None => (None, true),
+        };
+
+    let credentials = require_integration_value(
+        SourceKind::GooglePubSub,
+        id,
+        "credentials",
+        CredentialKind::ServiceAccountCredentials,
+        streaming_pull.credentials,
+        env,
+        errors,
+    )
+    .and_then(|document| match GoogleCredentials::parse(document) {
+        Ok(credentials) => Some(credentials),
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_integration(
+                "google_pubsub",
+                id,
+                "credentials",
+                error,
+            ));
+            None
+        }
+    });
+
+    let (Some(subscription), Some(credentials), true) = (subscription, credentials, max_outstanding_messages_valid)
+    else {
+        return None;
+    };
+
+    Some(GooglePubSubTransportConfig::StreamingPull(StreamingPullConfig {
+        subscription,
+        max_outstanding_messages,
+        credentials,
+    }))
+}
+
 fn resolve_microsoft_graph_integrations(
     section: MicrosoftGraphConfigInput,
     env: &impl ReadEnv,
@@ -1467,9 +1907,10 @@ fn resolve_microsoft_graph_integrations(
             continue;
         };
         let Some(raw_client_state) = require_integration_value(
-            "microsoft_graph",
+            SourceKind::MicrosoftGraph,
             &id,
             "client_state",
+            CredentialKind::ClientState,
             webhook.client_state,
             env,
             errors,
@@ -1542,9 +1983,15 @@ fn resolve_incidentio_integrations(
             errors.push(ConfigValidationError::missing_integration("incidentio", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("incidentio", &id, "signing_secret", webhook.signing_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Incidentio,
+            &id,
+            "signing_secret",
+            CredentialKind::SigningSecret,
+            webhook.signing_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let signing_secret = match IncidentioSigningSecret::new(secret) {
@@ -1606,6 +2053,254 @@ fn resolve_incidentio_integrations(
     integrations
 }
 
+fn resolve_zoom_integrations(
+    section: ZoomConfig,
+    env: &impl ReadEnv,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Vec<SourceIntegration<ZoomSourceConfig>> {
+    let ZoomConfig {
+        status,
+        integrations: configured_integrations,
+    } = section;
+    let mut integrations = Vec::new();
+    if !resolve_source_status("zoom", status.as_deref(), errors) {
+        return integrations;
+    }
+    for (raw_id, integration) in configured_integrations {
+        let Some(id) = resolve_integration_id("zoom", raw_id, errors) else {
+            continue;
+        };
+        if !resolve_integration_source_status("zoom", &id, integration.status.as_deref(), errors) {
+            continue;
+        }
+        let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("zoom", &id, "webhook"));
+            continue;
+        };
+        let Some(secret) = require_integration_value(
+            SourceKind::Zoom,
+            &id,
+            "secret_token",
+            CredentialKind::SecretToken,
+            webhook.secret_token,
+            env,
+            errors,
+        ) else {
+            continue;
+        };
+        let secret_token = match ZoomSecretToken::new(secret) {
+            Ok(secret) => secret,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "zoom",
+                    &id,
+                    "secret_token",
+                    error,
+                ));
+                continue;
+            }
+        };
+        let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
+            CommonIntegrationFieldsInput {
+                source: "zoom",
+                id: &id,
+                subject_source_prefix: "zoom",
+                stream_source_prefix: "ZOOM",
+                subject_prefix: integration.subject_prefix,
+                stream_name: integration.stream_name,
+                stream_max_age_secs: integration.stream_max_age_secs,
+                nats_ack_timeout_secs: integration.nats_ack_timeout_secs,
+                default_nats_ack_timeout_secs: DEFAULT_NATS_ACK_TIMEOUT_SECS,
+            },
+            errors,
+        ) else {
+            continue;
+        };
+        let timestamp_tolerance = match NonZeroDuration::from_secs(
+            webhook
+                .timestamp_tolerance_secs
+                .unwrap_or(DEFAULT_ZOOM_TIMESTAMP_TOLERANCE_SECS),
+        ) {
+            Ok(duration) => duration,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "zoom",
+                    &id,
+                    "timestamp_tolerance_secs",
+                    error,
+                ));
+                continue;
+            }
+        };
+        integrations.push(SourceIntegration::new(
+            id,
+            ZoomSourceConfig {
+                secret_token,
+                subject_prefix,
+                stream_name,
+                stream_max_age,
+                nats_ack_timeout,
+                timestamp_tolerance,
+            },
+        ));
+    }
+    integrations
+}
+
+fn resolve_plaid_integrations(
+    section: PlaidConfig,
+    env: &impl ReadEnv,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Vec<SourceIntegration<PlaidSourceConfig>> {
+    let PlaidConfig {
+        status,
+        integrations: configured_integrations,
+    } = section;
+    let mut integrations = Vec::new();
+    if !resolve_source_status("plaid", status.as_deref(), errors) {
+        return integrations;
+    }
+    for (raw_id, integration) in configured_integrations {
+        let Some(id) = resolve_integration_id("plaid", raw_id, errors) else {
+            continue;
+        };
+        if !resolve_integration_source_status("plaid", &id, integration.status.as_deref(), errors) {
+            continue;
+        }
+        let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("plaid", &id, "webhook"));
+            continue;
+        };
+        let Some(secret) = require_integration_value(
+            SourceKind::Plaid,
+            &id,
+            "secret",
+            CredentialKind::ClientSecret,
+            webhook.secret,
+            env,
+            errors,
+        ) else {
+            continue;
+        };
+        let secret = match PlaidSecret::new(secret) {
+            Ok(secret) => secret,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid", &id, "secret", error,
+                ));
+                continue;
+            }
+        };
+        let Some(raw_client_id) = webhook.client_id else {
+            errors.push(ConfigValidationError::missing_integration("plaid", &id, "client_id"));
+            continue;
+        };
+        let raw_client_id = match raw_client_id.resolve(env) {
+            Ok(raw_client_id) => raw_client_id,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid",
+                    &id,
+                    "client_id",
+                    error,
+                ));
+                continue;
+            }
+        };
+        let client_id = match PlaidClientId::new(raw_client_id) {
+            Ok(client_id) => client_id,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid",
+                    &id,
+                    "client_id",
+                    error,
+                ));
+                continue;
+            }
+        };
+        let Some(raw_environment) = webhook.environment else {
+            errors.push(ConfigValidationError::missing_integration("plaid", &id, "environment"));
+            continue;
+        };
+        let environment = match PlaidEnvironment::parse(&raw_environment) {
+            Ok(environment) => environment,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid",
+                    &id,
+                    "environment",
+                    error,
+                ));
+                continue;
+            }
+        };
+        let api_base_url = match PlaidApiBaseUrl::new(
+            webhook
+                .api_base_url
+                .as_deref()
+                .unwrap_or_else(|| environment.default_api_base_url()),
+        ) {
+            Ok(api_base_url) => api_base_url,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid",
+                    &id,
+                    "api_base_url",
+                    error,
+                ));
+                continue;
+            }
+        };
+        let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
+            CommonIntegrationFieldsInput {
+                source: "plaid",
+                id: &id,
+                subject_source_prefix: "plaid",
+                stream_source_prefix: "PLAID",
+                subject_prefix: integration.subject_prefix,
+                stream_name: integration.stream_name,
+                stream_max_age_secs: integration.stream_max_age_secs,
+                nats_ack_timeout_secs: integration.nats_ack_timeout_secs,
+                default_nats_ack_timeout_secs: DEFAULT_NATS_ACK_TIMEOUT_SECS,
+            },
+            errors,
+        ) else {
+            continue;
+        };
+        let timestamp_tolerance = match NonZeroDuration::from_secs(
+            webhook
+                .timestamp_tolerance_secs
+                .unwrap_or(DEFAULT_PLAID_TIMESTAMP_TOLERANCE_SECS),
+        ) {
+            Ok(duration) => duration,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "plaid",
+                    &id,
+                    "timestamp_tolerance_secs",
+                    error,
+                ));
+                continue;
+            }
+        };
+        integrations.push(SourceIntegration::new(
+            id,
+            PlaidSourceConfig {
+                client_id,
+                secret,
+                api_base_url,
+                subject_prefix,
+                stream_name,
+                stream_max_age,
+                nats_ack_timeout,
+                timestamp_tolerance,
+            },
+        ));
+    }
+    integrations
+}
+
 fn resolve_notion_integrations(
     section: NotionConfig,
     env: &impl ReadEnv,
@@ -1631,9 +2326,10 @@ fn resolve_notion_integrations(
             continue;
         };
         let Some(raw_token) = require_integration_value(
-            "notion",
+            SourceKind::Notion,
             &id,
             "verification_token",
+            CredentialKind::VerificationToken,
             webhook.verification_token,
             env,
             errors,
@@ -1706,9 +2402,15 @@ fn resolve_sentry_integrations(
             errors.push(ConfigValidationError::missing_integration("sentry", &id, "webhook"));
             continue;
         };
-        let Some(secret) =
-            require_integration_value("sentry", &id, "client_secret", webhook.client_secret, env, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Sentry,
+            &id,
+            "client_secret",
+            CredentialKind::ClientSecret,
+            webhook.client_secret,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let client_secret = match SentryClientSecret::new(secret) {
@@ -1786,9 +2488,15 @@ fn resolve_datadog_integrations(
             errors.push(ConfigValidationError::missing_integration("datadog", &id, "webhook"));
             continue;
         };
-        let Some(token) =
-            require_integration_value("datadog", &id, "webhook_token", webhook.webhook_token, env, errors)
-        else {
+        let Some(token) = require_integration_value(
+            SourceKind::Datadog,
+            &id,
+            "webhook_token",
+            CredentialKind::WebhookToken,
+            webhook.webhook_token,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let webhook_token = match DatadogWebhookToken::new(token) {
@@ -1868,26 +2576,40 @@ fn resolve_integration_id(
 }
 
 fn require_integration_value(
-    source: &'static str,
+    source: SourceKind,
     id: &SourceIntegrationId,
     field: &'static str,
+    kind: CredentialKind,
     value: Option<SecretInput>,
     env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<String> {
     match value {
-        Some(value) => match value.resolve(env) {
+        Some(value) => match value.resolve(static_config_integration_scope(source, id), kind, env) {
             Ok(value) => Some(value),
             Err(error) => {
-                errors.push(ConfigValidationError::invalid_integration(source, id, field, error));
+                errors.push(ConfigValidationError::invalid_integration(
+                    source.as_str(),
+                    id,
+                    field,
+                    error,
+                ));
                 None
             }
         },
         None => {
-            errors.push(ConfigValidationError::missing_integration(source, id, field));
+            errors.push(ConfigValidationError::missing_integration(source.as_str(), id, field));
             None
         }
     }
+}
+
+fn static_config_source_scope(source: SourceKind) -> CredentialScope {
+    CredentialScope::source(CredentialOwnerId::static_config(), source)
+}
+
+fn static_config_integration_scope(source: SourceKind, id: &SourceIntegrationId) -> CredentialScope {
+    CredentialScope::integration(CredentialOwnerId::static_config(), source, id.clone())
 }
 
 struct CommonIntegrationFieldsInput<'a> {

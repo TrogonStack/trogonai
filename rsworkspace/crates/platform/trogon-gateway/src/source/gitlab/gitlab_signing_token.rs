@@ -35,11 +35,9 @@ impl GitLabSigningToken {
         let decoded = STANDARD
             .decode(encoded)
             .map_err(GitLabSigningTokenError::InvalidBase64)?;
-        if decoded.len() != GITLAB_SIGNING_TOKEN_BYTES {
-            return Err(GitLabSigningTokenError::InvalidLength { actual: decoded.len() });
-        }
-        let mut bytes = [0; GITLAB_SIGNING_TOKEN_BYTES];
-        bytes.copy_from_slice(&decoded);
+        let bytes: [u8; GITLAB_SIGNING_TOKEN_BYTES] = decoded
+            .try_into()
+            .map_err(|decoded: Vec<u8>| GitLabSigningTokenError::InvalidLength { actual: decoded.len() })?;
         Ok(Self(bytes))
     }
 

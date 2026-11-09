@@ -1,0 +1,69 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Identifies one registration of an immutable provider account, project, or
+// OpenBao security boundary (ADR#0030). Lifecycle, admission, and health change
+// without changing it. Every identity in this file is nonempty, opaque,
+// compared whole, and never reused.
+message KeyBackendId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Opaque platform reference to one key-encryption key, tenant-scoped in every
+// tier. It never carries a provider, a backend, or a locator. A presented
+// KeyRef is untrusted input: the service verifies that its bound tenant and
+// purpose match the authenticated operation before any provider call
+// (ADR#0030, ADR#0033).
+message KeyRef {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Names one service-owned payload kind from the catalogue that the owning
+// data-plane services declare (ADR#0033). Tenant surfaces list purposes from
+// that catalogue and never invent them. Secrets and platform control-plane
+// state are never purposes.
+message KeyPurpose {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// Positive ordinal of one accepted configuration of a registration. A new
+// revision takes effect only after it validates, and the current revision stays
+// in force until then (ADR#0030).
+message RegistrationRevision {
+  uint64 value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+// Identifies one audited key operation, which has exactly one audit record.
+message OperationId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// The request identifier a provider returned for one provider attempt, kept
+// exactly as returned. The platform never synthesizes one: an attempt whose
+// provider returned none records an absence reason instead (ADR#0030). A
+// recorded identifier is claimed to join a provider's own audit log only after
+// a conformance case proves that join for that provider.
+message ProviderRequestId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

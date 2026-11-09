@@ -1,13 +1,15 @@
 /// Known Trogon service binaries. Used as the OTel service name, log directory
-/// name, and log file name — keeping them in one place prevents typos and
+/// name, and log file name. Keeping them in one place prevents typos and
 /// guarantees the values are path-safe.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServiceName {
+    A2aGateway,
     AcpNatsStdio,
     AcpNatsServer,
     McpNatsStdio,
     McpNatsServer,
     TrogonGateway,
+    TrogonProviderGateway,
     TrogonSourceDiscord,
     TrogonSourceGithub,
     TrogonSourceGitlab,
@@ -21,11 +23,13 @@ pub enum ServiceName {
 impl ServiceName {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::A2aGateway => "a2a-gateway",
             Self::AcpNatsStdio => "acp-nats-stdio",
             Self::AcpNatsServer => "acp-nats-server",
             Self::McpNatsStdio => "mcp-nats-stdio",
             Self::McpNatsServer => "mcp-nats-server",
             Self::TrogonGateway => "trogon-gateway",
+            Self::TrogonProviderGateway => "trogon-provider-gateway",
             Self::TrogonSourceDiscord => "trogon-source-discord",
             Self::TrogonSourceGithub => "trogon-source-github",
             Self::TrogonSourceGitlab => "trogon-source-gitlab",

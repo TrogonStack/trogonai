@@ -77,7 +77,9 @@ fn reads_nats_config_from_env_provider() {
     let config = config_from_env(&env);
 
     assert_eq!(config.mcp.nats().servers, vec!["host1:4222", "host2:4222"]);
-    assert!(matches!(&config.mcp.nats().auth, mcp_nats::NatsAuth::Token(token) if token == "my-token"));
+    assert!(
+        matches!(&config.mcp.nats().auth, mcp_nats::NatsAuth::Token(mcp_nats::CredentialValue::Literal(t)) if t.as_str() == "my-token")
+    );
 }
 
 #[test]

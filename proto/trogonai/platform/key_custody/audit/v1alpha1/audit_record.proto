@@ -1,0 +1,94 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.audit.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/platform/key_custody/audit/v1alpha1/provider_attempt.proto";
+import "trogonai/platform/key_custody/v1alpha1/failure.proto";
+import "trogonai/platform/key_custody/v1alpha1/identity.proto";
+import "trogonai/platform/key_custody/v1alpha1/operation.proto";
+import "trogonai/platform/key_custody/v1alpha1/provider.proto";
+
+// Opaque nonempty identifier that ties an operation's audit record and
+// telemetry to the request that caused it.
+message CorrelationId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// One audit record per operation, listing every provider attempt in the order
+// made (ADR#0030). It identifies the tenant, KeyRef, KeyBackendId, purpose,
+// provider, outcome, and correlation ID. It carries the backend identity and
+// provider, so it is an internal fact and never a tenant projection.
+//
+// Nothing here carries a DEK, a wrapped DEK, a credential, a token, a raw
+// provider response, or ciphertext. That is structural rather than a review
+// rule: no field has a type that could hold one. The authenticated binding is
+// not part of the record.
+message KeyOperationAuditRecord {
+  option (buf.validate.message).cel = {
+    id: "audit_record.no_attempts_before_provider"
+    message: "a failure decided before the provider call lists no provider attempts"
+    expression: "size(this.attempts) == 0 || !has(this.failed) || !(this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH || (this.operation != trogonai.platform.key_custody.v1alpha1.KeyOperationKind.KEY_OPERATION_KIND_BIND_EXTERNAL_KEY && (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY || (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED && this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_KEY_STATE))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "audit_record.provider_outcome_has_attempt"
+    message: "a provider outcome lists at least one provider attempt"
+    expression: "size(this.attempts) > 0 || (has(this.failed) && (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_BINDING_MISMATCH || (this.operation != trogonai.platform.key_custody.v1alpha1.KeyOperationKind.KEY_OPERATION_KIND_BIND_EXTERNAL_KEY && this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY) || (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED && (this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_BACKEND_PAUSED || (this.operation != trogonai.platform.key_custody.v1alpha1.KeyOperationKind.KEY_OPERATION_KIND_BIND_EXTERNAL_KEY && this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_KEY_STATE) || this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_BACKEND_NOT_ACTIVE))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "audit_record.success_has_successful_attempt"
+    message: "a successful operation ends with its only successful provider attempt"
+    expression: "!has(this.succeeded) || (this.attempts.filter(attempt, has(attempt.succeeded)).size() == 1 && has(this.attempts[this.attempts.size() - 1].succeeded))"
+  };
+  option (buf.validate.message).cel = {
+    id: "audit_record.failure_has_no_successful_attempt"
+    message: "only post-validation bind discovery may end a failed operation with one successful provider attempt"
+    expression: "!has(this.failed) || ((this.operation == trogonai.platform.key_custody.v1alpha1.KeyOperationKind.KEY_OPERATION_KIND_BIND_EXTERNAL_KEY && (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_UNSUPPORTED_CAPABILITY || (this.failed.category == trogonai.platform.key_custody.v1alpha1.OperationFailureCategory.OPERATION_FAILURE_CATEGORY_KEY_USE_DENIED && this.failed.denial_reason == trogonai.platform.key_custody.v1alpha1.KeyUseDenialReason.KEY_USE_DENIAL_REASON_KEY_STATE))) ? (this.attempts.filter(attempt, has(attempt.succeeded)).size() == 1 && has(this.attempts[this.attempts.size() - 1].succeeded)) : !this.attempts.exists(attempt, has(attempt.succeeded)))"
+  };
+  option (buf.validate.message).cel = {
+    id: "audit_record.attempt_sequence"
+    message: "provider attempt numbers form the ordered sequence from one"
+    expression: "this.attempts.map(attempt, attempt.attempt_number).unique() && this.attempts.all(attempt, attempt.attempt_number > 0u && attempt.attempt_number <= uint(this.attempts.size()) && this.attempts[int(attempt.attempt_number) - 1].attempt_number == attempt.attempt_number)"
+  };
+
+  trogonai.platform.key_custody.v1alpha1.OperationId operation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CorrelationId correlation_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.key_custody.v1alpha1.KeyOperationKind operation = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogon.hierarchy.v1alpha1.NodeId tenant = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.key_custody.v1alpha1.KeyRef key_ref = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.key_custody.v1alpha1.KeyBackendId key_backend_id = 6 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.key_custody.v1alpha1.KeyPurpose purpose = 7 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.key_custody.v1alpha1.KeyProvider provider = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // When the operation began. An operation denied before any provider call has
+  // no attempt to carry a time, so the record carries its own.
+  google.protobuf.Timestamp occurred_at = 9 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty succeeded = 10;
+    trogonai.platform.key_custody.v1alpha1.OperationFailure failed = 11;
+  }
+
+  repeated ProviderAttempt attempts = 12;
+}

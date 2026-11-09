@@ -5,11 +5,11 @@ The fixture runner builds the current workflow descriptors and checks each paylo
 ## Command reference
 
 ```sh
-mise run proto:validate-workflows
-mise run proto:validate-workflows -- --case query-history
+mise run proto:validate
+mise run proto:validate -- --suite workflows --case query-history
 ```
 
-`--case` selects case names by substring. `--buf` overrides the executable; its version must still match the repository pin. The runner uses Python's standard library and the installed Buf executable.
+`--suite` selects one or more fixture directories. `--case` selects case names by substring. `--buf` overrides the executable; its version must still match the repository pin. The runner uses Python's standard library and the installed Buf executable.
 
 ## Fixture format
 

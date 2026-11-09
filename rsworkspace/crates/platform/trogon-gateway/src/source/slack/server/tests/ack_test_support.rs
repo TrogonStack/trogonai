@@ -8,6 +8,7 @@ use trogon_nats::mocks::MockError;
 enum AckBehavior {
     Fail,
     Hang,
+    HangPublish,
 }
 
 #[derive(Clone)]
@@ -25,6 +26,12 @@ impl AckFailPublisher {
     pub fn hanging() -> Self {
         Self {
             behavior: Arc::new(Mutex::new(AckBehavior::Hang)),
+        }
+    }
+
+    pub fn hanging_publish() -> Self {
+        Self {
+            behavior: Arc::new(Mutex::new(AckBehavior::HangPublish)),
         }
     }
 }
@@ -60,6 +67,7 @@ impl JetStreamPublisher for AckFailPublisher {
         match behavior {
             AckBehavior::Fail => Ok(AckFuture::Fail),
             AckBehavior::Hang => Ok(AckFuture::Hang),
+            AckBehavior::HangPublish => std::future::pending().await,
         }
     }
 }

@@ -68,6 +68,10 @@ pub trait ObjectStorePut: Send + Sync + Clone + 'static {
         name: &str,
         data: &mut R,
     ) -> impl Future<Output = Result<Self::Info, Self::Error>> + Send;
+
+    /// Whether a live object is stored under `name`. Best effort: a failed lookup
+    /// reports `false`, so the caller falls back to writing the object.
+    fn contains(&self, name: &str) -> impl Future<Output = bool> + Send;
 }
 
 pub trait ObjectStoreGet: Send + Sync + Clone + 'static {
@@ -200,6 +204,10 @@ impl ObjectStorePut for NatsObjectStore {
 
     async fn put<R: AsyncRead + Unpin + Send>(&self, name: &str, data: &mut R) -> Result<Self::Info, Self::Error> {
         self.store.put(name, data).await
+    }
+
+    async fn contains(&self, name: &str) -> bool {
+        self.store.info(name).await.is_ok_and(|info| !info.deleted)
     }
 }
 

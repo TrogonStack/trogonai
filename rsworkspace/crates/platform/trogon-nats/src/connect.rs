@@ -1,23 +1,47 @@
 use crate::auth::{NatsAuth, NatsConfig};
-use crate::constants::MAX_RECONNECT_DELAY;
-use async_nats::{Client, ConnectOptions, Event};
+use crate::constants::{
+    ENV_NATS_CA, ENV_NATS_CERT, ENV_NATS_CREDS, ENV_NATS_JWT, ENV_NATS_KEY, ENV_NATS_NKEY, ENV_NATS_PASSWORD,
+    ENV_NATS_SEED, ENV_NATS_TLS_DISABLED, ENV_NATS_TOKEN, FIRST_CONNECT_ATTEMPT, MAX_RECONNECT_DELAY,
+    TLS_DISABLED_VALUES,
+};
+use crate::credential_value::{CredentialValue, SettingError};
+use crate::tls::{NatsTls, TlsMisconfiguration};
+use async_nats::{AuthError, Client, ConnectOptions, Event};
+use nkeys::KeyPair;
+use std::sync::Arc;
 use std::time::Duration;
-use tracing::{info, instrument, warn};
+use tracing::{Event as TraceEvent, Level, Value, info, instrument, warn};
 use trogon_semconv::span::NATS_CONNECT;
+use trogon_std::env::{ReadEnv, SystemEnv};
+use trogon_std::tls::install_default_crypto_provider;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
     #[error("Failed to load credentials file: {0}")]
     InvalidCredentials(#[source] std::io::Error),
-    #[error("Failed to connect to NATS servers {servers:?}: {error}")]
+    #[error("Invalid {setting}: {error}")]
+    InvalidSetting {
+        setting: &'static str,
+        #[source]
+        error: SettingError,
+    },
+    /// The message names only the kind of failure. The servers, and a source that
+    /// can name one such as a TLS hostname mismatch, stay out of it because
+    /// callers forward it to remote clients; `connect` and `connect_once` log both.
+    #[error("Failed to connect to NATS: {}", error.kind())]
     ConnectionFailed {
         servers: Vec<String>,
         #[source]
         error: async_nats::ConnectError,
     },
+    #[error("No NATS servers to connect to")]
+    NoServers,
 }
 
 fn reconnect_delay(attempts: usize) -> Duration {
+    if attempts <= FIRST_CONNECT_ATTEMPT {
+        return Duration::ZERO;
+    }
     let delay = Duration::from_secs(std::cmp::min(
         MAX_RECONNECT_DELAY.as_secs(),
         2u64.saturating_pow(attempts as u32),
@@ -46,76 +70,318 @@ fn apply_reconnect_options(opts: ConnectOptions, connection_timeout: Duration) -
         .event_callback(|event| async move { handle_event(event).await })
 }
 
-#[instrument(name = NATS_CONNECT, skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
-pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Result<Client, ConnectError> {
-    info!(
-        servers = ?config.servers,
-        auth = %config.auth.description(),
-        "Connecting to NATS"
-    );
-
-    let connect_result = match &config.auth {
-        NatsAuth::Credentials(path) => {
+async fn apply_auth<E: ReadEnv>(
+    opts: ConnectOptions,
+    auth: &NatsAuth,
+    env: &E,
+) -> Result<ConnectOptions, ConnectError> {
+    match auth {
+        NatsAuth::Credentials(location) => {
+            let path = location.path().map_err(invalid_setting(ENV_NATS_CREDS))?;
             info!(path = %path.display(), "Using credentials file");
-            match ConnectOptions::with_credentials_file(path.clone()).await {
-                Ok(opts) => {
-                    apply_reconnect_options(opts, connection_timeout)
-                        .connect(&config.servers)
-                        .await
-                }
-                Err(e) => {
-                    warn!(error = %e, path = %path.display(), "Failed to load credentials file");
-                    return Err(ConnectError::InvalidCredentials(e));
-                }
-            }
+            opts.credentials_file(path).await.map_err(|e| {
+                warn!(error = %e, path = %path.display(), "Failed to load credentials file");
+                ConnectError::InvalidCredentials(e)
+            })
         }
         NatsAuth::NKey(seed) => {
-            apply_reconnect_options(ConnectOptions::with_nkey(seed.clone()), connection_timeout)
-                .connect(&config.servers)
-                .await
+            let seed = seed.resolve(env).await.map_err(invalid_setting(ENV_NATS_NKEY))?;
+            Ok(opts.nkey(seed))
         }
         NatsAuth::UserPassword { user, password } => {
-            apply_reconnect_options(
-                ConnectOptions::with_user_and_password(user.clone(), password.clone()),
-                connection_timeout,
-            )
-            .connect(&config.servers)
-            .await
+            let password = password
+                .resolve(env)
+                .await
+                .map_err(invalid_setting(ENV_NATS_PASSWORD))?;
+            Ok(opts.user_and_password(user.clone(), password))
+        }
+        NatsAuth::Jwt { jwt, seed } => {
+            let jwt = resolve_jwt(jwt, env).await?;
+            match seed {
+                Some(seed) => {
+                    let seed = seed.resolve(env).await.map_err(invalid_setting(ENV_NATS_SEED))?;
+                    let key_pair = Arc::new(
+                        KeyPair::from_seed(seed.trim())
+                            .map_err(|e| invalid_setting(ENV_NATS_SEED)(SettingError::InvalidSeed(e)))?,
+                    );
+                    Ok(opts.jwt(jwt, jwt_signer(key_pair)))
+                }
+                None => Ok(opts.jwt(jwt, |_| std::future::ready(Ok(Vec::new())))),
+            }
         }
         NatsAuth::Token(token) => {
-            apply_reconnect_options(ConnectOptions::with_token(token.clone()), connection_timeout)
-                .connect(&config.servers)
-                .await
+            let token = token.resolve(env).await.map_err(invalid_setting(ENV_NATS_TOKEN))?;
+            Ok(opts.token(token))
         }
-        NatsAuth::None => {
-            apply_reconnect_options(ConnectOptions::new(), connection_timeout)
-                .connect(&config.servers)
-                .await
-        }
-    };
+        NatsAuth::None => Ok(opts),
+    }
+}
 
-    match connect_result {
+async fn resolve_jwt<E: ReadEnv>(jwt: &CredentialValue, env: &E) -> Result<String, ConnectError> {
+    let jwt = jwt.resolve(env).await.map_err(invalid_setting(ENV_NATS_JWT))?;
+    Ok(jwt.trim().to_owned())
+}
+
+fn jwt_signer(
+    key_pair: Arc<KeyPair>,
+) -> impl Fn(Vec<u8>) -> std::future::Ready<Result<Vec<u8>, AuthError>> + Send + Sync + 'static {
+    move |nonce| std::future::ready(key_pair.sign(&nonce).map_err(AuthError::new))
+}
+
+fn apply_tls(opts: ConnectOptions, tls: &NatsTls) -> Result<ConnectOptions, ConnectError> {
+    let NatsTls::Enabled { ca, client_cert } = tls else {
+        return Ok(opts);
+    };
+    let mut opts = opts.require_tls(true);
+    if let Some(client) = client_cert {
+        let cert = client.cert.path().map_err(invalid_setting(ENV_NATS_CERT))?;
+        let key = client.key.path().map_err(invalid_setting(ENV_NATS_KEY))?;
+        opts = opts.add_client_certificate(cert.to_path_buf(), key.to_path_buf());
+    }
+    if let Some(ca) = ca {
+        let ca = ca.path().map_err(invalid_setting(ENV_NATS_CA))?;
+        opts = opts.add_root_certificates(ca.to_path_buf());
+    }
+    Ok(opts)
+}
+
+fn tls(config: &NatsConfig) -> Result<&NatsTls, ConnectError> {
+    config.tls.as_ref().map_err(invalid_tls_setting)
+}
+
+pub(crate) async fn build_options<E: ReadEnv>(config: &NatsConfig, env: &E) -> Result<ConnectOptions, ConnectError> {
+    let tls = tls(config)?;
+    let opts = apply_auth(ConnectOptions::new(), &config.auth, env).await?;
+    apply_tls(opts, tls)
+}
+
+fn invalid_setting(setting: &'static str) -> impl Fn(SettingError) -> ConnectError {
+    move |error| ConnectError::InvalidSetting { setting, error }
+}
+
+fn invalid_tls_setting(misconfiguration: &TlsMisconfiguration) -> ConnectError {
+    match misconfiguration {
+        TlsMisconfiguration::IncompleteClientCertificate(incomplete) => ConnectError::InvalidSetting {
+            setting: incomplete.present_setting(),
+            error: SettingError::MissingCompanion(incomplete.missing_setting()),
+        },
+        TlsMisconfiguration::UnrecognizedDisabledValue(value) => ConnectError::InvalidSetting {
+            setting: ENV_NATS_TLS_DISABLED,
+            error: SettingError::UnrecognizedValue {
+                value: value.clone(),
+                accepted: &TLS_DISABLED_VALUES,
+            },
+        },
+        TlsMisconfiguration::DisabledAlongside(setting) => ConnectError::InvalidSetting {
+            setting: ENV_NATS_TLS_DISABLED,
+            error: SettingError::ConflictsWith(setting),
+        },
+    }
+}
+
+async fn prepare(config: &NatsConfig) -> Result<ConnectOptions, ConnectError> {
+    install_default_crypto_provider();
+    if config.servers.is_empty() {
+        return Err(ConnectError::NoServers);
+    }
+    let tls = tls(config)?;
+    let servers = servers_for_logging(&config.servers);
+    let auth = config.auth.description();
+    let transport = tls.description();
+    info!(
+        servers = ?servers,
+        auth,
+        tls = transport,
+        "Connecting to NATS"
+    );
+    if *tls == NatsTls::Disabled {
+        warn!(
+            servers = ?servers,
+            "NATS TLS is disabled, which is only for tests and local debugging"
+        );
+    }
+
+    build_options(config, &SystemEnv).await
+}
+
+fn connected(config: &NatsConfig, result: Result<Client, async_nats::ConnectError>) -> Result<Client, ConnectError> {
+    let auth = config.auth.description();
+    match result {
         Ok(client) => {
-            info!(
-                servers = ?config.servers,
-                auth = %config.auth.description(),
-                "Connected to NATS"
-            );
+            info!(servers = ?servers_for_logging(&config.servers), auth, "Connected to NATS");
             Ok(client)
         }
         Err(e) => {
-            warn!(
-                error = %e,
-                servers = ?config.servers,
-                auth = %config.auth.description(),
-                "Failed to connect to NATS"
-            );
+            log_connect_failure(&e, config);
             Err(ConnectError::ConnectionFailed {
                 servers: config.servers.clone(),
                 error: e,
             })
         }
     }
+}
+
+fn log_connect_failure(error: &async_nats::ConnectError, config: &NatsConfig) {
+    let servers = servers_for_logging(&config.servers);
+    log_connect_failure_to_facade(error, config, &servers);
+
+    static METADATA: tracing::Metadata<'static> = tracing::metadata! {
+        name: "event crates/platform/trogon-nats/src/connect.rs:212",
+        target: module_path!(),
+        level: Level::WARN,
+        fields: &["message", "error", "servers", "auth"],
+        callsite: &CALLSITE,
+        kind: tracing::metadata::Kind::EVENT,
+    };
+    static CALLSITE: tracing::__macro_support::MacroCallsite = tracing::__macro_support::MacroCallsite::new(&METADATA);
+
+    let interest = CALLSITE.interest();
+    if interest.is_never()
+        || (interest.is_sometimes() && !tracing::dispatcher::get_default(|subscriber| subscriber.enabled(&METADATA)))
+    {
+        return;
+    }
+    let message = "Failed to connect to NATS";
+    let error = tracing::field::display(error);
+    let servers = tracing::field::debug(&servers);
+    let auth = config.auth.description();
+    let values: [Option<&dyn Value>; 4] = [Some(&message), Some(&error), Some(&servers), Some(&auth)];
+    TraceEvent::dispatch(&METADATA, &METADATA.fields().value_set_all(&values));
+}
+
+fn servers_for_logging(servers: &[String]) -> Vec<String> {
+    servers.iter().map(|server| redact_server_userinfo(server)).collect()
+}
+
+fn redact_server_userinfo(server: &str) -> String {
+    let authority_start = server.find("://").map_or(0, |scheme_end| scheme_end + 3);
+    let authority = &server[authority_start..];
+    let authority_end = authority.find(['/', '?', '#']).unwrap_or(authority.len());
+    let authority = &authority[..authority_end];
+    let Some(userinfo_end) = authority.rfind('@') else {
+        return server.to_owned();
+    };
+    let userinfo_end = authority_start + userinfo_end;
+
+    format!("{}<redacted>{}", &server[..authority_start], &server[userinfo_end..])
+}
+
+fn log_connect_failure_to_facade(error: &async_nats::ConnectError, config: &NatsConfig, servers: &[String]) {
+    if tracing::dispatcher::has_been_set() {
+        return;
+    }
+    let metadata = log::Metadata::builder()
+        .level(log::Level::Warn)
+        .target(module_path!())
+        .build();
+    let logger = log::logger();
+    if log::max_level() < log::LevelFilter::Warn || !logger.enabled(&metadata) {
+        return;
+    }
+    logger.log(
+        &log::Record::builder()
+            .metadata(metadata)
+            .args(format_args!(
+                "Failed to connect to NATS error={error} servers={:?} auth={}",
+                servers,
+                config.auth.description()
+            ))
+            .build(),
+    );
+}
+
+/// Returns before any server answers and keeps dialing, then reconnecting, in
+/// the background, so it only fails on settings it cannot use.
+#[instrument(name = NATS_CONNECT, skip(config), fields(servers = ?servers_for_logging(&config.servers), auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
+pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Result<Client, ConnectError> {
+    let opts = prepare(config).await?;
+    let result = apply_reconnect_options(opts, connection_timeout)
+        .connect(&config.servers)
+        .await;
+    connected(config, result)
+}
+
+pub async fn connect_with_inbox_prefix(
+    config: &NatsConfig,
+    connection_timeout: Duration,
+    inbox_prefix: &crate::DottedNatsToken,
+) -> Result<Client, ConnectError> {
+    let opts = prepare(config).await?.custom_inbox_prefix(inbox_prefix.as_str());
+    let result = apply_reconnect_options(opts, connection_timeout)
+        .connect(&config.servers)
+        .await;
+    connected(config, result)
+}
+
+pub async fn connect_once_with_inbox_prefix(
+    config: &NatsConfig,
+    auth: NatsAuth,
+    connection_timeout: Duration,
+    inbox_prefix: &crate::DottedNatsToken,
+) -> Result<Client, ConnectError> {
+    let config = NatsConfig { auth, ..config.clone() };
+    let opts = prepare(&config).await?.custom_inbox_prefix(inbox_prefix.as_str());
+    let result = opts
+        .connection_timeout(connection_timeout)
+        .max_reconnects(config.servers.len())
+        .connect(&config.servers)
+        .await;
+    connected(&config, result)
+}
+
+/// Delays every replacement transport after an established session. The caller
+/// owns the quarantine duration; queued requests are not retracted by this API.
+pub async fn connect_once_with_reconnect_quarantine(
+    config: &NatsConfig,
+    auth: NatsAuth,
+    connection_timeout: Duration,
+    inbox_prefix: &crate::DottedNatsToken,
+    reconnect_quarantine: Duration,
+) -> Result<Client, ConnectError> {
+    let config = NatsConfig { auth, ..config.clone() };
+    let opts = prepare(&config).await?.custom_inbox_prefix(inbox_prefix.as_str());
+    let result = opts
+        .connection_timeout(connection_timeout)
+        .max_reconnects(config.servers.len())
+        .reconnect_to_server_callback(move |servers, last_info| async move {
+            if last_info.server_id.is_empty() {
+                None
+            } else {
+                servers.into_iter().next().map(|server| async_nats::ReconnectToServer {
+                    addr: server.addr,
+                    delay: Some(reconnect_quarantine),
+                })
+            }
+        })
+        .connect(&config.servers)
+        .await;
+    connected(&config, result)
+}
+
+/// Makes a single pass over the servers with `auth` in place of the configured
+/// authentication and fails once that pass does, for a connection that serves
+/// one request. TLS follows the same settings as [`connect`].
+///
+/// A connection that drops after it was made redials at most once per configured
+/// server and then closes for good, so it cannot go on dialing with the caller's
+/// token after its request is over.
+///
+/// Give a caller's token as [`CredentialValue::Literal`] so it is never read as
+/// a `file://` or `env://` reference.
+#[instrument(name = NATS_CONNECT, skip(config, auth), fields(servers = ?servers_for_logging(&config.servers), auth = %auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
+pub async fn connect_once(
+    config: &NatsConfig,
+    auth: NatsAuth,
+    connection_timeout: Duration,
+) -> Result<Client, ConnectError> {
+    let config = NatsConfig { auth, ..config.clone() };
+    let opts = prepare(&config).await?;
+    let result = opts
+        .connection_timeout(connection_timeout)
+        .max_reconnects(config.servers.len())
+        .connect(&config.servers)
+        .await;
+    connected(&config, result)
 }
 
 #[cfg(test)]

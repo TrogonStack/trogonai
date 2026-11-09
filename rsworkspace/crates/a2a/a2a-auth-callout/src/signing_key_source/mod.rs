@@ -1,14 +1,17 @@
 mod env;
 mod file;
+mod issuer_public_keys;
 mod key_version;
 mod loader;
 mod minting_material;
 mod signing_key_handle;
 mod static_source;
 mod vault;
+mod verifying_key;
 
 pub use env::EnvSigningKeySource;
 pub use file::FileSigningKeySource;
+pub use issuer_public_keys::{IssuerPublicKeys, IssuerPublicKeysError};
 pub(crate) use key_version::unminted_placeholder;
 pub use key_version::{KeyVersion, KeyVersionError};
 pub use loader::signing_key_source_from_env;
@@ -16,6 +19,7 @@ pub use minting_material::MintingMaterial;
 pub use signing_key_handle::SigningKeyHandle;
 pub use static_source::StaticSigningKeySource;
 pub use vault::VaultSigningKeySource;
+pub use verifying_key::{VerifyingKey, VerifyingKeySource};
 
 pub trait SigningKeySource: Send + Sync {
     fn current(&self) -> SigningKeyHandle;

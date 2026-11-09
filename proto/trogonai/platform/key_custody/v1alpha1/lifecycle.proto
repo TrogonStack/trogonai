@@ -1,0 +1,25 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+// Owned by the platform. A failed validation keeps the registration
+// PENDING_VALIDATION and records the reason. RETIRED is terminal. Unspecified
+// and unknown values are invalid.
+enum KeyBackendLifecycle {
+  KEY_BACKEND_LIFECYCLE_UNSPECIFIED = 0;
+  KEY_BACKEND_LIFECYCLE_PENDING_VALIDATION = 1;
+  KEY_BACKEND_LIFECYCLE_ACTIVE = 2;
+  KEY_BACKEND_LIFECYCLE_RETIRED = 3;
+}
+
+// Controlled by the registration's owner and authoritative: only the owner
+// changes it. PAUSED is a platform-side admission control, never the
+// provider-side veto. While PAUSED the platform makes no provider call for the
+// registration, probes included, and every gated operation fails with
+// KeyUseDenied and denial reason BACKEND_PAUSED (ADR#0030). Unspecified and
+// unknown values are invalid.
+enum KeyBackendAdmission {
+  KEY_BACKEND_ADMISSION_UNSPECIFIED = 0;
+  KEY_BACKEND_ADMISSION_ENABLED = 1;
+  KEY_BACKEND_ADMISSION_PAUSED = 2;
+}

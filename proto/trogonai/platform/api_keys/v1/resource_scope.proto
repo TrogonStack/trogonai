@@ -1,0 +1,34 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "buf/validate/validate.proto";
+
+// ResourceScope narrows where a permission applies. It never grants
+// (ADR#0077 section 4).
+//
+// A request must pass both the permission check and every applicable scope
+// check. Scope is ANDed with permissions, so widening a scope can never add an
+// ability the permission set does not already carry.
+//
+// The oneof exists to close the empty-list ambiguity. A bare repeated field
+// would leave the system deciding at runtime whether an empty list means
+// "everything" or "nothing", which is a security question settled by accident
+// in whichever call site is read first. Here All is explicit, and Only with an
+// empty set is rejected at creation rather than interpreted.
+message ResourceScope {
+  oneof kind {
+    option (buf.validate.oneof).required = true;
+
+    All all = 1;
+    Only only = 2;
+  }
+
+  // Project-wide, still subject to permissions.
+  message All {}
+
+  // Exactly these ids. The set must be non-empty.
+  message Only {
+    repeated string ids = 1 [(buf.validate.field).repeated.min_items = 1];
+  }
+}

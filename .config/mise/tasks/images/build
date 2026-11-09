@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+#MISE description="Build a local image from devops/docker/images"
+
+import argparse
+from pathlib import Path
+import re
+import subprocess
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Build a local repository image")
+    parser.add_argument("image", help="Directory name under devops/docker/images")
+    parser.add_argument("tag", nargs="?", help="Local image reference, defaulting to its commit")
+    args = parser.parse_args()
+
+    if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", args.image) is None:
+        parser.error("image must be a lowercase name containing letters, numbers and hyphens")
+
+    root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+    status = subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=root, text=True
+    )
+    if status:
+        parser.error("Build from a clean worktree so the image revision identifies its source")
+
+    image_dir = root / "devops" / "docker" / "images" / args.image
+    dockerfile = image_dir / "Dockerfile"
+    if not dockerfile.is_file():
+        parser.error(f"No Dockerfile for image {args.image}")
+
+    source = dockerfile.read_text().replace("\\\n", " ")
+    context = image_dir
+    for mount in re.findall(r"--mount=([^\s]+)", source):
+        options = dict(option.split("=", 1) for option in mount.split(",") if "=" in option)
+        if options.get("type", "bind") == "bind" and "from" not in options:
+            context = root
+            break
+
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    tag = args.tag or f"{args.image}:{revision}"
+    subprocess.run(
+        [
+            "docker",
+            "build",
+            "--file",
+            str(dockerfile),
+            "--tag",
+            tag,
+            "--build-arg",
+            f"OCI_REVISION={revision}",
+            str(context),
+        ],
+        cwd=root,
+        check=True,
+    )
+
+
+if __name__ == "__main__":
+    main()

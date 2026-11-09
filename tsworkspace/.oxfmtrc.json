@@ -21,6 +21,7 @@
     "*.min.js",
     "pnpm-lock.yaml",
     "*.hbs",
-    "**/routeTree.gen.ts"
+    "**/routeTree.gen.ts",
+    "**/src/gen/**"
   ]
 }

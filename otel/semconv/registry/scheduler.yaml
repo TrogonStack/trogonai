@@ -1,52 +1,11 @@
 groups:
   # trogon-scheduler: reconciliation consumer (meter "trogon-scheduler").
+  # The shared `outcome` attribute is defined in common.yaml.
   - id: registry.trogonai.scheduler
     type: attribute_group
     display_name: Scheduler Attributes
     brief: Attributes emitted by the trogon-scheduler reconciliation pipeline today.
     attributes:
-      - id: outcome
-        type:
-          members:
-            - id: published
-              value: "published"
-              brief: An execution schedule message was published.
-              stability: development
-            - id: purged
-              value: "purged"
-              brief: An execution schedule subject was purged.
-              stability: development
-            - id: stored_paused
-              value: "stored_paused"
-              brief: The schedule was stored in a paused state.
-              stability: development
-            - id: unsupported
-              value: "unsupported"
-              brief: The schedule event type is not supported.
-              stability: development
-            - id: expired
-              value: "expired"
-              brief: The schedule had already expired.
-              stability: development
-            - id: resumed_expired
-              value: "resumed_expired"
-              brief: An expired schedule was resumed.
-              stability: development
-            - id: duplicate_stale
-              value: "duplicate_stale"
-              brief: A duplicate or stale record was observed.
-              stability: development
-            - id: skipped_foreign
-              value: "skipped_foreign"
-              brief: A record owned by another partition was skipped.
-              stability: development
-            - id: durable_failure
-              value: "durable_failure"
-              brief: A durable failure was recorded for the schedule.
-              stability: development
-        stability: development
-        brief: Reconciliation outcome for a processed schedule event record.
-        examples: ["published", "purged"]
       - id: stream_id
         type: string
         stability: development

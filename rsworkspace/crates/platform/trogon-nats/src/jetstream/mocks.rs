@@ -1532,6 +1532,10 @@ impl ObjectStorePut for MockObjectStore {
         self.objects.lock().unwrap().push((name.to_string(), Bytes::from(buf)));
         Ok(())
     }
+
+    async fn contains(&self, name: &str) -> bool {
+        self.objects.lock().unwrap().iter().any(|(k, _)| k == name)
+    }
 }
 
 impl ObjectStoreGet for MockObjectStore {

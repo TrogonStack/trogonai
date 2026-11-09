@@ -1,0 +1,93 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/key_custody/v1alpha1/operation.proto";
+
+// Why a connection check failed. Unspecified and unknown values are invalid.
+enum KeyBackendFailureReason {
+  KEY_BACKEND_FAILURE_REASON_UNSPECIFIED = 0;
+  KEY_BACKEND_FAILURE_REASON_AUTHENTICATION_FAILED = 1;
+  KEY_BACKEND_FAILURE_REASON_ACCESS_DENIED = 2;
+  KEY_BACKEND_FAILURE_REASON_TLS_FAILURE = 3;
+  KEY_BACKEND_FAILURE_REASON_UNREACHABLE = 4;
+  KEY_BACKEND_FAILURE_REASON_TIMEOUT = 5;
+  KEY_BACKEND_FAILURE_REASON_INVALID_RESPONSE = 6;
+  KEY_BACKEND_FAILURE_REASON_CAPABILITY_MISSING = 7;
+}
+
+// Carries only the typed reason, never a provider error, header, or response.
+message KeyBackendConnectionFailure {
+  KeyBackendFailureReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// Expiry and credential-age signals, one per piece of trust material a
+// registration depends on. A value that is not known stays absent and is never
+// recorded as zero. Warning thresholds are product policy. Expiry never blocks
+// admission: when a certificate or trust root actually expires, the TLS
+// handshake fails closed (ADR#0030).
+message KeyBackendTrustExpiry {
+  // The endpoint's server certificate not-after.
+  google.protobuf.Timestamp server_certificate_not_after = 1 [(buf.validate.field).timestamp.gt = {seconds: 0}];
+  google.protobuf.Timestamp client_certificate_not_after = 2 [(buf.validate.field).timestamp.gt = {seconds: 0}];
+  // The earliest not-after among the registration's trust roots.
+  google.protobuf.Timestamp trust_root_not_after = 3 [(buf.validate.field).timestamp.gt = {seconds: 0}];
+  // The credential signals are present only while a CredentialRef is in use.
+  google.protobuf.Timestamp credential_issued_at = 4 [(buf.validate.field).timestamp.gt = {seconds: 0}];
+  google.protobuf.Timestamp credential_expires_at = 5 [(buf.validate.field).timestamp.gt = {seconds: 0}];
+}
+
+// One measured provider call. Latency is recorded per registration and
+// operation kind (ADR#0030). How many observations are retained, and any
+// summary over them, is not fixed here.
+message LatencyObservation {
+  KeyOperationKind operation = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  google.protobuf.Duration duration = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gte = {}
+  ];
+  google.protobuf.Timestamp observed_at = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}
+
+// Advisory observed connection health, never an admission input. The provider
+// call itself fails closed, so health never needs to block anything, and the
+// platform never pauses a registration from it (ADR#0030). UNKNOWN means no
+// observation exists, so observed_at is present exactly when the status is
+// connected or failed. The platform makes no provider call for a paused
+// registration, so its health is not refreshed until it resumes.
+message KeyBackendHealth {
+  option (buf.validate.message).cel = {
+    id: "health.observed_at"
+    message: "an observation time accompanies a connected or failed status and no other"
+    expression: "has(this.unknown) != has(this.observed_at)"
+  };
+
+  oneof status {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty unknown = 1;
+    google.protobuf.Empty connected = 2;
+    KeyBackendConnectionFailure failed = 3;
+  }
+  google.protobuf.Timestamp observed_at = 4 [(buf.validate.field).timestamp.gt = {seconds: 0}];
+  KeyBackendTrustExpiry trust_expiry = 5;
+  repeated LatencyObservation latency = 6;
+}

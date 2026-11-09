@@ -8,6 +8,9 @@ import rego.v1
 # `input.groups` are the authored groups.
 
 # Registered OpenTelemetry root namespaces. Custom telemetry must not claim them.
+# Standard metrics retain their upstream namespace.
+standard_metrics := {"http.server.request.duration"}
+
 otel_reserved_roots := {
 	"http", "rpc", "messaging", "dns", "db", "system", "process", "container",
 	"k8s", "jvm", "dotnet", "nodejs", "go", "v8js", "aws", "azure", "gcp",
@@ -55,6 +58,7 @@ deny contains finding("metric_name_reserved_root", message, "violation") if {
 	group.type == "metric"
 	root := split(group.metric_name, ".")[0]
 	otel_reserved_roots[root]
+	not standard_metrics[group.metric_name]
 	message := sprintf("metric name '%s' claims reserved OTel root namespace '%s'; custom metrics must use a non-reserved root", [group.metric_name, root])
 }
 

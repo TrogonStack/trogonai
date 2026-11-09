@@ -36,4 +36,4 @@ pub use nats::{
     parse_client_subject, parse_server_subject,
 };
 pub use transport::{NatsTransport, NatsTransportError};
-pub use trogon_nats::{NatsAuth, NatsConfig};
+pub use trogon_nats::{CredentialValue, NatsAuth, NatsConfig};

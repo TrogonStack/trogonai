@@ -8,6 +8,24 @@
 //! instrument, so call sites never restate them. The registry under
 //! `otel/semconv/` is authoritative for name, instrument, description, and unit.
 
+/// Imported reply requests refused by concurrent admission limits
+///
+/// Instrument: `counter`. Unit: `{request}`.
+pub const A2A_GATEWAY_IMPORTED_REPLY_CAPACITY_REFUSALS: &str = "a2a.gateway.imported_reply.capacity_refusals";
+
+/// Imported reply requests refused by concurrent admission limits
+///
+/// Instrument: `counter`. Unit: `{request}`.
+pub fn build_a2a_gateway_imported_reply_capacity_refusals(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(A2A_GATEWAY_IMPORTED_REPLY_CAPACITY_REFUSALS)
+        .with_description("Imported reply requests refused by concurrent admission limits.")
+        .with_unit("{request}")
+        .build()
+}
+
 /// Total number of ACP errors by operation and reason
 ///
 /// Instrument: `counter`. Unit: `{error}`.
@@ -271,6 +289,225 @@ pub fn build_decider_wasm_traps(meter: &opentelemetry::metrics::Meter) -> opente
         .u64_counter(DECIDER_WASM_TRAPS)
         .with_description("WASM guest call traps, by classification.")
         .with_unit("{trap}")
+        .build()
+}
+
+/// Credential resolutions served from the runtime cache
+///
+/// Instrument: `counter`. Unit: `{resolution}`.
+pub const GATEWAY_CREDENTIAL_CACHE_HITS: &str = "gateway.credential.cache.hits";
+
+/// Credential resolutions served from the runtime cache
+///
+/// Instrument: `counter`. Unit: `{resolution}`.
+pub fn build_gateway_credential_cache_hits(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(GATEWAY_CREDENTIAL_CACHE_HITS)
+        .with_description("Credential resolutions served from the runtime cache.")
+        .with_unit("{resolution}")
+        .build()
+}
+
+/// Credential resolutions that had to read the secret store
+///
+/// Instrument: `counter`. Unit: `{resolution}`.
+pub const GATEWAY_CREDENTIAL_CACHE_MISSES: &str = "gateway.credential.cache.misses";
+
+/// Credential resolutions that had to read the secret store
+///
+/// Instrument: `counter`. Unit: `{resolution}`.
+pub fn build_gateway_credential_cache_misses(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(GATEWAY_CREDENTIAL_CACHE_MISSES)
+        .with_description("Credential resolutions that had to read the secret store.")
+        .with_unit("{resolution}")
+        .build()
+}
+
+/// Credential resolutions refused by the credential's runtime release policy
+///
+/// Instrument: `counter`. Unit: `{resolution}`.
+pub const GATEWAY_CREDENTIAL_DELIVERY_DENIED: &str = "gateway.credential.delivery.denied";
+
+/// Credential resolutions refused by the credential's runtime release policy
+///
+/// Instrument: `counter`. Unit: `{resolution}`.
+pub fn build_gateway_credential_delivery_denied(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(GATEWAY_CREDENTIAL_DELIVERY_DENIED)
+        .with_description("Credential resolutions refused by the credential's runtime release policy.")
+        .with_unit("{resolution}")
+        .build()
+}
+
+/// Credential recovery worker pass errors by reason
+///
+/// Instrument: `counter`. Unit: `{error}`.
+pub const GATEWAY_CREDENTIAL_RECOVERY_ERRORS: &str = "gateway.credential.recovery.errors";
+
+/// Credential recovery worker pass errors by reason
+///
+/// Instrument: `counter`. Unit: `{error}`.
+pub fn build_gateway_credential_recovery_errors(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(GATEWAY_CREDENTIAL_RECOVERY_ERRORS)
+        .with_description("Credential recovery worker pass errors by reason.")
+        .with_unit("{error}")
+        .build()
+}
+
+/// Credential recovery worker passes by outcome
+///
+/// Instrument: `counter`. Unit: `{pass}`.
+pub const GATEWAY_CREDENTIAL_RECOVERY_PASSES: &str = "gateway.credential.recovery.passes";
+
+/// Credential recovery worker passes by outcome
+///
+/// Instrument: `counter`. Unit: `{pass}`.
+pub fn build_gateway_credential_recovery_passes(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(GATEWAY_CREDENTIAL_RECOVERY_PASSES)
+        .with_description("Credential recovery worker passes by outcome.")
+        .with_unit("{pass}")
+        .build()
+}
+
+/// Credential recovery commands by status and kind
+///
+/// Instrument: `counter`. Unit: `{command}`.
+pub const GATEWAY_CREDENTIAL_RECOVERY_RECOVERIES: &str = "gateway.credential.recovery.recoveries";
+
+/// Credential recovery commands by status and kind
+///
+/// Instrument: `counter`. Unit: `{command}`.
+pub fn build_gateway_credential_recovery_recoveries(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(GATEWAY_CREDENTIAL_RECOVERY_RECOVERIES)
+        .with_description("Credential recovery commands by status and kind.")
+        .with_unit("{command}")
+        .build()
+}
+
+/// Raw credential stream events scanned by the recovery worker
+///
+/// Instrument: `counter`. Unit: `{event}`.
+pub const GATEWAY_CREDENTIAL_RECOVERY_SCANNED_EVENTS: &str = "gateway.credential.recovery.scanned_events";
+
+/// Raw credential stream events scanned by the recovery worker
+///
+/// Instrument: `counter`. Unit: `{event}`.
+pub fn build_gateway_credential_recovery_scanned_events(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(GATEWAY_CREDENTIAL_RECOVERY_SCANNED_EVENTS)
+        .with_description("Raw credential stream events scanned by the recovery worker.")
+        .with_unit("{event}")
+        .build()
+}
+
+/// Recovery passes that observed a stuck recovery checkpoint
+///
+/// Instrument: `counter`. Unit: `{pass}`.
+pub const GATEWAY_CREDENTIAL_RECOVERY_STUCK_REPORTS: &str = "gateway.credential.recovery.stuck_reports";
+
+/// Recovery passes that observed a stuck recovery checkpoint
+///
+/// Instrument: `counter`. Unit: `{pass}`.
+pub fn build_gateway_credential_recovery_stuck_reports(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(GATEWAY_CREDENTIAL_RECOVERY_STUCK_REPORTS)
+        .with_description("Recovery passes that observed a stuck recovery checkpoint.")
+        .with_unit("{pass}")
+        .build()
+}
+
+/// Credential resolutions that failed to read material from the secret store
+///
+/// Instrument: `counter`. Unit: `{resolution}`.
+pub const GATEWAY_CREDENTIAL_RESOLVE_FAILURES: &str = "gateway.credential.resolve.failures";
+
+/// Credential resolutions that failed to read material from the secret store
+///
+/// Instrument: `counter`. Unit: `{resolution}`.
+pub fn build_gateway_credential_resolve_failures(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(GATEWAY_CREDENTIAL_RESOLVE_FAILURES)
+        .with_description("Credential resolutions that failed to read material from the secret store.")
+        .with_unit("{resolution}")
+        .build()
+}
+
+/// Time from a credential revocation event's recorded timestamp to runtime cache invalidation
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub const GATEWAY_CREDENTIAL_REVOCATION_LATENCY: &str = "gateway.credential.revocation.latency";
+
+/// Time from a credential revocation event's recorded timestamp to runtime cache invalidation
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub fn build_gateway_credential_revocation_latency(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Histogram<f64> {
+    meter
+        .f64_histogram(GATEWAY_CREDENTIAL_REVOCATION_LATENCY)
+        .with_description("Time from a credential revocation event's recorded timestamp to runtime cache invalidation.")
+        .with_unit("s")
+        .build()
+}
+
+/// Credential secret-store writes that failed, by lifecycle operation
+///
+/// Instrument: `counter`. Unit: `{failure}`.
+pub const GATEWAY_CREDENTIAL_STORE_WRITE_FAILURES: &str = "gateway.credential.store.write.failures";
+
+/// Credential secret-store writes that failed, by lifecycle operation
+///
+/// Instrument: `counter`. Unit: `{failure}`.
+pub fn build_gateway_credential_store_write_failures(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(GATEWAY_CREDENTIAL_STORE_WRITE_FAILURES)
+        .with_description("Credential secret-store writes that failed, by lifecycle operation.")
+        .with_unit("{failure}")
+        .build()
+}
+
+/// Duration of HTTP server requests
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub const HTTP_SERVER_REQUEST_DURATION: &str = "http.server.request.duration";
+
+/// Duration of HTTP server requests
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub fn build_http_server_request_duration(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Histogram<f64> {
+    meter
+        .f64_histogram(HTTP_SERVER_REQUEST_DURATION)
+        .with_description("Duration of HTTP server requests.")
+        .with_unit("s")
+        .with_boundaries(vec![
+            0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+        ])
         .build()
 }
 

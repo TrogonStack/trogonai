@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "socket.malformed.missing_payload",
+  "kind": "malformed",
+  "transport": "socket_mode",
+  "provenance": {
+    "bolt_version": "5.1.0",
+    "bolt_commit": "3f8823c93f5639e99f05a2df9c7dc692da5cc184",
+    "node_slack_sdk_commit": "d02afdfd5c87f896dc9994dfe2b55472758fbcf4",
+    "payload_source": "hand written interactive Socket Mode envelope without a payload",
+    "wire_source": "https://docs.slack.dev/apis/events-api/using-socket-mode",
+    "ack_source": null
+  },
+  "not_representable": null,
+  "input": {
+    "frame": "{\"envelope_id\":\"dbdd0ef3-1543-4f94-bfb4-133d0e6c1545\",\"type\":\"interactive\",\"accepts_response_payload\":false}"
+  },
+  "bolt": {
+    "outcome": "ignored",
+    "ack": null,
+    "dispatch": null
+  },
+  "expected": {
+    "outcome": "reject",
+    "nats": null,
+    "request": null,
+    "http": null,
+    "socket_ack": null
+  }
+}

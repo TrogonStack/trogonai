@@ -8,23 +8,18 @@
 //! a dependency cannot change which cryptography a binary uses.
 //!
 //! Call [`install_default_crypto_provider`] before the first TLS handshake,
-//! ahead of any client construction or task spawn.
-
-/// A rustls [`rustls::crypto::CryptoProvider`] was already installed for this
-/// process, so the caller has no guarantee which cryptography it now uses.
-#[derive(Debug, thiserror::Error)]
-#[error("a rustls CryptoProvider was already installed for this process")]
-pub struct CryptoProviderAlreadyInstalledError;
+//! ahead of any client construction or task spawn. Libraries that open TLS
+//! connections on a binary's behalf call it too, so every caller shares one
+//! provider no matter which of them runs first.
 
 /// Installs aws-lc-rs as the process-wide rustls
 /// [`rustls::crypto::CryptoProvider`].
 ///
-/// Fails rather than accepting whichever provider got there first, so a second
-/// installer cannot silently downgrade the process to different cryptography.
-pub fn install_default_crypto_provider() -> Result<(), CryptoProviderAlreadyInstalledError> {
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .map_err(|_| CryptoProviderAlreadyInstalledError)
+/// Calling it again once a provider is installed does nothing, so a binary and
+/// the libraries it links can each make sure a provider exists without
+/// coordinating which of them goes first.
+pub fn install_default_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
 
 #[cfg(test)]

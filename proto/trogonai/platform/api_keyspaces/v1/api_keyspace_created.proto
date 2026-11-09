@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.v1;
+
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_policy.proto";
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_tier.proto";
+import "trogonai/platform/api_keyspaces/v1/environment.proto";
+
+// ApiKeyspaceCreated records the full definition of a keyspace.
+//
+// Environment and tier appear here and in no later event, because no later
+// event may change them.
+message ApiKeyspaceCreated {
+  string api_keyspace_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string project_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string name = 3 [features.field_presence = LEGACY_REQUIRED];
+  Environment environment = 4;
+  ApiKeyspaceTier tier = 5;
+  ApiKeyspacePolicy policy = 6 [features.field_presence = LEGACY_REQUIRED];
+}

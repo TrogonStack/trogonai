@@ -60,10 +60,7 @@ fn message_with_reply_wire_client(subject: &str, reply: &str, item: &TxJsonRpcMe
 fn config() -> Config {
     Config::new(
         McpPrefix::new("mcp").unwrap(),
-        trogon_nats::NatsConfig {
-            servers: vec!["localhost:4222".to_string()],
-            auth: trogon_nats::NatsAuth::None,
-        },
+        trogon_nats::NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None),
     )
 }
 

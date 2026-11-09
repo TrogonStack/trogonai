@@ -9,10 +9,8 @@ use crate::a2a_prefix::A2aPrefix;
 use crate::constants::{
     DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_MAX_CONCURRENT_CLIENT_TASKS, DEFAULT_OPERATION_TIMEOUT,
     DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE, DEFAULT_TASK_TIMEOUT, ENV_CONNECT_TIMEOUT_SECS, ENV_MAX_CONCURRENT_CLIENT_TASKS,
-    ENV_OPERATION_TIMEOUT_SECS, ENV_PUSH_DLQ_CALLER_SEGMENT, ENV_PUSH_DLQ_DEDUP_LRU_SIZE, ENV_TASK_TIMEOUT_SECS,
-    MIN_TIMEOUT_SECS,
+    ENV_OPERATION_TIMEOUT_SECS, ENV_PUSH_DLQ_DEDUP_LRU_SIZE, ENV_TASK_TIMEOUT_SECS, MIN_TIMEOUT_SECS,
 };
-use crate::push::caller_id::CallerId;
 
 pub use crate::constants::{DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX};
 
@@ -23,7 +21,6 @@ pub struct Config {
     pub(crate) operation_timeout: Duration,
     pub(crate) task_timeout: Duration,
     pub(crate) max_concurrent_client_tasks: usize,
-    pub(crate) push_dlq_caller_segment: CallerId,
     pub(crate) push_dlq_dedup_lru_size: usize,
 }
 
@@ -35,7 +32,6 @@ impl Config {
             operation_timeout: DEFAULT_OPERATION_TIMEOUT,
             task_timeout: DEFAULT_TASK_TIMEOUT,
             max_concurrent_client_tasks: DEFAULT_MAX_CONCURRENT_CLIENT_TASKS,
-            push_dlq_caller_segment: CallerId::default(),
             push_dlq_dedup_lru_size: DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE,
         }
     }
@@ -52,16 +48,6 @@ impl Config {
 
     pub fn with_max_concurrent_client_tasks(mut self, max: usize) -> Self {
         self.max_concurrent_client_tasks = max.max(1);
-        self
-    }
-
-    pub fn with_push_dlq_caller_segment(mut self, segment: impl Into<String>) -> Self {
-        let s = segment.into();
-        self.push_dlq_caller_segment = if s.trim().is_empty() {
-            CallerId::default()
-        } else {
-            CallerId::from(s.trim())
-        };
         self
     }
 
@@ -89,20 +75,13 @@ impl Config {
         self.max_concurrent_client_tasks
     }
 
-    pub fn push_dlq_caller_segment(&self) -> &CallerId {
-        &self.push_dlq_caller_segment
-    }
-
     pub fn push_dlq_dedup_lru_size(&self) -> usize {
         self.push_dlq_dedup_lru_size
     }
 
     #[cfg(test)]
     pub(crate) fn for_test(a2a_prefix: &str) -> Self {
-        let nats = NatsConfig {
-            servers: vec!["localhost:4222".to_string()],
-            auth: trogon_nats::NatsAuth::None,
-        };
+        let nats = NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None);
         Self::new(A2aPrefix::new(a2a_prefix.to_string()).unwrap(), nats)
             .with_task_timeout(crate::constants::TEST_TASK_TIMEOUT)
     }
@@ -170,10 +149,6 @@ pub fn apply_timeout_overrides<E: ReadEnv>(config: Config, env_provider: &E) -> 
                 );
             }
         }
-    }
-
-    if let Ok(raw) = env_provider.var(ENV_PUSH_DLQ_CALLER_SEGMENT) {
-        config = config.with_push_dlq_caller_segment(raw);
     }
 
     if let Ok(raw) = env_provider.var(ENV_PUSH_DLQ_DEDUP_LRU_SIZE) {

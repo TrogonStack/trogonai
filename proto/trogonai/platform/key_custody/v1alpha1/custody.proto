@@ -1,0 +1,73 @@
+edition = "2024";
+
+package trogonai.platform.key_custody.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/platform/key_custody/v1alpha1/identity.proto";
+import "trogonai/platform/key_custody/v1alpha1/provider.proto";
+
+// Names the data-plane service that owns a purpose's wrapped payloads.
+message PurposeOwner {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}
+
+// One catalogue entry. A data-plane service declares the purposes whose
+// wrapped payloads it owns, and tenant surfaces list only declared purposes
+// (ADR#0033).
+message KeyPurposeDeclaration {
+  KeyPurpose purpose = 1 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  string description = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  PurposeOwner owner = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A dedicated key exposes only its opaque KeyRef. The platform registration
+// behind it, its provider, and its locator are removed from the projection
+// (ADR#0033).
+message DedicatedCustody {
+  KeyRef key_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A customer managed key names the registration the tenant owns and that
+// registration's provider. Admission, not this message, checks that the
+// registration belongs to the tenant. The locator is not part of the summary;
+// the owner reads it in CustomerManagedKeyBindingDetail.
+message CustomerManagedCustody {
+  KeyRef key_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  KeyBackendId key_backend_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  KeyProvider provider = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// The tenant-facing custody summary for one purpose. Tenant projections are
+// derived after removing the platform registration's identity, provider, and
+// locator, so no arm below can carry them: managed exposes no key identity,
+// dedicated exposes only an opaque KeyRef, and only customer managed names a
+// registration, one the tenant owns (ADR#0033). The purpose comes from the
+// catalogue of purposes declared by the data-plane services that own the
+// wrapped payloads.
+message PurposeCustody {
+  KeyPurpose purpose = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  oneof custody {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty managed = 2;
+    DedicatedCustody dedicated = 3;
+    CustomerManagedCustody customer_managed = 4;
+  }
+}
