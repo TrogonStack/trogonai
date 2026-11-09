@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::v1::{PromptRequest, PromptResponse, StopReason};
+use agent_client_protocol::v1::schema::{PromptRequest, PromptResponse, StopReason};
 use agent_client_protocol::{Error, ErrorCode};
 use async_nats::jetstream::AckKind;
 use futures::StreamExt;
@@ -39,7 +39,7 @@ where
 
     let session_id = AcpSessionId::try_from(&args.session_id).map_err(|_| {
         bridge.metrics.record_error("prompt", "invalid_session_id");
-        Error::new(ErrorCode::InvalidParams.into(), "Invalid session ID")
+        Error::new(ErrorCode::INVALID_PARAMS, "Invalid session ID")
     })?;
 
     let req_id = ReqId::new();
@@ -80,24 +80,22 @@ where
     let resp_stream = js
         .get_stream(&responses_stream)
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("get responses stream: {e}")))?;
-    let resp_consumer = resp_stream.create_consumer(resp_config).await.map_err(|e| {
-        Error::new(
-            ErrorCode::InternalError.into(),
-            format!("create response consumer: {e}"),
-        )
-    })?;
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("get responses stream: {e}")))?;
+    let resp_consumer = resp_stream
+        .create_consumer(resp_config)
+        .await
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("create response consumer: {e}")))?;
     let mut resp_messages = resp_consumer
         .messages()
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("response messages: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("response messages: {e}")))?;
 
     // Cancel still uses core NATS — it's a fire-and-forget signal, not persisted.
     let mut cancel_sub = bridge
         .nats
         .subscribe(responses::CancelledSubject::new(prefix, session_id))
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe cancelled: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("subscribe cancelled: {e}")))?;
 
     // Now publish — consumers are ready, no race condition.
     let encoded = encode_request(
@@ -105,7 +103,7 @@ where
         RequestId::String(req_id.as_str().to_string()),
         args,
     )
-    .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("encode request: {e}")))?;
+    .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("encode request: {e}")))?;
 
     let mut headers = encoded.headers;
     headers.insert(SESSION_ID_HEADER, session_id.as_str());
@@ -113,9 +111,9 @@ where
     let prompt_subject = commands::PromptSubject::new(prefix, session_id);
     js.publish_with_headers(prompt_subject, headers, encoded.body)
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("js publish: {e}")))?
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js ack: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("js ack: {e}")))?;
 
     let op_timeout = bridge.config.prompt_timeout();
 
@@ -147,7 +145,7 @@ where
                                 let _ = js_msg.ack_with(AckKind::Term).await;
                                 bridge.metrics.record_error("prompt", "bad_response_payload");
                                 break Err(Error::new(
-                                    ErrorCode::InternalError.into(),
+                                    ErrorCode::INTERNAL_ERROR,
                                     "bad response payload",
                                 ));
                             }
@@ -155,7 +153,7 @@ where
                                 let _ = js_msg.ack_with(AckKind::Term).await;
                                 bridge.metrics.record_error("prompt", "bad_response_payload");
                                 break Err(Error::new(
-                                    ErrorCode::InternalError.into(),
+                                    ErrorCode::INTERNAL_ERROR,
                                     format!("decode response: {e}"),
                                 ));
                             }
@@ -164,21 +162,21 @@ where
                     Ok(Some(Err(e))) => {
                         bridge.metrics.record_error("prompt", "response_consumer_error");
                         break Err(Error::new(
-                            ErrorCode::InternalError.into(),
+                            ErrorCode::INTERNAL_ERROR,
                             format!("response consumer: {e}"),
                         ));
                     }
                     Ok(None) => {
                         bridge.metrics.record_error("prompt", "response_stream_closed");
                         break Err(Error::new(
-                            ErrorCode::InternalError.into(),
+                            ErrorCode::INTERNAL_ERROR,
                             "response stream closed unexpectedly",
                         ));
                     }
                     Err(_elapsed) => {
                         bridge.metrics.record_error("prompt", "prompt_timeout");
                         break Err(Error::new(
-                            ErrorCode::InternalError.into(),
+                            ErrorCode::INTERNAL_ERROR,
                             "prompt timed out waiting for runner",
                         ));
                     }

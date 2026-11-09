@@ -11,8 +11,8 @@ graph LR
 
 ## Usage
 
-Runners implement `acp_nats::AgentHandler`. The SDK's own `Agent` trait was removed in
-`agent-client-protocol` 2.0.0, so the bridge owns this trait surface
+Runners implement `acp_nats::AgentHandler`. The SDK uses builder callbacks, so the
+bridge owns this trait surface
 (see [ADR#0020](../../../../docs/adr/0020-acp-sdk-1x-boundary-and-bridge-traits.md)).
 Only `initialize`, `authenticate`, `new_session`, `prompt`, and `cancel` are required; every
 other method defaults to `method_not_found`.
@@ -22,7 +22,7 @@ use acp_nats::{AcpPrefix, AgentHandler};
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::Result;
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     AuthenticateRequest, AuthenticateResponse, CancelNotification, InitializeRequest, InitializeResponse,
     NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, StopReason,
 };
@@ -32,7 +32,7 @@ struct MyAgent;
 #[async_trait::async_trait]
 impl AgentHandler for MyAgent {
     async fn initialize(&self, _args: InitializeRequest) -> Result<InitializeResponse> {
-        Ok(InitializeResponse::new(ProtocolVersion::V0))
+        Ok(InitializeResponse::new(ProtocolVersion::V1))
     }
 
     async fn authenticate(&self, _args: AuthenticateRequest) -> Result<AuthenticateResponse> {

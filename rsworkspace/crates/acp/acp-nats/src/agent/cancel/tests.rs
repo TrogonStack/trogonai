@@ -3,7 +3,7 @@ use crate::AgentHandler;
 use crate::agent::test_support::{has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics};
 use crate::config::Config;
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::CancelNotification;
+use agent_client_protocol::v1::schema::CancelNotification;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_std::time::MockClock;
 
@@ -60,7 +60,7 @@ async fn cancel_validates_session_id() {
         .await
         .unwrap_err();
     assert!(err.message.contains("Invalid session ID"));
-    assert_eq!(err.code, ErrorCode::InvalidParams);
+    assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]

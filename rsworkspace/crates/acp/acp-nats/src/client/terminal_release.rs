@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{ReleaseTerminalRequest, ReleaseTerminalResponse};
+use agent_client_protocol::v1::schema::{ReleaseTerminalRequest, ReleaseTerminalResponse};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
 use trogon_semconv::span::ACP_CLIENT_TERMINAL_RELEASE;
@@ -18,7 +18,7 @@ pub enum TerminalReleaseError {
 
 pub fn error_code_and_message(e: &TerminalReleaseError) -> (ErrorCode, String) {
     match e {
-        TerminalReleaseError::InvalidRequest(message) => (ErrorCode::InvalidParams, message.clone()),
+        TerminalReleaseError::InvalidRequest(message) => (ErrorCode::INVALID_PARAMS, message.clone()),
         TerminalReleaseError::ClientError(inner) => (inner.code, inner.message.clone()),
     }
 }

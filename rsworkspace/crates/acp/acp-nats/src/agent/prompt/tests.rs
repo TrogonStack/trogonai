@@ -79,7 +79,7 @@ async fn prompt_rejects_invalid_session_id() {
     let err = handle(&bridge, PromptRequest::new("invalid.session.id", vec![]))
         .await
         .unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidParams);
+    assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]
@@ -177,13 +177,13 @@ async fn prompt_js_agent_error_response() {
     let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
 
-    let agent_err = Error::new(ErrorCode::InternalError.into(), "agent blew up");
+    let agent_err = Error::new(ErrorCode::INTERNAL_ERROR, "agent blew up");
     reply_error_when_published(&js, resp_tx, &agent_err);
 
     let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
     assert!(err.message.contains("agent blew up"));
 }
 

@@ -3,7 +3,7 @@ use crate::agent::test_support::{
     has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics, set_js_response,
 };
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{ResumeSessionRequest, ResumeSessionResponse};
+use agent_client_protocol::v1::schema::{ResumeSessionRequest, ResumeSessionResponse};
 use std::time::Duration;
 
 #[tokio::test]
@@ -24,7 +24,7 @@ async fn resume_session_returns_error_when_js_fails() {
     let request = ResumeSessionRequest::new("s1", ".");
     let err = bridge.resume_session(request).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[tokio::test]
@@ -35,7 +35,7 @@ async fn resume_session_returns_error_when_response_is_invalid_json() {
     let request = ResumeSessionRequest::new("s1", ".");
     let err = bridge.resume_session(request).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[tokio::test]
@@ -45,7 +45,7 @@ async fn resume_session_validates_session_id() {
     let err = bridge.resume_session(request).await.unwrap_err();
 
     assert!(err.message.contains("Invalid session ID"));
-    assert_eq!(err.code, ErrorCode::InvalidParams);
+    assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]

@@ -2,7 +2,7 @@ use crate::AgentHandler;
 use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
 use crate::error::AGENT_UNAVAILABLE;
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{ListProvidersRequest, ListProvidersResponse};
+use agent_client_protocol::v1::schema::{ListProvidersRequest, ListProvidersResponse};
 
 #[tokio::test]
 async fn list_providers_forwards_request_and_returns_response() {
@@ -24,7 +24,7 @@ async fn list_providers_returns_error_when_nats_fails() {
     let request = ListProvidersRequest::new();
     let err = bridge.list_providers(request).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+    assert_eq!(err.code, ErrorCode::new(AGENT_UNAVAILABLE));
 }
 
 #[tokio::test]
@@ -35,7 +35,7 @@ async fn list_providers_returns_error_when_response_is_invalid_json() {
     let request = ListProvidersRequest::new();
     let err = bridge.list_providers(request).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[tokio::test]

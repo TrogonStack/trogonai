@@ -1,6 +1,6 @@
 use super::super::tests::{MockClient, TerminalWaitForExitFailingClient, TerminalWaitForExitTimeoutClient};
 use super::*;
-use agent_client_protocol::schema::v1::WaitForTerminalExitRequest;
+use agent_client_protocol::v1::schema::WaitForTerminalExitRequest;
 use async_nats::header::HeaderMap;
 use jsonrpc_nats::RequestId;
 use std::error::Error;
@@ -258,7 +258,7 @@ fn error_code_and_message_invalid_params() {
 fn error_code_and_message_timed_out() {
     let err = TerminalWaitForExitError::TimedOut;
     let (code, msg) = error_code_and_message(&err);
-    assert_eq!(code, ErrorCode::InternalError);
+    assert_eq!(code, ErrorCode::INTERNAL_ERROR);
     assert_eq!(msg, "Timed out waiting for terminal exit");
 }
 

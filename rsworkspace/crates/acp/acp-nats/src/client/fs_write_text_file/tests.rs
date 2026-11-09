@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionRequest,
     RequestPermissionResponse, SessionNotification, SessionUpdate,
 };
@@ -19,7 +19,7 @@ fn make_wire_request<T: serde::Serialize>(params: &T) -> (HeaderMap, Vec<u8>) {
 
 fn sample_request() -> WriteTextFileRequest {
     WriteTextFileRequest::new(
-        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        agent_client_protocol::v1::schema::SessionId::from("sess-1"),
         "/tmp/foo.txt".to_string(),
         "data".to_string(),
     )
@@ -81,7 +81,7 @@ impl ClientHandler for FailingClient {
 
     async fn write_text_file(&self, _: WriteTextFileRequest) -> agent_client_protocol::Result<WriteTextFileResponse> {
         Err(agent_client_protocol::Error::new(
-            i32::from(ErrorCode::InvalidParams),
+            i32::from(ErrorCode::INVALID_PARAMS),
             "permission denied",
         ))
     }
@@ -179,7 +179,7 @@ async fn handle_client_error_publishes_error_reply_with_matching_id() {
     );
     assert_eq!(
         published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(),
-        i32::from(ErrorCode::InvalidParams).to_string().as_str(),
+        i32::from(ErrorCode::INVALID_PARAMS).to_string().as_str(),
         "error response must have error code"
     );
 }
@@ -209,16 +209,16 @@ fn error_code_and_message_invalid_request_returns_invalid_params() {
     let err = serde_json::from_slice::<WriteTextFileRequest>(b"not json").unwrap_err();
     let fs_err = FsWriteTextFileError::InvalidRequest(err);
     let (code, message) = error_code_and_message(&fs_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert!(message.contains("Invalid write_text_file request"));
 }
 
 #[test]
 fn error_code_and_message_client_error_preserves_client_code() {
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "permission denied");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "permission denied");
     let fs_err = FsWriteTextFileError::ClientError(client_err);
     let (code, message) = error_code_and_message(&fs_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "permission denied");
 }
 
@@ -290,7 +290,7 @@ fn fs_write_text_file_error_display() {
     let fs_err = FsWriteTextFileError::InvalidRequest(err);
     assert_eq!(fs_err.to_string(), expected);
 
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "permission denied");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "permission denied");
     let fs_err = FsWriteTextFileError::ClientError(client_err);
     assert_eq!(fs_err.to_string(), "client error: permission denied");
 }
@@ -301,7 +301,7 @@ fn fs_write_text_file_error_source() {
     let fs_err = FsWriteTextFileError::InvalidRequest(err);
     assert!(fs_err.source().is_some());
 
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "permission denied");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "permission denied");
     let fs_err = FsWriteTextFileError::ClientError(client_err);
     assert!(fs_err.source().is_some());
 }
@@ -323,7 +323,7 @@ async fn mock_client_request_permission_returns_err() {
 async fn mock_client_read_text_file_returns_err() {
     let client = MockClient;
     let req = ReadTextFileRequest::new(
-        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        agent_client_protocol::v1::schema::SessionId::from("sess-1"),
         "/tmp/file.txt".to_string(),
     );
     let result = client.read_text_file(req).await;
@@ -334,7 +334,7 @@ async fn mock_client_read_text_file_returns_err() {
 async fn failing_client_read_text_file_returns_err() {
     let client = FailingClient;
     let req = ReadTextFileRequest::new(
-        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        agent_client_protocol::v1::schema::SessionId::from("sess-1"),
         "/tmp/file.txt".to_string(),
     );
     let result = client.read_text_file(req).await;

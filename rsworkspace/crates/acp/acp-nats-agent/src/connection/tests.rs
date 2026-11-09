@@ -1,8 +1,10 @@
 use super::*;
 use acp_nats::nats::{ParsedAgentSubject, parse_agent_subject};
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::{
-    AuthenticateResponse, InitializeResponse, LogoutResponse, NewSessionResponse, PromptResponse, StopReason,
+use agent_client_protocol::v1::schema::{
+    ArchiveSessionResponse, AuthState, AuthStatusResponse, AuthenticateResponse, InitializeResponse, LogoutResponse,
+    NewSessionResponse, PromptResponse, SessionStatus, SessionStatusResponse, SetSessionTitleResponse, StopReason,
+    UnarchiveSessionResponse,
 };
 use agent_client_protocol::{Error as AcpError, ErrorCode};
 use std::sync::Mutex;
@@ -14,6 +16,7 @@ struct MockAgent {
     initialized: Mutex<bool>,
     cancelled: Mutex<Vec<String>>,
     fail_cancel: bool,
+    schema_calls: Mutex<Vec<(String, serde_json::Value)>>,
     received_new_session: Mutex<Option<NewSessionRequest>>,
 }
 
@@ -23,6 +26,7 @@ impl MockAgent {
             initialized: Mutex::new(false),
             cancelled: Mutex::new(Vec::new()),
             fail_cancel: false,
+            schema_calls: Mutex::new(Vec::new()),
             received_new_session: Mutex::new(None),
         }
     }
@@ -32,6 +36,7 @@ impl MockAgent {
             initialized: Mutex::new(false),
             cancelled: Mutex::new(Vec::new()),
             fail_cancel: true,
+            schema_calls: Mutex::new(Vec::new()),
             received_new_session: Mutex::new(None),
         }
     }
@@ -39,6 +44,56 @@ impl MockAgent {
 
 #[async_trait::async_trait]
 impl AgentHandler for MockAgent {
+    async fn auth_status(&self, args: AuthStatusRequest) -> agent_client_protocol::Result<AuthStatusResponse> {
+        self.schema_calls
+            .lock()
+            .unwrap()
+            .push(("auth/status".into(), serde_json::to_value(args).unwrap()));
+        Ok(AuthStatusResponse::new(AuthState::Unauthenticated))
+    }
+
+    async fn archive_session(
+        &self,
+        args: ArchiveSessionRequest,
+    ) -> agent_client_protocol::Result<ArchiveSessionResponse> {
+        self.schema_calls
+            .lock()
+            .unwrap()
+            .push(("session/archive".into(), serde_json::to_value(args).unwrap()));
+        Ok(ArchiveSessionResponse::new())
+    }
+
+    async fn unarchive_session(
+        &self,
+        args: UnarchiveSessionRequest,
+    ) -> agent_client_protocol::Result<UnarchiveSessionResponse> {
+        self.schema_calls
+            .lock()
+            .unwrap()
+            .push(("session/unarchive".into(), serde_json::to_value(args).unwrap()));
+        Ok(UnarchiveSessionResponse::new())
+    }
+
+    async fn session_status(&self, args: SessionStatusRequest) -> agent_client_protocol::Result<SessionStatusResponse> {
+        self.schema_calls
+            .lock()
+            .unwrap()
+            .push(("session/status".into(), serde_json::to_value(args).unwrap()));
+        Ok(SessionStatusResponse::new(SessionStatus::Saved))
+    }
+
+    async fn set_session_title(
+        &self,
+        args: SetSessionTitleRequest,
+    ) -> agent_client_protocol::Result<SetSessionTitleResponse> {
+        let title = args.title.clone();
+        self.schema_calls
+            .lock()
+            .unwrap()
+            .push(("session/set_title".into(), serde_json::to_value(args).unwrap()));
+        Ok(SetSessionTitleResponse::new(title))
+    }
+
     async fn initialize(&self, _args: InitializeRequest) -> agent_client_protocol::Result<InitializeResponse> {
         *self.initialized.lock().unwrap() = true;
         Ok(InitializeResponse::new(ProtocolVersion::V0))
@@ -200,7 +255,7 @@ async fn dispatch_authenticate_error_publishes_jsonrpc_error_header() {
     .await;
 
     let error = published_wire_error(&nats);
-    assert_eq!(error.code, ErrorCode::MethodNotFound);
+    assert_eq!(error.code, ErrorCode::METHOD_NOT_FOUND);
 }
 
 #[tokio::test]
@@ -224,7 +279,7 @@ async fn dispatch_invalid_payload_publishes_error_reply() {
 
     assert!(!*agent.initialized.lock().unwrap());
     let error = published_wire_error(&nats);
-    assert_eq!(error.code, ErrorCode::InvalidParams);
+    assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]
@@ -309,20 +364,20 @@ fn raw_value(json: &str) -> std::sync::Arc<serde_json::value::RawValue> {
 async fn dispatch_ext_with_reply_calls_ext_method() {
     let (nats, _) = dispatch(
         "acp.v1.global.agent.ext.my_tool",
-        &agent_client_protocol::schema::v1::ExtRequest::new("my_tool", raw_value("{}")),
+        &agent_client_protocol::v1::schema::ExtRequest::new("my_tool", raw_value("{}")),
         Some("_INBOX.ext"),
     )
     .await;
     assert_eq!(nats.published_messages(), vec!["_INBOX.ext"]);
     let error = published_wire_error(&nats);
-    assert_eq!(error.code, ErrorCode::MethodNotFound);
+    assert_eq!(error.code, ErrorCode::METHOD_NOT_FOUND);
 }
 
 #[tokio::test]
 async fn dispatch_ext_without_reply_calls_ext_notification() {
     let (nats, _) = dispatch(
         "acp.v1.global.agent.ext.my_tool",
-        &agent_client_protocol::schema::v1::ExtNotification::new("my_tool", raw_value("{}")),
+        &agent_client_protocol::v1::schema::ExtNotification::new("my_tool", raw_value("{}")),
         None,
     )
     .await;
@@ -333,7 +388,7 @@ async fn assert_dispatch_method_not_found<T: serde::Serialize>(subject: &str, ar
     let (nats, _) = dispatch(subject, args, Some("_INBOX.r")).await;
     assert_eq!(nats.published_messages(), vec!["_INBOX.r"]);
     let error = published_wire_error(&nats);
-    assert_eq!(error.code, ErrorCode::MethodNotFound);
+    assert_eq!(error.code, ErrorCode::METHOD_NOT_FOUND);
 }
 
 #[tokio::test]
@@ -394,7 +449,7 @@ async fn dispatch_providers_list_publishes_response() {
 async fn dispatch_providers_set_publishes_response() {
     let request = SetProviderRequest::new(
         "anthropic",
-        agent_client_protocol::schema::v1::LlmProtocol::Anthropic,
+        agent_client_protocol::v1::schema::LlmProtocol::Anthropic,
         "https://api.anthropic.com",
     );
     assert_dispatch_method_not_found("acp.v1.global.agent.providers.set", &request).await;
@@ -735,7 +790,7 @@ async fn dispatch_js_message_bad_payload_terms() {
 
     assert_eq!(nats.published_messages(), vec!["acp.v1.session.s1.agent.response"]);
     let error = published_wire_error(&nats);
-    assert_eq!(error.code, ErrorCode::InvalidParams);
+    assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]
@@ -813,7 +868,7 @@ async fn dispatch_js_message_ext_notification_handler_error() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let raw = std::sync::Arc::from(serde_json::value::RawValue::from_string("{}".to_string()).unwrap());
-    let payload = serialize(&agent_client_protocol::schema::v1::ExtNotification::new("my_tool", raw));
+    let payload = serialize(&agent_client_protocol::v1::schema::ExtNotification::new("my_tool", raw));
     // No Jsonrpc-Id → ext notification path (reply_subject is None → msg.reply is None)
     let js_msg = make_js_msg_no_headers("acp.v1.session.s1.agent.ext.my_tool", &payload);
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
@@ -826,7 +881,7 @@ async fn dispatch_js_message_ext_notification_handler_error_ack_failure() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let raw = std::sync::Arc::from(serde_json::value::RawValue::from_string("{}".to_string()).unwrap());
-    let payload = serialize(&agent_client_protocol::schema::v1::ExtNotification::new("my_tool", raw));
+    let payload = serialize(&agent_client_protocol::v1::schema::ExtNotification::new("my_tool", raw));
     let js_msg = MockJsMessage::with_failing_signals(async_nats::Message {
         subject: "acp.v1.session.s1.agent.ext.my_tool".into(),
         reply: None,
@@ -844,7 +899,7 @@ async fn dispatch_js_message_global_ext_no_session_id() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let raw = std::sync::Arc::from(serde_json::value::RawValue::from_string("{}".to_string()).unwrap());
-    let payload = serialize(&agent_client_protocol::schema::v1::ExtNotification::new("my_tool", raw));
+    let payload = serialize(&agent_client_protocol::v1::schema::ExtNotification::new("my_tool", raw));
     let js_msg = make_js_msg_no_headers("acp.v1.global.agent.ext.my_tool", &payload);
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 }
@@ -1008,7 +1063,7 @@ async fn dispatch_js_message_cancel_notification() {
 fn assert_js_response_method_not_found(nats: &MockNatsClient, expected_subject: &str) {
     assert_eq!(nats.published_messages(), vec![expected_subject]);
     let error = published_wire_error(nats);
-    assert_eq!(error.code, ErrorCode::MethodNotFound);
+    assert_eq!(error.code, ErrorCode::METHOD_NOT_FOUND);
 }
 
 #[tokio::test]
@@ -1282,7 +1337,7 @@ async fn handle_request_with_keepalive_handler_returns_error() {
     assert!(result.is_ok());
     assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
     let error = published_wire_error(&nats);
-    assert_eq!(error.code, ErrorCode::InternalError);
+    assert_eq!(error.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[tokio::test(start_paused = true)]
@@ -1336,5 +1391,63 @@ async fn handle_request_with_keepalive_handler_error() {
     assert!(result.is_ok());
     assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
     let error = published_wire_error(&nats);
-    assert_eq!(error.code, ErrorCode::MethodNotFound);
+    assert_eq!(error.code, ErrorCode::METHOD_NOT_FOUND);
+}
+
+fn schema_1_15_requests() -> Vec<(&'static str, &'static str, serde_json::Value, serde_json::Value)> {
+    vec![
+        (
+            "acp.v1.global.agent.auth.status",
+            "auth/status",
+            serde_json::json!({"_meta":{"probe":"auth"}}),
+            serde_json::json!({"state":"unauthenticated"}),
+        ),
+        (
+            "acp.v1.session.s1.agent.archive",
+            "session/archive",
+            serde_json::json!({"sessionId":"s1","_meta":{"probe":"archive"}}),
+            serde_json::json!({}),
+        ),
+        (
+            "acp.v1.session.s1.agent.unarchive",
+            "session/unarchive",
+            serde_json::json!({"sessionId":"s1","_meta":{"probe":"unarchive"}}),
+            serde_json::json!({}),
+        ),
+        (
+            "acp.v1.session.s1.agent.status",
+            "session/status",
+            serde_json::json!({"sessionId":"s1","_meta":{"probe":"status"}}),
+            serde_json::json!({"status":"saved"}),
+        ),
+        (
+            "acp.v1.session.s1.agent.set_title",
+            "session/set_title",
+            serde_json::json!({"sessionId":"s1","title":"Renamed","_meta":{"probe":"title"}}),
+            serde_json::json!({"title":"Renamed"}),
+        ),
+    ]
+}
+
+#[tokio::test]
+async fn schema_1_15_core_dispatch_preserves_request_and_response() {
+    for (subject, method, params, result) in schema_1_15_requests() {
+        let (nats, agent) = dispatch(subject, &params, Some("_INBOX.schema-upgrade")).await;
+        assert_eq!(*agent.schema_calls.lock().unwrap(), vec![(method.to_owned(), params)]);
+        assert_eq!(published_response::<serde_json::Value>(&nats), result);
+        assert_eq!(nats.published_messages(), vec!["_INBOX.schema-upgrade"]);
+    }
+}
+
+#[tokio::test]
+async fn schema_1_15_durable_dispatch_preserves_request_and_response() {
+    for (subject, method, params, result) in schema_1_15_requests().into_iter().skip(1) {
+        let nats = MockNatsClient::new();
+        let agent = MockAgent::new();
+        let msg = make_js_msg(subject, &params, None);
+        dispatch_js_message(msg, &agent, &nats, &test_prefix()).await;
+        assert_eq!(*agent.schema_calls.lock().unwrap(), vec![(method.to_owned(), params)]);
+        assert_eq!(published_response::<serde_json::Value>(&nats), result);
+        assert_eq!(nats.published_messages(), vec!["acp.v1.session.s1.agent.response"]);
+    }
 }

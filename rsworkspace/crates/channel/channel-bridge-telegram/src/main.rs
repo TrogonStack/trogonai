@@ -25,7 +25,7 @@ use {
     acp_nats::AgentHandler,
     acp_port::{AcpBridge, AcpPort, SessionMethods},
     agent_client_protocol::schema::ProtocolVersion,
-    agent_client_protocol::schema::v1::InitializeRequest,
+    agent_client_protocol::v1::schema::InitializeRequest,
     anyhow::Context as _,
     async_nats::jetstream::consumer::DeliverPolicy,
     config::BridgeConfig,

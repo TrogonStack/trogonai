@@ -87,7 +87,7 @@ async fn publish_internal_error_reply<N: PublishClient + FlushClient>(
         nats,
         reply_to,
         response_id,
-        ErrorCode::InternalError,
+        ErrorCode::INTERNAL_ERROR,
         "Internal error",
         context,
     )
@@ -97,7 +97,7 @@ async fn publish_internal_error_reply<N: PublishClient + FlushClient>(
 async fn publish_fallback_error_reply<N: PublishClient + FlushClient>(nats: &N, reply_to: &str, context: &str) {
     let encoded = match encode_agent_error(
         ResponseId::Null,
-        &Error::new(ErrorCode::InternalError.into(), "Internal error"),
+        &Error::new(ErrorCode::INTERNAL_ERROR, "Internal error"),
     ) {
         Ok(encoded) => encoded,
         Err(e) => {

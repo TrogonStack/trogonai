@@ -1,6 +1,6 @@
 use super::*;
 use crate::agent::test_support::set_wire_json_response;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, ElicitationAcceptAction, ElicitationFormMode, ElicitationSchema,
     ElicitationSessionScope, ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionResponse,
     SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
@@ -72,13 +72,13 @@ async fn request_returns_error_when_nats_fails() {
     let result = p.read_text_file(ReadTextFileRequest::new("s1", "/test.txt")).await;
 
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().code, ErrorCode::InternalError);
+    assert_eq!(result.unwrap_err().code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[tokio::test]
 async fn write_text_file_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
-    let response = agent_client_protocol::schema::v1::WriteTextFileResponse::default();
+    let response = agent_client_protocol::v1::schema::WriteTextFileResponse::default();
     set_wire_json_response(&nats, "acp.v1.session.s1.client.fs.write_text_file", &response);
 
     let p = proxy(nats.clone());
@@ -140,7 +140,7 @@ async fn kill_terminal_publishes_to_correct_subject() {
 #[tokio::test]
 async fn wait_for_terminal_exit_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
-    let response = WaitForTerminalExitResponse::new(agent_client_protocol::schema::v1::TerminalExitStatus::new());
+    let response = WaitForTerminalExitResponse::new(agent_client_protocol::v1::schema::TerminalExitStatus::new());
     set_wire_json_response(&nats, "acp.v1.session.s1.client.terminal.wait_for_exit", &response);
 
     let p = proxy(nats.clone());
@@ -164,7 +164,7 @@ async fn notification_returns_error_when_publish_fails() {
     let result = p.session_notification(notif).await;
 
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().code, ErrorCode::InternalError);
+    assert_eq!(result.unwrap_err().code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[tokio::test]
@@ -201,6 +201,6 @@ async fn elicitation_complete_publishes_to_correct_subject() {
 #[test]
 fn to_acp_error_preserves_message() {
     let err = to_acp_error("something went wrong");
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
     assert_eq!(err.message, "something went wrong");
 }

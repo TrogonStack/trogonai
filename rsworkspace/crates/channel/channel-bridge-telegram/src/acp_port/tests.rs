@@ -104,7 +104,10 @@ fn display_lists_the_advertised_methods_by_wire_name() {
 /// failure or an unimplemented method does not trigger a session rotation.
 #[test]
 fn only_a_rejected_session_id_reads_as_a_lost_session() {
-    for error in [AcpError::invalid_params(), AcpError::resource_not_found(None)] {
+    for error in [
+        AcpError::invalid_params(),
+        agent_client_protocol::v1::schema::Error::resource_not_found(None).into(),
+    ] {
         let message = error.message.clone();
         assert!(
             AcpPortError::Rpc(error).is_session_lost(),

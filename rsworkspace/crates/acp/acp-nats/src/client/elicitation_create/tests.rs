@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, ElicitationAcceptAction, ElicitationFormMode, ElicitationRequestScope,
     ElicitationSchema, ElicitationSessionScope, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SessionNotification, SessionUpdate,
@@ -60,7 +60,7 @@ impl ClientHandler for FailingClient {
         _: CreateElicitationRequest,
     ) -> agent_client_protocol::Result<CreateElicitationResponse> {
         Err(agent_client_protocol::Error::new(
-            i32::from(ErrorCode::InvalidParams),
+            i32::from(ErrorCode::INVALID_PARAMS),
             "elicitation declined",
         ))
     }
@@ -73,7 +73,7 @@ fn session_scoped_request(session_id: &'static str) -> CreateElicitationRequest 
 
 fn request_scoped_request() -> CreateElicitationRequest {
     let mode = ElicitationFormMode::new(
-        ElicitationRequestScope::new(agent_client_protocol::schema::v1::RequestId::from(7i64)),
+        ElicitationRequestScope::new(agent_client_protocol::v1::schema::RequestId::from(7i64)),
         ElicitationSchema::new(),
     );
     CreateElicitationRequest::new(mode, "Please authenticate")
@@ -170,7 +170,7 @@ fn sample_wire_error() -> crate::wire::WireError {
 fn error_code_and_message_invalid_request_returns_invalid_params() {
     let ec_err = ElicitationCreateError::InvalidRequest(sample_wire_error());
     let (code, _) = error_code_and_message(&ec_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn error_code_and_message_session_mismatch_returns_invalid_params() {
         subject: "session-001".to_string(),
     };
     let (code, message) = error_code_and_message(&ec_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(
         message,
         "scope.sessionId (session-other) does not match subject session id (session-001)"
@@ -189,10 +189,10 @@ fn error_code_and_message_session_mismatch_returns_invalid_params() {
 
 #[test]
 fn error_code_and_message_client_error_preserves_client_code() {
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "denied");
     let ec_err = ElicitationCreateError::ClientError(client_err);
     let (code, message) = error_code_and_message(&ec_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "denied");
 }
 
@@ -203,7 +203,7 @@ fn elicitation_create_error_display() {
     let ec_err = ElicitationCreateError::InvalidRequest(sample_wire_error());
     assert_eq!(ec_err.to_string(), expected);
 
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "elicitation declined");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "elicitation declined");
     let ec_err = ElicitationCreateError::ClientError(client_err);
     assert_eq!(ec_err.to_string(), "client error: elicitation declined");
 }
@@ -213,7 +213,7 @@ fn elicitation_create_error_source() {
     let ec_err = ElicitationCreateError::InvalidRequest(sample_wire_error());
     assert!(ec_err.source().is_some());
 
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "denied");
     let ec_err = ElicitationCreateError::ClientError(client_err);
     assert!(ec_err.source().is_some());
 }

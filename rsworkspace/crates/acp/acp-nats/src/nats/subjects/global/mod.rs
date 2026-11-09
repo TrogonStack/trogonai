@@ -1,3 +1,4 @@
+mod auth_status;
 mod authenticate;
 mod ext;
 mod ext_notify;
@@ -9,6 +10,7 @@ mod providers_set;
 mod session_list;
 mod session_new;
 
+pub use auth_status::AuthStatusSubject;
 pub use authenticate::AuthenticateSubject;
 pub use ext::ExtSubject;
 pub use ext_notify::ExtNotifySubject;

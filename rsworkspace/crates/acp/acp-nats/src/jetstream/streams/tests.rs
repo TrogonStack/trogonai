@@ -239,3 +239,18 @@ fn no_retired_stream_is_still_provisioned() {
         );
     }
 }
+
+#[test]
+fn schema_1_15_session_commands_are_captured_without_widening_stream_scope() {
+    let patterns = AcpStream::Commands.subject_patterns(&p("acp"));
+    for method in ["archive", "unarchive", "status", "set_title"] {
+        let expected = format!("acp.v1.session.*.agent.{method}");
+        assert!(patterns.contains(&expected));
+        assert!(!nats_pattern_matches(&expected, "acp.v1.global.agent.auth.status"));
+        assert!(!nats_pattern_matches(
+            &expected,
+            "acp.v1.session.s1.client.session.update"
+        ));
+        assert!(!nats_pattern_matches(&expected, "acp.v1.session.s1.agent.ext.custom"));
+    }
+}

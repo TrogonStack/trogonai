@@ -2,7 +2,7 @@
 mod tests;
 
 use acp_nats::ClientHandler;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
     SessionUpdate,
 };

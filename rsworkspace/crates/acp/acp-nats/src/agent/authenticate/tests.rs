@@ -4,7 +4,7 @@ use crate::agent::test_support::{
 };
 use crate::error::AGENT_UNAVAILABLE;
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{AuthenticateRequest, AuthenticateResponse};
+use agent_client_protocol::v1::schema::{AuthenticateRequest, AuthenticateResponse};
 
 #[tokio::test]
 async fn authenticate_forwards_request_and_returns_response() {
@@ -25,7 +25,7 @@ async fn authenticate_returns_error_when_nats_request_fails() {
     let request = AuthenticateRequest::new("test");
     let err = bridge.authenticate(request).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+    assert_eq!(err.code, ErrorCode::new(AGENT_UNAVAILABLE));
 }
 
 #[tokio::test]
@@ -34,13 +34,13 @@ async fn authenticate_surfaces_structured_agent_error_from_header() {
     set_wire_agent_error(
         &mock,
         "acp.v1.global.agent.authenticate",
-        i32::from(ErrorCode::MethodNotFound),
+        i32::from(ErrorCode::METHOD_NOT_FOUND),
         "method not found",
     );
 
     let err = bridge.authenticate(AuthenticateRequest::new("test")).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::MethodNotFound);
+    assert_eq!(err.code, ErrorCode::METHOD_NOT_FOUND);
     assert_eq!(err.message, "method not found");
 }
 
@@ -53,7 +53,7 @@ async fn authenticate_returns_error_when_response_is_invalid_json() {
     let err = bridge.authenticate(request).await.unwrap_err();
 
     assert_eq!(err.message, "Invalid response from agent");
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[tokio::test]

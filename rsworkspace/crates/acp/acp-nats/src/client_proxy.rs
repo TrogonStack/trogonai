@@ -4,7 +4,7 @@ use crate::nats::client_ops;
 use crate::nats::{FlushClient, PublishClient, RequestClient, headers_with_trace_context};
 use crate::session_id::AcpSessionId;
 use crate::wire::{encode_notification, merge_jsonrpc_headers};
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     CompleteElicitationNotification, CreateElicitationRequest, CreateElicitationResponse, CreateTerminalRequest,
     CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse,
     ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest, RequestPermissionResponse,
@@ -33,7 +33,7 @@ impl<N> NatsClientProxy<N> {
 }
 
 fn to_acp_error(e: impl std::fmt::Display) -> Error {
-    Error::new(ErrorCode::InternalError.into(), e.to_string())
+    Error::new(ErrorCode::INTERNAL_ERROR, e.to_string())
 }
 
 impl<N: RequestClient + PublishClient + FlushClient> NatsClientProxy<N> {
