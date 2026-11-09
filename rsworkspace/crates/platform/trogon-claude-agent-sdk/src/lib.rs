@@ -27,4 +27,4 @@ pub use usd_budget::{UsdBudget, UsdBudgetError};
 
 pub use effort_level::EffortLevel;
 
-pub use agent_name::{AgentName, AgentNameError};
+pub use agent_name::AgentName;
