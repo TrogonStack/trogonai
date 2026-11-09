@@ -1,15 +1,16 @@
-use trogon_claude_agent_sdk::{BuiltinToolName, ToolName};
+use trogon_claude_agent_sdk::{BuiltinToolName, ToolName, ToolNameError};
 
 fn preserves_builtin_tool_name(input: &str) {
-    let name = BuiltinToolName::new(input).expect("tool-list configuration text must be preserved");
+    let name = BuiltinToolName::new(input);
     assert_eq!(name.as_str(), input);
     assert_eq!(name.clone(), name);
 }
 
-fn preserves_tool_name_conversion(input: &str) {
-    let source = ToolName::new(input).expect("opaque tool name");
-    let name = BuiltinToolName::try_from(source).expect("conversion must preserve tool-list text");
+fn preserves_tool_name_conversion(input: &str) -> Result<(), ToolNameError> {
+    let source = ToolName::new(input)?;
+    let name = BuiltinToolName::from(source);
     assert_eq!(name.as_str(), input);
+    Ok(())
 }
 
 #[test]
@@ -43,16 +44,16 @@ fn default_in_a_builtin_tool_name_is_preserved() {
 }
 
 #[test]
-fn converted_tool_name_preserves_comma() {
+fn converted_tool_name_preserves_comma() -> Result<(), ToolNameError> {
     preserves_tool_name_conversion("Read,Write")
 }
 
 #[test]
-fn converted_tool_name_preserves_whitespace() {
+fn converted_tool_name_preserves_whitespace() -> Result<(), ToolNameError> {
     preserves_tool_name_conversion("with space")
 }
 
 #[test]
-fn converted_tool_name_preserves_default() {
+fn converted_tool_name_preserves_default() -> Result<(), ToolNameError> {
     preserves_tool_name_conversion("default")
 }
