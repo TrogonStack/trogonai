@@ -12,6 +12,7 @@ mod prompt;
 mod session_id;
 mod setting_source;
 mod task_id;
+mod tool_name;
 mod tool_rule;
 mod tool_use_id;
 mod usd_budget;
@@ -39,3 +40,5 @@ pub use message_id::MessageId;
 pub use control_request_id::ControlRequestId;
 pub use task_id::TaskId;
 pub use tool_use_id::ToolUseId;
+
+pub use tool_name::ToolName;
