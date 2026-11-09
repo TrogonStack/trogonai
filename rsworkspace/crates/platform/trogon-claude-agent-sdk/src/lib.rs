@@ -6,6 +6,7 @@ mod effort_level;
 mod error;
 mod options;
 mod permission_mode;
+mod prompt;
 mod setting_source;
 mod tool_rule;
 mod usd_budget;
@@ -23,3 +24,5 @@ pub use effort_level::EffortLevel;
 pub use agent_name::{AgentName, AgentNameError};
 
 pub use tool_rule::{ToolRule, ToolRuleError};
+
+pub use prompt::{Prompt, PromptError};
