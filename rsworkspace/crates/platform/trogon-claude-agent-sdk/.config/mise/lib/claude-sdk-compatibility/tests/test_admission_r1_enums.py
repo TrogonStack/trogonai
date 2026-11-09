@@ -14,6 +14,7 @@ class VariantContainerAdmissionTests(unittest.TestCase):
                     d["index"]["3"]["inner"]["variant"]["kind"][container] = value
                 else:
                     d["index"]["4"]["inner"]["variant"]["kind"]["struct"][container] = value
-                with self.subTest(container=container, value=value), self.assertRaises(GateError) as caught:
-                    extract(d)
-                self.assertEqual(caught.exception.code, Code.FORMAT)
+                with self.subTest(container=container, value=value):
+                    with self.assertRaises(GateError) as caught:
+                        extract(d)
+                    self.assertEqual(caught.exception.code, Code.FORMAT)
