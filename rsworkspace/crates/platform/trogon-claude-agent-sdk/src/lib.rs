@@ -49,4 +49,4 @@ pub use control_request_id::ControlRequestId;
 pub use task_id::TaskId;
 pub use tool_use_id::ToolUseId;
 
-pub use tool_name::{ToolName, ToolNameError};
+pub use tool_name::ToolName;
