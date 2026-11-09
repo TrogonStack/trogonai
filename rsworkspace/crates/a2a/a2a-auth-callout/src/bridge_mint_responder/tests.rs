@@ -8,6 +8,7 @@ use trogon_identity_types::PrincipalKind;
 use trogon_std::env::InMemoryEnv;
 
 use super::*;
+use crate::VerifiedCredential;
 use crate::admission_keys::{AccountSigningKey, TenantAccount, TenantSigningKeys};
 use crate::bridge_mint::{BridgeClientInfo, BridgeCredential, SealedBridgeCredential};
 use crate::credentials::mtls::{ClientCertPem, MTlsVerifier};
@@ -17,6 +18,7 @@ use crate::jwt::{
     AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims, decode_nats_user_payload,
 };
 use crate::permissions::IssuedPermissions;
+use crate::tenant_admission::{TenantMembership, TenantMemberships};
 
 const GOOD_TOKEN: &str = "good.bearer.token";
 
@@ -24,12 +26,16 @@ struct TokenVerifier;
 
 #[async_trait::async_trait]
 impl OidcVerifier for TokenVerifier {
-    async fn verify(&self, token: &BearerToken, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError> {
+    async fn verify(
+        &self,
+        token: &BearerToken,
+        account: &AudienceAccount,
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         if token.as_str() != GOOD_TOKEN {
             return Err(CredentialError::InvalidCredentials("verifier diagnostic detail".into()).into());
         }
         let caller = CallerId::new("alice").unwrap();
-        Ok(UserJwtClaims {
+        Ok(crate::test_support::verified_test_credential(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: ExternalSubject::new("alice-sub").unwrap(),
             aud: account.clone(),
@@ -37,7 +43,7 @@ impl OidcVerifier for TokenVerifier {
             nats_permissions: IssuedPermissions::default_for_caller(&caller),
             caller_id: caller,
             principal_kind: PrincipalKind::Person,
-        })
+        }))
     }
 }
 
@@ -51,9 +57,9 @@ impl MTlsVerifier for AcceptingMtlsVerifier {
         &self,
         _cert: &ClientCertPem,
         account: &AudienceAccount,
-    ) -> Result<UserJwtClaims, AuthCalloutError> {
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         let caller = CallerId::new("svc").unwrap();
-        Ok(UserJwtClaims {
+        Ok(crate::test_support::verified_test_credential(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: ExternalSubject::new("CN=svc").unwrap(),
             aud: account.clone(),
@@ -61,7 +67,7 @@ impl MTlsVerifier for AcceptingMtlsVerifier {
             nats_permissions: IssuedPermissions::default_for_caller(&caller),
             caller_id: caller,
             principal_kind: PrincipalKind::Service,
-        })
+        }))
     }
 }
 
@@ -83,6 +89,19 @@ impl Fixture {
         let signing_public = signing_key.public_key();
         let dispatcher = CalloutDispatcher::new(CalloutDispatcherConfig {
             tenant_signing_keys: TenantSigningKeys::new([(tenant.clone(), signing_key)]).unwrap(),
+            tenant_admission: Arc::new(
+                TenantMemberships::new([
+                    TenantMembership::new(
+                        tenant.clone(),
+                        trogon_identity_types::SubjectPrincipal::from_tokens("person", "alice").unwrap(),
+                    ),
+                    TenantMembership::new(
+                        tenant.clone(),
+                        trogon_identity_types::SubjectPrincipal::from_tokens("service", "svc").unwrap(),
+                    ),
+                ])
+                .unwrap(),
+            ),
             user_jwt_ttl: Duration::from_secs(60),
             a2a_prefix: A2aPrefix::new("a2a").unwrap(),
             oidc: Some(Arc::new(TokenVerifier)),

@@ -12,6 +12,8 @@ mod native_binding;
 mod operation_metadata;
 mod peer_mcp;
 mod peer_mcp_error;
+mod peer_mcp_error_code;
+mod peer_mcp_error_content;
 mod peer_message_text;
 mod prompt_hook_context;
 mod prompt_hook_event;
@@ -27,3 +29,4 @@ pub use backend::{
 pub use connector_config_input::ConnectorConfigInput;
 pub use peer_mcp::PeerMcp;
 pub use peer_mcp_error::PeerMcpError;
+pub use peer_mcp_error_code::PeerMcpErrorCode;

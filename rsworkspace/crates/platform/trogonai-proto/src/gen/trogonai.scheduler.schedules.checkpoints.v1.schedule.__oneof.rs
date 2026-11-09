@@ -52,25 +52,25 @@ pub mod schedule {
             Self::Some(Kind::from(v))
         }
     }
-    impl serde::Serialize for Kind {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Kind {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::At(v) => {
-                    map.serialize_entry("at", v)?;
+                    map.serialize_entry("at", &**v)?;
                 }
                 Self::Every(v) => {
-                    map.serialize_entry("every", v)?;
+                    map.serialize_entry("every", &**v)?;
                 }
                 Self::Cron(v) => {
-                    map.serialize_entry("cron", v)?;
+                    map.serialize_entry("cron", &**v)?;
                 }
                 Self::Rrule(v) => {
-                    map.serialize_entry("rrule", v)?;
+                    map.serialize_entry("rrule", &**v)?;
                 }
             }
             map.end()
