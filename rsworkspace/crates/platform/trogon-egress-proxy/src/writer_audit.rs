@@ -12,16 +12,24 @@
 //! flush.
 
 use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use trogon_audit::{AuditName, AuditSink as Sink, AuditWriter, Disposition, Stamper};
+use trogon_audit::{
+    ActivationRecorder, Actor, AuditName, AuditSink as Sink, AuditWriter, Disposition, RecordScope, Stamper,
+};
 use trogon_nats::NatsToken;
 use trogon_std::time::SystemClock;
 use trogon_std::uuid::UuidV7Generator;
 
 use crate::audit::{AuditEvent, AuditSink, Decision};
+use crate::audit_budget::AuditBudget;
+use crate::audit_capacity::AuditCapacity;
 use crate::audit_error::AuditError;
-use crate::constants::AUDIT_LOG_TARGET;
+use crate::audit_readiness::AuditReadiness;
+use crate::connection_limit::ConnectionLimit;
+use crate::constants::{AUDIT_LOG_TARGET, AUDIT_READINESS_TIMEOUT};
 use crate::decision_record::decision_record;
 use crate::fault::Fault;
 
@@ -31,23 +39,47 @@ pub struct WriterAudit<S> {
     tenant: AuditName,
     project: NatsToken,
     in_flight: TaskTracker,
+    budget: AuditBudget,
+    readiness_probe: Arc<Mutex<()>>,
 }
 
 impl<S: Sink> WriterAudit<S> {
-    pub fn new(writer: AuditWriter<S>, tenant: AuditName, project: NatsToken) -> Self {
+    pub fn with_limit(writer: AuditWriter<S>, tenant: AuditName, project: NatsToken, limit: ConnectionLimit) -> Self {
         Self {
             writer,
             stamper: Stamper::new(SystemClock, UuidV7Generator),
             tenant,
             project,
             in_flight: TaskTracker::new(),
+            budget: AuditBudget::new(limit),
+            readiness_probe: Arc::new(Mutex::new(())),
         }
     }
 
+    pub(crate) fn activation_recorder(&self) -> ActivationRecorder<S> {
+        ActivationRecorder::new(
+            self.writer.clone(),
+            RecordScope::new(self.tenant.clone(), self.project.clone(), Actor::Unattributed),
+        )
+    }
+
+    pub fn new(writer: AuditWriter<S>, tenant: AuditName, project: NatsToken) -> Self {
+        Self::with_limit(writer, tenant, project, ConnectionLimit::default())
+    }
+
+    pub fn capacity(&self) -> AuditCapacity {
+        self.budget.capacity()
+    }
+
     async fn write(&self, event: &AuditEvent<'_>) -> Result<Disposition, AuditError> {
+        let tracked = self.in_flight.token();
+        let permit = self.budget.try_acquire()?;
         let record = decision_record(event, &self.tenant, &self.project, self.stamper.stamp())?;
         let writer = self.writer.clone();
-        let write = self.in_flight.spawn(async move { writer.write(record).await });
+        let write = tokio::spawn(async move {
+            let (_tracked, _permit) = (tracked, permit);
+            writer.write(record).await
+        });
         let outcome = write
             .await
             .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()));
@@ -57,6 +89,43 @@ impl<S: Sink> WriterAudit<S> {
 
 #[async_trait]
 impl<S: Sink> AuditSink for WriterAudit<S> {
+    async fn readiness(&self) -> AuditReadiness {
+        if self.writer.is_degraded() {
+            return AuditReadiness::Degraded;
+        }
+        let Ok(probe) = Arc::clone(&self.readiness_probe).try_lock_owned() else {
+            return AuditReadiness::Overloaded;
+        };
+        let tracked = self.in_flight.token();
+        let Ok(permit) = self.budget.try_acquire() else {
+            return AuditReadiness::Overloaded;
+        };
+        // A health check cannot consume the last decision slot.
+        if !self.capacity().has_capacity() {
+            return AuditReadiness::Overloaded;
+        }
+        let writer = self.writer.clone();
+        let stamp = self.stamper.stamp();
+        let write = tokio::spawn(async move {
+            let (_tracked, _permit, _probe) = (tracked, permit, probe);
+            writer.readiness_probe(stamp).await.map(|_| ())
+        });
+        match tokio::time::timeout(AUDIT_READINESS_TIMEOUT, write).await {
+            Ok(Ok(Ok(()))) if self.writer.is_degraded() => AuditReadiness::Degraded,
+            Ok(Ok(Ok(()))) if !self.capacity().has_capacity() => AuditReadiness::Overloaded,
+            Ok(Ok(Ok(()))) => AuditReadiness::Ready,
+            Err(_) => AuditReadiness::TimedOut,
+            Ok(Ok(Err(error))) => {
+                crate::telemetry::readiness::audit_unavailable(&error);
+                AuditReadiness::Unavailable
+            }
+            Ok(Err(error)) => {
+                crate::telemetry::readiness::audit_worker_failed(&error);
+                AuditReadiness::Unavailable
+            }
+        }
+    }
+
     async fn record(&self, event: &AuditEvent<'_>) -> Result<(), AuditError> {
         let outcome = self.write(event).await;
         log(event, &outcome);
@@ -67,6 +136,7 @@ impl<S: Sink> AuditSink for WriterAudit<S> {
         let settled = CancellationToken::new();
         tokio::join!(self.writer.run(settled.clone()), async {
             shutdown.cancelled().await;
+            self.budget.close();
             self.in_flight.close();
             self.in_flight.wait().await;
             settled.cancel();
@@ -87,7 +157,10 @@ fn log(event: &AuditEvent<'_>, outcome: &Result<Disposition, AuditError>) {
     let (audit, failure) = match outcome {
         Ok(disposition) => (disposition_name(*disposition), "-"),
         Err(AuditError::Unavailable(error)) => ("unavailable", error.reason().as_str()),
-        Err(AuditError::Name(_) | AuditError::Reason(_)) => ("unavailable", "unrecordable"),
+        Err(AuditError::Overloaded) => ("unavailable", "overloaded"),
+        Err(
+            AuditError::Name(_) | AuditError::Reason(_) | AuditError::PolicyEvidence | AuditError::WorkloadEvidence(_),
+        ) => ("unavailable", "unrecordable"),
     };
     tracing::info!(
         target: AUDIT_LOG_TARGET,
@@ -97,6 +170,7 @@ fn log(event: &AuditEvent<'_>, outcome: &Result<Disposition, AuditError>) {
         decision = decision.as_str(),
         fault = decision.fault().map_or("-", Fault::code),
         snapshot_source = %event.snapshot_source,
+        projection_revision = event.policy_revision.map(|revision| revision.generation.get()),
         audit,
         audit_failure = failure,
         "egress decision"

@@ -3,6 +3,7 @@
 
 /// Unspecified and unknown values are invalid, so omission cannot silently make
 /// a caller binding optional.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum VariableRequirement {
@@ -736,18 +737,21 @@ impl ::buffa::Message for VariableType {
         self.kind = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for VariableType {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for VariableType {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = VariableType;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct VariableType")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<VariableType, A::Error> {
@@ -768,7 +772,7 @@ impl<'de> serde::Deserialize<'de> for VariableType {
                             if let Some(v) = v {
                                 if __oneof_kind.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'kind'",
                                         ),
                                     );
@@ -792,7 +796,7 @@ impl<'de> serde::Deserialize<'de> for VariableType {
                             if let Some(v) = v {
                                 if __oneof_kind.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'kind'",
                                         ),
                                     );
@@ -816,7 +820,7 @@ impl<'de> serde::Deserialize<'de> for VariableType {
                             if let Some(v) = v {
                                 if __oneof_kind.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'kind'",
                                         ),
                                     );
@@ -840,7 +844,7 @@ impl<'de> serde::Deserialize<'de> for VariableType {
                             if let Some(v) = v {
                                 if __oneof_kind.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'kind'",
                                         ),
                                     );
@@ -864,7 +868,7 @@ impl<'de> serde::Deserialize<'de> for VariableType {
                             if let Some(v) = v {
                                 if __oneof_kind.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'kind'",
                                         ),
                                     );
@@ -888,7 +892,7 @@ impl<'de> serde::Deserialize<'de> for VariableType {
                             if let Some(v) = v {
                                 if __oneof_kind.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'kind'",
                                         ),
                                     );
@@ -901,7 +905,7 @@ impl<'de> serde::Deserialize<'de> for VariableType {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
