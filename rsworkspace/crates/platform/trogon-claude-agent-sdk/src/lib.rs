@@ -2,6 +2,7 @@
 
 mod agent_name;
 mod client;
+mod control_request_id;
 mod effort_level;
 mod error;
 mod message_id;
@@ -35,3 +36,5 @@ pub use session_id::{SessionId, SessionIdError};
 pub use message_id::{MessageId, MessageIdError};
 
 pub use tool_use_id::{ToolUseId, ToolUseIdError};
+
+pub use control_request_id::{ControlRequestId, ControlRequestIdError};
