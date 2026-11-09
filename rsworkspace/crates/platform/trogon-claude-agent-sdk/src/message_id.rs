@@ -1,17 +1,9 @@
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct MessageId(String);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-#[error("invalid message identifier")]
-pub struct MessageIdError;
-
 impl MessageId {
-    pub fn new(value: impl Into<String>) -> Result<Self, MessageIdError> {
-        let value = value.into();
-        if value.is_empty() || value.chars().any(char::is_control) {
-            return Err(MessageIdError);
-        }
-        Ok(Self(value))
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
     }
 
     pub fn as_str(&self) -> &str {
