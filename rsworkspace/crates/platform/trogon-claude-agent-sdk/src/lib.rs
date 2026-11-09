@@ -6,6 +6,7 @@ mod client;
 mod control_request_id;
 mod effort_level;
 mod error;
+mod mcp_server_name;
 mod message_id;
 mod options;
 mod permission_mode;
@@ -47,3 +48,5 @@ pub use task_id::{TaskId, TaskIdError};
 pub use tool_name::{ToolName, ToolNameError};
 
 pub use builtin_tool_name::{BuiltinToolName, BuiltinToolNameError};
+
+pub use mcp_server_name::{McpServerName, McpServerNameError};
