@@ -1,5 +1,9 @@
 //! Shared NATS infrastructure for integration tests.
 
+mod tls_cluster;
+
+pub use tls_cluster::TlsJetStreamCluster;
+
 use std::path::PathBuf;
 use std::time::Duration;
 
