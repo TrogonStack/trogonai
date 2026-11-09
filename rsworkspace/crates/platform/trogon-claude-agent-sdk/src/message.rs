@@ -1,6 +1,16 @@
 use crate::{JsonObject, MessageId, MessageOrigin, SessionId, ToolName, ToolUseId};
 
 #[derive(Clone, Debug)]
+pub enum Message {
+    Assistant(AssistantMessage),
+    User(UserMessage),
+    System(SystemMessage),
+    Result(Box<ResultMessage>),
+    StreamEvent(StreamEvent),
+    Unknown { kind: String, data: JsonObject },
+}
+
+#[derive(Clone, Debug)]
 pub struct AssistantMessage {
     pub content: Vec<ContentBlock>,
     pub model: String,
