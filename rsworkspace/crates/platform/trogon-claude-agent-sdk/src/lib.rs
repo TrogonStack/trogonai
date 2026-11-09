@@ -11,6 +11,7 @@ mod prompt;
 mod session_id;
 mod setting_source;
 mod tool_rule;
+mod tool_use_id;
 mod usd_budget;
 
 pub use client::ClaudeSdkClient;
@@ -32,3 +33,5 @@ pub use prompt::Prompt;
 pub use session_id::SessionId;
 
 pub use message_id::MessageId;
+
+pub use tool_use_id::{ToolUseId, ToolUseIdError};
