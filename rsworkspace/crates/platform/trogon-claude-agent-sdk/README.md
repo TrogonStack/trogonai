@@ -88,14 +88,16 @@ configuration assembly. The Rust field follows TypeScript
 `additionalDirectories`; Python calls this option `add_dirs`.
 
 `agent` follows the pinned TypeScript `Options.agent` selection field;
-the reviewed Python options do not expose a counterpart. `AgentName` keeps
-the runtime draft's nonempty, control-free name boundary without rewriting
-valid Unicode names. This draft stores the selection without starting an agent.
+the reviewed Python options do not expose a counterpart. `AgentName` stores
+the string unchanged without identifier restrictions during configuration
+assembly. Process-start checks belong to the later runtime boundary. This draft
+stores the selection without starting an agent.
 
 `allowed_tools` stores ordered tool rules and defaults to empty.
-`ToolRule` preserves rule patterns while refusing empty values, control
-characters, and commas that could split a single rule at the CLI boundary.
-Duplicate rules remain present; this draft applies no permission policy.
+`ToolRule` stores strings unchanged, including empty values, control characters,
+and commas, like the upstream option fields. Duplicate rules remain present.
+Process-start validation belongs to the later runtime boundary; this draft
+applies no permission policy.
 
 `disallowed_tools` defaults to empty and remains independent of the
 allowed-rule list. Ordering and duplicate rules are preserved without
@@ -115,7 +117,12 @@ They prepare values for later runtime slices without implementing wire dispatch.
 
 | Rust value | Upstream scalar or purpose | Rust boundary |
 | --- | --- | --- |
-| `Prompt` | [Python `query(prompt=...)`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/query.py#L11) / TypeScript `query` string prompt | Nonempty and NUL-free; multiline, whitespace and Unicode text remain valid. |
-| `SessionId` | [Python `ResultMessage.session_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1714) / TypeScript `SDKResultSuccess.session_id` | Nonempty, control-free opaque text; valid spelling is preserved. |
-| `MessageId` | [Python `UserMessage.uuid`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1378) / TypeScript `SDKUserMessage.uuid`; Rust does not require UUID syntax | Nonempty, control-free opaque text; valid spelling is preserved. |
+| `Prompt` | [Python `ClaudeSDKClient.query(prompt=...)`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L272) / TypeScript `query` string prompt | Infallible owned string storage; empty strings and control characters remain unchanged. |
+| `SessionId` | [Python `ResultMessage.session_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1714) / TypeScript `SDKResultSuccess.session_id` | Infallible owned string storage; empty strings and control characters remain unchanged. |
+
+`SessionId` preserves message data without asserting native acceptance. Python's
+[`ClaudeSDKClient.query(session_id=...)`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L272)
+stores the string in JSON. TypeScript's `Options.sessionId` and session-store
+operations have separate UUID requirements at their respective boundaries.
+| `MessageId` | [Python `UserMessage.uuid`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1378) / TypeScript `SDKUserMessage.uuid` | Stores Python string values unchanged, including empty and control-bearing text. TypeScript declares `UUID`; Rust keeps opaque text without UUID syntax checks. |
 | `ToolUseId` | [Python `ToolUseBlock.id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1223) / TypeScript `UserDialogRequest.toolUseID` | Stores strings unchanged, including empty and control-bearing text. Optionality belongs to the containing message. |
