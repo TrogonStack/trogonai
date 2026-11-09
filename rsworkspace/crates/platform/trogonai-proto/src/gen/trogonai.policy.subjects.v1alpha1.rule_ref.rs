@@ -6,6 +6,7 @@
 /// rather than copying policies, so a past decision can be reconstructed from
 /// the policy streams at the recorded revisions without the stream ever being
 /// pinned (ADR#0025 "authorization never pins"). Unknown kinds reject.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum PolicyRuleKind {
