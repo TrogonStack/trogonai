@@ -44,6 +44,31 @@ def tuple_fields(reader, identifiers):
     return result
 
 
+def enum_shapes(reader, name, body):
+    require(body["has_stripped_variants"] is False, name)
+    result = {name: {"kind": "enum", "generics": generics(reader, body["generics"]), "variants": []}}
+    for identifier in body["variants"]:
+        variant = reader.item(identifier)
+        require(set(variant["inner"]) == {"variant"}, name)
+        key = name + "::" + variant["name"]
+        require(key not in result, "duplicate-variant:" + key)
+        result[name]["variants"].append(variant["name"])
+        value = variant["inner"]["variant"]
+        kind = value["kind"]
+        if kind == "plain":
+            payload = "plain"
+        elif isinstance(kind, dict) and set(kind) == {"tuple"}:
+            require(all(i is not None for i in kind["tuple"]), key)
+            payload = tuple_fields(reader, kind["tuple"])
+        elif isinstance(kind, dict) and set(kind) == {"struct"}:
+            require(kind["struct"]["has_stripped_fields"] is False, key)
+            payload = fields(reader, kind["struct"]["fields"])
+        else:
+            raise GateError(Code.FORMAT, key)
+        result[key] = {"kind": "variant", "payload": payload, "discriminant": reader.normalize(value["discriminant"])}
+    return result
+
+
 def data_shape(reader, name, kind, body):
     result = {"kind": kind}
     if kind == "module":
