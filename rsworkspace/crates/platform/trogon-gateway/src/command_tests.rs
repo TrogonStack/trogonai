@@ -174,6 +174,20 @@ async fn serve_rejects_empty_sources_before_connecting() {
 }
 
 #[tokio::test]
+async fn serve_allows_empty_sources_when_explicitly_configured() {
+    let server = JetStreamTestServer::start().await;
+    let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    std::fs::write(file.path(), "allow_empty_sources = true\n").unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address());
+
+    tokio::time::timeout(Duration::from_secs(10), serve(resolved, std::future::ready(())))
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
 async fn serve_provisions_stream_and_claim_bucket_before_graceful_shutdown() {
     let server = JetStreamTestServer::start().await;
     let mut resolved = resolved_config();
