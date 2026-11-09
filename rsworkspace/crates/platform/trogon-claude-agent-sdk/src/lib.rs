@@ -7,6 +7,7 @@ mod error;
 mod options;
 mod permission_mode;
 mod prompt;
+mod session_id;
 mod setting_source;
 mod tool_rule;
 mod usd_budget;
@@ -26,3 +27,5 @@ pub use agent_name::AgentName;
 pub use tool_rule::{ToolRule, ToolRuleError};
 
 pub use prompt::Prompt;
+
+pub use session_id::{SessionId, SessionIdError};
