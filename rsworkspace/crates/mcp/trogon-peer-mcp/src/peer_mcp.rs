@@ -22,6 +22,7 @@ use crate::model_operation::ModelOperation;
 use crate::model_tool_definitions::model_tool;
 use crate::model_tools;
 use crate::native_binding::NativeBinding;
+use crate::peer_mcp_error_content::PeerMcpErrorContent;
 use crate::prompt_hook_context::PromptHookContext;
 use crate::prompt_hook_event::PromptHookEvent;
 use crate::prompt_hook_input::PromptHookInput;
@@ -338,7 +339,14 @@ where
     ) -> Result<CallToolResponse, ErrorData> {
         let result = match self.invoke(request).await {
             Ok(result) => result,
-            Err(error) => CallToolResult::error(vec![ContentBlock::text(error.to_string())]),
+            Err(error) => {
+                let mut result = CallToolResult::error(vec![ContentBlock::text(error.to_string())]);
+                result.structured_content = Some(
+                    serde_json::to_value(PeerMcpErrorContent { code: error.code() })
+                        .map_err(|_| ErrorData::internal_error("Peer error could not be encoded.", None))?,
+                );
+                result
+            }
         };
         Ok(CallToolResponse::Complete(result))
     }
