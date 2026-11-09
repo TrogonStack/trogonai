@@ -6,6 +6,7 @@ mod client;
 mod control_request_id;
 mod effort_level;
 mod error;
+mod mcp_server_name;
 mod message_id;
 mod options;
 mod permission_mode;
@@ -45,3 +46,5 @@ pub use tool_use_id::ToolUseId;
 pub use tool_name::ToolName;
 
 pub use builtin_tool_name::BuiltinToolName;
+
+pub use mcp_server_name::McpServerName;
