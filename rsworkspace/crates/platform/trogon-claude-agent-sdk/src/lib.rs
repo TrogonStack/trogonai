@@ -4,6 +4,7 @@ mod agent_name;
 mod builtin_tool_name;
 mod client;
 mod control_request_id;
+mod dialog_kind;
 mod effort_level;
 mod error;
 mod mcp_server_name;
@@ -50,3 +51,5 @@ pub use tool_name::{ToolName, ToolNameError};
 pub use builtin_tool_name::{BuiltinToolName, BuiltinToolNameError};
 
 pub use mcp_server_name::{McpServerName, McpServerNameError};
+
+pub use dialog_kind::{DialogKind, DialogKindError};
