@@ -68,6 +68,60 @@ async fn native_pipe_read_from_a_write_only_descriptor_preserves_the_os_error() 
 }
 
 #[tokio::test]
+async fn native_pipe_read_error_does_not_depend_on_the_reader_closing() -> TestResult {
+    let (_reader, writer) = std::io::pipe()?;
+    let flags = fcntl_getfl(&writer)?;
+    let mut pipe = NativePipe::new(&writer)?;
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), pipe.read(&mut [])).await??,
+        0
+    );
+    let mut bytes = [0; 1];
+    let error = tokio::time::timeout(Duration::from_secs(1), pipe.read(&mut bytes))
+        .await?
+        .err()
+        .ok_or("a write-only descriptor must not become a readable transport")?;
+    assert_eq!(error.raw_os_error(), Some(rustix::io::Errno::BADF.raw_os_error()));
+    drop(pipe);
+    assert_eq!(fcntl_getfl(&writer)?, flags);
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_pipe_cancelled_pending_read_preserves_later_bytes_and_eof() -> TestResult {
+    let (reader, mut writer) = std::io::pipe()?;
+    let flags = fcntl_getfl(&reader)?;
+    let mut pipe = NativePipe::new(&reader)?;
+    let mut bytes = [0; 4];
+    {
+        let mut read = std::pin::pin!(pipe.read(&mut bytes));
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(read.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+    }
+    let send = async move {
+        tokio::task::yield_now().await;
+        writer.write_all(b"late")
+    };
+    let (sent, received) = tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::join!(send, pipe.read_exact(&mut bytes))
+    })
+    .await?;
+    sent?;
+    received?;
+    assert_eq!(&bytes, b"late");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), pipe.read(&mut bytes)).await??,
+        0
+    );
+    drop(pipe);
+    assert_eq!(fcntl_getfl(&reader)?, flags);
+    Ok(())
+}
+
+#[tokio::test]
 async fn native_pipe_preserves_bytes_through_bounded_backpressure_and_eof() -> TestResult {
     let (original, peer) = UnixStream::pair()?;
     peer.set_nonblocking(true)?;

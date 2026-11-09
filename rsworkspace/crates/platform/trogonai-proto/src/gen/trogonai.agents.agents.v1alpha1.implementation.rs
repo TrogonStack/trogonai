@@ -1051,18 +1051,21 @@ impl ::buffa::Message for AgentImplementation {
         self.editable_surface = ::buffa::MessageField::none();
     }
 }
-impl<'de> serde::Deserialize<'de> for AgentImplementation {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for AgentImplementation {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = AgentImplementation;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct AgentImplementation")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<AgentImplementation, A::Error> {
@@ -1111,7 +1114,7 @@ impl<'de> serde::Deserialize<'de> for AgentImplementation {
                             if let Some(v) = v {
                                 if __oneof_implementation.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'implementation'",
                                         ),
                                     );
@@ -1137,7 +1140,7 @@ impl<'de> serde::Deserialize<'de> for AgentImplementation {
                             if let Some(v) = v {
                                 if __oneof_implementation.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'implementation'",
                                         ),
                                     );
@@ -1150,7 +1153,7 @@ impl<'de> serde::Deserialize<'de> for AgentImplementation {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
