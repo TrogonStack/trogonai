@@ -64,6 +64,7 @@ fn message_envelopes_keep_declared_variants_and_boxed_results() -> Result<(), Bo
             uuid: "stream-one".into(),
             session_id: session,
             event: JsonObject::new(),
+            additional_fields: JsonObject::new(),
             parent_tool_use_id: None,
         }),
         Message::Unknown {
