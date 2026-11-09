@@ -3,6 +3,7 @@
 
 /// Specifies how `FieldRules.ignore` behaves, depending on the field's value, and
 /// whether the field tracks presence.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum Ignore {
@@ -227,6 +228,7 @@ impl ::buffa::Enumeration for Ignore {
     }
 }
 /// KnownRegex contains some well-known patterns.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum KnownRegex {
@@ -2254,18 +2256,21 @@ impl ::buffa::Message for FieldRules {
         self.cel_expression.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for FieldRules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for FieldRules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = FieldRules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct FieldRules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<FieldRules, A::Error> {
@@ -2289,11 +2294,11 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                         "celExpression" | "cel_expression" => {
                             __f_cel_expression = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<
                                         ::buffa::alloc::string::String,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -2309,9 +2314,9 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                         "cel" => {
                             __f_cel = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<Rule>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -2332,9 +2337,9 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                         "ignore" => {
                             __f_ignore = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<Ignore>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -2359,7 +2364,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2383,7 +2388,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2407,7 +2412,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2431,7 +2436,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2455,7 +2460,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2479,7 +2484,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2503,7 +2508,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2527,7 +2532,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2551,7 +2556,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2575,7 +2580,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2599,7 +2604,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2623,7 +2628,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2647,7 +2652,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2671,7 +2676,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2695,7 +2700,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2719,7 +2724,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2743,7 +2748,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2767,7 +2772,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2791,7 +2796,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2815,7 +2820,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2839,7 +2844,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2863,7 +2868,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             if let Some(v) = v {
                                 if __oneof_type.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'type'",
                                         ),
                                     );
@@ -2876,7 +2881,7 @@ impl<'de> serde::Deserialize<'de> for FieldRules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -3500,18 +3505,21 @@ impl ::buffa::Message for FloatRules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for FloatRules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for FloatRules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = FloatRules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct FloatRules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<FloatRules, A::Error> {
@@ -3537,9 +3545,9 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<f32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -3555,9 +3563,9 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<f32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -3573,9 +3581,9 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<f32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -3596,9 +3604,9 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<f32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -3613,9 +3621,9 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = f32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<f32, D::Error> {
@@ -3629,7 +3637,7 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -3641,9 +3649,9 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = f32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<f32, D::Error> {
@@ -3657,7 +3665,7 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -3669,9 +3677,9 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = f32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<f32, D::Error> {
@@ -3685,7 +3693,7 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -3697,9 +3705,9 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = f32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<f32, D::Error> {
@@ -3713,7 +3721,7 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -3724,7 +3732,7 @@ impl<'de> serde::Deserialize<'de> for FloatRules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -4216,18 +4224,21 @@ impl ::buffa::Message for DoubleRules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for DoubleRules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for DoubleRules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = DoubleRules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct DoubleRules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<DoubleRules, A::Error> {
@@ -4253,9 +4264,9 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<f64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -4271,9 +4282,9 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<f64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -4289,9 +4300,9 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<f64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -4312,9 +4323,9 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<f64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -4329,9 +4340,9 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = f64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<f64, D::Error> {
@@ -4345,7 +4356,7 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -4357,9 +4368,9 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = f64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<f64, D::Error> {
@@ -4373,7 +4384,7 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -4385,9 +4396,9 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = f64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<f64, D::Error> {
@@ -4401,7 +4412,7 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -4413,9 +4424,9 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = f64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<f64, D::Error> {
@@ -4429,7 +4440,7 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -4440,7 +4451,7 @@ impl<'de> serde::Deserialize<'de> for DoubleRules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -4906,18 +4917,21 @@ impl ::buffa::Message for Int32Rules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for Int32Rules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for Int32Rules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = Int32Rules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct Int32Rules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<Int32Rules, A::Error> {
@@ -4940,9 +4954,9 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -4958,9 +4972,9 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -4976,9 +4990,9 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -4994,9 +5008,9 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -5011,9 +5025,9 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -5027,7 +5041,7 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -5039,9 +5053,9 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -5055,7 +5069,7 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -5067,9 +5081,9 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -5083,7 +5097,7 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -5095,9 +5109,9 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -5111,7 +5125,7 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -5122,7 +5136,7 @@ impl<'de> serde::Deserialize<'de> for Int32Rules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -5585,18 +5599,21 @@ impl ::buffa::Message for Int64Rules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for Int64Rules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for Int64Rules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = Int64Rules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct Int64Rules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<Int64Rules, A::Error> {
@@ -5619,9 +5636,9 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -5637,9 +5654,9 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -5655,9 +5672,9 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -5673,9 +5690,9 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -5690,9 +5707,9 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -5706,7 +5723,7 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -5718,9 +5735,9 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -5734,7 +5751,7 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -5746,9 +5763,9 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -5762,7 +5779,7 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -5774,9 +5791,9 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -5790,7 +5807,7 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -5801,7 +5818,7 @@ impl<'de> serde::Deserialize<'de> for Int64Rules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -6264,18 +6281,21 @@ impl ::buffa::Message for UInt32Rules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for UInt32Rules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for UInt32Rules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = UInt32Rules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct UInt32Rules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<UInt32Rules, A::Error> {
@@ -6298,9 +6318,9 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -6316,9 +6336,9 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -6334,9 +6354,9 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -6352,9 +6372,9 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -6369,9 +6389,9 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u32, D::Error> {
@@ -6385,7 +6405,7 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -6397,9 +6417,9 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u32, D::Error> {
@@ -6413,7 +6433,7 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -6425,9 +6445,9 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u32, D::Error> {
@@ -6441,7 +6461,7 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -6453,9 +6473,9 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u32, D::Error> {
@@ -6469,7 +6489,7 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -6480,7 +6500,7 @@ impl<'de> serde::Deserialize<'de> for UInt32Rules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -6943,18 +6963,21 @@ impl ::buffa::Message for UInt64Rules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for UInt64Rules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for UInt64Rules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = UInt64Rules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct UInt64Rules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<UInt64Rules, A::Error> {
@@ -6977,9 +7000,9 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -6995,9 +7018,9 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -7013,9 +7036,9 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -7031,9 +7054,9 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -7048,9 +7071,9 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u64, D::Error> {
@@ -7064,7 +7087,7 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -7076,9 +7099,9 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u64, D::Error> {
@@ -7092,7 +7115,7 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -7104,9 +7127,9 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u64, D::Error> {
@@ -7120,7 +7143,7 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -7132,9 +7155,9 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u64, D::Error> {
@@ -7148,7 +7171,7 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -7159,7 +7182,7 @@ impl<'de> serde::Deserialize<'de> for UInt64Rules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -7621,18 +7644,21 @@ impl ::buffa::Message for SInt32Rules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for SInt32Rules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for SInt32Rules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = SInt32Rules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct SInt32Rules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<SInt32Rules, A::Error> {
@@ -7655,9 +7681,9 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -7673,9 +7699,9 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -7691,9 +7717,9 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -7709,9 +7735,9 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -7726,9 +7752,9 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -7742,7 +7768,7 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -7754,9 +7780,9 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -7770,7 +7796,7 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -7782,9 +7808,9 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -7798,7 +7824,7 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -7810,9 +7836,9 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -7826,7 +7852,7 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -7837,7 +7863,7 @@ impl<'de> serde::Deserialize<'de> for SInt32Rules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -8299,18 +8325,21 @@ impl ::buffa::Message for SInt64Rules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for SInt64Rules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for SInt64Rules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = SInt64Rules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct SInt64Rules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<SInt64Rules, A::Error> {
@@ -8333,9 +8362,9 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -8351,9 +8380,9 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -8369,9 +8398,9 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -8387,9 +8416,9 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -8404,9 +8433,9 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -8420,7 +8449,7 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -8432,9 +8461,9 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -8448,7 +8477,7 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -8460,9 +8489,9 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -8476,7 +8505,7 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -8488,9 +8517,9 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -8504,7 +8533,7 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -8515,7 +8544,7 @@ impl<'de> serde::Deserialize<'de> for SInt64Rules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -8974,18 +9003,21 @@ impl ::buffa::Message for Fixed32Rules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for Fixed32Rules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for Fixed32Rules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = Fixed32Rules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct Fixed32Rules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<Fixed32Rules, A::Error> {
@@ -9008,9 +9040,9 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -9026,9 +9058,9 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -9044,9 +9076,9 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -9062,9 +9094,9 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -9079,9 +9111,9 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u32, D::Error> {
@@ -9095,7 +9127,7 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -9107,9 +9139,9 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u32, D::Error> {
@@ -9123,7 +9155,7 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -9135,9 +9167,9 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u32, D::Error> {
@@ -9151,7 +9183,7 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -9163,9 +9195,9 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u32, D::Error> {
@@ -9179,7 +9211,7 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -9190,7 +9222,7 @@ impl<'de> serde::Deserialize<'de> for Fixed32Rules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -9649,18 +9681,21 @@ impl ::buffa::Message for Fixed64Rules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for Fixed64Rules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for Fixed64Rules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = Fixed64Rules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct Fixed64Rules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<Fixed64Rules, A::Error> {
@@ -9683,9 +9718,9 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -9701,9 +9736,9 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -9719,9 +9754,9 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -9737,9 +9772,9 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -9754,9 +9789,9 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u64, D::Error> {
@@ -9770,7 +9805,7 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -9782,9 +9817,9 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u64, D::Error> {
@@ -9798,7 +9833,7 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -9810,9 +9845,9 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u64, D::Error> {
@@ -9826,7 +9861,7 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -9838,9 +9873,9 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u64, D::Error> {
@@ -9854,7 +9889,7 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -9865,7 +9900,7 @@ impl<'de> serde::Deserialize<'de> for Fixed64Rules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -10326,18 +10361,21 @@ impl ::buffa::Message for SFixed32Rules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for SFixed32Rules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for SFixed32Rules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = SFixed32Rules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct SFixed32Rules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<SFixed32Rules, A::Error> {
@@ -10360,9 +10398,9 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -10378,9 +10416,9 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -10396,9 +10434,9 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -10414,9 +10452,9 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -10431,9 +10469,9 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -10447,7 +10485,7 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -10459,9 +10497,9 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -10475,7 +10513,7 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -10487,9 +10525,9 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -10503,7 +10541,7 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -10515,9 +10553,9 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i32;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i32, D::Error> {
@@ -10531,7 +10569,7 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -10542,7 +10580,7 @@ impl<'de> serde::Deserialize<'de> for SFixed32Rules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -11003,18 +11041,21 @@ impl ::buffa::Message for SFixed64Rules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for SFixed64Rules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for SFixed64Rules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = SFixed64Rules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct SFixed64Rules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<SFixed64Rules, A::Error> {
@@ -11037,9 +11078,9 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -11055,9 +11096,9 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -11073,9 +11114,9 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -11091,9 +11132,9 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<i64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -11108,9 +11149,9 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                         }
                         "lt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -11124,7 +11165,7 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -11136,9 +11177,9 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                         }
                         "lte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -11152,7 +11193,7 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -11164,9 +11205,9 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                         }
                         "gt" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -11180,7 +11221,7 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -11192,9 +11233,9 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                         }
                         "gte" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -11208,7 +11249,7 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -11219,7 +11260,7 @@ impl<'de> serde::Deserialize<'de> for SFixed64Rules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -12595,18 +12636,21 @@ impl ::buffa::Message for StringRules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for StringRules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for StringRules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = StringRules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct StringRules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<StringRules, A::Error> {
@@ -12672,9 +12716,9 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                         "len" => {
                             __f_len = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -12690,9 +12734,9 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                         "minLen" | "min_len" => {
                             __f_min_len = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -12708,9 +12752,9 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                         "maxLen" | "max_len" => {
                             __f_max_len = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -12726,9 +12770,9 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                         "lenBytes" | "len_bytes" => {
                             __f_len_bytes = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -12744,9 +12788,9 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                         "minBytes" | "min_bytes" => {
                             __f_min_bytes = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -12762,9 +12806,9 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                         "maxBytes" | "max_bytes" => {
                             __f_max_bytes = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -12820,11 +12864,11 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<
                                         ::buffa::alloc::string::String,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -12840,11 +12884,11 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<
                                         ::buffa::alloc::string::String,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -12865,11 +12909,11 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<
                                         ::buffa::alloc::string::String,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -12892,7 +12936,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -12912,7 +12956,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -12932,7 +12976,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -12952,7 +12996,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -12972,7 +13016,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -12992,7 +13036,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13012,7 +13056,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13032,7 +13076,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13052,7 +13096,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13072,7 +13116,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13092,7 +13136,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13112,7 +13156,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13134,7 +13178,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13156,7 +13200,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13176,7 +13220,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13196,7 +13240,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13216,7 +13260,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13236,7 +13280,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13256,7 +13300,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13276,7 +13320,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13298,7 +13342,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -13309,7 +13353,7 @@ impl<'de> serde::Deserialize<'de> for StringRules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -14015,18 +14059,21 @@ impl ::buffa::Message for BytesRules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for BytesRules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for BytesRules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = BytesRules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct BytesRules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<BytesRules, A::Error> {
@@ -14069,11 +14116,11 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                         "const" => {
                             __f_const = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<
                                         ::buffa::alloc::vec::Vec<u8>,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -14089,9 +14136,9 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                         "len" => {
                             __f_len = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -14107,9 +14154,9 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                         "minLen" | "min_len" => {
                             __f_min_len = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -14125,9 +14172,9 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                         "maxLen" | "max_len" => {
                             __f_max_len = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<u64>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -14151,11 +14198,11 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                         "prefix" => {
                             __f_prefix = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<
                                         ::buffa::alloc::vec::Vec<u8>,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -14171,11 +14218,11 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                         "suffix" => {
                             __f_suffix = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<
                                         ::buffa::alloc::vec::Vec<u8>,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -14191,11 +14238,11 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                         "contains" => {
                             __f_contains = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<
                                         ::buffa::alloc::vec::Vec<u8>,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -14211,11 +14258,11 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<
                                         ::buffa::alloc::vec::Vec<u8>,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -14231,11 +14278,11 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<
                                         ::buffa::alloc::vec::Vec<u8>,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -14251,11 +14298,11 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<
                                         ::buffa::alloc::vec::Vec<u8>,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -14278,7 +14325,7 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -14298,7 +14345,7 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -14318,7 +14365,7 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -14338,7 +14385,7 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                             if let Some(v) = v {
                                 if __oneof_well_known.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'well_known'",
                                         ),
                                     );
@@ -14349,7 +14396,7 @@ impl<'de> serde::Deserialize<'de> for BytesRules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -15981,18 +16028,21 @@ impl ::buffa::Message for DurationRules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for DurationRules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for DurationRules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = DurationRules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct DurationRules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<DurationRules, A::Error> {
@@ -16033,11 +16083,11 @@ impl<'de> serde::Deserialize<'de> for DurationRules {
                         "in" => {
                             __f_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<
                                         ::buffa_types::google::protobuf::Duration,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -16055,11 +16105,11 @@ impl<'de> serde::Deserialize<'de> for DurationRules {
                         "notIn" | "not_in" => {
                             __f_not_in = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<
                                         ::buffa_types::google::protobuf::Duration,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -16077,11 +16127,11 @@ impl<'de> serde::Deserialize<'de> for DurationRules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<
                                         ::buffa_types::google::protobuf::Duration,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -16110,7 +16160,7 @@ impl<'de> serde::Deserialize<'de> for DurationRules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -16136,7 +16186,7 @@ impl<'de> serde::Deserialize<'de> for DurationRules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -16162,7 +16212,7 @@ impl<'de> serde::Deserialize<'de> for DurationRules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -16188,7 +16238,7 @@ impl<'de> serde::Deserialize<'de> for DurationRules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -16201,7 +16251,7 @@ impl<'de> serde::Deserialize<'de> for DurationRules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -16948,18 +16998,21 @@ impl ::buffa::Message for TimestampRules {
         self.example.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for TimestampRules {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for TimestampRules {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = TimestampRules;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct TimestampRules")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<TimestampRules, A::Error> {
@@ -17011,11 +17064,11 @@ impl<'de> serde::Deserialize<'de> for TimestampRules {
                         "example" => {
                             __f_example = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<
                                         ::buffa_types::google::protobuf::Timestamp,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -17044,7 +17097,7 @@ impl<'de> serde::Deserialize<'de> for TimestampRules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -17070,7 +17123,7 @@ impl<'de> serde::Deserialize<'de> for TimestampRules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -17092,7 +17145,7 @@ impl<'de> serde::Deserialize<'de> for TimestampRules {
                             if let Some(v) = v {
                                 if __oneof_less_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'less_than'",
                                         ),
                                     );
@@ -17116,7 +17169,7 @@ impl<'de> serde::Deserialize<'de> for TimestampRules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -17142,7 +17195,7 @@ impl<'de> serde::Deserialize<'de> for TimestampRules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -17164,7 +17217,7 @@ impl<'de> serde::Deserialize<'de> for TimestampRules {
                             if let Some(v) = v {
                                 if __oneof_greater_than.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'greater_than'",
                                         ),
                                     );
@@ -17175,7 +17228,7 @@ impl<'de> serde::Deserialize<'de> for TimestampRules {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -18233,18 +18286,21 @@ impl ::buffa::Message for FieldPathElement {
         self.subscript = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for FieldPathElement {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for FieldPathElement {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = FieldPathElement;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct FieldPathElement")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<FieldPathElement, A::Error> {
@@ -18277,9 +18333,9 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                         "fieldNumber" | "field_number" => {
                             __f_field_number = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<i32>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -18303,11 +18359,11 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                         "fieldType" | "field_type" => {
                             __f_field_type = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<
                                         ::buffa_descriptor::generated::descriptor::field_descriptor_proto::Type,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -18325,11 +18381,11 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                         "keyType" | "key_type" => {
                             __f_key_type = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<
                                         ::buffa_descriptor::generated::descriptor::field_descriptor_proto::Type,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -18347,11 +18403,11 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                         "valueType" | "value_type" => {
                             __f_value_type = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<
                                         ::buffa_descriptor::generated::descriptor::field_descriptor_proto::Type,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -18368,9 +18424,9 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                         }
                         "index" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u64, D::Error> {
@@ -18384,7 +18440,7 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                             if let Some(v) = v {
                                 if __oneof_subscript.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'subscript'",
                                         ),
                                     );
@@ -18404,7 +18460,7 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                             if let Some(v) = v {
                                 if __oneof_subscript.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'subscript'",
                                         ),
                                     );
@@ -18416,9 +18472,9 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                         }
                         "intKey" | "int_key" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = i64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<i64, D::Error> {
@@ -18432,7 +18488,7 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                             if let Some(v) = v {
                                 if __oneof_subscript.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'subscript'",
                                         ),
                                     );
@@ -18444,9 +18500,9 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                         }
                         "uintKey" | "uint_key" => {
                             struct _DeserSeed;
-                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                            impl<'de> ::serde::de::DeserializeSeed<'de> for _DeserSeed {
                                 type Value = u64;
-                                fn deserialize<D: serde::Deserializer<'de>>(
+                                fn deserialize<D: ::serde::Deserializer<'de>>(
                                     self,
                                     d: D,
                                 ) -> ::core::result::Result<u64, D::Error> {
@@ -18460,7 +18516,7 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                             if let Some(v) = v {
                                 if __oneof_subscript.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'subscript'",
                                         ),
                                     );
@@ -18484,7 +18540,7 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                             if let Some(v) = v {
                                 if __oneof_subscript.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'subscript'",
                                         ),
                                     );
@@ -18495,7 +18551,7 @@ impl<'de> serde::Deserialize<'de> for FieldPathElement {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
