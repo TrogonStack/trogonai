@@ -13,6 +13,7 @@ mod message_id;
 mod options;
 mod permission_mode;
 mod prompt;
+mod queue_capacity;
 mod session_id;
 mod setting_source;
 mod task_id;
@@ -56,3 +57,5 @@ pub use mcp_server_name::{McpServerName, McpServerNameError};
 pub use dialog_kind::{DialogKind, DialogKindError};
 
 pub use mcp_tool_name::{McpToolName, McpToolNameError};
+
+pub use queue_capacity::{QueueCapacity, QueueCapacityError};
