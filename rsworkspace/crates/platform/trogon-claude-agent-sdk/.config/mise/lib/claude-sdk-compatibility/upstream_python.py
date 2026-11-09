@@ -31,7 +31,8 @@ def extract(contents, expected_hash):
         elif isinstance(statement, (ast.Import, ast.ImportFrom)):
             if any((alias.asname or alias.name.split(".")[0]) in selected for alias in statement.names):
                 raise GateError(Code.FORMAT, "selected-python-import")
-    result = {"ClaudeAgentOptions": {"kind": "class"}}
+    result = {"ClaudeAgentOptions": {"kind": "class",
+                                      "decorators": [ast.unparse(node) for node in options[0].decorator_list]}}
     for node in options[0].body:
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
             continue
