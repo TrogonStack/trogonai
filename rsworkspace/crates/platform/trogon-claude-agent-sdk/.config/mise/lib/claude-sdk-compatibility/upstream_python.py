@@ -184,5 +184,64 @@ def extract(contents, expected_hash):
     return result
 
 
-def required_wrappers(tree):
-    raise GateError(Code.FORMAT, "wrapper-identity-not-supported")
+def _required_wrappers(tree):
+    wrappers = {}
+
+    def invalidate(name):
+        if name in wrappers:
+            wrappers[name] = None
+
+    def comprehension(node):
+        if isinstance(node, ast.Lambda):
+            for default in (*node.args.defaults, *node.args.kw_defaults):
+                if default is not None:
+                    comprehension(default)
+            return
+        if isinstance(node, ast.NamedExpr):
+            visit(node.target)
+        for child in ast.iter_child_nodes(node):
+            comprehension(child)
+
+    def visit(node):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            invalidate(node.name)
+            for field, value in ast.iter_fields(node):
+                if field != "body":
+                    for child in value if isinstance(value, list) else [value]:
+                        if isinstance(child, ast.AST):
+                            visit(child)
+            return
+        if isinstance(node, ast.Lambda):
+            for default in (*node.args.defaults, *node.args.kw_defaults):
+                if default is not None:
+                    visit(default)
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            comprehension(node)
+            return
+        if isinstance(node, ast.AnnAssign) and node.value is None:
+            visit(node.annotation)
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            invalidate(node.id)
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+            invalidate(node.name)
+        elif isinstance(node, ast.MatchMapping):
+            invalidate(node.rest)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                invalidate(alias.asname or alias.name.split(".")[0])
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                local = alias.asname or alias.name
+                invalidate(local)
+                if not node.level and node.module in {"typing", "typing_extensions"} and alias.name in {"Required", "NotRequired"}:
+                    wrappers[local] = alias.name == "Required"
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    visit(tree)
+    return wrappers
+
+
+required_wrappers = _required_wrappers
