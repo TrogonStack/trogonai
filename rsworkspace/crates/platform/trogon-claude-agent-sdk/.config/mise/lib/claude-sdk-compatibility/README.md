@@ -33,8 +33,7 @@ TypeScript `extract(bytes, expectedHash)` accept a reviewed SHA256 pin and at
 most 2 MiB of source. They parse declarations without executing the SDK. Python
 selects `ClaudeAgentOptions` annotations/defaults; TypeScript selects `Options`
 property types, optionality, and readonly modifiers. Both select the
-`PermissionMode` and `SettingSource` string literal aliases. They do not select
-message or callback declarations. TypeScript uses the locked compiler 6.0.3.
+`PermissionMode` and `SettingSource` string literal aliases. TypeScript uses the locked compiler 6.0.3.
 
 Rust input must be freshly generated rustdoc JSON format 57 using
 `nightly-2026-04-16`. The format number does not attest which compiler produced
