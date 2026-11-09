@@ -15,10 +15,11 @@
 //!
 //! Left absent because the proxy cannot say them honestly: the session (the
 //! certificate profile that names it is a later ADR), the rule ids and rule
-//! refs (a static snapshot has no rule identity), the projection revision (a
-//! static file has none), byte counts and latency (a tunnel is opaque and the
+//! refs (these snapshots have no rule identity), byte counts and latency (a tunnel is opaque and the
 //! decision precedes it). The resolved address has no field in the record and
 //! stays in the local log line only.
+//! Live snapshots bind their configured bucket and incarnation in the policy
+//! source and retain the observed producer generation as the projection revision.
 
 use trogon_audit::{
     Actor, AuditName, AuditNameError, DecisionFacts, DecisionOutcome, Enforcement, ReasonCode, Record, RecordScope,
@@ -30,6 +31,7 @@ use crate::audit::{AuditEvent, Decision};
 use crate::audit_error::AuditError;
 use crate::constants::{DESTINATION_TOO_LONG_TARGET, NO_DESTINATION_TARGET};
 use crate::destination::Destination;
+use crate::policy_source::PolicySource;
 
 pub(crate) fn decision_record(
     event: &AuditEvent<'_>,
@@ -37,15 +39,30 @@ pub(crate) fn decision_record(
     project: &NatsToken,
     stamp: Stamp,
 ) -> Result<Record, AuditError> {
+    let provenance_matches = match (event.snapshot_source, event.policy_revision) {
+        (PolicySource::StaticFile { .. }, None) => true,
+        (PolicySource::NatsKv { incarnation, .. }, Some(revision)) => *incarnation == revision.incarnation,
+        (PolicySource::NatsKv { .. }, None) => matches!(event.decision, Decision::Refused(_)),
+        _ => false,
+    };
+    if !provenance_matches {
+        return Err(AuditError::PolicyEvidence);
+    }
     let actor = Actor::Agent {
         agent_id: AuditName::new(event.agent.as_str())?,
     };
     let scope = RecordScope::new(tenant.clone(), project.clone(), actor);
     let mut facts = DecisionFacts::new(Surface::Egress, target(event.destination)?, outcome(event.decision));
     facts.reason = reason(event.decision)?;
-    facts.policy_source = Some(AuditName::new(event.snapshot_source.kind())?);
+    facts.policy_source = Some(AuditName::new(event.snapshot_source.audit_name())?);
+    facts.projection_revision = event.policy_revision.map(|revision| revision.generation.get());
     facts.tls_mode = Some(TlsMode::Passthrough);
-    Ok(Record::decision(scope, facts, stamp))
+    match event.workload_peer {
+        Some(peer) => {
+            Record::authenticated_workload_decision(scope, facts, peer.clone(), stamp).map_err(AuditError::from)
+        }
+        None => Ok(Record::decision(scope, facts, stamp)),
+    }
 }
 
 fn outcome(decision: Decision) -> DecisionOutcome {
