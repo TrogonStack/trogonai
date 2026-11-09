@@ -17,6 +17,7 @@ pinned [TypeScript `0.3.319` declaration archive](https://registry.npmjs.org/@an
 | `permission_mode: Option<PermissionMode>` | [`permission_mode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2393) | `permissionMode` |
 | `setting_sources: Option<Vec<SettingSource>>` | [`setting_sources`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2666) | `settingSources` |
 | `max_turns: Option<NonZeroUsize>` | [`max_turns`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2418) | `maxTurns` |
+| `max_budget_usd: Option<UsdBudget>` | [`max_budget_usd`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2424) | `maxBudgetUsd` |
 
 `PermissionMode` mirrors Python's
 [`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L25)
@@ -60,6 +61,10 @@ client.disconnect().await?;
 
 `max_turns` preserves omission separately from an explicit positive turn
 limit. The Rust boundary uses `NonZeroUsize` for the configured count.
+
+`max_budget_usd` distinguishes an omitted cap from an explicit zero.
+`UsdBudget` admits finite, nonnegative amounts and preserves their value;
+non-finite and negative amounts fail at construction with `UsdBudgetError`.
 
 The example checks API composition; it does not run a session. Further options
 and runtime behavior belong in separate review slices.
