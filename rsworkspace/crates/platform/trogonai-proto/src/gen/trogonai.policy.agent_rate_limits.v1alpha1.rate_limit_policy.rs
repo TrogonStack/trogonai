@@ -2,6 +2,7 @@
 // source: trogonai/policy/agent_rate_limits/v1alpha1/rate_limit_policy.proto
 
 /// Which counter the ceiling applies to. Unknown and unspecified values reject.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum AgentRateLimitScope {
@@ -163,6 +164,7 @@ impl ::buffa::Enumeration for AgentRateLimitScope {
     }
 }
 /// What is counted. Unknown and unspecified values reject.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum AgentRateLimitMeter {

@@ -6,6 +6,7 @@
 /// Only egress decisions carry it; a surface with no TLS leg leaves it
 /// unspecified, which is a valid value on the record and not an error. Unknown
 /// values are invalid.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum TlsMode {

@@ -86,6 +86,12 @@ accepted history when capacity is exhausted. Full storage rejects writes.
 A separately bounded snapshot KV bucket retains one revision per key. Snapshots
 are optional runtime accelerators; they do not replace authoritative history.
 
+The adapter does not enforce a replica count. New event streams and snapshot
+buckets use JetStream client and broker defaults; existing replica counts are
+neither changed nor validated by `open_store`. File storage and retention checks
+do not establish node-failure tolerance. Deployments requiring that guarantee
+must provision and verify replication separately.
+
 Opening an existing resource checks its storage, subject scope, capacity and
 retention settings and fails on unsafe configuration. It does not reconfigure
 that resource. Initial provisioning uses the shared get-before-create helpers;
