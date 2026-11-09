@@ -3,6 +3,7 @@
 
 /// CredentialUseKind is what was done with a credential. Unspecified and unknown
 /// values are invalid.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum CredentialUseKind {
