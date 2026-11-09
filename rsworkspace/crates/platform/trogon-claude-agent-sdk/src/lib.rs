@@ -58,4 +58,4 @@ pub use builtin_tool_name::BuiltinToolName;
 
 pub use mcp_server_name::McpServerName;
 
-pub use dialog_kind::{DialogKind, DialogKindError};
+pub use dialog_kind::DialogKind;

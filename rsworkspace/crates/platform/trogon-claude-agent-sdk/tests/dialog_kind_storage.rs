@@ -1,10 +1,7 @@
 use trogon_claude_agent_sdk::DialogKind;
 
 fn assert_stored(input: &str) {
-    assert_eq!(
-        DialogKind::from(input).map(|value| value.as_str().to_owned()),
-        Ok(input.to_owned())
-    );
+    assert_eq!(DialogKind::from(input).as_str(), input);
 }
 
 #[test]
