@@ -285,6 +285,14 @@ impl ::buffa::Message for AuditRecord {
                         += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
                             + inner as u64;
                 }
+                __buffa::oneof::audit_record::Detail::CredentialActivation(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
+                }
             }
         }
         ::buffa::saturate_size(size)
@@ -397,6 +405,14 @@ impl ::buffa::Message for AuditRecord {
                 __buffa::oneof::audit_record::Detail::WriterLifecycle(x) => {
                     ::buffa::types::put_len_delimited_header(
                         16u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                __buffa::oneof::audit_record::Detail::CredentialActivation(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        17u32,
                         u64::from(__cache.consume_next()),
                         buf,
                     );
@@ -629,6 +645,28 @@ impl ::buffa::Message for AuditRecord {
                     );
                 }
             }
+            17u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::audit_record::Detail::CredentialActivation(
+                        ref mut existing,
+                    ),
+                ) = self.detail
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.detail = ::core::option::Option::Some(
+                        __buffa::oneof::audit_record::Detail::CredentialActivation(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -651,18 +689,21 @@ impl ::buffa::Message for AuditRecord {
         self.detail = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for AuditRecord {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for AuditRecord {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = AuditRecord;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct AuditRecord")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<AuditRecord, A::Error> {
@@ -726,9 +767,9 @@ impl<'de> serde::Deserialize<'de> for AuditRecord {
                         "recordId" | "record_id" => {
                             __f_record_id = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::string::String;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -744,9 +785,9 @@ impl<'de> serde::Deserialize<'de> for AuditRecord {
                         "class" => {
                             __f_class = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::EnumValue<AuditClass>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -821,9 +862,9 @@ impl<'de> serde::Deserialize<'de> for AuditRecord {
                         "actChain" | "act_chain" => {
                             __f_act_chain = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::vec::Vec<ActChainEntry>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -883,7 +924,7 @@ impl<'de> serde::Deserialize<'de> for AuditRecord {
                             if let Some(v) = v {
                                 if __oneof_detail.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'detail'",
                                         ),
                                     );
@@ -907,7 +948,7 @@ impl<'de> serde::Deserialize<'de> for AuditRecord {
                             if let Some(v) = v {
                                 if __oneof_detail.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'detail'",
                                         ),
                                     );
@@ -931,7 +972,7 @@ impl<'de> serde::Deserialize<'de> for AuditRecord {
                             if let Some(v) = v {
                                 if __oneof_detail.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'detail'",
                                         ),
                                     );
@@ -955,7 +996,7 @@ impl<'de> serde::Deserialize<'de> for AuditRecord {
                             if let Some(v) = v {
                                 if __oneof_detail.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'detail'",
                                         ),
                                     );
@@ -967,8 +1008,34 @@ impl<'de> serde::Deserialize<'de> for AuditRecord {
                                 );
                             }
                         }
+                        "credentialActivation" | "credential_activation" => {
+                            let v: ::core::option::Option<
+                                super::super::workload_identity::v1alpha1::CredentialActivation,
+                            > = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            super::super::workload_identity::v1alpha1::CredentialActivation,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_detail.is_some() {
+                                    return Err(
+                                        ::serde::de::Error::custom(
+                                            "multiple oneof fields set for 'detail'",
+                                        ),
+                                    );
+                                }
+                                __oneof_detail = Some(
+                                    __buffa::oneof::audit_record::Detail::CredentialActivation(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
