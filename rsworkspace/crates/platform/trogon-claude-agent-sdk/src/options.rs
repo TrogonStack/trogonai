@@ -17,6 +17,7 @@ pub struct ClaudeAgentOptions {
     pub additional_directories: Vec<PathBuf>,
     pub agent: Option<AgentName>,
     pub allowed_tools: Vec<ToolRule>,
+    pub disallowed_tools: Vec<ToolRule>,
 }
 
 impl std::fmt::Debug for ClaudeAgentOptions {
