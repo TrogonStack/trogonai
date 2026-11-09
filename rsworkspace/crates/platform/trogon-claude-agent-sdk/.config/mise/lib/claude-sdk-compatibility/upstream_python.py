@@ -66,6 +66,8 @@ def extract(contents, expected_hash):
         tree = ast.parse(contents.decode("utf-8"))
     except (UnicodeDecodeError, SyntaxError, ValueError, RecursionError) as error:
         raise GateError(Code.EXTRACTION, "python-types") from error
+    if any(isinstance(node, ast.ClassDef) and node.name in {"TextBlock", "UserMessage"} for node in tree.body):
+        raise GateError(Code.FORMAT, "message-classes-not-supported")
     options = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "ClaudeAgentOptions"]
     if len(options) != 1:
         raise GateError(Code.FORMAT, "ClaudeAgentOptions")
