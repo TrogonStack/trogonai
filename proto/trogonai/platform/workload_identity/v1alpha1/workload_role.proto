@@ -1,0 +1,10 @@
+edition = "2024";
+
+package trogonai.platform.workload_identity.v1alpha1;
+
+enum WorkloadRole {
+  WORKLOAD_ROLE_UNSPECIFIED = 0;
+  WORKLOAD_ROLE_EGRESS_PROXY = 1;
+  WORKLOAD_ROLE_AGENT = 2;
+  WORKLOAD_ROLE_SUPERVISOR = 3;
+}
