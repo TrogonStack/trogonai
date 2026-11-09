@@ -4,6 +4,18 @@ import hashlib
 from gate_errors import Code, GateError, format_boundary
 
 
+SELECTED_CLASSES = {
+    "ClaudeAgentOptions",
+    "TextBlock",
+    "ThinkingBlock",
+    "ToolUseBlock",
+    "ToolResultBlock",
+    "UserMessage",
+    "AssistantMessage",
+    "SystemMessage",
+    "ResultMessage",
+    "StreamEvent",
+}
 SELECTED_ALIASES = {
     "PermissionMode",
     "SettingSource",
@@ -24,6 +36,34 @@ def _literal_items(value):
     if len(literals) != len(set(literals)):
         raise GateError(Code.FORMAT, "python-literal")
     return literals
+
+
+def _field_shape(node, required=None):
+    if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name) or node.simple != 1:
+        raise GateError(Code.FORMAT, "python-field")
+    shape = {"annotation": ast.unparse(node.annotation),
+             "default": None if node.value is None else ast.unparse(node.value)}
+    if required is not None:
+        shape["required"] = required
+    return node.target.id, shape
+
+
+def _class_shape(node):
+    if node.bases or node.type_params or node.keywords:
+        raise GateError(Code.FORMAT, node.name)
+    decorators = [ast.unparse(value) for value in node.decorator_list]
+    result = {node.name: {"kind": "typed-dict" if node.bases else "class", "decorators": decorators}}
+    for statement in node.body:
+        if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant) and isinstance(statement.value.value, str):
+            continue
+        if isinstance(statement, ast.Pass):
+            continue
+        name, shape = _field_shape(statement)
+        key = node.name + "." + name
+        if key in result:
+            raise GateError(Code.FORMAT, key)
+        result[key] = shape
+    return result
 
 
 def reject_unreviewed_bindings(tree, selected, approved):
@@ -71,7 +111,7 @@ def extract(contents, expected_hash):
         raise GateError(Code.FORMAT, "ClaudeAgentOptions")
     if options[0].bases or options[0].keywords or options[0].type_params:
         raise GateError(Code.FORMAT, "ClaudeAgentOptions.inheritance-or-generics")
-    selected = {"ClaudeAgentOptions"} | SELECTED_ALIASES
+    selected = SELECTED_CLASSES | SELECTED_ALIASES
     approved = {id(options[0])}
     seen_selected = set()
     for statement in tree.body:
@@ -111,6 +151,10 @@ def extract(contents, expected_hash):
             raise GateError(Code.FORMAT, key)
         result[key] = {"annotation": ast.unparse(node.annotation),
                        "default": None if node.value is None else ast.unparse(node.value)}
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name in SELECTED_CLASSES and node.name != "ClaudeAgentOptions":
+            result.update(_class_shape(node))
+
     aliases = {}
     for node in tree.body:
         name, value = None, None
