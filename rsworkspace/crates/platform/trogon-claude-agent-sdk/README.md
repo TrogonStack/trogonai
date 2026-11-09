@@ -86,9 +86,10 @@ configuration assembly. The Rust field follows TypeScript
 `additionalDirectories`; Python calls this option `add_dirs`.
 
 `agent` follows the pinned TypeScript `Options.agent` selection field;
-the reviewed Python options do not expose a counterpart. `AgentName` keeps
-the runtime draft's nonempty, control-free name boundary without rewriting
-valid Unicode names. This draft stores the selection without starting an agent.
+the reviewed Python options do not expose a counterpart. `AgentName` stores
+the string unchanged without identifier restrictions during configuration
+assembly. Process-start checks belong to the later runtime boundary. This draft
+stores the selection without starting an agent.
 
 `allowed_tools` stores ordered tool rules and defaults to empty.
 `ToolRule` preserves rule patterns while refusing empty values, control
