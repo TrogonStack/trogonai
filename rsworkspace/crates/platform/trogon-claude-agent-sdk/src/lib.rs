@@ -17,6 +17,7 @@ mod queue_capacity;
 mod session_id;
 mod setting_source;
 mod task_id;
+mod timeout;
 mod tool_name;
 mod tool_rule;
 mod tool_use_id;
@@ -57,3 +58,5 @@ pub use mcp_tool_name::McpToolName;
 pub use dialog_kind::DialogKind;
 
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
+
+pub use timeout::{Timeout, TimeoutError};
