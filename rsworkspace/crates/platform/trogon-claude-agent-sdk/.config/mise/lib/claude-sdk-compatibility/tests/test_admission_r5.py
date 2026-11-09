@@ -9,7 +9,8 @@ class InventoryAdmissionTests(unittest.TestCase):
             for body in (None, [], "", 0):
                 d = document()
                 add(d, node(1, "Export", kind, body))
-                with self.subTest(kind=kind, body=body), self.assertRaises(GateError) as caught:
-                    inventory(d)
-                self.assertEqual(caught.exception.code, Code.FORMAT)
-                self.assertTrue(caught.exception.selector)
+                with self.subTest(kind=kind, body=body):
+                    with self.assertRaises(GateError) as caught:
+                        inventory(d)
+                    self.assertEqual(caught.exception.code, Code.FORMAT)
+                    self.assertTrue(caught.exception.selector)
