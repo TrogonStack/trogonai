@@ -61,4 +61,4 @@ pub use mcp_server_name::McpServerName;
 
 pub use dialog_kind::DialogKind;
 
-pub use mcp_tool_name::{McpToolName, McpToolNameError};
+pub use mcp_tool_name::McpToolName;

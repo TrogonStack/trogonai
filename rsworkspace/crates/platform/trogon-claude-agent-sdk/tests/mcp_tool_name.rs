@@ -1,17 +1,16 @@
-use trogon_claude_agent_sdk::{McpToolName, McpToolNameError};
+use trogon_claude_agent_sdk::McpToolName;
 
 #[test]
-fn mcp_tool_names_preserve_the_supported_alphabet_and_exact_maximum() -> Result<(), McpToolNameError> {
+fn mcp_tool_names_preserve_recommended_spellings_and_length() {
     for input in ["a".to_owned(), "Echo_01-tool.name".to_owned(), "a".repeat(128)] {
-        let name = McpToolName::from(input.clone())?;
+        let name = McpToolName::from(input.clone());
         assert_eq!(name.as_str(), input);
         assert_eq!(name.to_string(), input);
     }
-    Ok(())
 }
 
 #[test]
-fn mcp_tool_names_reject_invalid_lengths_and_characters() {
+fn mcp_tool_names_preserve_values_outside_naming_recommendations() {
     for input in [
         "".to_owned(),
         "a".repeat(129),
@@ -20,6 +19,8 @@ fn mcp_tool_names_reject_invalid_lengths_and_characters() {
         "a:b".to_owned(),
         "a\0b".to_owned(),
     ] {
-        assert!(matches!(McpToolName::from(input), Err(McpToolNameError)));
+        let name = McpToolName::from(input.clone());
+        assert_eq!(name.as_str(), input);
+        assert_eq!(name.to_string(), input);
     }
 }

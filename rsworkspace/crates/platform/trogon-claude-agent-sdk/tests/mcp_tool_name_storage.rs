@@ -1,8 +1,9 @@
 use trogon_claude_agent_sdk::McpToolName;
 
 fn assert_stored(input: &str) {
-    let stored = McpToolName::from(input).map(|name| (name.as_str().to_owned(), name.to_string()));
-    assert_eq!(stored, Ok((input.to_owned(), input.to_owned())));
+    let name = McpToolName::from(input);
+    assert_eq!(name.as_str(), input);
+    assert_eq!(name.to_string(), input);
 }
 
 #[test]
