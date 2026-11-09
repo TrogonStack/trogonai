@@ -63,7 +63,7 @@ pub struct ResultMessage {
     pub result: Option<String>,
     pub structured_output: Option<serde_json::Value>,
     pub usage: Option<JsonObject>,
-    pub errors: Vec<String>,
+    pub errors: Option<Vec<String>>,
     pub uuid: Option<MessageId>,
     pub stop_reason: Option<String>,
     pub terminal_reason: Option<String>,
