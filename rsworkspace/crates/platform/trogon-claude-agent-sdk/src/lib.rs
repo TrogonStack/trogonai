@@ -55,4 +55,4 @@ pub use mcp_server_name::{McpServerName, McpServerNameError};
 
 pub use dialog_kind::{DialogKind, DialogKindError};
 
-pub use mcp_tool_name::{McpToolName, McpToolNameError};
+pub use mcp_tool_name::McpToolName;
