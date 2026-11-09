@@ -28,4 +28,4 @@ pub use tool_rule::{ToolRule, ToolRuleError};
 
 pub use prompt::Prompt;
 
-pub use session_id::{SessionId, SessionIdError};
+pub use session_id::SessionId;
