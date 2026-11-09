@@ -4,6 +4,7 @@ mod agent_name;
 mod client;
 mod effort_level;
 mod error;
+mod message_id;
 mod options;
 mod permission_mode;
 mod prompt;
@@ -29,3 +30,5 @@ pub use tool_rule::{ToolRule, ToolRuleError};
 pub use prompt::{Prompt, PromptError};
 
 pub use session_id::{SessionId, SessionIdError};
+
+pub use message_id::{MessageId, MessageIdError};
