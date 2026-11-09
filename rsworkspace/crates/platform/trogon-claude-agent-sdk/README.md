@@ -128,4 +128,4 @@ They prepare values for later runtime slices without implementing wire dispatch.
 [`ClaudeSDKClient.query(session_id=...)`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L272)
 stores the string in JSON. TypeScript's `Options.sessionId` and session-store
 operations have separate UUID requirements at their respective boundaries.
-| `MessageId` | [Python `UserMessage.uuid`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1378) / TypeScript `SDKUserMessage.uuid`; Rust does not require UUID syntax | Nonempty, control-free opaque text; valid spelling is preserved. |
+| `MessageId` | [Python `UserMessage.uuid`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1378) / TypeScript `SDKUserMessage.uuid` | Stores Python string values unchanged, including empty and control-bearing text. TypeScript declares `UUID`; Rust keeps opaque text without UUID syntax checks. |

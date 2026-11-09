@@ -39,4 +39,4 @@ pub use prompt::Prompt;
 
 pub use session_id::SessionId;
 
-pub use message_id::{MessageId, MessageIdError};
+pub use message_id::MessageId;
