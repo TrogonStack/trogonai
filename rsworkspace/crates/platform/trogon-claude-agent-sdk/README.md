@@ -92,9 +92,10 @@ assembly. Process-start checks belong to the later runtime boundary. This draft
 stores the selection without starting an agent.
 
 `allowed_tools` stores ordered tool rules and defaults to empty.
-`ToolRule` preserves rule patterns while refusing empty values, control
-characters, and commas that could split a single rule at the CLI boundary.
-Duplicate rules remain present; this draft applies no permission policy.
+`ToolRule` stores strings unchanged, including empty values, control characters,
+and commas, like the upstream option fields. Duplicate rules remain present.
+Process-start validation belongs to the later runtime boundary; this draft
+applies no permission policy.
 
 The example checks API composition; it does not run a session. Further options
 and runtime behavior belong in separate review slices.
