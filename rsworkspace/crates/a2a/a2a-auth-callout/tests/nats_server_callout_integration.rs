@@ -25,6 +25,7 @@ use a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcV
 use a2a_auth_callout::dispatcher::{AuthDispatcher, CalloutDispatcher, CalloutDispatcherConfig};
 use a2a_auth_callout::jwt::{ExternalSubject, UserJwtClaims, decode_nats_user_payload};
 use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
+use a2a_auth_callout::tenant_admission::{TenantMembership, TenantMemberships};
 use a2a_auth_callout::wire::ServerAuthRequestClaims;
 use a2a_auth_callout::{
     AccountSigningKey, AuthAccount, AuthCalloutWireCodec, CalloutXkey, DenialCategory, MintedUserJwt, TenantAccount,
@@ -939,7 +940,7 @@ fn test_jwks_and_encoding_key(rng: &mut OsRng) -> (JwkSet, EncodingKey) {
 
 async fn mock_oidc_issuer() -> (MockServer, MockOidcIssuerUrl, JwkSet, EncodingKey) {
     let server = MockServer::start().await;
-    let issuer = MockOidcIssuerUrl(server.uri());
+    let issuer = MockOidcIssuerUrl("https://issuer.example".to_owned());
     let (jwks, enc) = test_jwks_and_encoding_key(&mut OsRng);
     Mock::given(method("GET"))
         .and(path("/.well-known/openid-configuration"))
@@ -1061,6 +1062,12 @@ fn grant_prefix() -> A2aPrefix {
 }
 
 fn dispatcher_with_oidc(tenant: &TenantFixture, issuer: OidcIssuerUrl, jwks: JwkSet) -> CalloutDispatcher {
+    let membership = TenantMembership::for_oidc_subject(
+        tenant.account.clone(),
+        &issuer,
+        &ExternalSubject::new("user-integration-oidc").unwrap(),
+    )
+    .unwrap();
     let oidc: Arc<dyn OidcVerifier> = Arc::new(JwksOidcVerifier::with_static_jwks(
         issuer,
         vec![OIDC_AUDIENCE.into()],
@@ -1068,6 +1075,7 @@ fn dispatcher_with_oidc(tenant: &TenantFixture, issuer: OidcIssuerUrl, jwks: Jwk
     ));
     CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: tenant.signing_keys(),
+        tenant_admission: Arc::new(TenantMemberships::new([membership]).unwrap()),
         user_jwt_ttl: Duration::from_secs(300),
         a2a_prefix: grant_prefix(),
         oidc: Some(oidc),
@@ -1077,9 +1085,15 @@ fn dispatcher_with_oidc(tenant: &TenantFixture, issuer: OidcIssuerUrl, jwks: Jwk
 }
 
 fn dispatcher_with_mtls(tenant: &TenantFixture, trust_anchor_pem: String) -> CalloutDispatcher {
+    let membership = TenantMembership::for_legacy_mtls_subject(
+        tenant.account.clone(),
+        &ExternalSubject::new("CN=integration-client").unwrap(),
+    )
+    .unwrap();
     let mtls: Arc<dyn MTlsVerifier> = Arc::new(X509MtlsVerifier::new(TrustAnchorPem::new(trust_anchor_pem)));
     CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: tenant.signing_keys(),
+        tenant_admission: Arc::new(TenantMemberships::new([membership]).unwrap()),
         user_jwt_ttl: Duration::from_secs(300),
         a2a_prefix: grant_prefix(),
         oidc: None,
@@ -1090,6 +1104,11 @@ fn dispatcher_with_mtls(tenant: &TenantFixture, trust_anchor_pem: String) -> Cal
 
 #[allow(deprecated)]
 fn dispatcher_with_api_key(tenant: &TenantFixture) -> CalloutDispatcher {
+    let membership = TenantMembership::for_legacy_api_key_subject(
+        tenant.account.clone(),
+        &ExternalSubject::new("svc-integration").unwrap(),
+    )
+    .unwrap();
     let mut registry = ApiKeyRegistry::new(API_KEY_HMAC.to_vec());
     let key = ApiKey::new(API_KEY_VALUE).expect("api key");
     registry.register(
@@ -1103,6 +1122,7 @@ fn dispatcher_with_api_key(tenant: &TenantFixture) -> CalloutDispatcher {
     let api_key: Arc<dyn ApiKeyVerifier> = Arc::new(HmacApiKeyVerifier::new(Arc::new(registry)));
     CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: tenant.signing_keys(),
+        tenant_admission: Arc::new(TenantMemberships::new([membership]).unwrap()),
         user_jwt_ttl: Duration::from_secs(300),
         a2a_prefix: grant_prefix(),
         oidc: None,
