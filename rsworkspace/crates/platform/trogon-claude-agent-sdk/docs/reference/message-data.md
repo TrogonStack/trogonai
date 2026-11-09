@@ -28,7 +28,7 @@ retaining nested nulls, arrays and objects. This is not an SDK frame decoder.
 
 | Rust declaration | Python source | TypeScript source | Stored representation |
 | --- | --- | --- | --- |
-| MessageOrigin.kind | MessageOrigin.kind: Required[MessageOriginKind] | SDKMessageOrigin discriminated union | Nonempty, control-free String accepts future kinds. |
+| MessageOrigin.kind | MessageOrigin.kind: Required[MessageOriginKind] | SDKMessageOrigin discriminated union | String preserves known and future spellings, including empty and control-character values. |
 | MessageOrigin.additional_fields | MessageOrigin is a total=False TypedDict; its docs permit additional undocumented keys | SDKMessageOrigin variant-specific fields | Explicit JsonObject retains fields instead of reproducing the closed TypeScript union. |
 
 MessageOrigin serde keeps its kind discriminator separate from extension keys.
