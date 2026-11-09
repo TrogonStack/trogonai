@@ -54,19 +54,19 @@ pub mod delegation_target {
             Self::Some(Target::from(v))
         }
     }
-    impl serde::Serialize for Target {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Target {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::AgentId(v) => {
-                    map.serialize_entry("agentId", v)?;
+                    map.serialize_entry("agentId", &**v)?;
                 }
                 Self::AgentsUnder(v) => {
-                    map.serialize_entry("agentsUnder", v)?;
+                    map.serialize_entry("agentsUnder", &**v)?;
                 }
             }
             map.end()
