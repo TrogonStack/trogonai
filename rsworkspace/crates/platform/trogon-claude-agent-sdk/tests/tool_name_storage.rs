@@ -1,7 +1,7 @@
 use trogon_claude_agent_sdk::ToolName;
 
 fn preserves_tool_name(input: &str) {
-    let name = ToolName::new(input).expect("tool names must preserve upstream string data");
+    let name = ToolName::new(input);
     assert_eq!(name.as_str(), input);
     assert_eq!(name.to_string(), input);
     assert_eq!(name.clone(), name);
