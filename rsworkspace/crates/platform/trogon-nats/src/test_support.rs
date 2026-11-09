@@ -14,6 +14,7 @@ use trogon_std::env::SystemEnv;
 
 use crate::auth::NatsConfig;
 use crate::connect::build_options;
+use crate::telemetry::fixture_diagnostics::FixtureDiagnostics;
 use crate::tls::NatsTls;
 
 const NATS_IMAGE_TAG: &str = "2.10.14";
@@ -37,11 +38,16 @@ fn image(command: impl IntoIterator<Item = impl Into<String>>) -> ContainerReque
 struct TestServer {
     _container: ContainerAsync<Nats>,
     address: String,
+    diagnostics: Option<FixtureDiagnostics>,
 }
 
 impl TestServer {
     async fn start(request: ContainerRequest<Nats>) -> Self {
-        let container = request.start().await.expect("start NATS testcontainer");
+        let diagnostics = FixtureDiagnostics::for_request(&request);
+        let container = match &diagnostics {
+            Some(diagnostics) => diagnostics.start(request).await,
+            None => request.start().await.expect("start NATS testcontainer"),
+        };
         let host = container.get_host().await.expect("get NATS testcontainer host");
         let port = container
             .get_host_port_ipv4(NATS_CLIENT_PORT)
@@ -51,6 +57,7 @@ impl TestServer {
         Self {
             _container: container,
             address: format!("{host}:{port}"),
+            diagnostics,
         }
     }
 
@@ -92,7 +99,20 @@ impl JetStreamTestServer {
     pub async fn client(&self) -> async_nats::Client {
         self.0.client().await
     }
+
+    /// Collects bounded, selected evidence from this plain fixture before it is dropped.
+    pub async fn failure_diagnostics(&self) -> String {
+        self.0
+            .diagnostics
+            .as_ref()
+            .expect("plain JetStream fixture diagnostics")
+            .capture(&self.0._container)
+            .await
+    }
 }
+
+#[cfg(test)]
+mod tests;
 
 /// An isolated NATS server with only core NATS, for bindings that live on
 /// request/reply and NATS Services rather than on streams.
