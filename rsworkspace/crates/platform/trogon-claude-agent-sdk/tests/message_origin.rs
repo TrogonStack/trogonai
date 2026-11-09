@@ -17,6 +17,16 @@ fn message_origins_round_trip_future_kinds_and_extension_values() -> TestResult 
     let constructed = MessageOrigin::new("human", fields.clone())?;
     assert_eq!(constructed.kind(), "human");
     assert_eq!(constructed.additional_fields(), &fields);
+    for kind in ["", "bad\nkind", "bad\0kind", "bad\u{7f}kind"] {
+        let preserved = MessageOrigin::new(kind, fields.clone())?;
+        assert_eq!(preserved.kind(), kind);
+        assert_eq!(preserved.additional_fields(), &fields);
+        let wire = serde_json::to_value(preserved.clone())?;
+        assert_eq!(wire["kind"], kind);
+        let decoded: MessageOrigin = serde_json::from_value(wire)?;
+        assert_eq!(decoded.kind(), kind);
+        assert_eq!(decoded.additional_fields(), &fields);
+    }
     Ok(())
 }
 
