@@ -13,7 +13,21 @@ pub const __FILE_JSON_EXT: ::buffa::type_registry::JsonExtEntry = ::buffa::type_
     to_json: ::buffa::extension_registry::helpers::message_to_json::<
         super::super::FileOptions,
     >,
-    from_json: ::buffa::extension_registry::helpers::message_from_json::<
-        super::super::FileOptions,
-    >,
+    from_json: {
+        fn __from_json(
+            value: ::buffa::serde_json::Value,
+            number: u32,
+        ) -> ::core::result::Result<
+            ::buffa::alloc::vec::Vec<::buffa::UnknownField>,
+            ::buffa::alloc::string::String,
+        > {
+            if value.is_null() {
+                return ::core::result::Result::Ok(::buffa::alloc::vec::Vec::new());
+            }
+            ::buffa::extension_registry::helpers::message_from_json::<
+                super::super::FileOptions,
+            >(value, number)
+        }
+        __from_json
+    },
 };
