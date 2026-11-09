@@ -50,22 +50,22 @@ pub mod egress_permission_event {
             Self::Some(Event::from(v))
         }
     }
-    impl serde::Serialize for Event {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Event {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::EgressPermissionInitialized(v) => {
-                    map.serialize_entry("egressPermissionInitialized", v)?;
+                    map.serialize_entry("egressPermissionInitialized", &**v)?;
                 }
                 Self::EgressPermissionSet(v) => {
-                    map.serialize_entry("egressPermissionSet", v)?;
+                    map.serialize_entry("egressPermissionSet", &**v)?;
                 }
                 Self::EgressPermissionCleared(v) => {
-                    map.serialize_entry("egressPermissionCleared", v)?;
+                    map.serialize_entry("egressPermissionCleared", &**v)?;
                 }
             }
             map.end()
