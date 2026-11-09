@@ -182,3 +182,7 @@ def extract(contents, expected_hash):
     if not {"PermissionMode", "SettingSource"}.issubset(aliases):
         raise GateError(Code.FORMAT, "selected-python-aliases")
     return result
+
+
+def required_wrappers(tree):
+    raise GateError(Code.FORMAT, "wrapper-identity-not-supported")
