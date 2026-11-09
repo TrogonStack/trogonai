@@ -49,4 +49,4 @@ pub use tool_name::{ToolName, ToolNameError};
 
 pub use builtin_tool_name::{BuiltinToolName, BuiltinToolNameError};
 
-pub use mcp_server_name::{McpServerName, McpServerNameError};
+pub use mcp_server_name::McpServerName;
