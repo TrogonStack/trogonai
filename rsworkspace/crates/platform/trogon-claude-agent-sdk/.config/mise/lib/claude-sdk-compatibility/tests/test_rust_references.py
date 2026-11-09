@@ -12,6 +12,17 @@ class ReferenceTests(unittest.TestCase):
         self.doc["paths"]["9"] = {"crate_id": 2, "path": ["alloc", "vec", "Vec"], "kind": "struct"}
         self.args = {"angle_bracketed": {"args": [{"type": path(1)}], "constraints": []}}
 
+    def test_public_alias_and_external_generic_paths_replace_compiler_ids(self):
+        reader = RustDocument(self.doc, {"1": "PublicName"})
+        self.assertEqual(reader.type(path(9, self.args)), {"resolved_path": {
+            "path": "alloc::vec::Vec", "args": {"angle_bracketed": {
+                "args": [{"type": {"resolved_path": {"path": "PublicName", "args": None}}}],
+                "constraints": [],
+            }},
+        }})
+        changed = copy.deepcopy(self.doc)
+        changed["paths"]["900"] = changed["paths"].pop("9")
+        self.assertEqual(reader.type(path(9, self.args)), RustDocument(changed, {"1": "PublicName"}).type(path(900, self.args)))
 
     def test_reference_tuple_lifetime_and_const_arguments_are_retained(self):
         value = {"borrowed_ref": {"lifetime": "'a", "is_mutable": True, "type": {
