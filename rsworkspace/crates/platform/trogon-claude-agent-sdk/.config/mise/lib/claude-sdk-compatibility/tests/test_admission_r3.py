@@ -10,9 +10,10 @@ class IdentityAdmissionTests(unittest.TestCase):
             d["paths"]["9"] = {"path": ["alloc", "vec", "Vec"], "kind": "struct"}
             if crate is not None:
                 d["paths"]["9"]["crate_id"] = crate
-            with self.subTest(crate=crate), self.assertRaises(GateError) as caught:
-                RustDocument(d).type(path(9))
-            self.assertEqual(caught.exception.code, Code.FORMAT)
+            with self.subTest(crate=crate):
+                with self.assertRaises(GateError) as caught:
+                    RustDocument(d).type(path(9))
+                self.assertEqual(caught.exception.code, Code.FORMAT)
 
     def test_reference_ids_are_exact_integers_even_for_aliases(self):
         for identifier in ("9", True, 9.0, -1):
