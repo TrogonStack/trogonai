@@ -17,3 +17,46 @@ fn empty_and_control_values_are_typed_construction_errors() {
         assert!(matches!(SessionId::from(input), Err(SessionIdError)));
     }
 }
+
+fn assert_upstream_session_round_trip(input: &str) -> Result<(), SessionIdError> {
+    let value = SessionId::from(input)?;
+    assert_eq!(value.as_str(), input);
+    assert_eq!(value.to_string(), input);
+    assert_eq!(value.clone(), value);
+    let encoded = serde_json::json!({ "session_id": value.as_str() }).to_string();
+    let decoded = serde_json::from_str::<serde_json::Value>(&encoded);
+    assert!(matches!(decoded, Ok(message) if message["session_id"] == input));
+    assert!(!encoded.contains('\0'));
+    assert!(!encoded.contains('\n'));
+    Ok(())
+}
+
+#[test]
+fn empty_session_strings_remain_lossless_in_json() -> Result<(), SessionIdError> {
+    assert_upstream_session_round_trip("")
+}
+
+#[test]
+fn nul_session_strings_remain_lossless_in_json() -> Result<(), SessionIdError> {
+    assert_upstream_session_round_trip("before\0after")
+}
+
+#[test]
+fn newline_session_strings_remain_lossless_in_json() -> Result<(), SessionIdError> {
+    assert_upstream_session_round_trip("line\nidentifier")
+}
+
+#[test]
+fn tab_session_strings_remain_lossless_in_json() -> Result<(), SessionIdError> {
+    assert_upstream_session_round_trip("\t  ")
+}
+
+#[test]
+fn del_session_strings_remain_lossless_in_json() -> Result<(), SessionIdError> {
+    assert_upstream_session_round_trip("value\u{7f}")
+}
+
+#[test]
+fn c1_control_session_strings_remain_lossless_in_json() -> Result<(), SessionIdError> {
+    assert_upstream_session_round_trip("value\u{85}")
+}
