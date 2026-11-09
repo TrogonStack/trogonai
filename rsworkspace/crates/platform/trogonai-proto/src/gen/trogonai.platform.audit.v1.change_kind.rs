@@ -3,6 +3,7 @@
 
 /// ChangeKind is which kind of aggregate the pointed-at event belongs to.
 /// Unspecified and unknown values are invalid.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum ChangeKind {
