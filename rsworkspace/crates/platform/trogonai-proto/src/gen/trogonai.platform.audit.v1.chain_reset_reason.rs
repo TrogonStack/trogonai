@@ -3,6 +3,7 @@
 
 /// ChainResetReason is why a writer began a new chain. Unspecified and unknown
 /// values are invalid.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum ChainResetReason {

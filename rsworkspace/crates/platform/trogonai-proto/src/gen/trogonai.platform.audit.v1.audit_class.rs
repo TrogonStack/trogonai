@@ -9,6 +9,7 @@
 /// call, and the default for a surface that declares nothing is MUST. The field
 /// records the outcome of that table so a reader does not have to recompute it.
 /// Unspecified and unknown values are invalid.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum AuditClass {

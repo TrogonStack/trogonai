@@ -4,7 +4,7 @@
 //! platform.v1.audit.decision.{project}.{allow|deny|would_deny}
 //! platform.v1.audit.credential.{project}.{release|inject}
 //! platform.v1.audit.change.{project}.{policy|credential}
-//! platform.v1.audit.integrity.{component}.{start|chain_reset}
+//! platform.v1.audit.integrity.{component}.{start|chain_reset|readiness_probe}
 //! platform.v1.audit.checkpoint.{component}.signed
 //! ```
 //!

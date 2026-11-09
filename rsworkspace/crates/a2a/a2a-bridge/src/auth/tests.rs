@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use a2a_auth_callout::{BridgeMintResponder, BridgeMintSubscriber};
+use futures_util::StreamExt as _;
 use trogon_nats::test_support::CoreTestServer;
 use trogon_std::env::InMemoryEnv;
 
@@ -261,6 +262,18 @@ async fn the_bridge_mints_through_the_callout_responder_over_nats() {
     wait_for_callout_subscription(&callout_client, Duration::from_secs(5))
         .await
         .unwrap();
+
+    // A socket flush does not acknowledge subscription processing on the broker.
+    let ready_subject = callout_client.new_inbox();
+    let mut ready = callout_client.subscribe(ready_subject.clone()).await.unwrap();
+    callout_client
+        .publish(ready_subject, bytes::Bytes::new())
+        .await
+        .unwrap();
+    ready
+        .next()
+        .await
+        .expect("broker processed the callout connection's subscriptions");
 
     let wire = Arc::new(AsyncNatsAuthMintWire::from_client(
         bridge_client,
