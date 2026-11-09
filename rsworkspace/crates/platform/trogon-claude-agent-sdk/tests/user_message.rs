@@ -11,7 +11,7 @@ fn user_messages_keep_text_blocks_injected_origin_and_tool_metadata() -> Result<
         session_id: Some(SessionId::new("session-one")?),
         uuid: Some(MessageId::new("user-one")?),
         origin: Some(MessageOrigin::new("channel", fields.clone())?),
-        tool_use_result: Some(fields.clone()),
+        tool_use_result: Some(serde_json::to_value(&fields)?),
         additional_fields: fields.clone(),
         message_fields: fields.clone(),
     };
@@ -22,7 +22,7 @@ fn user_messages_keep_text_blocks_injected_origin_and_tool_metadata() -> Result<
     }]);
     let copied = message.clone();
     assert!(matches!(&copied.content, Content::Blocks(blocks) if blocks.len() == 1));
-    assert_eq!(copied.tool_use_result.as_ref(), Some(&fields));
+    assert_eq!(copied.tool_use_result, Some(serde_json::to_value(&fields)?));
     assert_eq!(copied.additional_fields, fields);
     assert_eq!(copied.uuid.as_ref().map(MessageId::as_str), Some("user-one"));
     Ok(())

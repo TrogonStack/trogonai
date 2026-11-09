@@ -22,7 +22,7 @@ pub struct UserMessage {
     pub session_id: Option<SessionId>,
     pub uuid: Option<MessageId>,
     pub origin: Option<MessageOrigin>,
-    pub tool_use_result: Option<JsonObject>,
+    pub tool_use_result: Option<serde_json::Value>,
     pub additional_fields: JsonObject,
     pub message_fields: JsonObject,
 }
