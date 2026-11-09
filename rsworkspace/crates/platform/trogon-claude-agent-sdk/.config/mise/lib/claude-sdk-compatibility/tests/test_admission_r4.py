@@ -15,6 +15,7 @@ class ScalarAdmissionTests(unittest.TestCase):
                 if kind == "borrowed_ref":
                     body["lifetime"] = None
                 body[field] = value
-                with self.subTest(kind=kind, field=field, value=value), self.assertRaises(GateError) as caught:
-                    RustDocument(document()).type({kind: body})
-                self.assertEqual(caught.exception.code, Code.FORMAT)
+                with self.subTest(kind=kind, field=field, value=value):
+                    with self.assertRaises(GateError) as caught:
+                        RustDocument(document()).type({kind: body})
+                    self.assertEqual(caught.exception.code, Code.FORMAT)
