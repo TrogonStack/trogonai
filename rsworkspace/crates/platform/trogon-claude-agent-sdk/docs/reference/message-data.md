@@ -95,3 +95,14 @@ run completion, queued-turn accounting, cancellation or process shutdown.
 | origin | optional MessageOrigin | origin?: SDKMessageOrigin | Optional validated origin object. |
 | tool_use_result | optional dict[str, Any] | tool_use_result?: unknown | Option<Value> retains every JSON kind; None is omitted data and Some(Value::Null) is explicitly present null. This data boundary does not implement wire decoding. |
 | additional_fields / message_fields | No separate typed extension fields | Envelope and MessageParam scopes differ | Explicit maps preserve manually supplied outer and nested extension data. |
+
+## Partial events
+
+| Rust field | Python StreamEvent | TypeScript SDKPartialAssistantMessage | Stored representation |
+| --- | --- | --- | --- |
+| uuid / session_id | str / str | UUID / string | Existing String uuid and validated SessionId. |
+| event | dict[str, Any] | event: BetaRawMessageStreamEvent | Raw JsonObject rather than a recreated event union. |
+| parent_tool_use_id | optional str | string or null | Optional ToolUseId. |
+
+This declaration does not enable partial messages, decode deltas or reconstruct
+assistant content. Those are separate operational review boundaries.
