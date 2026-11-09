@@ -488,18 +488,21 @@ impl ::buffa::Message for ProviderAppParent {
         self.scope = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for ProviderAppParent {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for ProviderAppParent {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = ProviderAppParent;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct ProviderAppParent")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<ProviderAppParent, A::Error> {
@@ -520,7 +523,7 @@ impl<'de> serde::Deserialize<'de> for ProviderAppParent {
                             if let Some(v) = v {
                                 if __oneof_scope.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'scope'",
                                         ),
                                     );
@@ -544,7 +547,7 @@ impl<'de> serde::Deserialize<'de> for ProviderAppParent {
                             if let Some(v) = v {
                                 if __oneof_scope.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'scope'",
                                         ),
                                     );
@@ -557,7 +560,7 @@ impl<'de> serde::Deserialize<'de> for ProviderAppParent {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -754,18 +757,21 @@ impl ::buffa::Message for CredentialResourceParent {
         self.scope = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for CredentialResourceParent {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for CredentialResourceParent {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = CredentialResourceParent;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct CredentialResourceParent")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<CredentialResourceParent, A::Error> {
@@ -786,7 +792,7 @@ impl<'de> serde::Deserialize<'de> for CredentialResourceParent {
                             if let Some(v) = v {
                                 if __oneof_scope.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'scope'",
                                         ),
                                     );
@@ -810,7 +816,7 @@ impl<'de> serde::Deserialize<'de> for CredentialResourceParent {
                             if let Some(v) = v {
                                 if __oneof_scope.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'scope'",
                                         ),
                                     );
@@ -823,7 +829,7 @@ impl<'de> serde::Deserialize<'de> for CredentialResourceParent {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
