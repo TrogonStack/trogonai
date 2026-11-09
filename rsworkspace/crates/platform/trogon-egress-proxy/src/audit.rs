@@ -18,6 +18,7 @@ use crate::agent_id::AgentId;
 use crate::audit_error::AuditError;
 use crate::destination::Destination;
 use crate::fault::Fault;
+use crate::policy_revision::PolicyRevision;
 use crate::policy_source::PolicySource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +51,7 @@ pub struct AuditEvent<'a> {
     pub resolved_address: Option<IpAddr>,
     pub decision: Decision,
     pub snapshot_source: &'a PolicySource,
+    pub policy_revision: Option<PolicyRevision>,
 }
 
 /// Where decisions are recorded.

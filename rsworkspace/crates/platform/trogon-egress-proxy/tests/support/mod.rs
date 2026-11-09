@@ -27,7 +27,7 @@ use trogon_audit::{AuditName, WriterId, WriterIdentity};
 use trogon_egress_proxy::audit::{AuditEvent, AuditSink, Decision};
 use trogon_egress_proxy::audit_config::AuditConfig;
 use trogon_egress_proxy::audit_error::AuditError;
-use trogon_egress_proxy::config::Config;
+use trogon_egress_proxy::config::{Config, PolicyInput};
 use trogon_egress_proxy::host_name::HostName;
 use trogon_egress_proxy::limits::Limits;
 use trogon_egress_proxy::mtls::TlsFiles;
@@ -91,7 +91,7 @@ impl Pki {
         std::fs::write(&policy_file, policy).expect("write");
         Config {
             listen,
-            policy_file,
+            policy: PolicyInput::StaticFile(policy_file),
             tls: self.write_server_files(dir),
             trust_domain: TrustDomain::new(TRUST_DOMAIN).expect("trust domain"),
             audit: audit_config(),

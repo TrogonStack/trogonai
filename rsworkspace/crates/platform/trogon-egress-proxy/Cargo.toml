@@ -25,6 +25,7 @@ rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 rustls-pki-types = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
 tokio-rustls = { workspace = true }
@@ -38,6 +39,8 @@ trogon-std = { workspace = true, features = ["signal", "uuid"] }
 x509-parser = { workspace = true }
 
 [dev-dependencies]
+futures = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 buffa = { workspace = true }
 rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
 tempfile = { workspace = true }

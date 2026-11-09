@@ -3,6 +3,8 @@ use trogon_std::env::InMemoryEnv;
 
 use super::*;
 
+mod connection_limit_tests;
+
 const REQUIRED: [&str; 19] = [
     "trogon-egress-proxy",
     "--policy-file",
@@ -163,4 +165,54 @@ fn invalid_values_are_typed_errors() {
         resolve(args).expect_err("domain"),
         ConfigError::TrustDomain(_)
     ));
+}
+
+fn live_args() -> Args {
+    let mut args = parse(&[]).unwrap();
+    args.policy_file = None;
+    args.policy_bucket = Some("egress_policy".to_owned());
+    args.policy_incarnation = NonZeroU64::new(1);
+    args
+}
+
+#[test]
+fn live_policy_refuses_plaintext_and_anonymous_production_connections() {
+    assert!(matches!(
+        resolve(live_args()),
+        Err(ConfigError::LivePolicyTransport(
+            PolicyTransportError::ClientAuthenticationRequired
+        ))
+    ));
+    let env = InMemoryEnv::new();
+    env.set("NATS_TLS_DISABLED", "true");
+    assert!(matches!(
+        Config::resolve(live_args(), &env),
+        Err(ConfigError::LivePolicyTransport(PolicyTransportError::TlsRequired))
+    ));
+}
+
+#[test]
+fn live_policy_requires_an_explicit_source_and_pinned_incarnation() {
+    let mut args = live_args();
+    args.policy_incarnation = None;
+    assert_eq!(resolve(args).unwrap_err(), ConfigError::PolicySource);
+    let mut args = live_args();
+    args.policy_file = Some("policy.toml".into());
+    assert_eq!(resolve(args).unwrap_err(), ConfigError::PolicySource);
+    let mut command = REQUIRED.to_vec();
+    command.extend(["--policy-bucket", "egress_policy", "--policy-incarnation", "1"]);
+    assert!(Args::try_parse_from(command).is_err());
+}
+
+#[test]
+fn live_policy_derives_its_scope_from_validated_runtime_configuration() {
+    let env = InMemoryEnv::new();
+    env.set("NATS_CERT", "client.pem");
+    env.set("NATS_KEY", "client.key");
+    let config = Config::resolve(live_args(), &env).unwrap();
+    let PolicyInput::NatsKv(policy) = config.policy else {
+        panic!("explicit live selection required");
+    };
+    assert_eq!(policy.key(), "t61636d65.p7061796d656e7473");
+    assert_eq!(policy.bucket(), "egress_policy");
 }
