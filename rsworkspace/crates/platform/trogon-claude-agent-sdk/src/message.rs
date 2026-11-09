@@ -110,4 +110,5 @@ pub struct StreamEvent {
     pub session_id: SessionId,
     pub event: JsonObject,
     pub parent_tool_use_id: Option<ToolUseId>,
+    pub additional_fields: JsonObject,
 }
