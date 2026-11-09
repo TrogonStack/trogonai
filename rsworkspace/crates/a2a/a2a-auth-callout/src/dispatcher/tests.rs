@@ -8,12 +8,16 @@ use crate::jwt::{
     AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims, decode_nats_user_payload,
 };
 use crate::permissions::IssuedPermissions;
+use crate::tenant_admission::{TenantMembership, TenantMemberships};
 use crate::wire::test_encode::{FixtureServer, verified_client_tls};
 use nats_jwt_rs::Claims;
 use nats_jwt_rs::authorization::AuthRequest;
 use nkeys::KeyPair;
 use serde_json::json;
 use trogon_identity_types::{PrincipalId, PrincipalKind, SubjectPrincipal};
+
+mod admission_tests;
+mod lifetime_tests;
 
 const FIXTURE_CLIENT_CERT: &str = "-----BEGIN CERT-----\n-----END CERT-----";
 
@@ -88,8 +92,12 @@ struct StubOidcVerifier {
 
 #[async_trait::async_trait]
 impl OidcVerifier for StubOidcVerifier {
-    async fn verify(&self, _token: &BearerToken, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError> {
-        Ok(UserJwtClaims {
+    async fn verify(
+        &self,
+        _token: &BearerToken,
+        account: &AudienceAccount,
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
+        Ok(crate::test_support::verified_test_credential(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: ExternalSubject::new(self.sub).unwrap(),
             aud: account.clone(),
@@ -97,7 +105,7 @@ impl OidcVerifier for StubOidcVerifier {
             nats_permissions: IssuedPermissions::default_for_caller(&self.caller),
             caller_id: self.caller.clone(),
             principal_kind: PrincipalKind::Person,
-        })
+        }))
     }
 }
 
@@ -109,9 +117,9 @@ impl MTlsVerifier for StubMtlsVerifier {
         &self,
         _cert: &ClientCertPem,
         account: &AudienceAccount,
-    ) -> Result<UserJwtClaims, AuthCalloutError> {
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         let caller_id = CallerId::new("mtlsstub").unwrap();
-        Ok(UserJwtClaims {
+        Ok(crate::test_support::verified_test_credential(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: ExternalSubject::new("CN=svc").unwrap(),
             aud: account.clone(),
@@ -119,7 +127,7 @@ impl MTlsVerifier for StubMtlsVerifier {
             nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
             caller_id,
             principal_kind: PrincipalKind::Service,
-        })
+        }))
     }
 }
 
@@ -133,12 +141,50 @@ fn config_with(
         TenantSigningKeys::new(tenants.iter().map(|t| (t.account.clone(), t.signing_key.clone()))).unwrap();
     CalloutDispatcherConfig {
         tenant_signing_keys,
+        tenant_admission: Arc::new(fixture_memberships(tenants)),
         user_jwt_ttl: Duration::from_secs(60),
         a2a_prefix: A2aPrefix::new("a2a").unwrap(),
         oidc,
         mtls,
         api_key,
     }
+}
+
+fn fixture_memberships(tenants: &[&Tenant]) -> TenantMemberships {
+    let issuer = crate::credentials::oidc::OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let mut members = Vec::new();
+    for tenant in tenants {
+        for id in ["usrstub", "jos\u{e9}"] {
+            members.push(TenantMembership::new(tenant.account.clone(), person(id)));
+        }
+        members.push(TenantMembership::new(
+            tenant.account.clone(),
+            SubjectPrincipal::from_tokens("service", "mtlsstub").unwrap(),
+        ));
+        members.push(
+            TenantMembership::for_oidc_subject(
+                tenant.account.clone(),
+                &issuer,
+                &ExternalSubject::new("person:alice").unwrap(),
+            )
+            .unwrap(),
+        );
+        members.push(
+            TenantMembership::for_legacy_mtls_subject(
+                tenant.account.clone(),
+                &ExternalSubject::new("CN=lifetime-service").unwrap(),
+            )
+            .unwrap(),
+        );
+        members.push(
+            TenantMembership::for_legacy_api_key_subject(
+                tenant.account.clone(),
+                &ExternalSubject::new("svc-demo").unwrap(),
+            )
+            .unwrap(),
+        );
+    }
+    TenantMemberships::new(members).unwrap()
 }
 
 fn dispatcher_with(
