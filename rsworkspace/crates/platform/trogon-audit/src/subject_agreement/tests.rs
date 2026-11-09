@@ -169,3 +169,24 @@ fn an_unknown_detail_value_agrees_with_no_subject() {
         assert!(!subject_agrees(subject, &message), "{subject}");
     }
 }
+
+#[test]
+fn a_readiness_probe_cannot_claim_a_reset_or_decision_attribution() {
+    let mut probe = lifecycle(WriterLifecycleKind::ReadinessProbe);
+    probe.class = EnumValue::from(trogonai_proto::platform::audit::v1::AuditClass::Must);
+    let subject = "platform.v1.audit.integrity.egress_proxy.readiness_probe";
+    assert!(subject_agrees(subject, &probe));
+    let mut attributed = probe.clone();
+    attributed.attribution = deny(&stamper()).message().attribution.clone();
+    assert!(!subject_agrees(subject, &attributed));
+    let mut best_effort = probe.clone();
+    best_effort.class = EnumValue::from(trogonai_proto::platform::audit::v1::AuditClass::BestEffort);
+    assert!(!subject_agrees(subject, &best_effort));
+    let Some(Detail::WriterLifecycle(lifecycle)) = probe.detail.as_mut() else {
+        panic!("readiness lifecycle");
+    };
+    lifecycle.reset_reason = Some(EnumValue::from(
+        trogonai_proto::platform::audit::v1::ChainResetReason::ProcessStartWithoutResume,
+    ));
+    assert!(!subject_agrees(subject, &probe));
+}
