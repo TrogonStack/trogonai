@@ -10,6 +10,7 @@ mod effort_level;
 mod environment;
 mod error;
 mod mcp_server_name;
+mod mcp_tool_name;
 mod message_id;
 mod model_name;
 mod options;
@@ -59,3 +60,5 @@ pub use builtin_tool_name::BuiltinToolName;
 pub use mcp_server_name::McpServerName;
 
 pub use dialog_kind::DialogKind;
+
+pub use mcp_tool_name::{McpToolName, McpToolNameError};
