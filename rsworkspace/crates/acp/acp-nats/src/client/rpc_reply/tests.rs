@@ -16,7 +16,7 @@ fn encode_success_sets_jsonrpc_id_header() {
 
 #[test]
 fn encode_agent_error_sets_error_code_header() {
-    let error = Error::new(ErrorCode::InvalidParams.into(), "test message");
+    let error = Error::new(ErrorCode::INVALID_PARAMS, "test message");
     let encoded = encode_agent_error_for_test(ResponseId::Number(1), &error).unwrap();
     assert_eq!(
         encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(),
@@ -27,7 +27,7 @@ fn encode_agent_error_sets_error_code_header() {
 
 #[test]
 fn encode_agent_error_null_id() {
-    let error = Error::new(ErrorCode::InternalError.into(), "Internal error");
+    let error = Error::new(ErrorCode::INTERNAL_ERROR, "Internal error");
     let encoded = encode_agent_error_for_test(ResponseId::Null, &error).unwrap();
     assert!(encoded.headers.get(jsonrpc_nats::HEADER_ID).is_none());
     assert!(encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_some());
@@ -149,7 +149,7 @@ async fn failed_result_serialization_replies_with_correlated_internal_error() {
 #[tokio::test]
 async fn agent_error_publisher_preserves_structured_error_data() {
     let transport = ReplyTransport::default();
-    let mut error = Error::new(ErrorCode::InvalidParams.into(), "Invalid path");
+    let mut error = Error::new(ErrorCode::INVALID_PARAMS, "Invalid path");
     error.data = Some(json!({"path": "cwd", "allowed": ["relative"]}));
     publish_agent_error_reply(
         &transport,
@@ -181,7 +181,7 @@ async fn transport_failures_still_flush_without_duplicate_reply_attempts() {
             &transport,
             "_INBOX.reply-contract",
             ResponseId::Number(7),
-            ErrorCode::MethodNotFound,
+            ErrorCode::METHOD_NOT_FOUND,
             "Unsupported method",
             "transport failure contract",
         )

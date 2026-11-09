@@ -1,8 +1,9 @@
 use super::boundary_exit::BoundaryExit;
 use super::eof_signal_reader::EofSignalReader;
 use crate::agent_handler::AgentHandler;
-use agent_client_protocol::schema::v1::{CancelRequestNotification, ClientNotification, ClientRequest};
-use agent_client_protocol::{Agent, ByteStreams, Client, ConnectTo, ConnectionTo, Dispatch, Error, Responder, Result};
+use agent_client_protocol::v1::schema::{CancelRequestNotification, ClientNotification, ClientRequest};
+use agent_client_protocol::v1::{ConnectionTo, Dispatch, Responder};
+use agent_client_protocol::{Agent, ByteStreams, Client, ConnectTo, Error, Result};
 use std::future::Future;
 use std::sync::Arc;
 
@@ -46,6 +47,30 @@ async fn handle_client_dispatch<A: AgentHandler + Send + Sync + 'static>(
 ) -> Result<()> {
     match dispatch {
         Dispatch::Request(request, responder) => match request {
+            ClientRequest::AuthStatusRequest(req) => {
+                respond_in_task(&cx, responder, async move { agent.auth_status(req).await })
+            }
+            ClientRequest::ArchiveSessionRequest(req) => {
+                respond_in_task(&cx, responder, async move { agent.archive_session(req).await })
+            }
+            ClientRequest::UnarchiveSessionRequest(req) => {
+                respond_in_task(&cx, responder, async move { agent.unarchive_session(req).await })
+            }
+            ClientRequest::SessionStatusRequest(req) => {
+                respond_in_task(&cx, responder, async move { agent.session_status(req).await })
+            }
+            ClientRequest::SetSessionTitleRequest(req) => {
+                respond_in_task(&cx, responder, async move { agent.set_session_title(req).await })
+            }
+            ClientRequest::ListProvidersRequest(req) => {
+                respond_in_task(&cx, responder, async move { agent.list_providers(req).await })
+            }
+            ClientRequest::SetProviderRequest(req) => {
+                respond_in_task(&cx, responder, async move { agent.set_provider(req).await })
+            }
+            ClientRequest::DisableProviderRequest(req) => {
+                respond_in_task(&cx, responder, async move { agent.disable_provider(req).await })
+            }
             ClientRequest::InitializeRequest(req) => {
                 respond_in_task(&cx, responder, async move { agent.initialize(req).await })
             }
@@ -138,7 +163,7 @@ where
     let (incoming, eof_rx) = EofSignalReader::new(incoming);
 
     Agent
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |_notif: CancelRequestNotification, _cx| Ok(()),
             agent_client_protocol::on_receive_notification!(),
@@ -185,7 +210,7 @@ where
     C: ConnectTo<Agent>,
 {
     Agent
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |_notif: CancelRequestNotification, _cx| Ok(()),
             agent_client_protocol::on_receive_notification!(),

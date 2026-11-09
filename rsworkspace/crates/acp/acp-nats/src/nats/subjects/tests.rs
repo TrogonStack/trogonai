@@ -375,6 +375,11 @@ fn stream_assignments() {
     assert_eq!(commands::CancelSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::CloseSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::DeleteSubject::STREAM, Some(AcpStream::Commands));
+    assert_eq!(commands::ArchiveSubject::STREAM, Some(AcpStream::Commands));
+    assert_eq!(commands::UnarchiveSubject::STREAM, Some(AcpStream::Commands));
+    assert_eq!(commands::StatusSubject::STREAM, Some(AcpStream::Commands));
+    assert_eq!(commands::SetTitleSubject::STREAM, Some(AcpStream::Commands));
+    assert_eq!(global::AuthStatusSubject::STREAM, None);
     assert_eq!(commands::ForkSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::ResumeSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::SetModeSubject::STREAM, Some(AcpStream::Commands));

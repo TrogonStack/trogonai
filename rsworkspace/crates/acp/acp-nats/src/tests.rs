@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification, ToolCallUpdate, ToolCallUpdateFields,
 };
 use std::sync::{Arc, Mutex};

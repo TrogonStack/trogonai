@@ -76,6 +76,16 @@ delegation, per the zero-cost passthrough rule in `rsworkspace/crates/AGENTS.md`
 > and regroups the replies, so the NATS leg keeps carrying one message per
 > subject message.
 
+> Amended 2026-11-09 for SDK 5.0: boundary builders explicitly choose
+> `Agent.v1()` / `Client.v1()`, and version-specific schema, connection,
+> dispatch, and responder types live under `agent_client_protocol::v1`.
+> The callback-trait and NATS layering decisions remain unchanged. The SDK
+> removed JSON-RPC batch support from every transport; arrays now return one
+> invalid-request error without dispatching entries, consistent with the
+> updated remote transport RFD. This supersedes the batch behavior described
+> in the 2026-07-27 amendment. See the conformance document for payload
+> coverage and deliberate method exclusions.
+
 The adapters are shared by `acp-nats-server` (WebSocket and HTTP duplex) and
 `acp-nats-stdio`, so they live in one place: the `boundary` module of
 `acp-nats`. That module is the single SDK-connection-aware part of the crate;
@@ -168,7 +178,7 @@ behavior changes" in the conformance doc.
 - We keep full control of JetStream durability semantics, backpressure, and
   keepalives, which the SDK transport abstraction does not model.
 - The remote transport is upstream's as of decision 5, so HTTP, WebSocket, and
-  stdio all share one framing implementation and batch handling lives in exactly
+  stdio all share one framing implementation and array rejection lives in exactly
   one place. The NATS leg remains ours for the reason decision 1 gives.
 - Companion crates are tracked in the conformance doc and watched by the
   freshness task, so an upstream release re-tests these decisions instead of

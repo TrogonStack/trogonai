@@ -1,7 +1,7 @@
 use super::super::connection_client::ConnectionClient;
 use super::*;
 use crate::client_handler::ClientHandler;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
     CompleteElicitationNotification, ContentBlock, ContentChunk, CreateElicitationRequest, CreateElicitationResponse,
     CreateTerminalRequest, CreateTerminalResponse, DeleteSessionRequest, ElicitationAcceptAction, ElicitationFormMode,
@@ -111,7 +111,7 @@ async fn initialize_round_trips_through_boundary() {
 }
 
 #[tokio::test]
-async fn jsonrpc_batch_round_trips_as_a_single_grouped_response() {
+async fn jsonrpc_batch_is_rejected_as_one_invalid_request() {
     let (client_io, server_io) = tokio::io::duplex(8192);
     let (client_read, client_write) = tokio::io::split(client_io);
     let (server_read, server_write) = tokio::io::split(server_io);
@@ -136,19 +136,11 @@ async fn jsonrpc_batch_round_trips_as_a_single_grouped_response() {
         let mut lines = BufReader::new(client_read).lines();
         let line = lines.next_line().await.unwrap().unwrap();
         let value: serde_json::Value = serde_json::from_str(&line).unwrap();
-        let entries = value.as_array().expect("batch requests answer with one response array");
-        assert_eq!(entries.len(), 3, "the notification must not produce an entry: {line}");
-
-        let by_id: std::collections::HashMap<u64, &serde_json::Value> = entries
-            .iter()
-            .map(|entry| (entry["id"].as_u64().unwrap(), entry))
-            .collect();
-        assert_eq!(by_id[&1]["result"]["protocolVersion"], 1);
-        assert_eq!(by_id[&2]["result"]["sessionId"], "sess-1");
+        assert!(value.is_object(), "batch array must produce one error: {line}");
+        assert!(value["id"].is_null());
         assert_eq!(
-            by_id[&3]["error"]["code"],
-            i32::from(agent_client_protocol::ErrorCode::MethodNotFound),
-            "unrouted methods keep answering method_not_found inside a batch: {line}"
+            value["error"]["code"],
+            i32::from(agent_client_protocol::ErrorCode::INVALID_REQUEST)
         );
         drop(writer);
     };
@@ -214,7 +206,7 @@ async fn cancel_request_answers_pending_prompt_with_request_cancelled_error() {
         assert_eq!(value["id"], 1);
         assert_eq!(
             value["error"]["code"],
-            i32::from(agent_client_protocol::ErrorCode::RequestCancelled)
+            i32::from(agent_client_protocol::ErrorCode::REQUEST_CANCELLED)
         );
         drop(writer);
     };
@@ -333,7 +325,7 @@ async fn every_agent_method_is_routed_through_the_boundary() {
             if value.get("error").is_some() {
                 assert_eq!(
                     value["error"]["code"],
-                    i32::from(agent_client_protocol::ErrorCode::MethodNotFound),
+                    i32::from(agent_client_protocol::ErrorCode::METHOD_NOT_FOUND),
                     "unexpected error for id {id}: {line}"
                 );
             }
@@ -483,9 +475,9 @@ impl AgentHandler for ContraryAgent {
 
     async fn ext_method(
         &self,
-        _args: agent_client_protocol::schema::v1::ExtRequest,
-    ) -> Result<agent_client_protocol::schema::v1::ExtResponse> {
-        Ok(agent_client_protocol::schema::v1::ExtResponse::new(
+        _args: agent_client_protocol::v1::schema::ExtRequest,
+    ) -> Result<agent_client_protocol::v1::schema::ExtResponse> {
+        Ok(agent_client_protocol::v1::schema::ExtResponse::new(
             std::sync::Arc::from(serde_json::value::RawValue::from_string("{\"ok\":true}".to_string()).unwrap()),
         ))
     }
@@ -519,8 +511,9 @@ async fn boundary_covers_ext_success_and_notification_fallthroughs() {
             .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"_bad/note\",\"params\":{}}\n")
             .await
             .unwrap();
-        let mcp_params = serde_json::to_value(agent_client_protocol::schema::v1::MessageMcpRequest::new(
+        let mcp_params = serde_json::to_value(agent_client_protocol::v1::schema::MessageMcpRequest::new(
             "c1",
+            "request-1",
             "tools/list",
         ))
         .unwrap();
@@ -543,7 +536,7 @@ async fn boundary_covers_ext_success_and_notification_fallthroughs() {
         }
         assert_eq!(
             seen[&1]["error"]["code"],
-            i32::from(agent_client_protocol::ErrorCode::MethodNotFound)
+            i32::from(agent_client_protocol::ErrorCode::METHOD_NOT_FOUND)
         );
         assert_eq!(seen[&2]["result"]["ok"], true);
 

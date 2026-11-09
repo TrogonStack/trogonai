@@ -1,14 +1,14 @@
 use super::*;
 use agent_client_protocol::Error;
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::{
-    AgentCapabilities, ClientCapabilities, ClientNesCapabilities, ConfigOptionUpdate, ContentBlock, ContentChunk,
-    CreateElicitationRequest, ElicitationCapabilities, ElicitationFormCapabilities, ElicitationFormMode,
-    ElicitationSchema, ElicitationSessionScope, EnumOption, InitializeRequest, InitializeResponse, LoadSessionRequest,
-    McpCapabilities, McpServer, McpServerAcp, MessageId, NesCapabilities, NewSessionRequest, PlanEntry,
-    PlanEntryPriority, PlanEntryStatus, PlanId, PlanRemoved, PlanUpdate, PlanUpdateContent, PositionEncodingKind,
-    SessionConfigId, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue, SessionInfoUpdate,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, StringPropertySchema, UsageUpdate,
+use agent_client_protocol::v1::schema::{
+    AgentCapabilities, ClientCapabilities, ConfigOptionUpdate, ContentBlock, ContentChunk, CreateElicitationRequest,
+    ElicitationCapabilities, ElicitationFormCapabilities, ElicitationFormMode, ElicitationSchema,
+    ElicitationSessionScope, EnumOption, InitializeRequest, InitializeResponse, LoadSessionRequest, McpCapabilities,
+    McpServer, McpServerAcp, MessageId, NewSessionRequest, PlanEntry, PlanEntryPriority, PlanEntryStatus, PlanId,
+    PlanRemoved, PlanUpdate, PlanUpdateContent, SessionConfigId, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigOptionValue, SessionInfoUpdate, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
+    StringPropertySchema, UsageUpdate,
 };
 use std::path::PathBuf;
 
@@ -50,11 +50,9 @@ fn load_session_request_additional_directories_survive_round_trip() {
 }
 
 #[test]
-fn initialize_request_elicitation_and_nes_capabilities_survive_round_trip() {
-    let client_capabilities = ClientCapabilities::new()
-        .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()))
-        .nes(ClientNesCapabilities::new())
-        .position_encodings(vec![PositionEncodingKind::Utf8]);
+fn initialize_request_elicitation_capabilities_survive_round_trip() {
+    let client_capabilities =
+        ClientCapabilities::new().elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()));
     let request = InitializeRequest::new(ProtocolVersion::LATEST).client_capabilities(client_capabilities);
 
     let encoded = encode_request("initialize", RequestId::Number(1), &request).unwrap();
@@ -63,30 +61,6 @@ fn initialize_request_elicitation_and_nes_capabilities_survive_round_trip() {
     assert_eq!(
         decoded.client_capabilities.elicitation,
         request.client_capabilities.elicitation
-    );
-    assert_eq!(decoded.client_capabilities.nes, request.client_capabilities.nes);
-    assert_eq!(
-        decoded.client_capabilities.position_encodings,
-        request.client_capabilities.position_encodings
-    );
-}
-
-#[test]
-fn initialize_response_nes_capabilities_survive_round_trip() {
-    let response = InitializeResponse::new(ProtocolVersion::LATEST).agent_capabilities(
-        AgentCapabilities::new()
-            .nes(NesCapabilities::new())
-            .position_encoding(PositionEncodingKind::Utf16),
-    );
-
-    let encoded = encode_success(ResponseId::Number(1), &response).unwrap();
-    let decoded: Result<InitializeResponse, Error> = decode_response(&encoded.headers, &encoded.body).unwrap();
-    let decoded = decoded.unwrap();
-
-    assert_eq!(decoded.agent_capabilities.nes, response.agent_capabilities.nes);
-    assert_eq!(
-        decoded.agent_capabilities.position_encoding,
-        response.agent_capabilities.position_encoding
     );
 }
 
@@ -255,9 +229,9 @@ fn elicitation_create_enum_option_descriptions_survive_round_trip() {
         decode_request_params("elicitation/create", &encoded.headers, &encoded.body).unwrap();
 
     match decoded.mode {
-        agent_client_protocol::schema::v1::ElicitationMode::Form(form) => {
+        agent_client_protocol::v1::schema::ElicitationMode::Form(form) => {
             match form.requested_schema.properties.get("priority") {
-                Some(agent_client_protocol::schema::v1::ElicitationPropertySchema::String(prop)) => {
+                Some(agent_client_protocol::v1::schema::ElicitationPropertySchema::String(prop)) => {
                     let options = prop.one_of.clone().expect("expected oneOf options");
                     assert_eq!(options.len(), 2);
                     assert_eq!(options[0].description.as_deref(), Some("Handle when convenient"));
@@ -379,13 +353,13 @@ fn request_ids_round_trip_between_the_acp_and_json_rpc_spellings() {
     for (rpc, acp) in [
         (
             ResponseId::Number(7),
-            agent_client_protocol::schema::v1::RequestId::Number(7),
+            agent_client_protocol::v1::schema::RequestId::Number(7),
         ),
         (
             ResponseId::String("req-1".into()),
-            agent_client_protocol::schema::v1::RequestId::Str("req-1".into()),
+            agent_client_protocol::v1::schema::RequestId::Str("req-1".into()),
         ),
-        (ResponseId::Null, agent_client_protocol::schema::v1::RequestId::Null),
+        (ResponseId::Null, agent_client_protocol::v1::schema::RequestId::Null),
     ] {
         assert_eq!(acp_request_id(&rpc), acp);
         assert_eq!(response_id_from_acp(&acp), rpc);
