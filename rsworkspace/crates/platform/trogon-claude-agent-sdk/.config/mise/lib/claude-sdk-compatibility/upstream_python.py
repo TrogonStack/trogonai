@@ -1,7 +1,7 @@
 import ast
 import hashlib
 
-from gate_errors import Code, GateError
+from gate_errors import Code, GateError, format_boundary
 
 
 SELECTED_ALIASES = {
@@ -58,6 +58,7 @@ def reject_unreviewed_bindings(tree, selected, approved):
     visit(tree)
 
 
+@format_boundary("python-types")
 def extract(contents, expected_hash):
     if len(contents) > 2 * 1024 * 1024 or hashlib.sha256(contents).hexdigest() != expected_hash:
         raise GateError(Code.PIN, "python-types")
