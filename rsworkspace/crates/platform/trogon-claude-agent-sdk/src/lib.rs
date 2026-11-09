@@ -20,6 +20,7 @@ mod queue_capacity;
 mod sensitive_string;
 mod session_id;
 mod setting_source;
+mod stderr_tail;
 mod task_id;
 mod timeout;
 mod tool_name;
@@ -68,3 +69,5 @@ pub use dialog_kind::DialogKind;
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 
 pub use timeout::{Timeout, TimeoutError};
+
+pub use stderr_tail::StderrTail;
