@@ -1,6 +1,21 @@
 use crate::{JsonObject, MessageId, MessageOrigin, SessionId, ToolName, ToolUseId};
 
 #[derive(Clone, Debug)]
+pub struct AssistantMessage {
+    pub content: Vec<ContentBlock>,
+    pub model: String,
+    pub parent_tool_use_id: Option<ToolUseId>,
+    pub session_id: Option<SessionId>,
+    pub error: Option<String>,
+    pub usage: Option<JsonObject>,
+    pub uuid: Option<MessageId>,
+    pub message_id: Option<MessageId>,
+    pub stop_reason: Option<String>,
+    pub additional_fields: JsonObject,
+    pub message_fields: JsonObject,
+}
+
+#[derive(Clone, Debug)]
 pub enum Content {
     Text(String),
     Blocks(Vec<ContentBlock>),
