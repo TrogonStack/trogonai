@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }
