@@ -24,6 +24,7 @@ pinned [TypeScript `0.3.319` declaration archive](https://registry.npmjs.org/@an
 | `agent: Option<AgentName>` | Not exposed in pinned Python | `agent` |
 | `allowed_tools: Vec<ToolRule>` | [`allowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2353) | `allowedTools` |
 | `disallowed_tools: Vec<ToolRule>` | [`disallowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2431) | `disallowedTools` |
+| `resume: Option<SessionId>` | [`resume`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2408) | `resume` |
 
 `PermissionMode` mirrors Python's
 [`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L25)
@@ -105,6 +106,9 @@ applies no permission policy.
 `disallowed_tools` defaults to empty and remains independent of the
 allowed-rule list. Ordering and duplicate rules are preserved without
 resolving policy conflicts during configuration assembly.
+
+`resume` preserves an omitted selection separately from an opaque session ID.
+This API draft does not load transcripts, check session existence, or resume a process.
 
 The example checks API composition; it does not run a session. Further options
 and runtime behavior belong in separate review slices.
