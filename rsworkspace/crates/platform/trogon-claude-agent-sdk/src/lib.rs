@@ -44,4 +44,4 @@ pub use tool_use_id::ToolUseId;
 
 pub use tool_name::ToolName;
 
-pub use builtin_tool_name::{BuiltinToolName, BuiltinToolNameError};
+pub use builtin_tool_name::BuiltinToolName;
