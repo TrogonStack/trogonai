@@ -14,11 +14,11 @@ fn config(policy_file: &Path) -> Config {
     Config {
         listen: "127.0.0.1:0".parse().expect("addr"),
         policy: PolicyInput::StaticFile(policy_file.to_owned()),
-        tls: TlsFiles {
+        tls: crate::config::TlsInput::Files(TlsFiles {
             certificate_chain: "unused-server.pem".into(),
             private_key: "unused-server.key".into(),
             client_trust_anchors: "unused-ca.pem".into(),
-        },
+        }),
         trust_domain: TrustDomain::new("trogon.example").expect("trust domain"),
         audit: AuditConfig {
             nats: NatsConfig::from_url("nats://127.0.0.1:1"),
@@ -97,6 +97,38 @@ async fn audit_settings_that_cannot_build_a_connection_stop_startup() {
 #[test]
 fn the_only_mode_is_enforce() {
     assert_eq!(EnforcementMode::Enforce.as_str(), "enforce");
+}
+
+#[tokio::test]
+async fn direct_workload_runtime_configuration_cannot_select_static_policy_or_another_scope() {
+    let dir = tempfile::tempdir().expect("directory");
+    let mut configured = config(&dir.path().join("unused.toml"));
+    configured.tls = TlsInput::Workload(
+        crate::workload_identity_config::WorkloadIdentityConfig::new(
+            "unix:///run/identity/api.sock",
+            "spiffe://trogon.example/service/egress",
+            "REGISTRATIONS",
+            std::num::NonZeroU64::MIN,
+            &configured.trust_domain,
+            &configured.audit,
+        )
+        .expect("workload profile"),
+    );
+    assert!(matches!(
+        start(configured.clone()).await,
+        Err(StartupError::WorkloadPolicyRequired)
+    ));
+    configured.policy = PolicyInput::NatsKv(
+        KvPolicyConfig::new(
+            "POLICIES",
+            configured.audit.identity.tenant().clone(),
+            configured.audit.identity.project().clone(),
+            std::num::NonZeroU64::MIN,
+        )
+        .expect("policy scope"),
+    );
+    configured.trust_domain = TrustDomain::new("other.example").expect("other domain");
+    assert!(matches!(start(configured).await, Err(StartupError::WorkloadScope)));
 }
 
 #[tokio::test]

@@ -1,24 +1,31 @@
-use std::fmt::Write as _;
 use std::num::NonZeroU64;
 
 use trogon_audit::AuditName;
 use trogon_nats::{NatsAuth, NatsConfig, NatsTls, NatsToken, TlsMisconfiguration};
 
-use crate::constants::LIVE_POLICY_MAX_BUCKET_BYTES;
+use crate::scoped_stream::is_exclusive_snapshot;
+use crate::{ScopedSnapshotKey, SnapshotBucket, SnapshotBucketError};
 
 #[derive(Debug, Clone)]
 pub struct KvPolicyConfig {
-    pub(crate) bucket: String,
+    pub(crate) bucket: SnapshotBucket,
     pub(crate) tenant: AuditName,
     pub(crate) project: NatsToken,
     pub(crate) incarnation: NonZeroU64,
-    key: String,
+    key: ScopedSnapshotKey,
+    isolation: ScopeIsolation,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ScopeIsolation {
+    ConfiguredKey,
+    ExclusiveStream,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PolicyConfigError {
     #[error("policy bucket must be a bounded NATS bucket name")]
-    Bucket,
+    Bucket(#[source] SnapshotBucketError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -51,40 +58,41 @@ impl KvPolicyConfig {
         project: NatsToken,
         incarnation: NonZeroU64,
     ) -> Result<Self, PolicyConfigError> {
-        if bucket.is_empty()
-            || bucket.len() > LIVE_POLICY_MAX_BUCKET_BYTES
-            || !bucket
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-        {
-            return Err(PolicyConfigError::Bucket);
-        }
-        let key = format!("t{}.p{}", encoded(tenant.as_str()), encoded(project.as_str()));
+        let bucket = SnapshotBucket::new(bucket).map_err(PolicyConfigError::Bucket)?;
+        let key = ScopedSnapshotKey::new(&tenant, &project);
         Ok(Self {
-            bucket: bucket.to_owned(),
+            bucket,
             tenant,
             project,
             incarnation,
             key,
+            isolation: ScopeIsolation::ConfiguredKey,
         })
     }
 
     pub fn bucket(&self) -> &str {
-        &self.bucket
+        self.bucket.as_str()
     }
 
     pub(crate) fn matches_scope(&self, tenant: &AuditName, project: &NatsToken) -> bool {
         &self.tenant == tenant && &self.project == project
     }
     pub fn key(&self) -> &str {
-        &self.key
+        self.key.as_str()
     }
-}
 
-fn encoded(value: &str) -> String {
-    let mut result = String::with_capacity(value.len() * 2);
-    for byte in value.bytes() {
-        let _ = write!(result, "{byte:02x}");
+    pub(crate) fn for_workload_identity(&self) -> Self {
+        let mut config = self.clone();
+        config.isolation = ScopeIsolation::ExclusiveStream;
+        config
     }
-    result
+
+    pub(crate) fn stream_matches_scope(&self, info: &async_nats::jetstream::stream::Info) -> bool {
+        match self.isolation {
+            ScopeIsolation::ConfiguredKey => true,
+            ScopeIsolation::ExclusiveStream => {
+                is_exclusive_snapshot(info, &format!("$KV.{}.{}", self.bucket, self.key))
+            }
+        }
+    }
 }

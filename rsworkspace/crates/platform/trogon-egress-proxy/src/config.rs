@@ -23,6 +23,7 @@ use crate::limits::Limits;
 use crate::live_policy::{KvPolicyConfig, PolicyConfigError, PolicyTransportError};
 use crate::mtls::TlsFiles;
 use crate::trust_domain::{TrustDomain, TrustDomainError};
+use crate::workload_identity_config::{WorkloadIdentityConfig, WorkloadIdentityConfigError};
 
 #[derive(Debug, Clone, Parser)]
 #[command(
@@ -30,6 +31,10 @@ use crate::trust_domain::{TrustDomain, TrustDomainError};
     about = "Agent egress proxy: mTLS HTTP CONNECT by exact destination"
 )]
 pub struct Args {
+    /// Restricted HTTP readiness listener. Reports workload component readiness.
+    #[arg(long, env = "TROGON_EGRESS_READINESS_LISTEN", default_value = "127.0.0.1:8081")]
+    pub readiness_listen: SocketAddr,
+
     /// Address the mTLS listener binds.
     #[arg(long, env = "TROGON_EGRESS_LISTEN", default_value = "127.0.0.1:3128")]
     pub listen: SocketAddr,
@@ -57,16 +62,47 @@ pub struct Args {
     pub policy_incarnation: Option<NonZeroU64>,
 
     /// PEM certificate chain the proxy presents, leaf first.
-    #[arg(long, env = "TROGON_EGRESS_TLS_CERT")]
-    pub tls_cert: PathBuf,
+    #[arg(
+        long,
+        env = "TROGON_EGRESS_TLS_CERT",
+        required_unless_present = "workload_api_endpoint",
+        conflicts_with = "workload_api_endpoint"
+    )]
+    pub tls_cert: Option<PathBuf>,
 
     /// PEM private key of the proxy certificate.
-    #[arg(long, env = "TROGON_EGRESS_TLS_KEY")]
-    pub tls_key: PathBuf,
+    #[arg(
+        long,
+        env = "TROGON_EGRESS_TLS_KEY",
+        required_unless_present = "workload_api_endpoint",
+        conflicts_with = "workload_api_endpoint"
+    )]
+    pub tls_key: Option<PathBuf>,
 
     /// PEM bundle of the trust anchors client certificates must chain to.
-    #[arg(long, env = "TROGON_EGRESS_CLIENT_CA")]
-    pub client_ca: PathBuf,
+    #[arg(
+        long,
+        env = "TROGON_EGRESS_CLIENT_CA",
+        required_unless_present = "workload_api_endpoint",
+        conflicts_with = "workload_api_endpoint"
+    )]
+    pub client_ca: Option<PathBuf>,
+
+    /// Isolated Unix SPIFFE Workload API socket owned by the trusted runtime.
+    #[arg(long, env = "TROGON_EGRESS_WORKLOAD_API_ENDPOINT", requires_all = ["workload_spiffe_id", "registration_bucket", "registration_fence", "policy_bucket"])]
+    pub workload_api_endpoint: Option<String>,
+
+    /// Exact governed identity this proxy must receive from the Workload API.
+    #[arg(long, env = "TROGON_EGRESS_WORKLOAD_SPIFFE_ID", requires = "workload_api_endpoint")]
+    pub workload_spiffe_id: Option<String>,
+
+    /// Existing scoped registration projection. Never provisioned by this process.
+    #[arg(long, env = "TROGON_EGRESS_REGISTRATION_BUCKET", requires = "workload_api_endpoint")]
+    pub registration_bucket: Option<String>,
+
+    /// Independently provisioned recovery fence, never adopted from projection data.
+    #[arg(long, env = "TROGON_EGRESS_REGISTRATION_FENCE", requires = "workload_api_endpoint")]
+    pub registration_fence: Option<NonZeroU64>,
 
     /// Trust domain of the agent URI SAN: spiffe://<trust-domain>/agent/<agent-id>.
     #[arg(long, env = "TROGON_EGRESS_TRUST_DOMAIN")]
@@ -115,7 +151,7 @@ pub struct Args {
 pub struct Config {
     pub listen: SocketAddr,
     pub policy: PolicyInput,
-    pub tls: TlsFiles,
+    pub tls: TlsInput,
     pub trust_domain: TrustDomain,
     pub audit: AuditConfig,
     pub non_tls_ports: Vec<NonZeroU16>,
@@ -128,8 +164,18 @@ pub enum PolicyInput {
     NatsKv(KvPolicyConfig),
 }
 
+#[derive(Debug, Clone)]
+pub enum TlsInput {
+    Files(TlsFiles),
+    Workload(WorkloadIdentityConfig),
+}
+
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ConfigError {
+    #[error("select exactly one complete TLS identity source")]
+    TlsSource,
+    #[error("invalid workload identity configuration")]
+    WorkloadIdentity(#[source] WorkloadIdentityConfigError),
     #[error("select exactly one policy source and configure its incarnation")]
     PolicySource,
     #[error("invalid live policy configuration")]
@@ -198,14 +244,36 @@ impl Config {
         if args.first_record_timeout_secs == 0 {
             return Err(ConfigError::FirstRecordTimeoutTooSmall);
         }
+        let tls = match (
+            &args.tls_cert,
+            &args.tls_key,
+            &args.client_ca,
+            &args.workload_api_endpoint,
+            &args.workload_spiffe_id,
+            &args.registration_bucket,
+            args.registration_fence,
+        ) {
+            (Some(certificate_chain), Some(private_key), Some(client_trust_anchors), None, None, None, None) => {
+                TlsInput::Files(TlsFiles {
+                    certificate_chain: certificate_chain.clone(),
+                    private_key: private_key.clone(),
+                    client_trust_anchors: client_trust_anchors.clone(),
+                })
+            }
+            (None, None, None, Some(endpoint), Some(identity), Some(bucket), Some(fence))
+                if matches!(policy, PolicyInput::NatsKv(_)) =>
+            {
+                TlsInput::Workload(
+                    WorkloadIdentityConfig::new(endpoint, identity, bucket, fence, &trust_domain, &audit)
+                        .map_err(ConfigError::WorkloadIdentity)?,
+                )
+            }
+            _ => return Err(ConfigError::TlsSource),
+        };
         Ok(Self {
             listen: args.listen,
             policy,
-            tls: TlsFiles {
-                certificate_chain: args.tls_cert,
-                private_key: args.tls_key,
-                client_trust_anchors: args.client_ca,
-            },
+            tls,
             trust_domain,
             audit,
             non_tls_ports,

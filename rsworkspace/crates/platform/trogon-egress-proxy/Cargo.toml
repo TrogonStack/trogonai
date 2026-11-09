@@ -20,6 +20,8 @@ workspace = true
 [dependencies]
 async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }
+buffa = { workspace = true }
+buffa-types = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
@@ -36,6 +38,8 @@ tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
 trogon-audit = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["signal", "uuid"] }
+trogon-workload-identity = { workspace = true }
+trogonai-proto = { workspace = true, features = ["audit"] }
 x509-parser = { workspace = true }
 
 [dev-dependencies]
@@ -48,3 +52,4 @@ trogon-audit = { workspace = true, features = ["test-support"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
 trogonai-proto = { workspace = true, features = ["audit"] }
+trogon-workload-identity = { workspace = true, features = ["test-support"] }

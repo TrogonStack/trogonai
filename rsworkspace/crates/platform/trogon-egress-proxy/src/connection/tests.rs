@@ -24,6 +24,7 @@ use trogon_std::uuid::UuidV7Generator;
 use trogonai_proto::platform::audit::v1::AuditRecord;
 
 use super::*;
+use crate::agent_id::AgentId;
 use crate::policy_snapshot::SnapshotVerdict;
 use crate::policy_source::PolicySource;
 use crate::static_snapshot::StaticSnapshot;

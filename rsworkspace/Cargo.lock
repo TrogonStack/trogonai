@@ -7499,6 +7499,7 @@ dependencies = [
  "async-nats",
  "async-trait",
  "buffa",
+ "buffa-types",
  "clap",
  "futures",
  "rcgen",
@@ -7518,6 +7519,7 @@ dependencies = [
  "trogon-audit",
  "trogon-nats",
  "trogon-std",
+ "trogon-workload-identity",
  "trogonai-proto",
  "x509-parser",
 ]

@@ -25,6 +25,7 @@ fn record_for(destination: Option<&Destination>, decision: Decision) -> Record {
     let source = source();
     let event = AuditEvent {
         agent: &agent,
+        workload_peer: None,
         destination,
         resolved_address: Some("93.184.216.34".parse().expect("ip")),
         decision,
@@ -158,6 +159,7 @@ fn live_decision_provenance_binds_the_epoch_and_observed_producer_generation() {
     let target = destination("api.example.com:443");
     let event = AuditEvent {
         agent: &agent,
+        workload_peer: None,
         destination: Some(&target),
         resolved_address: None,
         decision: Decision::Permitted,
@@ -200,6 +202,7 @@ fn live_permit_audit_refuses_missing_or_cross_incarnation_evidence() {
     ] {
         let event = AuditEvent {
             agent: &agent,
+            workload_peer: None,
             destination: Some(&target),
             resolved_address: None,
             decision: Decision::Permitted,
