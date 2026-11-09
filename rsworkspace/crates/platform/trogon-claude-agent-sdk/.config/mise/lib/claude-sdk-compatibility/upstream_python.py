@@ -43,6 +43,10 @@ def extract(contents, expected_hash):
         tree = ast.parse(contents.decode("utf-8"))
     except (UnicodeDecodeError, SyntaxError, ValueError, RecursionError) as error:
         raise GateError(Code.EXTRACTION, "python-types") from error
+    pending = {"EffortLevel", "AssistantMessageError", "MessageOriginKind", "ContentBlock", "Message"}
+    for statement in tree.body:
+        if any(isinstance(node, ast.Name) and node.id in pending for node in ast.walk(statement)) or getattr(statement, "name", None) in pending:
+            raise GateError(Code.FORMAT, "message-aliases-not-supported")
     options = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "ClaudeAgentOptions"]
     if len(options) != 1:
         raise GateError(Code.FORMAT, "ClaudeAgentOptions")
