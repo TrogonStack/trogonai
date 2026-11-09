@@ -57,3 +57,22 @@ JSON can preserve content shapes beyond Python's annotated str/list/None field.
 | subtype | subtype: str | subtype: 'init' for the named init type | String keeps system subtypes open. |
 | data | data: dict[str, Any] | Init metadata fields are declared on the envelope | Explicit JsonObject holds metadata without claiming the TypeScript flat type is identical. |
 | session_id | Not a declared Python SystemMessage field | session_id: string | Optional SessionId retains a possible envelope identity. |
+
+## Turn results
+
+| Rust field family | Python ResultMessage | TypeScript result source | Stored representation |
+| --- | --- | --- | --- |
+| subtype / status | subtype: str; is_error: bool | SDKResultSuccess / SDKResultError subtype and is_error | Open String subtype and ResultStatus::Success/Error; no boolean decoder here. |
+| duration_ms / duration_api_ms / num_turns | int | number | u64 for nonnegative integral Rust data; upstream annotations alone do not impose this Rust range. |
+| session_id / uuid | str / optional str | string / UUID | Required SessionId and optional MessageId. |
+| result / total_cost_usd | optional str / optional float | Success result:string and cost:number | Option<String> and Option<f64> also represent absent legacy data. |
+| usage / model_usage | optional object; model_usage maps model names | usage / modelUsage | Optional raw JsonObject; TypeScript's camelCase modelUsage is a distinct wire spelling. |
+| structured_output | Any | structured_output?: unknown | Option<Value> permits manually represented JSON null separately from absent data. |
+| errors / permission_denials / deferred_tool_use | optional list[str] / list[Any] / DeferredToolUse | SDKResultError.errors / permission_denials / deferred_tool_use | Vec<String>, optional raw JSON list and optional JsonObject. |
+| api_error_status / stop_reason / terminal_reason | optional int / str / str | api_error_status?: number or null; stop_reason; TerminalReason | Option<u16> and optional String fields; no status or terminal-reason interpretation is added. |
+| origin | optional MessageOrigin | origin?: SDKMessageOrigin | Optional validated MessageOrigin. |
+| result_index / queued_turn_count | Not declared on the pinned Python ResultMessage | result_index?: number / queued_turn_count?: number | Optional u64 metadata. |
+| additional_fields | Not a separate Python dataclass field | Declarations include additional version-specific fields | Explicit extension JsonObject, populated manually until a later decoder. |
+
+A result is the declared outcome of a turn. Its presence here does not implement
+run completion, queued-turn accounting, cancellation or process shutdown.
