@@ -149,7 +149,8 @@ services:
     restart: on-failure:3
 
   # Admits a client that connects without a user JWT and names the DEV account
-  # as its user into DEV, once its client certificate chains to the dev CA. Its
+  # as its user into DEV, after certificate verification and explicit membership.
+  # The default membership admits only the nats-cli certificate identity. Its
   # settings, file references to its signing seeds included, are the
   # callout.env that nats-bootstrap writes.
   a2a-auth-callout:

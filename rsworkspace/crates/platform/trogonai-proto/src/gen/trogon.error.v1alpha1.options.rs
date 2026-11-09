@@ -937,18 +937,21 @@ impl ::buffa::Message for FieldOptions {
         self.value_policy = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for FieldOptions {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for FieldOptions {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = FieldOptions;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct FieldOptions")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<FieldOptions, A::Error> {
@@ -963,9 +966,9 @@ impl<'de> serde::Deserialize<'de> for FieldOptions {
                         "visibility" => {
                             __f_visibility = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::EnumValue<Visibility>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -992,7 +995,7 @@ impl<'de> serde::Deserialize<'de> for FieldOptions {
                             if let Some(v) = v {
                                 if __oneof_value_policy.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'value_policy'",
                                         ),
                                     );
@@ -1016,7 +1019,7 @@ impl<'de> serde::Deserialize<'de> for FieldOptions {
                             if let Some(v) = v {
                                 if __oneof_value_policy.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'value_policy'",
                                         ),
                                     );
@@ -1027,7 +1030,7 @@ impl<'de> serde::Deserialize<'de> for FieldOptions {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }

@@ -50,22 +50,22 @@ pub mod verdict_authority_event {
             Self::Some(Event::from(v))
         }
     }
-    impl serde::Serialize for Event {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Event {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::VerdictAuthorityInitialized(v) => {
-                    map.serialize_entry("verdictAuthorityInitialized", v)?;
+                    map.serialize_entry("verdictAuthorityInitialized", &**v)?;
                 }
                 Self::VerdictAuthoritySet(v) => {
-                    map.serialize_entry("verdictAuthoritySet", v)?;
+                    map.serialize_entry("verdictAuthoritySet", &**v)?;
                 }
                 Self::VerdictAuthorityCleared(v) => {
-                    map.serialize_entry("verdictAuthorityCleared", v)?;
+                    map.serialize_entry("verdictAuthorityCleared", &**v)?;
                 }
             }
             map.end()

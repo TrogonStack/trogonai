@@ -3,8 +3,9 @@ use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use buffa::Message;
@@ -23,10 +24,13 @@ use trogon_std::uuid::UuidV7Generator;
 use trogonai_proto::platform::audit::v1::AuditRecord;
 
 use super::*;
+use crate::agent_id::AgentId;
 use crate::policy_snapshot::SnapshotVerdict;
 use crate::policy_source::PolicySource;
 use crate::static_snapshot::StaticSnapshot;
 use crate::writer_audit::WriterAudit;
+
+mod authority_join_tests;
 
 type Record = (Option<String>, Option<IpAddr>, Decision);
 
@@ -76,6 +80,39 @@ impl Resolver for Stalled {
 
 /// A connection whose reads fail, as a reset peer's would.
 struct Reset;
+
+struct StalledShutdown;
+
+impl AsyncRead for StalledShutdown {
+    fn poll_read(self: Pin<&mut Self>, _: &mut Context<'_>, _: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncWrite for StalledShutdown {
+    fn poll_write(self: Pin<&mut Self>, _: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
+        Poll::Ready(Ok(bytes.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Pending
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn graceful_shutdown_cannot_extend_the_peer_deadline() {
+    let (proxy, _) = proxy(snapshot(&["api.example.com:443".into()]), &[], &[]);
+    let peer = PeerIdentity::for_test(agent(), Duration::from_secs(10));
+    assert!(
+        tokio::time::timeout(Duration::from_secs(11), proxy.serve(StalledShutdown, &peer),)
+            .await
+            .is_ok()
+    );
+}
 
 impl AsyncRead for Reset {
     fn poll_read(self: Pin<&mut Self>, _: &mut Context<'_>, _: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
@@ -191,14 +228,14 @@ async fn echo_upstream() -> u16 {
 
 /// Runs the proxy against an in-memory client and returns what the client
 /// received after it finished `script`.
-async fn exchange<F, Fut>(proxy: &Proxy, script: F) -> Vec<u8>
+async fn exchange<F, Fut, C: EpochClock>(proxy: &Proxy<C>, script: F) -> Vec<u8>
 where
     F: FnOnce(DuplexStream) -> Fut,
     Fut: std::future::Future<Output = Vec<u8>>,
 {
     let (client, server) = tokio::io::duplex(64 * 1024);
-    let agent = agent();
-    let ((), received) = tokio::join!(proxy.serve(server, &agent), script(client));
+    let peer = PeerIdentity::for_test(agent(), Duration::from_secs(60));
+    let ((), received) = tokio::join!(proxy.serve(server, &peer), script(client));
     received
 }
 
@@ -394,7 +431,9 @@ async fn a_client_that_hangs_up_before_the_head_is_closed_without_an_answer() {
 #[tokio::test]
 async fn a_connection_that_fails_while_the_head_is_read_ends_without_a_decision() {
     let (proxy, audit) = proxy(snapshot(&["example.com:443".to_owned()]), &[], &[]);
-    proxy.serve(Reset, &agent()).await;
+    proxy
+        .serve(Reset, &PeerIdentity::for_test(agent(), Duration::from_secs(60)))
+        .await;
     assert!(audit.events().is_empty());
 }
 
@@ -723,6 +762,423 @@ async fn the_proxy_hands_out_the_audit_it_records_to() {
     shutdown.cancel();
     proxy.audit().run(shutdown).await;
     assert!(audit.events().is_empty());
+}
+
+struct RevocableSnapshot {
+    source: PolicySource,
+    revoked: AtomicBool,
+    unavailable: AtomicBool,
+}
+
+impl PolicySnapshot for RevocableSnapshot {
+    fn source(&self) -> &PolicySource {
+        &self.source
+    }
+
+    fn lookup(&self, _: &AgentId, _: &Destination, _: SystemTime) -> SnapshotVerdict {
+        if self.unavailable.load(Ordering::SeqCst) {
+            SnapshotVerdict::Unavailable
+        } else if self.revoked.load(Ordering::SeqCst) {
+            SnapshotVerdict::NotPermitted
+        } else {
+            SnapshotVerdict::Permitted
+        }
+    }
+}
+
+struct RevokingAudit(Arc<RevocableSnapshot>);
+
+#[async_trait]
+impl AuditSink for RevokingAudit {
+    async fn record(&self, event: &AuditEvent<'_>) -> Result<(), AuditError> {
+        if event.decision == Decision::Permitted {
+            self.0.revoked.store(true, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn authority_revoked_during_audit_cannot_open_a_tunnel_or_forward_early_bytes() {
+    let (port, received) = counting_upstream().await;
+    let snapshot = Arc::new(RevocableSnapshot {
+        source: PolicySource::StaticFile {
+            path: "test-policy.toml".into(),
+        },
+        revoked: AtomicBool::new(false),
+        unavailable: AtomicBool::new(false),
+    });
+    let proxy = Proxy::new(
+        snapshot.clone(),
+        Arc::new(Names::default()),
+        Arc::new(RevokingAudit(snapshot)),
+        limits(),
+        Default::default(),
+    );
+    let request = format!("CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\nprivate-payload");
+    let response = exchange(&proxy, |mut client| async move {
+        client.write_all(request.as_bytes()).await.expect("write");
+        client.shutdown().await.expect("finish request");
+        read_to_end(client).await
+    })
+    .await;
+    assert_refusal(&response, "403", "NO_PERMIT");
+    assert_eq!(received.await.expect("upstream closed"), 0);
+}
+
+#[tokio::test]
+async fn established_tunnels_close_on_revocation_or_unavailable_policy() {
+    for unavailable in [false, true] {
+        let port = echo_upstream().await;
+        let snapshot = Arc::new(RevocableSnapshot {
+            source: PolicySource::StaticFile {
+                path: "test-policy.toml".into(),
+            },
+            revoked: AtomicBool::new(false),
+            unavailable: AtomicBool::new(false),
+        });
+        let (proxy, audit) = proxy(snapshot.clone(), &[], &[]);
+        exchange(&proxy, |mut client| async move {
+            client
+                .write_all(format!("CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\n").as_bytes())
+                .await
+                .expect("request");
+            let mut response = [0; 39];
+            client.read_exact(&mut response).await.expect("established");
+            tokio::time::pause();
+            if unavailable {
+                snapshot.unavailable.store(true, Ordering::SeqCst);
+            } else {
+                snapshot.revoked.store(true, Ordering::SeqCst);
+            }
+            tokio::time::advance(POLICY_RECHECK_INTERVAL).await;
+            let mut rest = Vec::new();
+            timeout(Duration::from_secs(1), client.read_to_end(&mut rest))
+                .await
+                .expect("revoked tunnel closes")
+                .expect("read");
+            assert!(rest.is_empty());
+            tokio::time::resume();
+            Vec::new()
+        })
+        .await;
+        assert_eq!(
+            audit.events().last().expect("refusal").2,
+            Decision::Refused(if unavailable {
+                Fault::PolicyUnavailable
+            } else {
+                Fault::NoPermit
+            })
+        );
+    }
+}
+
+struct AddressRevocation {
+    source: PolicySource,
+    revoked: AtomicBool,
+}
+
+impl PolicySnapshot for AddressRevocation {
+    fn source(&self) -> &PolicySource {
+        &self.source
+    }
+
+    fn lookup(&self, _: &AgentId, destination: &Destination, _: SystemTime) -> SnapshotVerdict {
+        if matches!(destination.host(), DestinationHost::Ip(_)) && self.revoked.load(Ordering::SeqCst) {
+            SnapshotVerdict::NotPermitted
+        } else {
+            SnapshotVerdict::Permitted
+        }
+    }
+}
+
+#[tokio::test]
+async fn revoking_the_selected_private_address_closes_a_named_destination_tunnel() {
+    let port = echo_upstream().await;
+    let snapshot = Arc::new(AddressRevocation {
+        source: PolicySource::StaticFile {
+            path: "test-policy.toml".into(),
+        },
+        revoked: AtomicBool::new(false),
+    });
+    let (proxy, audit) = proxy(snapshot.clone(), &[("upstream.test", "127.0.0.1")], &[port]);
+    exchange(&proxy, |mut client| async move {
+        client
+            .write_all(format!("CONNECT upstream.test:{port} HTTP/1.1\r\n\r\n").as_bytes())
+            .await
+            .expect("request");
+        let mut response = [0; 39];
+        client.read_exact(&mut response).await.expect("established");
+        tokio::time::pause();
+        snapshot.revoked.store(true, Ordering::SeqCst);
+        tokio::time::advance(POLICY_RECHECK_INTERVAL).await;
+        let mut rest = Vec::new();
+        timeout(Duration::from_secs(1), client.read_to_end(&mut rest))
+            .await
+            .expect("address revocation closes tunnel")
+            .expect("read");
+        assert!(rest.is_empty());
+        Vec::new()
+    })
+    .await;
+    assert_eq!(
+        audit.events().last().expect("refusal").2,
+        Decision::Refused(Fault::AddressForbidden)
+    );
+}
+
+struct AuditOutageAfterPermit(AtomicBool);
+
+#[async_trait]
+impl AuditSink for AuditOutageAfterPermit {
+    async fn record(&self, event: &AuditEvent<'_>) -> Result<(), AuditError> {
+        if matches!(event.decision, Decision::Refused(_)) {
+            self.0.store(true, Ordering::SeqCst);
+            std::future::pending().await
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_hard_session_deadline_closes_before_a_stalled_denial_audit() {
+    let port = echo_upstream().await;
+    let audit = Arc::new(AuditOutageAfterPermit(AtomicBool::new(false)));
+    let proxy = Proxy::new(
+        snapshot(&[format!("127.0.0.1:{port}")]),
+        Arc::new(Names::default()),
+        audit.clone(),
+        limits(),
+        Default::default(),
+    );
+    let (mut client, server) = tokio::io::duplex(64 * 1024);
+    let peer = PeerIdentity::for_test(agent(), Duration::from_secs(3600));
+    let task = tokio::spawn(async move { proxy.serve(server, &peer).await });
+    client
+        .write_all(format!("CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\n").as_bytes())
+        .await
+        .expect("request");
+    let mut response = [0; 39];
+    client.read_exact(&mut response).await.expect("established");
+    tokio::time::pause();
+    tokio::time::advance(crate::constants::MAX_SESSION_LIFETIME).await;
+    let mut rest = Vec::new();
+    timeout(Duration::from_millis(1), client.read_to_end(&mut rest))
+        .await
+        .expect("socket closes before audit can finish")
+        .expect("read");
+    assert!(rest.is_empty());
+    tokio::time::advance(DENIAL_AUDIT_TIMEOUT).await;
+    task.await.expect("bounded audit ends");
+    assert!(audit.0.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn an_expired_wall_clock_identity_cannot_read_a_request() {
+    let (proxy, audit) = proxy(snapshot(&["example.com:443".to_owned()]), &[], &[]);
+    let peer = PeerIdentity::for_test(agent(), Duration::from_secs(60));
+    let proxy = proxy.with_clock(trogon_std::time::FixedEpochClock(peer.expires_at()));
+    let (mut client, server) = tokio::io::duplex(1024);
+    proxy.serve(server, &peer).await;
+    let mut bytes = Vec::new();
+    client.read_to_end(&mut bytes).await.expect("closed");
+    assert!(bytes.is_empty());
+    assert_eq!(
+        audit.events().last().expect("expiry audit").2,
+        Decision::Refused(Fault::AuthorityExpired)
+    );
+}
+
+#[derive(Clone)]
+struct AdjustableEpochClock(Arc<Mutex<SystemTime>>);
+
+impl EpochClock for AdjustableEpochClock {
+    fn system_time(&self) -> SystemTime {
+        *self.0.lock().expect("clock")
+    }
+}
+
+struct ExpiringResolver {
+    clock: AdjustableEpochClock,
+    expiry: SystemTime,
+}
+
+#[async_trait]
+impl Resolver for ExpiringResolver {
+    async fn resolve(&self, _: &HostName) -> io::Result<Vec<IpAddr>> {
+        *self.clock.0.lock().expect("clock") = self.expiry;
+        Ok(vec!["127.0.0.1".parse().expect("ip")])
+    }
+}
+
+#[tokio::test]
+async fn certificate_expiry_during_dns_cannot_start_an_upstream_connection() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+    let port = listener.local_addr().expect("address").port();
+    let peer = PeerIdentity::for_test(agent(), Duration::from_secs(60));
+    let clock = AdjustableEpochClock(Arc::new(Mutex::new(SystemTime::now())));
+    let (proxy, audit) = proxy_with(
+        snapshot(&[format!("upstream.test:{port}"), format!("127.0.0.1:{port}")]),
+        ExpiringResolver {
+            clock: clock.clone(),
+            expiry: peer.expires_at(),
+        },
+        limits(),
+        &[port],
+    );
+    let proxy = proxy.with_clock(clock);
+    let (client, server) = tokio::io::duplex(1024);
+    let ((), response) = tokio::join!(
+        proxy.serve(server, &peer),
+        send_and_read_all(
+            client,
+            format!("CONNECT upstream.test:{port} HTTP/1.1\r\n\r\n").into_bytes()
+        ),
+    );
+    assert_refusal(&response, "403", "AUTHORITY_EXPIRED");
+    assert!(
+        timeout(Duration::from_millis(20), listener.accept()).await.is_err(),
+        "expired source authority cannot initiate an upstream connection"
+    );
+    assert!(audit.events().iter().all(|event| event.2 != Decision::Permitted));
+}
+
+#[derive(Clone, Copy)]
+enum FirstRecordRevocation {
+    Destination,
+    PrivateAddress,
+}
+
+struct FirstRecordPolicy {
+    source: PolicySource,
+    revoked: Arc<AtomicBool>,
+    scope: FirstRecordRevocation,
+}
+
+impl PolicySnapshot for FirstRecordPolicy {
+    fn source(&self) -> &PolicySource {
+        &self.source
+    }
+
+    fn lookup(&self, _: &AgentId, destination: &Destination, _: SystemTime) -> SnapshotVerdict {
+        let revoked_destination = match self.scope {
+            FirstRecordRevocation::Destination => matches!(destination.host(), DestinationHost::Name(_)),
+            FirstRecordRevocation::PrivateAddress => matches!(destination.host(), DestinationHost::Ip(_)),
+        };
+        if self.revoked.load(Ordering::SeqCst) && revoked_destination {
+            SnapshotVerdict::NotPermitted
+        } else {
+            SnapshotVerdict::Permitted
+        }
+    }
+}
+
+struct RevokeWhileReadingFirstRecord {
+    inner: DuplexStream,
+    armed: Arc<AtomicBool>,
+    revoked: Arc<AtomicBool>,
+}
+
+impl AsyncRead for RevokeWhileReadingFirstRecord {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        let before = buffer.filled().len();
+        let result = Pin::new(&mut self.inner).poll_read(cx, buffer);
+        if matches!(result, Poll::Ready(Ok(()))) && buffer.filled().len() > before && self.armed.load(Ordering::SeqCst)
+        {
+            self.revoked.store(true, Ordering::SeqCst);
+        }
+        result
+    }
+}
+
+impl AsyncWrite for RevokeWhileReadingFirstRecord {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(cx, bytes)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+fn first_record_for(host: &str) -> Vec<u8> {
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .expect("versions")
+        .with_root_certificates(rustls::RootCertStore::empty())
+        .with_no_client_auth();
+    let name = rustls::pki_types::ServerName::try_from(host.to_owned()).expect("name");
+    let mut client = rustls::ClientConnection::new(Arc::new(config), name).expect("TLS client");
+    let mut hello = Vec::new();
+    client.write_tls(&mut hello).expect("ClientHello");
+    hello
+}
+
+#[tokio::test]
+async fn first_record_revocation_stops_bytes_before_the_periodic_policy_check() {
+    for scope in [
+        FirstRecordRevocation::Destination,
+        FirstRecordRevocation::PrivateAddress,
+    ] {
+        let (port, upstream_received) = counting_upstream().await;
+        let revoked = Arc::new(AtomicBool::new(false));
+        let armed = Arc::new(AtomicBool::new(false));
+        let snapshot = Arc::new(FirstRecordPolicy {
+            source: PolicySource::StaticFile {
+                path: "test-policy.toml".into(),
+            },
+            revoked: revoked.clone(),
+            scope,
+        });
+        let (proxy, audit) = proxy(snapshot, &[("upstream.test", "127.0.0.1")], &[]);
+        let peer = PeerIdentity::for_test(agent(), Duration::from_secs(60));
+        let (mut client, server) = tokio::io::duplex(64 * 1024);
+        let server = RevokeWhileReadingFirstRecord {
+            inner: server,
+            armed: armed.clone(),
+            revoked: revoked.clone(),
+        };
+        let script = async {
+            client
+                .write_all(format!("CONNECT upstream.test:{port} HTTP/1.1\r\n\r\n").as_bytes())
+                .await
+                .expect("request");
+            let mut established = [0; 39];
+            client.read_exact(&mut established).await.expect("established");
+            assert_eq!(&established, CONNECTION_ESTABLISHED);
+            tokio::time::pause();
+            let before_record = tokio::time::Instant::now();
+            armed.store(true, Ordering::SeqCst);
+            let mut first_record = first_record_for("upstream.test");
+            first_record.extend_from_slice(b"must-not-be-forwarded");
+            client.write_all(&first_record).await.expect("first record");
+            let mut response = Vec::new();
+            timeout(Duration::from_millis(1), client.read_to_end(&mut response))
+                .await
+                .expect("authority rechecked at the first-record boundary")
+                .expect("closed");
+            assert!(
+                revoked.load(Ordering::SeqCst),
+                "revocation occurred while consuming the first record"
+            );
+            assert!(response.is_empty());
+            assert!(before_record.elapsed() < POLICY_RECHECK_INTERVAL);
+            tokio::time::resume();
+        };
+        tokio::join!(proxy.serve(server, &peer), script);
+        assert_eq!(upstream_received.await.expect("upstream closed"), 0);
+        let expected = match scope {
+            FirstRecordRevocation::Destination => Fault::NoPermit,
+            FirstRecordRevocation::PrivateAddress => Fault::AddressForbidden,
+        };
+        assert_eq!(audit.events().last().expect("refusal").2, Decision::Refused(expected));
+    }
 }
 
 /// The proxy and the audit crate against a real JetStream server, with the
