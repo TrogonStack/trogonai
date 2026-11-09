@@ -73,3 +73,12 @@ JSON can preserve content shapes beyond Python's annotated str/list/None field.
 
 A result is the declared outcome of a turn. Its presence here does not implement
 run completion, queued-turn accounting, cancellation or process shutdown.
+
+## Assistant messages
+
+| Rust field family | Python AssistantMessage | TypeScript SDKAssistantMessage | Stored representation |
+| --- | --- | --- | --- |
+| content / model / message_id | list[ContentBlock] / str / optional str | message: BetaMessage nests content/model/id | Flattened Rust fields retain Vec<ContentBlock>, unrestricted String and optional MessageId. |
+| parent_tool_use_id / session_id / uuid | optional strings | nullable parent ID, required session_id and UUID | Optional identifier wrappers also represent missing legacy metadata. |
+| error / usage / stop_reason | optional error literal / object / string | error enum and nested BetaMessage usage/stop_reason | Optional String/object/String preserve unknown error strings without a new restriction. |
+| additional_fields / message_fields | No separate typed extension fields | Envelope and nested message have different scopes | Separate JsonObject values retain manually supplied extension data. |
