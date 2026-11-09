@@ -2,6 +2,9 @@ use super::*;
 use serde_json::{Value, json};
 use testcontainers_modules::testcontainers::core::Mount;
 
+mod docker_tests;
+mod startup_tests;
+
 fn plain() -> ContainerRequest<Nats> {
     Nats::default().with_tag("2.10.14").with_cmd(["--jetstream"])
 }
@@ -101,4 +104,62 @@ fn inspect_selection_excludes_environment_paths_configuration_and_unknown_errors
     assert_eq!(selected["state_error_selected"], Value::Null);
     assert_eq!(selected["size_rw"], 123);
     assert!(!selected.to_string().contains("sensitive-fixture-marker"));
+}
+
+#[test]
+fn one_log_delivery_retains_only_the_bounded_tail_and_recovers_after_invalid_lines() {
+    let diagnostics = FixtureDiagnostics::for_request(&plain()).unwrap();
+    let warning = "[1] 2026/11/09 00:00:00 [WRN] permission denied\n";
+    diagnostics.stderr(warning.repeat(constants::MAX_RECORDS + 1).as_bytes());
+    diagnostics.stderr(b"\xff\n[caller] 2026/11/09 [INF] Server is ready\n[1] caller [INF] Server is ready\n[1] 2026/11/09 [DBG] sensitive-fixture-marker\n");
+    diagnostics.stderr(b"[1] 2026/11/09 [INF] Server is ready\n");
+    let report = diagnostics.report();
+    assert!(report.contains("diagnostics_truncated=true"));
+    assert_eq!(
+        report.lines().filter(|line| line.starts_with('{')).count(),
+        constants::MAX_RECORDS
+    );
+    assert_eq!(report.matches("Server is ready").count(), 1);
+    assert!(!report.contains("caller"));
+    assert!(!report.contains("sensitive-fixture-marker"));
+}
+
+#[test]
+fn filesystem_warning_selection_preserves_causes_without_paths_or_unknown_context() {
+    let diagnostics = FixtureDiagnostics::for_request(&plain()).unwrap();
+    for cause in [
+        "no space left on device",
+        "permission denied",
+        "no such file or directory",
+        "not a directory",
+        "file exists",
+        "input/output error",
+        "read-only file system",
+        "too many open files",
+        "too many open files in system",
+    ] {
+        diagnostics.stderr(format!("[1] 2026/11/09 [ERR] {cause}\n").as_bytes());
+        assert!(diagnostics.report().contains(cause));
+    }
+    for detail in [
+        "storage directory is not writable",
+        "could not create storage directory - mkdir /tmp/nats/jetstream/sensitive-fixture-marker: permission denied",
+        "could not create consumer storage directory - open /tmp/nats/jetstream/sensitive-fixture-marker: read-only file system",
+        "write /tmp/nats/jetstream/sensitive-fixture-marker: no space left on device",
+        "mkdir: permission denied",
+        "unlink /tmp/nats/jetstream/sensitive-fixture-marker: permission denied",
+        "open /sensitive-fixture-marker: permission denied",
+        "open /tmp/nats/jetstream/sensitive-fixture-marker: unknown-cause",
+    ] {
+        diagnostics.stderr(format!("[1] 2026/11/09 [WRN] {detail}\n").as_bytes());
+    }
+    let report = diagnostics.report();
+    assert!(report.contains("storage directory is not writable"));
+    assert!(report.contains("mkdir <fixture-store-path>: permission denied"));
+    assert!(report.contains("open <fixture-store-path>: read-only file system"));
+    assert!(report.contains("write <fixture-store-path>: no space left on device"));
+    assert_eq!(report.matches("unrecognized detail suppressed").count(), 4);
+    assert!(!report.contains("sensitive-fixture-marker"));
+    assert!(!report.contains("unknown-cause"));
+    assert!(!report.contains("/tmp/"));
 }

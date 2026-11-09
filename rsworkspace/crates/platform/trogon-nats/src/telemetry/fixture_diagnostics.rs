@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::future::Future;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -13,7 +14,11 @@ use testcontainers_modules::testcontainers::{
         models::ContainerInspectResponse,
         query_parameters::{InspectContainerOptionsBuilder, LogsOptionsBuilder},
     },
-    core::{client::docker_client_instance, error::WaitContainerError, logs::LogFrame},
+    core::{
+        client::{ClientError, docker_client_instance},
+        error::WaitContainerError,
+        logs::LogFrame,
+    },
     runners::AsyncRunner,
 };
 use tokio::time::{Instant, timeout};
@@ -92,7 +97,7 @@ impl FixtureDiagnostics {
         };
         let result = tokio::select! {
             result = request.start() => result,
-            () = self.observe_startup() => unreachable!("observer remains pending"),
+            () = self.observe_startup(&docker_client_instance) => unreachable!("observer remains pending"),
         };
         match result {
             Ok(container) => {
@@ -109,12 +114,18 @@ impl FixtureDiagnostics {
         }
     }
 
-    async fn observe_startup(&self) {
+    async fn observe_startup<F>(&self, connect: &impl Fn() -> F)
+    where
+        F: Future<Output = Result<Docker, ClientError>>,
+    {
         // Snapshots race alongside the original runner future, so collection cannot
         // defer polling its timeout. These are request-relative observations, not phase timings.
         for seconds in [1, 30, 55] {
             tokio::time::sleep_until(self.started + Duration::from_secs(seconds)).await;
-            if timeout(constants::COLLECTION_BUDGET, self.snapshot()).await.is_err() {
+            if timeout(constants::COLLECTION_BUDGET, self.snapshot(connect()))
+                .await
+                .is_err()
+            {
                 self.record(FixtureObservation::Collection {
                     operation: CollectionOperation::StartupSnapshot,
                     outcome: CollectionOutcome::CollectionTimeout,
@@ -125,14 +136,19 @@ impl FixtureDiagnostics {
     }
 
     pub(crate) async fn capture(&self, container: &ContainerAsync<Nats>) -> String {
-        if is_hex(container.id(), 64) {
-            self.evidence.lock().unwrap().container_id = Some(container.id().to_owned());
-            self.record(FixtureObservation::ContainerHandle {
-                container_id: container.id(),
-            });
+        self.capture_owned(container.id(), &docker_client_instance).await
+    }
+
+    async fn capture_owned<F>(&self, id: &str, connect: &impl Fn() -> F) -> String
+    where
+        F: Future<Output = Result<Docker, ClientError>>,
+    {
+        if is_hex(id, 64) {
+            self.evidence.lock().unwrap().container_id = Some(id.to_owned());
+            self.record(FixtureObservation::ContainerHandle { container_id: id });
         }
         let collection = async {
-            let docker = match docker_client_instance().await {
+            let docker = match connect().await {
                 Ok(docker) => docker,
                 Err(_) => {
                     self.record(FixtureObservation::Collection {
@@ -143,8 +159,8 @@ impl FixtureDiagnostics {
                 }
             };
             // Read the warning first while this caller still owns the live broker.
-            self.logs(&docker, container.id()).await;
-            self.snapshot().await;
+            self.logs(&docker, id).await;
+            self.snapshot(connect()).await;
         };
         if timeout(constants::COLLECTION_BUDGET, collection).await.is_err() {
             self.record(FixtureObservation::Collection {
@@ -155,8 +171,8 @@ impl FixtureDiagnostics {
         self.report()
     }
 
-    async fn snapshot(&self) {
-        let docker = match docker_client_instance().await {
+    async fn snapshot(&self, connection: impl Future<Output = Result<Docker, ClientError>>) {
+        let docker = match connection.await {
             Ok(docker) => docker,
             Err(_) => {
                 self.record(FixtureObservation::Collection {
