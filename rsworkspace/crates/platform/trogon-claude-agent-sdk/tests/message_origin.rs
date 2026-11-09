@@ -31,13 +31,7 @@ fn message_origins_round_trip_future_kinds_and_extension_values() -> TestResult 
 }
 
 #[test]
-fn message_origins_reject_invalid_kinds_and_reserved_extension_keys() -> TestResult {
-    for kind in ["", "bad\nkind", "bad\0kind"] {
-        assert!(matches!(
-            MessageOrigin::new(kind, JsonObject::new()),
-            Err(MessageOriginError::Kind)
-        ));
-    }
+fn message_origins_reject_missing_nonstring_kinds_and_reserved_extension_keys() -> TestResult {
     let reserved = serde_json::from_str(r#"{"kind":"spoofed"}"#)?;
     assert!(matches!(
         MessageOrigin::new("human", reserved),
@@ -45,13 +39,13 @@ fn message_origins_reject_invalid_kinds_and_reserved_extension_keys() -> TestRes
     ));
     for raw in [
         r#"{}"#,
-        r#"{"kind":""}"#,
         r#"{"kind":false}"#,
-        r#"{"kind":"bad\nkind"}"#,
+        r#"{"kind":7}"#,
+        r#"{"kind":null}"#,
+        r#"{"kind":"human","kind":"peer"}"#,
     ] {
         assert!(serde_json::from_str::<MessageOrigin>(raw).is_err());
     }
-    assert_eq!(MessageOriginError::Kind.to_string(), "invalid message origin kind");
     assert_eq!(
         MessageOriginError::ReservedField.to_string(),
         "message origin extension fields contain a reserved kind field"

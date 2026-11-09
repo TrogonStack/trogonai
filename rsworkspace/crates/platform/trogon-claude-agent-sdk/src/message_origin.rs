@@ -17,8 +17,6 @@ struct MessageOriginWire {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum MessageOriginError {
-    #[error("invalid message origin kind")]
-    Kind,
     #[error("message origin extension fields contain a reserved kind field")]
     ReservedField,
 }
@@ -26,9 +24,6 @@ pub enum MessageOriginError {
 impl MessageOrigin {
     pub fn new(kind: impl Into<String>, additional_fields: JsonObject) -> Result<Self, MessageOriginError> {
         let kind = kind.into();
-        if kind.is_empty() || kind.chars().any(char::is_control) {
-            return Err(MessageOriginError::Kind);
-        }
         if additional_fields.contains_key("kind") {
             return Err(MessageOriginError::ReservedField);
         }
