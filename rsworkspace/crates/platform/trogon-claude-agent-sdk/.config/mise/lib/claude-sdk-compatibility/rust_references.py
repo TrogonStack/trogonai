@@ -41,6 +41,7 @@ class RustDocument:
         return {"path": self.qualified(value["id"]), "args": self.arguments(value["args"])}
 
     def arguments(self, value):
+        from rust_generic_values import argument, associated
         if value is None:
             return None
         require(isinstance(value, dict) and len(value) == 1, "rust-generics")
@@ -48,11 +49,10 @@ class RustDocument:
             body = value["angle_bracketed"]
             require(isinstance(body, dict) and set(body) == {"args", "constraints"}
                     and isinstance(body["args"], list) and isinstance(body["constraints"], list), "rust-generics")
-            arguments = []
-            for arg in body["args"]:
-                require(isinstance(arg, dict) and len(arg) == 1 and next(iter(arg)) in ("type", "lifetime", "const", "infer"), "rust-generic-argument")
-                arguments.append({"type": self.type(arg["type"])} if "type" in arg else self.normalize(arg))
-            return {"angle_bracketed": {"args": arguments, "constraints": self.normalize(body["constraints"])}}
+            return {"angle_bracketed": {
+                "args": [argument(self, arg) for arg in body["args"]],
+                "constraints": [associated(self, value) for value in body["constraints"]],
+            }}
         if "parenthesized" in value:
             body = value["parenthesized"]
             require(isinstance(body, dict) and set(body) == {"inputs", "output"} and isinstance(body["inputs"], list), "rust-generics")
