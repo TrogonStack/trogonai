@@ -8,7 +8,7 @@ use trogon_decider_runtime::{
     CommandAuthorizer, CommandError, CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind, StreamAppend,
     StreamRead,
 };
-use trogon_peer::{Detach, DetachError, Heartbeat, PeerId, PeerObservation, TrustedPeerOwner};
+use trogon_peer::{Detach, DetachError, Heartbeat, HeartbeatError, PeerId, PeerObservation, TrustedPeerOwner};
 use trogonai_proto::{convert::datetime_from_timestamp, peers::v1alpha1 as proto};
 impl<S, P, C> PeerService<S, P, C>
 where
@@ -41,21 +41,25 @@ where
             .as_option()
             .map(|at| datetime_from_timestamp(at).map_err(|_| PeerApplicationError::Input))
             .transpose()?;
-        let command = Heartbeat::new(
-            owner.clone(),
-            reference,
-            PeerObservation::new(availability, condition, active)?,
-            self.clock.now(),
-        );
+        let observation = PeerObservation::new(availability, condition, active)?;
         let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(owner.caller().as_str())?);
-        self.authorizer
-            .authorize_execution(Some(&principal), &command)
-            .map_err(|error| PeerApplicationError::Heartbeat(CommandError::Unauthorized(error)))?;
         let mut retries_left = CONFLICT_RETRY_LIMIT.as_u32();
+        let mut validated_position = None;
         let result = loop {
-            let (_, position) = crate::history::load_with_position(&self.store, command.attachment().peer_id())
-                .await
-                .map_err(PeerApplicationError::LifetimeHistory)?;
+            let command = Heartbeat::new(owner.clone(), reference.clone(), observation.clone(), self.clock.now());
+            self.authorizer
+                .authorize_execution(Some(&principal), &command)
+                .map_err(|error| PeerApplicationError::Heartbeat(CommandError::Unauthorized(error)))?;
+            let position = match validated_position.take() {
+                Some(position) => position,
+                None => {
+                    crate::history::load_with_position(&self.store, reference.peer_id())
+                        .await
+                        .map_err(PeerApplicationError::LifetimeHistory)?
+                        .1
+                }
+            };
+            let command = Heartbeat::new(owner.clone(), reference.clone(), observation.clone(), self.clock.now());
             let result = CommandExecution::new(&self.store, &command)
                 .with_expected_revision(position)
                 .with_principal(principal.clone())
@@ -63,6 +67,16 @@ where
                 .with_replay_limit(PEER_REPLAY_LIMIT)
                 .execute()
                 .await;
+            if retries_left > 0 && matches!(&result, Err(CommandError::Decide(HeartbeatError::ClockRegression))) {
+                let (_, current_position) = crate::history::load_with_position(&self.store, reference.peer_id())
+                    .await
+                    .map_err(PeerApplicationError::LifetimeHistory)?;
+                if current_position > position {
+                    validated_position = Some(current_position);
+                    retries_left -= 1;
+                    continue;
+                }
+            }
             if retries_left > 0
                 && matches!(&result, Err(CommandError::Append(error))
                 if self.store.classify_append_failure(error) == trogon_decider_runtime::AppendFailure::WriteConflict)
@@ -87,20 +101,25 @@ where
         if self.store.tenant() != owner.tenant() {
             return Err(PeerApplicationError::Scope);
         }
-        let command = Detach::new(
-            owner.clone(),
-            attachment(request.attachment_ref.as_option().ok_or(PeerApplicationError::Input)?)?,
-            self.clock.now(),
-        );
+        let reference = attachment(request.attachment_ref.as_option().ok_or(PeerApplicationError::Input)?)?;
         let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(owner.caller().as_str())?);
-        self.authorizer
-            .authorize_execution(Some(&principal), &command)
-            .map_err(|error| PeerApplicationError::Detach(CommandError::Unauthorized(error)))?;
         let mut retries_left = CONFLICT_RETRY_LIMIT.as_u32();
+        let mut validated_position = None;
         let result = loop {
-            let (_, position) = crate::history::load_with_position(&self.store, command.attachment().peer_id())
-                .await
-                .map_err(PeerApplicationError::LifetimeHistory)?;
+            let command = Detach::new(owner.clone(), reference.clone(), self.clock.now());
+            self.authorizer
+                .authorize_execution(Some(&principal), &command)
+                .map_err(|error| PeerApplicationError::Detach(CommandError::Unauthorized(error)))?;
+            let position = match validated_position.take() {
+                Some(position) => position,
+                None => {
+                    crate::history::load_with_position(&self.store, reference.peer_id())
+                        .await
+                        .map_err(PeerApplicationError::LifetimeHistory)?
+                        .1
+                }
+            };
+            let command = Detach::new(owner.clone(), reference.clone(), self.clock.now());
             let result = CommandExecution::new(&self.store, &command)
                 .with_expected_revision(position)
                 .with_principal(principal.clone())
@@ -108,6 +127,16 @@ where
                 .with_replay_limit(PEER_REPLAY_LIMIT)
                 .execute()
                 .await;
+            if retries_left > 0 && matches!(&result, Err(CommandError::Decide(DetachError::ClockRegression))) {
+                let (_, current_position) = crate::history::load_with_position(&self.store, reference.peer_id())
+                    .await
+                    .map_err(PeerApplicationError::LifetimeHistory)?;
+                if current_position > position {
+                    validated_position = Some(current_position);
+                    retries_left -= 1;
+                    continue;
+                }
+            }
             if retries_left > 0
                 && matches!(&result, Err(CommandError::Append(error))
                 if self.store.classify_append_failure(error) == trogon_decider_runtime::AppendFailure::WriteConflict)
@@ -120,7 +149,7 @@ where
         match result {
             Ok(_) => Ok(proto::DetachResponse {}),
             Err(CommandError::Decide(DetachError::AlreadyDetached)) => {
-                crate::history::load(&self.store, command.attachment().peer_id())
+                crate::history::load(&self.store, reference.peer_id())
                     .await
                     .map_err(PeerApplicationError::LifetimeHistory)?;
                 Ok(proto::DetachResponse {})
