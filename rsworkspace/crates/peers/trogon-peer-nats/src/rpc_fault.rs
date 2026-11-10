@@ -50,6 +50,13 @@ pub(crate) fn application<R, A>(error: PeerApplicationError<R, A>) -> ServiceFau
             fault(Code::PERMISSION_DENIED, "peer operation denied")
         }
         PeerApplicationError::History(error) => history(error),
+        PeerApplicationError::LifetimeHistory(error) => match error {
+            HistoryError::Read(_) => fault(Code::UNAVAILABLE, "peer storage unavailable"),
+            HistoryError::Limit => fault(Code::RESOURCE_EXHAUSTED, "peer capacity exhausted"),
+            HistoryError::Decode(_) | HistoryError::UnknownEvent | HistoryError::Evolve(_) => {
+                fault(Code::INTERNAL, "peer execution failed")
+            }
+        },
         PeerApplicationError::Heartbeat(error) => execution(error),
         PeerApplicationError::Detach(error) => execution(error),
         PeerApplicationError::Message(error) => execution(error),
