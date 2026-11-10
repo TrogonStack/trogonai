@@ -9,17 +9,39 @@ generated-code checks.
 
 ## Run the native targets
 
-Install the pinned Bazel version, then invoke the repository tasks:
+Install the pinned build tools, then invoke the repository tasks:
 
 ```sh
-mise install bazel
+mise run --skip-tools bazel:setup
 mise run --skip-tools bazel:build
 mise run --skip-tools bazel:test
 ```
 
-`mise.toml` pins Bazel itself. Bazel downloads its pinned Rust, Go, protobuf,
-and Buf tools rather than invoking Cargo or Go build wrappers. The initial
-execution platforms are macOS ARM64 and Linux x86-64.
+`mise.toml` is the version authority for Bazel, Buf, Rust, and Go. Bazel imports
+mise's installed Rust and Go SDKs as native toolchains, including their compiler
+and standard-library files as build inputs. It resolves the real Rust toolchain
+rather than running rustup launchers inside build actions. Missing SDKs fail with
+an installation hint; Bazel does not install them during a build.
+
+Buf comes from the generated `.config/bazel/mise.lock` through
+[`rules_mise`](https://github.com/amartani/rules_mise). Bazel materializes the
+locked binary for its sandbox and hashes it as a test input. It does not rely on
+an arbitrary `buf` executable on `PATH`. Rule sets and the protobuf compiler
+remain Bazel dependencies. The supported execution hosts are macOS ARM64 and
+Linux x86-64.
+
+The cached build uses the root `mise.toml` pins, independent of local tool-version
+overrides. Keep the generated tool lock aligned after editing those pins:
+
+```sh
+mise run --skip-tools bazel:lock
+mise run --skip-tools bazel:setup
+```
+
+Commit `.config/bazel/mise.lock` with pin updates. Bazel rejects mismatched pins,
+missing Buf platform entries, and missing Buf SHA256 checksums. The scoped lock is
+generated from `mise.toml`; it introduces no second editable version list and
+does not change locked-install behavior in existing CI workflows.
 
 The build task builds `//:build`; the test task runs `bazel test //...`.
 Arguments are forwarded to Bazel, so a test can be selected without changing
@@ -75,10 +97,10 @@ them.
 
 Cache archives have an immutable key for each commit and workflow
 attempt, with a restore prefix partitioned by runner operating system,
-architecture, and the `mise.toml` hash. Changes to any managed tool configuration
-start a new cache namespace. Source-only updates can add new action results to
-a later archive. Bazel's own content keys decide which entries in a restored
-archive remain reusable.
+architecture, and the hashes of `mise.toml` and `.config/bazel/mise.lock`. Changes
+to managed tool configuration start a new cache namespace. Source-only updates
+can add new action results to a later archive. Bazel's own content keys decide
+which entries in a restored archive remain reusable.
 
 This cache follows GitHub's repository and branch access rules and eviction
 limits. It accelerates Actions jobs; it is not a globally writable cache endpoint

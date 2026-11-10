@@ -37,10 +37,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Bazel via mise
+      - name: Install build tools via mise
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
-          install_args: bazel
+          install_args: bazel buf go rust
           cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Restore Bazel cache
@@ -50,9 +50,9 @@ jobs:
           path: |
             ${{ runner.temp }}/bazel-disk-cache
             ${{ runner.temp }}/bazel-repository-cache
-          key: bazel-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', '.config/bazel/mise.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            bazel-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml') }}-
+            bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', '.config/bazel/mise.lock') }}-
 
       - name: Test native targets
         run: mise run --skip-tools github:workflows:ci-bazel:test

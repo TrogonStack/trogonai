@@ -5,78 +5,38 @@ bazel_dep(name = "rules_rust", version = "0.75.0")
 bazel_dep(name = "rules_go", version = "0.65.0")
 bazel_dep(name = "gazelle", version = "0.54.0")
 bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "rules_mise", version = "1.0.0")
+bazel_dep(name = "toml.bzl", version = "0.3.0")
 
-http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+mise = use_extension("@rules_mise//mise:extensions.bzl", "mise")
+mise.hub(lockfile = "//.config/bazel:mise.lock")
+use_repo(mise, "mise")
 
-http_file(
-    name = "buf_darwin_arm64",
-    downloaded_file_path = "buf",
-    executable = True,
-    sha256 = "f6662346793727c4a5a11a813983a74964f40a626c7ca35df96fe2582b1fbebf",
-    urls = ["https://github.com/bufbuild/buf/releases/download/v1.70.0/buf-Darwin-arm64"],
+register_toolchains("@mise//toolchains:all")
+
+mise_lock = use_repo_rule("//.config/bazel:mise_lock.bzl", "mise_lock")
+
+mise_lock(
+    name = "mise_lock",
+    config = "//:mise.toml",
+    lockfile = "//.config/bazel:mise.lock",
+    tool = "@mise//tools/buf",
 )
 
-http_file(
-    name = "buf_darwin_x86_64",
-    downloaded_file_path = "buf",
-    executable = True,
-    sha256 = "ee339fd6ca4ec2312bd9b5f2b53493b7396d87b702efbdaac98b5acbe8d1e3d9",
-    urls = ["https://github.com/bufbuild/buf/releases/download/v1.70.0/buf-Darwin-x86_64"],
-)
+mise_sdks = use_repo_rule("//.config/bazel:mise_sdks.bzl", "mise_sdks")
 
-http_file(
-    name = "buf_linux_arm64",
-    downloaded_file_path = "buf",
-    executable = True,
-    sha256 = "95eaebf9c6a25fd26510c9596b6cedebbb2ab90258904f96edc9625e505181b6",
-    urls = ["https://github.com/bufbuild/buf/releases/download/v1.70.0/buf-Linux-aarch64"],
-)
-
-http_file(
-    name = "buf_linux_x86_64",
-    downloaded_file_path = "buf",
-    executable = True,
-    sha256 = "e2bbcdd324da09c16a15963dc2dae0525c955c05dc118223cf732f4f7509c5e6",
-    urls = ["https://github.com/bufbuild/buf/releases/download/v1.70.0/buf-Linux-x86_64"],
+mise_sdks(
+    name = "mise_sdks",
+    config = "//:mise.toml",
 )
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
-rust.toolchain(
-    edition = "2024",
-    versions = ["1.96.0"],
-)
+rust.toolchain(versions = [])
 
-# Stripping proc-macro dylibs corrupts LINKEDIT with the pinned macOS toolchain.
-rust.repository_set(
-    name = "rust_macos_aarch64",
-    edition = "2024",
-    exec_compatible_with = [
-        "@platforms//os:osx",
-        "@platforms//cpu:aarch64",
-    ],
-    exec_triple = "aarch64-apple-darwin",
-    strip_level = {
-        "dbg": "none",
-        "fastbuild": "none",
-        "opt": "none",
-    },
-    target_compatible_with = [
-        "@platforms//os:osx",
-        "@platforms//cpu:aarch64",
-    ],
-    target_triple = "aarch64-apple-darwin",
-    versions = ["1.96.0"],
+register_toolchains(
+    "@mise_sdks//:rust_toolchain",
+    "@mise_sdks//:cargo_toolchain",
 )
-use_repo(rust, "rust_toolchains")
-
-register_toolchains("@rust_toolchains//:all")
-
-rust_host_tools = use_extension("@rules_rust//rust:extensions.bzl", "rust_host_tools")
-rust_host_tools.host_tools(
-    name = "trogon_rust_host_tools",
-    version = "1.96.0",
-)
-use_repo(rust_host_tools, "trogon_rust_host_tools")
 
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
 crate.spec(
@@ -90,7 +50,7 @@ crate.spec(
 crate.from_specs(
     name = "crates",
     cargo_lockfile = "//.config/bazel:Cargo.lock",
-    host_tools = "@trogon_rust_host_tools",
+    host_tools = "@mise_sdks//rust:ROOT",
     supported_platform_triples = [
         "aarch64-apple-darwin",
         "x86_64-unknown-linux-gnu",
@@ -99,7 +59,7 @@ crate.from_specs(
 use_repo(crate, "crates")
 
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
-go_sdk.download(version = "1.26.5")
+go_sdk.wrap(root_file = "@mise_sdks//go:ROOT")
 
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.from_file(go_mod = "//goworkspace:go.mod")

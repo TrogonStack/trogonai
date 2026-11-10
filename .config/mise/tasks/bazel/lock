@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#MISE description="Refresh Bazel tool artifacts from the pins in mise.toml"
+set -euo pipefail
+
+lock_dir=$(mktemp -d "${TMPDIR:-/tmp}/bazel-mise-lock.XXXXXXXX")
+trap 'rm -rf "$lock_dir"' EXIT
+
+# A root lockfile would change locked-mode behavior in unrelated CI workflows.
+cp mise.toml "$lock_dir/mise.toml"
+MISE_TRUSTED_CONFIG_PATHS="$lock_dir" mise --no-env --no-hooks --cd "$lock_dir" lock bazel buf go rust --platform macos-arm64,linux-x64 "$@"
+cp "$lock_dir/mise.lock" .config/bazel/mise.lock
