@@ -1400,3 +1400,115 @@ async fn idempotent_detach_rechecks_unknown_authority_after_its_validated_snapsh
         .unwrap();
     assert_same_durable_history(&actual, &injected);
 }
+
+#[derive(Clone)]
+struct TruncatedHistory {
+    inner: ObservedStore,
+    armed: Arc<std::sync::atomic::AtomicBool>,
+    empty: bool,
+}
+impl StreamRead<PeerId> for TruncatedHistory {
+    type Error = <ObservedStore as StreamRead<PeerId>>::Error;
+    async fn read_stream(&self, request: ReadStreamRequest<'_, PeerId>) -> Result<ReadStreamResponse, Self::Error> {
+        let mut read = self.inner.read_stream(request).await?;
+        if self.armed.swap(false, Ordering::SeqCst) {
+            if self.empty {
+                read.events.clear();
+            } else {
+                read.events.pop();
+            }
+        }
+        Ok(read)
+    }
+}
+impl StreamAppend<PeerId> for TruncatedHistory {
+    type Error = <ObservedStore as StreamAppend<PeerId>>::Error;
+    async fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, PeerId>,
+    ) -> Result<AppendStreamResponse, Self::Error> {
+        self.inner.append_stream(request).await
+    }
+    fn classify_append_failure(&self, error: &Self::Error) -> AppendFailure {
+        self.inner.classify_append_failure(error)
+    }
+}
+async fn expired_resume_refuses_an_incomplete_announced_history_tail(empty: bool) {
+    let inner = ObservedStore::default();
+    let first = PeerService::new(inner.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let peer = PeerId::parse(first.peer_id.unwrap()).unwrap();
+    let before = inner
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    let mut unknown = before.events[0].event.clone();
+    unknown.id = "00000000-0000-4000-8000-fffffffffff2".parse().unwrap();
+    unknown.r#type = "trogonai.peers.future.PeerAuthorityTransferred".into();
+    inner
+        .append_stream(AppendStreamRequest {
+            stream_id: &peer,
+            stream_write_precondition: before.current_position.into(),
+            events: vec![unknown],
+        })
+        .await
+        .unwrap();
+    let before = inner
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    let appends = inner.appends.load(Ordering::SeqCst);
+    let store = TruncatedHistory {
+        inner: inner.clone(),
+        armed: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        empty,
+    };
+    let mut resume = request("collaboration_alpha");
+    resume.connector_id = Some("replacement_connector".into());
+    let result = PeerService::new(
+        store.clone(),
+        policy(),
+        FixedClock(now() + chrono::Duration::seconds(10)),
+    )
+    .enroll(&owner(), resume)
+    .await;
+    assert!(
+        matches!(
+            &result,
+            Err(EnrollServiceError::History(
+                trogon_peer_service::HistoryError::Incomplete
+            ))
+        ),
+        "omitted authority tail must prevent resume, empty={empty}: {result:?}"
+    );
+    assert!(!store.armed.load(Ordering::SeqCst));
+    assert_eq!(
+        inner.appends.load(Ordering::SeqCst),
+        appends + 1,
+        "only the initial NoStream collision may attempt append"
+    );
+    let after = inner
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    assert_same_durable_history(&after, &before);
+}
+#[tokio::test]
+async fn expired_resume_refuses_a_page_that_omits_its_announced_history_tail() {
+    expired_resume_refuses_an_incomplete_announced_history_tail(false).await;
+}
+#[tokio::test]
+async fn expired_resume_refuses_an_empty_page_with_an_announced_history_tail() {
+    expired_resume_refuses_an_incomplete_announced_history_tail(true).await;
+}
