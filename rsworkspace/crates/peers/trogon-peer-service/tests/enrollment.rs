@@ -1,6 +1,8 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{future::Future, pin::Pin};
+type ReadInterleave = (usize, Pin<Box<dyn Future<Output = ()> + Send>>);
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, TimeZone, Utc};
@@ -22,13 +24,25 @@ struct ObservedStore {
     inner: InMemoryStore,
     reads: Arc<AtomicUsize>,
     appends: Arc<AtomicUsize>,
+    before_read: Arc<Mutex<Option<ReadInterleave>>>,
 }
 
 impl StreamRead<PeerId> for ObservedStore {
     type Error = <InMemoryStore as StreamRead<str>>::Error;
 
     async fn read_stream(&self, request: ReadStreamRequest<'_, PeerId>) -> Result<ReadStreamResponse, Self::Error> {
-        self.reads.fetch_add(1, Ordering::SeqCst);
+        let ordinal = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
+        let action = {
+            let mut pending = self.before_read.lock().unwrap();
+            if pending.as_ref().is_some_and(|(at, _)| *at == ordinal) {
+                pending.take().map(|(_, action)| action)
+            } else {
+                None
+            }
+        };
+        if let Some(action) = action {
+            action.await;
+        }
         self.inner
             .read_stream(ReadStreamRequest {
                 stream_id: request.stream_id.as_str(),
@@ -961,4 +975,85 @@ async fn live_resume_rechecks_unknown_authority_that_raced_its_validated_history
         .await
         .unwrap();
     assert_same_durable_history(&actual, &injected);
+}
+
+struct ReloadDetachGrant(trogon_peer::AttachmentRef);
+
+impl CommandAuthorizer<trogon_peer::Detach> for ReloadDetachGrant {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        command: &trogon_peer::Detach,
+    ) -> Result<(), AuthorizationDeniedError> {
+        if command.owner() != &owner()
+            || command.attachment() != &self.0
+            || principal.kind() != PrincipalKind::Agent
+            || principal.id().as_str() != owner().caller().as_str()
+        {
+            return Err(AuthorizationDeniedError::new("outside reload transition grant"));
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn live_resume_refuses_detach_or_foreign_replacement_during_its_response_reload() {
+    for replace in [false, true] {
+        let store = ObservedStore::default();
+        let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+        let first = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+        let peer = PeerId::parse(first.peer_id.clone().unwrap()).unwrap();
+        let interleaved_store = store.clone();
+        let reload_read = store.reads.load(Ordering::SeqCst) + 3;
+        *store.before_read.lock().unwrap() = Some((
+            reload_read,
+            Box::pin(async move {
+                let reference = trogon_peer::AttachmentRef::new(
+                    PeerId::parse(first.peer_id.clone().unwrap()).unwrap(),
+                    trogon_peer::ConnectorId::new("connector_alpha").unwrap(),
+                    1,
+                )
+                .unwrap();
+                let grant = ReloadDetachGrant(reference.clone());
+                let detach = trogon_peer::Detach::new(owner(), reference, now());
+                trogon_decider_runtime::CommandExecution::new(&interleaved_store, &detach)
+                    .with_principal(CommandPrincipal::new(
+                        PrincipalKind::Agent,
+                        trogon_decider_runtime::PrincipalId::new(owner().caller().as_str()).unwrap(),
+                    ))
+                    .with_authorizer(&grant)
+                    .execute()
+                    .await
+                    .unwrap();
+                let concurrent = PeerService::new(interleaved_store, policy(), FixedClock(now()));
+                if replace {
+                    let mut replacement = request("collaboration_alpha");
+                    replacement.connector_id = Some("replacement_connector".into());
+                    let replaced = concurrent.enroll(&owner(), replacement).await.unwrap();
+                    assert_eq!(replaced.attachment.attachment_ref.generation, Some(2));
+                }
+            }),
+        ));
+        let result = service.enroll(&owner(), request("collaboration_alpha")).await;
+        assert!(
+            store.before_read.lock().unwrap().is_none(),
+            "reload interleave must execute"
+        );
+        assert!(
+            matches!(result,
+                Err(EnrollServiceError::ResumeGuard(trogon_peer::HeartbeatError::Inactive)) if !replace
+            ) || matches!(result,
+                Err(EnrollServiceError::ResumeGuard(trogon_peer::HeartbeatError::Fenced)) if replace
+            ),
+            "resume cannot return a detached or competing connector attachment: {result:?}"
+        );
+        let history = store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning,
+            })
+            .await
+            .unwrap();
+        assert_eq!(history.events.len(), if replace { 4 } else { 3 });
+    }
 }
