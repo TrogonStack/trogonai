@@ -406,6 +406,7 @@ async fn executable_credentials_cannot_publish_another_caller_or_read_streams() 
     Ok(())
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn executable_sigterm_detaches_bound_generation_without_durable_erasure() -> TestResult {
     let broker = Broker::start().await?;
