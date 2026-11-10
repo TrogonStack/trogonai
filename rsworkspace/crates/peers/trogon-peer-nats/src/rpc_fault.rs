@@ -1,3 +1,4 @@
+use crate::telemetry::FaultOrigin;
 use buffa::Enumeration as _;
 use grpc_nats_micro::{ServiceErrorCode, ServiceFault};
 use trogon_decider_runtime::CommandError;
@@ -13,12 +14,18 @@ fn fault(code: Code, message: &'static str) -> ServiceFault {
         },
     )
 }
+fn observed_fault(origin: FaultOrigin, code: Code, message: &'static str) -> ServiceFault {
+    crate::telemetry::record_fault(origin, code);
+    fault(code, message)
+}
 fn history<R>(error: HistoryError<R>) -> ServiceFault {
     match error {
-        HistoryError::Read(_) => fault(Code::UNAVAILABLE, "peer storage unavailable"),
+        HistoryError::Read(_) => {
+            observed_fault(FaultOrigin::HistoryRead, Code::UNAVAILABLE, "peer storage unavailable")
+        }
         HistoryError::Limit => fault(Code::RESOURCE_EXHAUSTED, "peer history limit reached"),
-        HistoryError::Decode(_) | HistoryError::UnknownEvent | HistoryError::Evolve(_) => {
-            fault(Code::INTERNAL, "peer history invalid")
+        HistoryError::Decode(_) | HistoryError::UnknownEvent | HistoryError::Evolve(_) | HistoryError::Incomplete => {
+            observed_fault(FaultOrigin::HistoryIntegrity, Code::INTERNAL, "peer history invalid")
         }
     }
 }
@@ -26,9 +33,17 @@ fn execution<D, R, A>(error: ExecutionError<D, R, A>) -> ServiceFault {
     match error {
         CommandError::Unauthorized(_) => fault(Code::PERMISSION_DENIED, "peer operation denied"),
         CommandError::Decide(_) => fault(Code::FAILED_PRECONDITION, "peer precondition failed"),
-        CommandError::ReadStream(_) | CommandError::ReadSnapshot(_) | CommandError::Append(_) => {
-            fault(Code::UNAVAILABLE, "peer storage unavailable")
-        }
+        CommandError::ReadStream(_) => observed_fault(
+            FaultOrigin::ExecutionReadStream,
+            Code::UNAVAILABLE,
+            "peer storage unavailable",
+        ),
+        CommandError::ReadSnapshot(source) => match source {},
+        CommandError::Append(_) => observed_fault(
+            FaultOrigin::ExecutionAppend,
+            Code::UNAVAILABLE,
+            "peer storage unavailable",
+        ),
         CommandError::Overloaded(_) | CommandError::ReplayLimitExceeded(_) => {
             fault(Code::RESOURCE_EXHAUSTED, "peer capacity exhausted")
         }
@@ -38,7 +53,9 @@ fn execution<D, R, A>(error: ExecutionError<D, R, A>) -> ServiceFault {
         | CommandError::EventEncode(_)
         | CommandError::DecodeEvent(_)
         | CommandError::SnapshotAheadOfStream(_)
-        | CommandError::ReadAfterOverflow(_) => fault(Code::INTERNAL, "peer execution failed"),
+        | CommandError::ReadAfterOverflow(_) => {
+            observed_fault(FaultOrigin::ExecutionIntegrity, Code::INTERNAL, "peer execution failed")
+        }
     }
 }
 pub(crate) fn application<R, A>(error: PeerApplicationError<R, A>) -> ServiceFault {
@@ -51,10 +68,15 @@ pub(crate) fn application<R, A>(error: PeerApplicationError<R, A>) -> ServiceFau
         }
         PeerApplicationError::History(error) => history(error),
         PeerApplicationError::LifetimeHistory(error) => match error {
-            HistoryError::Read(_) => fault(Code::UNAVAILABLE, "peer storage unavailable"),
+            HistoryError::Read(_) => {
+                observed_fault(FaultOrigin::HistoryRead, Code::UNAVAILABLE, "peer storage unavailable")
+            }
             HistoryError::Limit => fault(Code::RESOURCE_EXHAUSTED, "peer capacity exhausted"),
-            HistoryError::Decode(_) | HistoryError::UnknownEvent | HistoryError::Evolve(_) => {
-                fault(Code::INTERNAL, "peer execution failed")
+            HistoryError::Decode(_)
+            | HistoryError::UnknownEvent
+            | HistoryError::Evolve(_)
+            | HistoryError::Incomplete => {
+                observed_fault(FaultOrigin::HistoryIntegrity, Code::INTERNAL, "peer execution failed")
             }
         },
         PeerApplicationError::Heartbeat(error) => execution(error),
@@ -63,13 +85,17 @@ pub(crate) fn application<R, A>(error: PeerApplicationError<R, A>) -> ServiceFau
         PeerApplicationError::Port(error) => match error {
             PeerPortError::Denied => fault(Code::PERMISSION_DENIED, "peer operation denied"),
             PeerPortError::Conflict => fault(Code::ABORTED, "peer record conflict"),
-            PeerPortError::Unavailable | PeerPortError::Backend(_) => fault(Code::UNAVAILABLE, "peer port unavailable"),
+            PeerPortError::Unavailable => fault(Code::UNAVAILABLE, "peer port unavailable"),
+            PeerPortError::Backend(_) => {
+                observed_fault(FaultOrigin::PortBackend, Code::UNAVAILABLE, "peer port unavailable")
+            }
             PeerPortError::Integrity => fault(Code::INTERNAL, "peer integrity check failed"),
         },
         PeerApplicationError::Evidence(_) => fault(Code::FAILED_PRECONDITION, "peer precondition failed"),
-        PeerApplicationError::Context(_) | PeerApplicationError::Principal(_) => {
-            fault(Code::INTERNAL, "peer execution failed")
+        PeerApplicationError::Context(_) => {
+            observed_fault(FaultOrigin::Context, Code::INTERNAL, "peer execution failed")
         }
+        PeerApplicationError::Principal(_) => fault(Code::INTERNAL, "peer execution failed"),
     }
 }
 pub(crate) fn enrollment<R, A>(error: EnrollServiceError<R, A>) -> ServiceFault {
