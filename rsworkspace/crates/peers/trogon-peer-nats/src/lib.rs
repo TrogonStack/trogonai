@@ -51,3 +51,4 @@ pub use rpc_application::PeerRpcApplication;
 pub use rpc_backend::PeerRpcBackend;
 
 mod rpc_fault;
+mod telemetry;
