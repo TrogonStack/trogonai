@@ -3,12 +3,13 @@ use std::time::Duration;
 use async_nats::jetstream::{self, stream};
 use futures::StreamExt as _;
 use serde_json::Value;
+use trogon_decider_nats::JetStreamStore;
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_peer_nats::{
     PeerTenant,
     peer::{
         PeerSnapshotConfigMismatchError, PeerStorageBudget, PeerStoreConfig, PeerStoreError,
-        PeerStreamConfigMismatchError, open_store,
+        PeerStreamConfigMismatchError, PeerSubjectResolver, open_store,
     },
 };
 
@@ -66,12 +67,12 @@ impl Fixture {
             account,
         })
     }
-    async fn rejected(
+    async fn open_with(
         &self,
         label: &str,
         event_config: stream::Config,
         snapshot_config: Option<stream::Config>,
-    ) -> TestResult<PeerStoreError> {
+    ) -> TestResult<Result<JetStreamStore<PeerSubjectResolver>, PeerStoreError>> {
         let prefix = format!("PEER_FIXTURE_{label}.API");
         let mut events = self.events.clone();
         events["config"] = serde_json::to_value(event_config)?;
@@ -112,11 +113,11 @@ impl Fixture {
         };
         let context = jetstream::with_prefix(self.client.clone(), &prefix);
         let (opened, served) = tokio::join!(tokio::time::timeout(BOUND, open_store(context, &self.config)), serve);
-        served?;
-        match opened? {
-            Err(error) => Ok(error),
-            Ok(_) => Err("unsafe successful CREATE response was admitted".into()),
+        let opened = opened?;
+        if opened.is_ok() {
+            served?;
         }
+        Ok(opened)
     }
 }
 
@@ -216,6 +217,44 @@ async fn snapshot_create_replies_cannot_weaken_retention_bound_or_import_other_b
         assert!(
             matches!(error, PeerStoreError::UnsafeSnapshotConfig(found) if found == expected),
             "{label}: wrong typed snapshot admission failure"
+        );
+    }
+    Ok(())
+}
+
+impl Fixture {
+    async fn rejected(
+        &self,
+        label: &str,
+        event_config: stream::Config,
+        snapshot_config: Option<stream::Config>,
+    ) -> TestResult<PeerStoreError> {
+        match self.open_with(label, event_config, snapshot_config).await? {
+            Err(error) => Ok(error),
+            Ok(_) => Err("unsafe successful CREATE response was admitted".into()),
+        }
+    }
+}
+
+#[tokio::test]
+async fn zero_and_negative_one_count_limits_admit_unbounded_history() -> TestResult {
+    let f = Fixture::new().await?;
+    let snapshots: stream::Config = serde_json::from_value(f.snapshots["config"].clone())?;
+    for (messages, per_subject) in [(-1, -1), (0, -1), (-1, 0), (0, 0)] {
+        let mut actual = f.config.stream_config();
+        actual.max_messages = messages;
+        actual.max_messages_per_subject = per_subject;
+        let result = f
+            .open_with(
+                &format!("unlimited_{messages}_{per_subject}"),
+                actual,
+                Some(snapshots.clone()),
+            )
+            .await?;
+        assert!(
+            result.is_ok(),
+            "safe count limits ({messages},{per_subject}) must be admitted: {:?}",
+            result.err()
         );
     }
     Ok(())

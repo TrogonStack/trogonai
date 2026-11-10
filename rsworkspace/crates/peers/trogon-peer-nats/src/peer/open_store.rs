@@ -36,10 +36,10 @@ fn validate_event_stream(
     if !actual.max_age.is_zero() {
         return Err(PeerStreamConfigMismatchError::MaxAge);
     }
-    if actual.max_messages != -1 {
+    if !matches!(actual.max_messages, -1 | 0) {
         return Err(PeerStreamConfigMismatchError::MaxMessages);
     }
-    if actual.max_messages_per_subject != -1 {
+    if !matches!(actual.max_messages_per_subject, -1 | 0) {
         return Err(PeerStreamConfigMismatchError::MaxMessagesPerSubject);
     }
     if !actual.allow_atomic_publish {
