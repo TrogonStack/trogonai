@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Select CI checks from a bound push or pull request change set"
+set -euo pipefail
+
+exec node "$(dirname "$0")/filter.mjs"
