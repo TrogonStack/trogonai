@@ -113,3 +113,6 @@ pub(crate) fn enrollment<R, A>(error: EnrollServiceError<R, A>) -> ServiceFault 
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
