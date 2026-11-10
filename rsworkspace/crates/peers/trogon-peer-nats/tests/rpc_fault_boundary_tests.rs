@@ -33,6 +33,9 @@ enum StoreFailure {
     MalformedEvent,
     InvalidHistory,
     HistoryLimit,
+    ReplayMalformed,
+    ReplayInvalidHistory,
+    ReplayHistoryLimit,
     ResumeRead,
     ResumeMalformed,
     ResumeExpired,
@@ -55,6 +58,14 @@ struct CapturedPastRead {
     response: ReadStreamResponse,
     observed: Arc<Mutex<Vec<ReadStreamResponse>>>,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReplayFaultRead {
+    peer: PeerId,
+    from: ReadFrom,
+    maximum: Option<u64>,
+    injected: bool,
+}
+
 #[derive(Clone)]
 struct FaultStore {
     inner: StoreFixture,
@@ -64,6 +75,7 @@ struct FaultStore {
     injected: Arc<AtomicUsize>,
     clock: ClockFixture,
     past_read: Option<CapturedPastRead>,
+    replay_observed: Arc<Mutex<Vec<ReplayFaultRead>>>,
 }
 impl ScopedPeerStore for FaultStore {
     fn tenant(&self) -> &TenantId {
@@ -71,6 +83,72 @@ impl ScopedPeerStore for FaultStore {
     }
 }
 impl FaultStore {
+    async fn read_with_replay_fault(
+        &self,
+        request: ReadStreamRequest<'_, PeerId>,
+        maximum: Option<u64>,
+    ) -> Result<ReadStreamResponse, InjectedStoreError> {
+        let ordinal = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
+        assert!((1..=2).contains(&ordinal), "the command cannot retry a replay fault");
+        assert_eq!(request.from, ReadFrom::Beginning);
+        assert_eq!(
+            maximum,
+            Some(4097),
+            "strict history and command replay both retain the4096-event ceiling"
+        );
+        let receipt = ReplayFaultRead {
+            peer: request.stream_id.clone(),
+            from: request.from,
+            maximum,
+            injected: ordinal == 2,
+        };
+        let mut read = match maximum {
+            Some(maximum) => self.inner.read_stream_bounded(request, maximum).await,
+            None => self.inner.read_stream(request).await,
+        }
+        .map_err(|error| InjectedStoreError::Fixture(Box::new(error)))?;
+        if ordinal == 1 {
+            assert_eq!(self.injected.load(Ordering::SeqCst), 0);
+            let mut history = trogon_peer::PeerHistory::initial();
+            for envelope in &read.events {
+                let decoded = envelope
+                    .decode::<proto::PeerEvent>()
+                    .map_err(|error| InjectedStoreError::Fixture(Box::new(error)))?
+                    .into_decoded()
+                    .ok_or(InjectedStoreError::Unavailable)?;
+                history = history
+                    .evolve(&decoded)
+                    .map_err(|error| InjectedStoreError::Fixture(Box::new(error)))?;
+            }
+        } else {
+            let observed = self
+                .replay_observed
+                .lock()
+                .map_err(|_| InjectedStoreError::Unavailable)?;
+            assert_eq!(
+                observed.len(),
+                1,
+                "validated strict pre-read must complete before injection"
+            );
+            assert_eq!(observed[0].peer, receipt.peer);
+            assert!(!observed[0].injected);
+            drop(observed);
+            assert_eq!(self.injected.fetch_add(1, Ordering::SeqCst), 0);
+            let first = read.events.first().cloned().ok_or(InjectedStoreError::Unavailable)?;
+            match self.failure {
+                StoreFailure::ReplayMalformed => read.events[0].event.content = vec![255],
+                StoreFailure::ReplayInvalidHistory => read.events.push(first),
+                StoreFailure::ReplayHistoryLimit => read.events = vec![first; 4097],
+                _ => return Err(InjectedStoreError::Unavailable),
+            }
+        }
+        self.replay_observed
+            .lock()
+            .map_err(|_| InjectedStoreError::Unavailable)?
+            .push(receipt);
+        Ok(read)
+    }
+
     async fn read_with_past_snapshot(
         &self,
         request: ReadStreamRequest<'_, PeerId>,
@@ -113,6 +191,12 @@ impl FaultStore {
 impl StreamRead<PeerId> for FaultStore {
     type Error = InjectedStoreError;
     async fn read_stream(&self, request: ReadStreamRequest<'_, PeerId>) -> Result<ReadStreamResponse, Self::Error> {
+        if matches!(
+            self.failure,
+            StoreFailure::ReplayMalformed | StoreFailure::ReplayInvalidHistory | StoreFailure::ReplayHistoryLimit
+        ) {
+            return self.read_with_replay_fault(request, None).await;
+        }
         if matches!(
             self.failure,
             StoreFailure::ResumeReplayPastSnapshot | StoreFailure::ResumeConfirmationPastSnapshot
@@ -162,7 +246,10 @@ impl StreamRead<PeerId> for FaultStore {
             | StoreFailure::ResumeMalformed
             | StoreFailure::ResumeExpired
             | StoreFailure::ResumeReplayPastSnapshot
-            | StoreFailure::ResumeConfirmationPastSnapshot => {}
+            | StoreFailure::ResumeConfirmationPastSnapshot
+            | StoreFailure::ReplayMalformed
+            | StoreFailure::ReplayInvalidHistory
+            | StoreFailure::ReplayHistoryLimit => {}
         }
         Ok(read)
     }
@@ -171,6 +258,12 @@ impl StreamRead<PeerId> for FaultStore {
         request: ReadStreamRequest<'_, PeerId>,
         max: u64,
     ) -> Result<ReadStreamResponse, Self::Error> {
+        if matches!(
+            self.failure,
+            StoreFailure::ReplayMalformed | StoreFailure::ReplayInvalidHistory | StoreFailure::ReplayHistoryLimit
+        ) {
+            return self.read_with_replay_fault(request, Some(max)).await;
+        }
         if matches!(
             self.failure,
             StoreFailure::ResumeReplayPastSnapshot | StoreFailure::ResumeConfirmationPastSnapshot
@@ -258,6 +351,8 @@ struct FaultAdapter {
     backend: Arc<Adapter>,
     failure: StoreFailure,
     injected: Arc<AtomicUsize>,
+    replay_observed: Arc<Mutex<Vec<ReplayFaultRead>>>,
+    reads: Arc<AtomicUsize>,
 }
 fn adapter(fixture: &Fixture, failure: StoreFailure, port: Option<PortFailure>, tenant: TenantId) -> FaultAdapter {
     adapter_with_past_read(fixture, failure, port, tenant, None)
@@ -270,14 +365,17 @@ fn adapter_with_past_read(
     past_read: Option<CapturedPastRead>,
 ) -> FaultAdapter {
     let injected = Arc::default();
+    let replay_observed = Arc::default();
+    let reads = Arc::default();
     let store = FaultStore {
         inner: fixture.store.clone(),
         tenant,
         failure,
-        reads: Arc::default(),
+        reads: Arc::clone(&reads),
         injected: Arc::clone(&injected),
         clock: fixture.clock.clone(),
         past_read,
+        replay_observed: Arc::clone(&replay_observed),
     };
     let backend = Arc::new(PeerRpcApplication::new(
         PeerService::new(store.clone(), fixture.policy.clone(), fixture.clock.clone()),
@@ -298,6 +396,8 @@ fn adapter_with_past_read(
         backend,
         failure,
         injected,
+        replay_observed,
+        reads,
     }
 }
 async fn assert_wire_fault<Request: buffa::Message + serde::Serialize>(
@@ -311,6 +411,8 @@ async fn assert_wire_fault<Request: buffa::Message + serde::Serialize>(
         backend,
         failure,
         injected,
+        replay_observed,
+        reads,
     } = adapter;
     let admission = PeerRpcAdmission {
         ingress: PeerIngress::new(PeerAccount::SharedFixture {
@@ -347,6 +449,24 @@ async fn assert_wire_fault<Request: buffa::Message + serde::Serialize>(
     assert_eq!(fault.message(), message);
     assert!(fault.status().details.is_empty());
     assert!(!String::from_utf8_lossy(&payloads[0]).contains("private-"));
+    if matches!(
+        failure,
+        StoreFailure::ReplayMalformed | StoreFailure::ReplayInvalidHistory | StoreFailure::ReplayHistoryLimit
+    ) {
+        assert_eq!(reads.load(Ordering::SeqCst), 2, "one strict read then one replay read");
+        let observed = replay_observed.lock().map_err(|_| "replay receipt unavailable")?;
+        assert_eq!(observed.len(), 2);
+        assert_eq!(observed[0].peer, observed[1].peer);
+        assert_eq!(observed[0].from, ReadFrom::Beginning);
+        assert_eq!(observed[1].from, ReadFrom::Beginning);
+        assert_eq!(observed[0].maximum, Some(4097));
+        assert_eq!(observed[1].maximum, Some(4097));
+        assert!(
+            !observed[0].injected,
+            "strict history was validated before replay fault"
+        );
+        assert!(observed[1].injected, "only the second read receives the fault");
+    }
     assert_eq!(
         injected.load(Ordering::SeqCst),
         usize::from(failure != StoreFailure::None),
@@ -860,5 +980,139 @@ async fn rpc_resume_rejects_a_host_returning_a_genuine_pre_enrollment_empty_conf
     let resumed = real_read_enrollment_resume(&f, &request).await?;
     assert_eq!(resumed, enrolled);
     assert_same_read_contents(&actual_begin_read(&f, &peer).await?, &current);
+    Ok(())
+}
+
+#[tokio::test]
+async fn rpc_strict_lifetime_history_keeps_execution_faults_and_query_history_keeps_its_boundary() -> TestResult {
+    for (failure, command_code, command_message, query_message) in [
+        (
+            StoreFailure::Read,
+            Code::UNAVAILABLE,
+            "peer storage unavailable",
+            "peer storage unavailable",
+        ),
+        (
+            StoreFailure::UnknownEvent,
+            Code::INTERNAL,
+            "peer execution failed",
+            "peer history invalid",
+        ),
+        (
+            StoreFailure::MalformedEvent,
+            Code::INTERNAL,
+            "peer execution failed",
+            "peer history invalid",
+        ),
+        (
+            StoreFailure::InvalidHistory,
+            Code::INTERNAL,
+            "peer execution failed",
+            "peer history invalid",
+        ),
+        (
+            StoreFailure::HistoryLimit,
+            Code::RESOURCE_EXHAUSTED,
+            "peer capacity exhausted",
+            "peer history limit reached",
+        ),
+    ] {
+        for method in [
+            PeerMethod::Heartbeat,
+            PeerMethod::Detach,
+            PeerMethod::Status,
+            PeerMethod::Roster,
+        ] {
+            let f = Fixture::new().await?;
+            let appends = f.store.appends.load(Ordering::SeqCst);
+            let query = matches!(method, PeerMethod::Status | PeerMethod::Roster);
+            let (code, message) = if query {
+                (command_code, query_message)
+            } else {
+                (command_code, command_message)
+            };
+            let rpc = adapter(&f, failure, None, f.alice.tenant().clone());
+            match method {
+                PeerMethod::Heartbeat => assert_wire_fault(rpc, method, &heartbeat(&f), code, message).await?,
+                PeerMethod::Detach => {
+                    assert_wire_fault(
+                        rpc,
+                        method,
+                        &proto::DetachRequest {
+                            attachment_ref: f.a.clone().into(),
+                        },
+                        code,
+                        message,
+                    )
+                    .await?
+                }
+                PeerMethod::Status => assert_wire_fault(rpc, method, &status(&f), code, message).await?,
+                PeerMethod::Roster => {
+                    assert_wire_fault(
+                        rpc,
+                        method,
+                        &proto::RosterRequest {
+                            attachment_ref: f.a.clone().into(),
+                            ..Default::default()
+                        },
+                        code,
+                        message,
+                    )
+                    .await?
+                }
+                _ => return Err("unexpected lifetime/query boundary method".into()),
+            }
+            assert_eq!(
+                f.store.appends.load(Ordering::SeqCst),
+                appends,
+                "invalid history cannot append"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn rpc_lifetime_replay_faults_preserve_execution_categories_after_validated_history() -> TestResult {
+    for (failure, code, message) in [
+        (StoreFailure::ReplayMalformed, Code::INTERNAL, "peer execution failed"),
+        (
+            StoreFailure::ReplayInvalidHistory,
+            Code::INTERNAL,
+            "peer execution failed",
+        ),
+        (
+            StoreFailure::ReplayHistoryLimit,
+            Code::RESOURCE_EXHAUSTED,
+            "peer capacity exhausted",
+        ),
+    ] {
+        for method in [PeerMethod::Heartbeat, PeerMethod::Detach] {
+            let f = Fixture::new().await?;
+            let before = f.store.appends.load(Ordering::SeqCst);
+            let rpc = adapter(&f, failure, None, f.alice.tenant().clone());
+            match method {
+                PeerMethod::Heartbeat => assert_wire_fault(rpc, method, &heartbeat(&f), code, message).await?,
+                PeerMethod::Detach => {
+                    assert_wire_fault(
+                        rpc,
+                        method,
+                        &proto::DetachRequest {
+                            attachment_ref: f.a.clone().into(),
+                        },
+                        code,
+                        message,
+                    )
+                    .await?
+                }
+                _ => return Err("unexpected lifecycle replay method".into()),
+            }
+            assert_eq!(
+                f.store.appends.load(Ordering::SeqCst),
+                before,
+                "failed replay cannot append"
+            );
+        }
+    }
     Ok(())
 }
