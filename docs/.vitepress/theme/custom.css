@@ -7,12 +7,102 @@
   --vp-home-hero-name-background: linear-gradient(120deg, #6f4cff, #14b8a6);
   --vp-home-hero-image-background-image: linear-gradient(135deg, rgba(120, 85, 255, 0.32), rgba(20, 184, 166, 0.22));
   --vp-home-hero-image-filter: blur(52px);
+  --vp-c-bg: #fbfbfe;
+  --vp-c-bg-soft: #f4f3fb;
+  --vp-c-bg-alt: #efeff8;
+  --vp-c-divider: rgba(73, 61, 130, 0.12);
+  --trogon-glow-blue: rgba(74, 104, 255, 0.18);
+  --trogon-glow-violet: rgba(148, 86, 255, 0.14);
+  --trogon-glow-cyan: rgba(33, 211, 196, 0.1);
+}
+
+.dark {
+  --vp-c-bg: #10101a;
+  --vp-c-bg-soft: #171725;
+  --vp-c-bg-alt: #1d1c2d;
+  --vp-c-divider: rgba(190, 180, 255, 0.14);
+  --trogon-glow-blue: rgba(69, 92, 255, 0.2);
+  --trogon-glow-violet: rgba(179, 72, 255, 0.16);
+  --trogon-glow-cyan: rgba(36, 210, 195, 0.08);
+}
+
+body {
+  background:
+    radial-gradient(ellipse 42% 34% at 50% 3%, var(--trogon-glow-blue), transparent 72%),
+    radial-gradient(ellipse 34% 30% at 73% 10%, var(--trogon-glow-violet), transparent 74%),
+    radial-gradient(ellipse 30% 26% at 25% 14%, var(--trogon-glow-cyan), transparent 72%),
+    var(--vp-c-bg);
+}
+
+.VPNav {
+  background: color-mix(in srgb, var(--vp-c-bg) 78%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+.VPNavBar {
+  background: transparent;
+  border-bottom-color: color-mix(in srgb, var(--vp-c-divider) 64%, transparent);
+}
+
+.VPHome {
+  position: relative;
+  isolation: isolate;
+}
+
+.VPHome::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 auto;
+  height: 620px;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 42% 42% at 50% 16%, var(--trogon-glow-violet), transparent 70%),
+    radial-gradient(ellipse 28% 38% at 78% 18%, var(--trogon-glow-blue), transparent 72%);
+  filter: blur(30px);
 }
 
 .VPHomeHero .image-src {
   max-width: 300px;
+  filter: drop-shadow(0 0 42px rgba(111, 76, 255, 0.28));
+}
+
+.VPHomeHero .name {
+  letter-spacing: -0.045em;
+}
+
+.VPHomeHero .text {
+  max-width: 760px;
 }
 
 .VPFeature {
-  border-radius: 8px;
+  border-radius: 16px;
+  border-color: rgba(111, 76, 255, 0.14);
+  transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.VPFeature:hover {
+  border-color: rgba(111, 76, 255, 0.34);
+  box-shadow: 0 14px 34px rgba(71, 48, 145, 0.1);
+  transform: translateY(-2px);
+}
+
+.VPNavBarTitle .title {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.VPButton.brand {
+  box-shadow: 0 10px 28px rgba(111, 76, 255, 0.22);
+}
+
+.vp-doc table {
+  display: table;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .VPHomeHero .image-src {
+    max-width: 220px;
+  }
 }
