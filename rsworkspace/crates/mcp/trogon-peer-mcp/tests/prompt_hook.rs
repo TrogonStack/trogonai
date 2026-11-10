@@ -35,12 +35,23 @@ struct Backend {
     fail_prepare: Arc<std::sync::atomic::AtomicBool>,
     pause_enroll: Arc<std::sync::atomic::AtomicBool>,
     pause_prepare: Arc<std::sync::atomic::AtomicBool>,
+    prepare_entered: Arc<tokio::sync::Notify>,
+    prepare_dropped: Arc<std::sync::atomic::AtomicUsize>,
     pause_heartbeat: Arc<std::sync::atomic::AtomicBool>,
+    heartbeat_entered: Arc<tokio::sync::Notify>,
     enroll_delay: std::time::Duration,
     prepare_delay: std::time::Duration,
     prepare_completion_at: Option<tokio::time::Instant>,
     detach_delay: std::time::Duration,
     fail_detach: Arc<std::sync::atomic::AtomicBool>,
+}
+
+struct PendingPrepare(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for PendingPrepare {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -135,6 +146,8 @@ impl PreparePeerBatch for Backend {
             .expect("call recorder")
             .push(ObservedCall::Prepare(request));
         if self.pause_prepare.load(std::sync::atomic::Ordering::SeqCst) {
+            let _pending = PendingPrepare(self.prepare_dropped.clone());
+            self.prepare_entered.notify_one();
             std::future::pending::<()>().await;
         }
         if let Some(completion_at) = self.prepare_completion_at {
@@ -194,7 +207,10 @@ fn backend(response: v1::PrepareBatchResponse) -> Backend {
         fail_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         pause_enroll: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         pause_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        prepare_entered: Arc::new(tokio::sync::Notify::new()),
+        prepare_dropped: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         pause_heartbeat: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        heartbeat_entered: Arc::new(tokio::sync::Notify::new()),
         enroll_delay: std::time::Duration::ZERO,
         prepare_delay: std::time::Duration::ZERO,
         prepare_completion_at: None,
@@ -1294,6 +1310,7 @@ impl trogon_peer_mcp::HeartbeatPeer for Backend {
     async fn heartbeat(&self, request: v1::HeartbeatRequest) -> Result<v1::HeartbeatResponse, Self::Error> {
         self.calls.lock().expect("calls").push(ObservedCall::Heartbeat(request));
         if self.pause_heartbeat.load(std::sync::atomic::Ordering::SeqCst) {
+            self.heartbeat_entered.notify_one();
             std::future::pending::<()>().await;
         }
         Ok(Default::default())
@@ -2056,6 +2073,8 @@ async fn runtime_signal_cancels_inflight_prompt_and_unbound_shutdown_never_enrol
     for bound in [false, true] {
         let backend = backend(Default::default());
         let paused = backend.pause_prepare.clone();
+        let entered = backend.prepare_entered.clone();
+        let dropped = backend.prepare_dropped.clone();
         let calls = backend.calls.clone();
         let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
         let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
@@ -2074,10 +2093,21 @@ async fn runtime_signal_cancels_inflight_prompt_and_unbound_shutdown_never_enrol
             paused.store(true, std::sync::atomic::Ordering::SeqCst);
             let pending = client.peer().clone();
             let work = tokio::spawn(async move { pending.call_tool(prompt("native_b", "pending")).await });
-            tokio::task::yield_now().await;
-            let _ = stop.send(());
+            entered.notified().await;
+            assert!(!work.is_finished(), "prepare must be in flight before shutdown");
+            assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 0);
+            let started = tokio::time::Instant::now();
+            stop.send(()).expect("shutdown signal");
             server.await.expect("runtime task").expect("shutdown");
-            let _outcome = work.await.expect("MCP work task");
+            let outcome = work.await.expect("MCP work task");
+            let cancellation = outcome.expect("MCP cancellation response");
+            assert_eq!(cancellation.is_error, Some(true));
+            assert_eq!(
+                cancellation.structured_content.expect("typed cancellation")["code"],
+                json!("request_cancelled")
+            );
+            assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert!(started.elapsed() <= std::time::Duration::from_secs(1));
             assert!(
                 calls
                     .lock()
@@ -2095,46 +2125,60 @@ async fn runtime_signal_cancels_inflight_prompt_and_unbound_shutdown_never_enrol
 }
 
 #[tokio::test(start_paused = true)]
-async fn runtime_shutdown_drops_pending_heartbeat_before_detach_lock_wait() {
-    let backend = backend(Default::default());
-    backend.pause_heartbeat.store(true, std::sync::atomic::Ordering::SeqCst);
-    let calls = backend.calls.clone();
-    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
-    let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
-    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(trogon_peer_mcp::serve_connector(
-        adapter,
-        server_transport,
-        trogon_peer_mcp::AvailabilityObservation::Ready,
-        async move {
-            let _ = stopped.await;
-        },
-    ));
-    let client = ().serve(client_transport).await.expect("handshake");
-    client.call_tool(prompt("native_b", "initial")).await.expect("bind");
-    tokio::task::yield_now().await;
-    tokio::time::advance(std::time::Duration::from_secs(2)).await;
-    tokio::task::yield_now().await;
-    assert!(
-        calls
-            .lock()
-            .expect("calls")
-            .iter()
-            .any(|call| matches!(call, ObservedCall::Heartbeat(_)))
-    );
-    let _ = stop.send(());
-    server
-        .await
-        .expect("runtime task")
-        .expect("shutdown cancels heartbeat before detach");
-    assert!(
-        calls
-            .lock()
-            .expect("calls")
-            .iter()
-            .any(|call| matches!(call, ObservedCall::Detach(_)))
-    );
-    client.cancel().await.expect("cleanup");
+async fn runtime_shutdown_and_eof_drop_inflight_heartbeat_before_detach_lock_wait() {
+    for eof in [false, true] {
+        let backend = backend(Default::default());
+        backend.pause_heartbeat.store(true, std::sync::atomic::Ordering::SeqCst);
+        let entered = backend.heartbeat_entered.clone();
+        let calls = backend.calls.clone();
+        let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+        let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(trogon_peer_mcp::serve_connector(
+            adapter,
+            server_transport,
+            trogon_peer_mcp::AvailabilityObservation::Ready,
+            async move {
+                let _ = stopped.await;
+            },
+        ));
+        let client = ().serve(client_transport).await.expect("handshake");
+        client.call_tool(prompt("native_b", "initial")).await.expect("bind");
+        entered.notified().await;
+        assert!(!server.is_finished());
+        let started = tokio::time::Instant::now();
+        let cleanup = if eof {
+            client.cancel().await.expect("EOF");
+            None
+        } else {
+            stop.send(()).expect("shutdown signal");
+            Some(client)
+        };
+        server
+            .await
+            .expect("runtime task")
+            .expect("shutdown cancels heartbeat before detach");
+        if let Some(client) = cleanup {
+            client.cancel().await.expect("client cleanup");
+        }
+        assert!(started.elapsed() <= std::time::Duration::from_secs(1));
+        let recorded = calls.lock().expect("calls");
+        assert_eq!(
+            recorded
+                .iter()
+                .filter(|call| matches!(call, ObservedCall::Heartbeat(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            recorded
+                .iter()
+                .filter(|call| matches!(call, ObservedCall::Detach(_)))
+                .count(),
+            1
+        );
+        assert!(matches!(recorded.last(), Some(ObservedCall::Detach(_))));
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -2320,4 +2364,54 @@ async fn runtime_transport_task_failure_preserves_typed_cause_and_detaches_exact
             .expect("bounded client cleanup")
             .expect("client cleanup");
     }
+}
+
+#[tokio::test]
+async fn plugin_declared_hooks_are_listed_and_invoke_through_public_mcp() {
+    let adapter = PeerMcp::new(backend(Default::default()), config()).expect("config");
+    let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+    let server = tokio::spawn(async move {
+        adapter
+            .serve(server_transport)
+            .await
+            .expect("handshake")
+            .waiting()
+            .await
+            .expect("server shutdown")
+    });
+    let client = ().serve(client_transport).await.expect("handshake");
+    let tools = client.list_all_tools().await.expect("tool listing");
+    let config: Value = serde_json::from_str(include_str!("../../../../../plugins/claude/peer/hooks/hooks.json"))
+        .expect("plugin hooks");
+    for event in ["UserPromptSubmit", "SessionEnd"] {
+        let Some(groups) = config["hooks"][event].as_array() else {
+            continue;
+        };
+        for group in groups {
+            for hook in group["hooks"].as_array().expect("hooks") {
+                let name = hook["tool"].as_str().expect("tool name");
+                assert!(
+                    tools.iter().any(|tool| tool.name == name),
+                    "plugin hook {name} must be advertised"
+                );
+                let mut input = hook["input"].clone();
+                for value in input.as_object_mut().expect("hook input").values_mut() {
+                    if *value == json!("${session_id}") {
+                        *value = json!("native_b");
+                    } else if *value == json!("${prompt_id}") {
+                        *value = json!("plugin_prompt");
+                    } else if *value == json!("${hook_event_name}") {
+                        *value = json!(event);
+                    }
+                }
+                let result = client
+                    .call_tool(request(name, input))
+                    .await
+                    .expect("plugin hook response");
+                assert_ne!(result.is_error, Some(true), "plugin hook {name}: {result:?}");
+            }
+        }
+    }
+    client.cancel().await.expect("client cleanup");
+    server.await.expect("server task");
 }

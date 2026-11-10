@@ -69,9 +69,6 @@ impl StdioPeer {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if let Some(profile) = SystemEnv.var_os("LLVM_PROFILE_FILE") {
-            command.env("LLVM_PROFILE_FILE", profile);
-        }
         let mut child = command.spawn()?;
         let output = child.stdout.take().ok_or("missing stdout")?;
         let input = child.stdin.take().ok_or("missing stdin")?;
@@ -411,6 +408,7 @@ async fn executable_credentials_cannot_publish_another_caller_or_read_streams() 
     Ok(())
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn executable_sigterm_detaches_bound_generation_without_durable_erasure() -> TestResult {
     let broker = Broker::start().await?;
