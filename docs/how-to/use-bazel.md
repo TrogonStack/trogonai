@@ -68,12 +68,12 @@ and actual cache results as well.
 
 ## GitHub Actions caching
 
-The `CI Bazel` workflow restores Bazel downloads, external repositories, and
-the action disk cache from GitHub Actions. Successful pushes to `main` publish
-cache entries. Pull requests can restore available entries and run all checks,
-but do not save them.
+The `CI Bazel` workflow restores Bazelisk downloads, the repository download
+cache, and the action disk cache from GitHub Actions. Successful pushes to `main`
+publish cache entries. Pull requests can restore available entries and run all
+checks, but do not save them.
 
-Action-cache archives have an immutable key for each commit and workflow
+Cache archives have an immutable key for each commit and workflow
 attempt, with a restore prefix partitioned by runner operating system,
 architecture, and pinned Bazel version. Source-only updates can therefore add
 new action results to a later archive. Bazel's own content keys decide which

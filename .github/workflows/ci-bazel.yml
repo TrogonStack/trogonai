@@ -42,22 +42,17 @@ jobs:
         with:
           install_args: bazelisk
 
-      - name: Restore Bazel downloads
-        uses: bazel-contrib/setup-bazel@f34d6a05eae3c24acab7fa54587492daeaeffdab # 0.19.2
-        with:
-          bazelisk-cache: true
-          repository-cache: true
-          disk-cache: false
-          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-
-      - name: Restore Bazel action cache
-        id: action-cache
+      - name: Restore Bazel cache
+        id: bazel-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ runner.temp }}/bazel-disk-cache
-          key: bazel-actions-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/bazel-disk-cache
+            ${{ runner.temp }}/bazel-repository-cache
+            ~/.cache/bazelisk
+          key: bazel-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            bazel-actions-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion') }}-
+            bazel-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion') }}-
 
       - name: Test native targets
         run: mise run --skip-tools github:workflows:ci-bazel:test
@@ -65,9 +60,12 @@ jobs:
       - name: Build native artifacts
         run: mise run --skip-tools github:workflows:ci-bazel:build
 
-      - name: Save Bazel action cache
+      - name: Save Bazel cache
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ runner.temp }}/bazel-disk-cache
-          key: ${{ steps.action-cache.outputs.cache-primary-key }}
+          path: |
+            ${{ runner.temp }}/bazel-disk-cache
+            ${{ runner.temp }}/bazel-repository-cache
+            ~/.cache/bazelisk
+          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
