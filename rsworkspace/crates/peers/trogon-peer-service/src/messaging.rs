@@ -82,6 +82,7 @@ where
         if binding.tenant() != owner.tenant() || binding.content().size() as usize != text.as_str().len() {
             return Err(PeerApplicationError::Scope);
         }
+        let sender = self.load(owner, reference.peer_id()).await?;
         self.live(owner, &reference, &sender)?;
         let accepted_at = self.clock.now();
         let command = SendMessage::new(
