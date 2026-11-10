@@ -34,6 +34,9 @@ use crate::{
     ReadPeerRoster, SendPeerMessage,
 };
 
+#[cfg(test)]
+mod tests;
+
 pub struct PeerMcp<B> {
     backend: B,
     config: ConnectorConfig,
