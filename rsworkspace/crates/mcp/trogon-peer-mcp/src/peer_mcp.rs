@@ -1,4 +1,5 @@
 use std::fmt;
+use std::future::Future as _;
 use std::time::Duration;
 
 use rmcp::ServerHandler;
@@ -40,6 +41,7 @@ pub struct PeerMcp<B> {
     operation: Mutex<()>,
     stopped: CancellationToken,
     bound: Notify,
+    prompt_arrived: Notify,
 }
 
 impl<B> fmt::Debug for PeerMcp<B> {
@@ -68,6 +70,7 @@ where
             operation: Mutex::new(()),
             stopped: CancellationToken::new(),
             bound: Notify::new(),
+            prompt_arrived: Notify::new(),
         })
     }
 
@@ -107,16 +110,25 @@ where
         availability: crate::AvailabilityObservation,
         attachment: &watch::Receiver<AttachmentRef>,
     ) {
-        let _operation = self.operation.lock().await;
-        let attachment = attachment.borrow().clone();
-        let _result = self
-            .backend
-            .heartbeat(v1::HeartbeatRequest {
-                attachment_ref: crate::model_tools::wire_attachment(&attachment).into(),
-                availability: Some(availability.wire().into()),
-                ..Default::default()
-            })
-            .await;
+        let prompted = self.prompt_arrived.notified();
+        tokio::pin!(prompted);
+        prompted.as_mut().enable();
+        tokio::select! {
+            biased;
+            _ = &mut prompted => {},
+            _ = async {
+                let _operation = self.operation.lock().await;
+                let attachment = attachment.borrow().clone();
+                let _result = self
+                    .backend
+                    .heartbeat(v1::HeartbeatRequest {
+                        attachment_ref: crate::model_tools::wire_attachment(&attachment).into(),
+                        availability: Some(availability.wire().into()),
+                        ..Default::default()
+                    })
+                    .await;
+            } => {},
+        }
     }
 
     pub async fn shutdown(&self) -> Result<(), PeerMcpError> {
@@ -210,7 +222,20 @@ where
         let arguments = Value::Object(request.arguments.unwrap_or_default());
         let input: PromptHookInput = serde_json::from_value(arguments).map_err(PeerMcpError::InvalidArguments)?;
         let (session_id, prompt_id) = input.into_identity()?;
-        let _operation = self.operation.lock().await;
+        if let Some(binding) = self.binding.get()
+            && binding.lock().await.native_session_id() != &session_id
+        {
+            return Err(PeerMcpError::NativeSessionChanged);
+        }
+        let operation = self.operation.lock();
+        tokio::pin!(operation);
+        let _operation = std::future::poll_fn(|cx| {
+            // Queue the prompt before a cancelled heartbeat can release the lock.
+            let acquired = operation.as_mut().poll(cx);
+            self.prompt_arrived.notify_waiters();
+            acquired
+        })
+        .await;
         let binding = self
             .binding
             .get_or_init(|| async { Mutex::new(NativeBinding::new(session_id.clone())) })
