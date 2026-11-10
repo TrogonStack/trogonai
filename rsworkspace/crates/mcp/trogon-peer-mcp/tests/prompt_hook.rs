@@ -1256,3 +1256,53 @@ async fn completed_prompt_outcome_at_deadline_is_preserved() {
         }
     }
 }
+
+#[tokio::test]
+async fn plugin_declared_hooks_are_listed_and_invoke_through_public_mcp() {
+    let adapter = PeerMcp::new(backend(Default::default()), config()).expect("config");
+    let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+    let server = tokio::spawn(async move {
+        adapter
+            .serve(server_transport)
+            .await
+            .expect("handshake")
+            .waiting()
+            .await
+            .expect("server shutdown")
+    });
+    let client = ().serve(client_transport).await.expect("handshake");
+    let tools = client.list_all_tools().await.expect("tool listing");
+    let config: Value = serde_json::from_str(include_str!("../../../../../plugins/claude/peer/hooks/hooks.json"))
+        .expect("plugin hooks");
+    for event in ["UserPromptSubmit", "SessionEnd"] {
+        let Some(groups) = config["hooks"][event].as_array() else {
+            continue;
+        };
+        for group in groups {
+            for hook in group["hooks"].as_array().expect("hooks") {
+                let name = hook["tool"].as_str().expect("tool name");
+                assert!(
+                    tools.iter().any(|tool| tool.name == name),
+                    "plugin hook {name} must be advertised"
+                );
+                let mut input = hook["input"].clone();
+                for value in input.as_object_mut().expect("hook input").values_mut() {
+                    if *value == json!("${session_id}") {
+                        *value = json!("native_b");
+                    } else if *value == json!("${prompt_id}") {
+                        *value = json!("plugin_prompt");
+                    } else if *value == json!("${hook_event_name}") {
+                        *value = json!(event);
+                    }
+                }
+                let result = client
+                    .call_tool(request(name, input))
+                    .await
+                    .expect("plugin hook response");
+                assert_ne!(result.is_error, Some(true), "plugin hook {name}: {result:?}");
+            }
+        }
+    }
+    client.cancel().await.expect("client cleanup");
+    server.await.expect("server task");
+}
