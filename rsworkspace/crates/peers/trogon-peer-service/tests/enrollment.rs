@@ -1767,11 +1767,6 @@ impl StreamAppend<PeerId> for TruncatedHistory {
         self.inner.classify_append_failure(error)
     }
 }
-impl trogon_peer_service::ScopedPeerStore for TruncatedHistory {
-    fn tenant(&self) -> &TenantId {
-        trogon_peer_service::ScopedPeerStore::tenant(&self.inner)
-    }
-}
 async fn expired_resume_refuses_an_incomplete_announced_history_tail(empty: bool) {
     let inner = ObservedStore::default();
     let first = PeerService::new(inner.clone(), policy(), FixedClock(now()))
