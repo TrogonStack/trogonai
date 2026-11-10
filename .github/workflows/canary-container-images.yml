@@ -36,26 +36,19 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Skip when this commit is no longer the branch tip
-        id: tip
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --depth=1 origin "${{ github.ref_name }}"
-          tip="$(git rev-parse "origin/${{ github.ref_name }}")"
-          if [ "$tip" = "${{ github.sha }}" ]; then
-            echo "current=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "current=false" >>"$GITHUB_OUTPUT"
-            echo "${{ github.sha }} is behind $tip; not publishing"
-          fi
-
       - name: Install mise
-        if: steps.tip.outputs.current == 'true'
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install: false
           cache: false
+
+      - name: Skip when this commit is no longer the branch tip
+        id: tip
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: mise run --skip-tools github-actions:canary-is-branch-tip
 
       - name: Set up Docker Buildx
         if: steps.tip.outputs.current == 'true'

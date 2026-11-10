@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+#MISE description="Report whether this commit is still the branch tip, so an older queued canary does not publish"
+set -euo pipefail
+
+: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+: "${GITHUB_REF_NAME:?GITHUB_REF_NAME is required}"
+: "${GITHUB_SHA:?GITHUB_SHA is required}"
+: "${GITHUB_TOKEN:?GITHUB_TOKEN is required}"
+
+git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --depth=1 origin "${GITHUB_REF_NAME}"
+tip="$(git rev-parse "origin/${GITHUB_REF_NAME}")"
+if [ "$tip" = "${GITHUB_SHA}" ]; then
+    echo "current=true" >>"$GITHUB_OUTPUT"
+else
+    echo "current=false" >>"$GITHUB_OUTPUT"
+    echo "${GITHUB_SHA} is behind ${tip}; not publishing"
+fi
