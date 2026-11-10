@@ -4,8 +4,6 @@ import sys
 import tempfile
 import unittest
 
-PUBLISH = pathlib.Path(__file__).with_name("publish.py").read_text()
-
 def run(cwd, *args, check=True, env=None):
     result = subprocess.run(list(args), cwd=cwd, text=True, capture_output=True, env=env)
     if check and result.returncode:
@@ -19,8 +17,7 @@ class PublicationTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.base = pathlib.Path(self.tmp.name)
         self.remote = self.base / 'remote.git'
-        self.helper = self.base / 'publish.py'
-        self.helper.write_text(PUBLISH)
+        self.helper = pathlib.Path(__file__).with_name('publish.py').resolve()
         run(self.base, 'git', 'init', '--bare', '--initial-branch=_xml_coverage_reports', str(self.remote))
         self.seed = self.clone('seed')
         self.change(self.seed, 'data/main/coverage.xml', 'immutable baseline')
@@ -135,8 +132,8 @@ class PublicationTests(unittest.TestCase):
         a, b = self.clone('a'), self.clone('b')
         self.change(a, 'README.md', 'initialized')
         self.change(b, 'data/pr/b/coverage.xml', 'racing b')
-        hook = a / '.git/hooks/pre-push'
-        hook.write_text('#!/bin/sh\nrm -- "$0"\ngit -C ' + shlex.quote(str(b)) + ' push --quiet origin HEAD\n')
+        hook = a / run(a, 'git', 'rev-parse', '--git-path', 'hooks/pre-push').stdout.strip()
+        hook.write_text('#!/bin/sh\nrm -- "$0"\nunset $(git rev-parse --local-env-vars)\ngit -C ' + shlex.quote(str(b)) + ' push --quiet origin HEAD\n')
         hook.chmod(0o755)
         result = run(a, 'git', 'push', '--force', 'origin', 'HEAD:refs/heads/_xml_coverage_reports', check=False)
         self.assertNotEqual(result.returncode, 0)
@@ -151,8 +148,8 @@ class PublicationTests(unittest.TestCase):
         self.invoke(a, 'pr/a', 'init')
         self.change(a, 'data/pr/a/coverage.xml', 'new a')
         self.change(b, 'data/pr/b/coverage.xml', 'racing b')
-        hook = a / '.git/hooks/pre-push'
-        hook.write_text('#!/bin/sh\nrm -- "$0"\ngit -C ' + shlex.quote(str(b)) + ' push --quiet origin HEAD\n')
+        hook = a / run(a, 'git', 'rev-parse', '--git-path', 'hooks/pre-push').stdout.strip()
+        hook.write_text('#!/bin/sh\nrm -- "$0"\nunset $(git rev-parse --local-env-vars)\ngit -C ' + shlex.quote(str(b)) + ' push --quiet origin HEAD\n')
         hook.chmod(0o755)
         result = self.invoke(a, 'pr/a', 'push')
         self.assertIn('attempt 2', result.stdout)
@@ -216,8 +213,8 @@ class PublicationTests(unittest.TestCase):
         self.invoke(a, 'pr/a', 'init')
         self.change(a, 'data/pr/a/coverage.xml', 'new a')
         self.change(b, 'data/main/sources.json', 'new baseline binding during push')
-        hook = a / '.git/hooks/pre-push'
-        hook.write_text('#!/bin/sh\nrm -- "$0"\ngit -C ' + shlex.quote(str(b)) + ' push --quiet origin HEAD\n')
+        hook = a / run(a, 'git', 'rev-parse', '--git-path', 'hooks/pre-push').stdout.strip()
+        hook.write_text('#!/bin/sh\nrm -- "$0"\nunset $(git rev-parse --local-env-vars)\ngit -C ' + shlex.quote(str(b)) + ' push --quiet origin HEAD\n')
         hook.chmod(0o755)
         rejected = self.invoke(a, 'pr/a', 'push', check=False)
         self.assertEqual(rejected.returncode, 1)
@@ -231,8 +228,8 @@ class PublicationTests(unittest.TestCase):
         self.invoke(a, 'pr/a', 'init')
         self.change(a, 'data/pr/a/coverage.xml', 'new a')
         self.change(b, 'data/pr/a/sources.json', 'new destination binding during push')
-        hook = a / '.git/hooks/pre-push'
-        hook.write_text('#!/bin/sh\nrm -- "$0"\ngit -C ' + shlex.quote(str(b)) + ' push --quiet origin HEAD\n')
+        hook = a / run(a, 'git', 'rev-parse', '--git-path', 'hooks/pre-push').stdout.strip()
+        hook.write_text('#!/bin/sh\nrm -- "$0"\nunset $(git rev-parse --local-env-vars)\ngit -C ' + shlex.quote(str(b)) + ' push --quiet origin HEAD\n')
         hook.chmod(0o755)
         rejected = self.invoke(a, 'pr/a', 'push', check=False)
         self.assertEqual(rejected.returncode, 1)
