@@ -560,8 +560,18 @@ async fn boundary_covers_ext_success_and_notification_fallthroughs() {
             .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"session/cancel\",\"params\":{\"sessionId\":\"s1\"}}\n")
             .await
             .unwrap();
+        let mcp_notification = agent_client_protocol::v1::schema::MessageMcpNotification::new(
+            "server-1",
+            "request-1",
+            "notifications/progress",
+        );
+        let notification_frame = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "mcp/message",
+            "params": mcp_notification,
+        });
         writer
-            .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"mcp/message\",\"params\":{\"connectionId\":\"c1\",\"method\":\"tools/list\"}}\n")
+            .write_all(format!("{notification_frame}\n").as_bytes())
             .await
             .unwrap();
         writer
@@ -603,6 +613,121 @@ async fn boundary_covers_ext_success_and_notification_fallthroughs() {
 
     let (boundary_result, ()) = tokio::join!(boundary, client);
     assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
+}
+
+#[tokio::test]
+async fn unsupported_mcp_notification_does_not_answer_and_preserves_the_connection() {
+    let notification = agent_client_protocol::v1::schema::MessageMcpNotification::new(
+        "server-1",
+        "request-1",
+        "notifications/progress",
+    );
+    let params = serde_json::to_value(notification).unwrap();
+    let parsed =
+        <ClientNotification as agent_client_protocol::JsonRpcMessage>::parse_message("mcp/message", &params).unwrap();
+    assert!(matches!(parsed, ClientNotification::MessageMcpNotification(_)));
+
+    let (client_io, server_io) = tokio::io::duplex(4096);
+    let (client_read, client_write) = tokio::io::split(client_io);
+    let (server_read, server_write) = tokio::io::split(server_io);
+    let boundary = connect_agent_boundary(
+        Arc::new(ContraryAgent),
+        async_compat::Compat::new(server_write),
+        async_compat::Compat::new(server_read),
+        async move |_cx| std::future::pending::<Result<()>>().await,
+    );
+
+    let client = async move {
+        let mut writer = client_write;
+        let notification_frame = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "mcp/message",
+            "params": params,
+        });
+        writer
+            .write_all(format!("{notification_frame}\n").as_bytes())
+            .await
+            .unwrap();
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"_probe\",\"params\":{}}\n")
+            .await
+            .unwrap();
+
+        let mut lines = BufReader::new(client_read).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let response: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(response["id"], 7, "the notification must not produce a response");
+        assert_eq!(response["result"]["ok"], true);
+        drop(writer);
+    };
+
+    let (boundary_result, ()) = tokio::join!(boundary, client);
+    assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
+}
+
+#[tokio::test]
+async fn unknown_and_malformed_requests_keep_their_errors_and_allow_the_next_request() {
+    let (client_io, server_io) = tokio::io::duplex(4096);
+    let (client_read, client_write) = tokio::io::split(client_io);
+    let (server_read, server_write) = tokio::io::split(server_io);
+    let boundary = connect_agent_boundary(
+        Arc::new(ContraryAgent),
+        async_compat::Compat::new(server_write),
+        async_compat::Compat::new(server_read),
+        async move |_cx| std::future::pending::<Result<()>>().await,
+    );
+
+    let client = async move {
+        let mut writer = client_write;
+        let requests = [
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "session/unrecognized", "params": {"value": 3},
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": 2, "method": "session/prompt",
+                "params": {"sessionId": "s1", "prompt": "not-an-array"},
+            }),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": 3, "method": "_probe", "params": {},
+            }),
+        ];
+        for request in requests {
+            writer.write_all(format!("{request}\n").as_bytes()).await.unwrap();
+        }
+
+        let mut lines = BufReader::new(client_read).lines();
+        let mut responses = std::collections::HashMap::new();
+        while responses.len() < 3 {
+            let line = lines.next_line().await.unwrap().unwrap();
+            let response: serde_json::Value = serde_json::from_str(&line).unwrap();
+            responses.insert(response["id"].as_u64().unwrap(), response);
+        }
+        assert_eq!(responses[&1]["error"]["code"], i32::from(ErrorCode::METHOD_NOT_FOUND));
+        assert_eq!(responses[&2]["error"]["code"], i32::from(ErrorCode::INVALID_PARAMS));
+        assert_eq!(responses[&3]["result"]["ok"], true);
+        drop(writer);
+    };
+
+    let (boundary_result, ()) = tokio::join!(boundary, client);
+    assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
+}
+
+#[test]
+fn request_adapter_preserves_sdk_methods_and_parameters() {
+    let requests = [
+        (
+            "session/prompt",
+            serde_json::json!({"sessionId": "s1", "prompt": [{"type": "text", "text": "Continue"}]}),
+        ),
+        ("session/unrecognized", serde_json::json!({"nested": {"value": 3}})),
+    ];
+    for (method, params) in requests {
+        let request = BoundaryRequest::parse_message(method, &params).unwrap();
+        assert_eq!(request.method(), method);
+        let untyped = request.to_untyped_message().unwrap();
+        assert_eq!(untyped.method(), method);
+        assert_eq!(untyped.params(), &params);
+    }
 }
 
 #[test]
