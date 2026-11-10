@@ -1,0 +1,22 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "trogon-config-value",
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "trogon_config_value",
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    rustc_flags = ["-Dwarnings"],
+    version = "0.1.0",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates//:base64",
+        "@crates//:thiserror",
+    ],
+)
+
+rust_test(
+    name = "trogon-config-value_test",
+    crate = ":trogon-config-value",
+    rustc_flags = ["-Dwarnings"],
+)

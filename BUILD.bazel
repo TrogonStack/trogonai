@@ -1,0 +1,10 @@
+filegroup(
+    name = "build",
+    srcs = [
+        "//goworkspace/cmd/protoc-gen-wit",
+        "//proto/trogonai/scheduler/schedules/v1:schedule_status_proto",
+        "//proto/trogonai/scheduler/schedules/v1:schedule_status_wit",
+        "//rsworkspace/crates/platform/trogon-config-value",
+    ],
+    visibility = ["//visibility:public"],
+)

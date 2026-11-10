@@ -1,0 +1,44 @@
+config_setting(
+    name = "darwin_arm64",
+    constraint_values = [
+        "@platforms//os:osx",
+        "@platforms//cpu:aarch64",
+    ],
+)
+
+config_setting(
+    name = "darwin_x86_64",
+    constraint_values = [
+        "@platforms//os:osx",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+config_setting(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:aarch64",
+    ],
+)
+
+config_setting(
+    name = "linux_x86_64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+alias(
+    name = "buf",
+    actual = select({
+        ":darwin_arm64": "@buf_darwin_arm64//file:buf",
+        ":darwin_x86_64": "@buf_darwin_x86_64//file:buf",
+        ":linux_arm64": "@buf_linux_arm64//file:buf",
+        ":linux_x86_64": "@buf_linux_x86_64//file:buf",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(["Cargo.lock"])

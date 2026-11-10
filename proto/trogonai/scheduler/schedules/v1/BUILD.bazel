@@ -1,0 +1,32 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+filegroup(
+    name = "schedule_fixture_sources",
+    srcs = [
+        "schedule_completed.proto",
+        "schedule_paused.proto",
+        "schedule_removed.proto",
+        "schedule_resumed.proto",
+        "schedule_status.proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+proto_library(
+    name = "schedule_status_proto",
+    srcs = ["schedule_status.proto"],
+    strip_import_prefix = "/proto",
+    visibility = ["//visibility:public"],
+)
+
+genrule(
+    name = "schedule_status_wit",
+    srcs = ["schedule_status.proto"],
+    outs = ["wit/trogonai/scheduler-schedules-v1/messages.wit"],
+    cmd = "mkdir -p $(RULEDIR)/wit && $(location @protobuf//:protoc) --proto_path=proto --plugin=protoc-gen-wit=$(location //goworkspace/cmd/protoc-gen-wit:protoc-gen-wit) --wit_out=$(RULEDIR)/wit $(location schedule_status.proto)",
+    tools = [
+        "//goworkspace/cmd/protoc-gen-wit",
+        "@protobuf//:protoc",
+    ],
+    visibility = ["//visibility:public"],
+)
