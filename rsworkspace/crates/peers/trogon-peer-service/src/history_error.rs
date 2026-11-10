@@ -11,6 +11,8 @@ pub enum HistoryError<ReadError> {
     Decode(#[source] PeerEventPayloadError),
     #[error("peer history contains an unknown event")]
     UnknownEvent,
+    #[error("peer history does not reach its announced tail")]
+    Incomplete,
     #[error("peer history replay failed: {0}")]
     Evolve(#[source] EvolveError),
 }

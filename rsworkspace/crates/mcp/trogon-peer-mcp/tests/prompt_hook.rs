@@ -39,11 +39,21 @@ struct Backend {
     prepare_dropped: Arc<std::sync::atomic::AtomicUsize>,
     pause_heartbeat: Arc<std::sync::atomic::AtomicBool>,
     heartbeat_entered: Arc<tokio::sync::Notify>,
+    heartbeat_inflight: Arc<std::sync::atomic::AtomicUsize>,
+    enroll_overlapped_heartbeat: Arc<std::sync::atomic::AtomicBool>,
     enroll_delay: std::time::Duration,
     prepare_delay: std::time::Duration,
     prepare_completion_at: Option<tokio::time::Instant>,
     detach_delay: std::time::Duration,
     fail_detach: Arc<std::sync::atomic::AtomicBool>,
+}
+
+struct PendingHeartbeat(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for PendingHeartbeat {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 struct PendingPrepare(Arc<std::sync::atomic::AtomicUsize>);
@@ -117,6 +127,10 @@ fn enrollment() -> v1::EnrollResponse {
 impl EnrollPeer for Backend {
     type Error = UnconfiguredOperationError;
     async fn enroll(&self, request: v1::EnrollRequest) -> Result<v1::EnrollResponse, Self::Error> {
+        if self.heartbeat_inflight.load(std::sync::atomic::Ordering::SeqCst) != 0 {
+            self.enroll_overlapped_heartbeat
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         self.calls
             .lock()
             .expect("call recorder")
@@ -211,6 +225,8 @@ fn backend(response: v1::PrepareBatchResponse) -> Backend {
         prepare_dropped: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         pause_heartbeat: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         heartbeat_entered: Arc::new(tokio::sync::Notify::new()),
+        heartbeat_inflight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        enroll_overlapped_heartbeat: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         enroll_delay: std::time::Duration::ZERO,
         prepare_delay: std::time::Duration::ZERO,
         prepare_completion_at: None,
@@ -1310,6 +1326,9 @@ impl trogon_peer_mcp::HeartbeatPeer for Backend {
     async fn heartbeat(&self, request: v1::HeartbeatRequest) -> Result<v1::HeartbeatResponse, Self::Error> {
         self.calls.lock().expect("calls").push(ObservedCall::Heartbeat(request));
         if self.pause_heartbeat.load(std::sync::atomic::Ordering::SeqCst) {
+            self.heartbeat_inflight
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _pending = PendingHeartbeat(self.heartbeat_inflight.clone());
             self.heartbeat_entered.notify_one();
             std::future::pending::<()>().await;
         }
@@ -2414,4 +2433,146 @@ async fn plugin_declared_hooks_are_listed_and_invoke_through_public_mcp() {
     }
     client.cancel().await.expect("client cleanup");
     server.await.expect("server task");
+}
+
+#[tokio::test(start_paused = true)]
+async fn prompt_preempts_background_heartbeat_without_spending_its_delivery_budget() {
+    let mut backend = backend(prepared("context after heartbeat contention"));
+    backend.enroll_delay = std::time::Duration::from_millis(50);
+    backend.pause_heartbeat.store(true, std::sync::atomic::Ordering::SeqCst);
+    let entered = backend.heartbeat_entered.clone();
+    let inflight = backend.heartbeat_inflight.clone();
+    let overlap = backend.enroll_overlapped_heartbeat.clone();
+    let calls = backend.calls.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    let heartbeat = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move {
+            adapter.run_heartbeat(AvailabilityObservation::Ready).await;
+        })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    entered.notified().await;
+
+    let started = tokio::time::Instant::now();
+    let outcome = adapter.invoke(prompt("native_b", "contended")).await;
+    let elapsed = started.elapsed();
+    assert_eq!(inflight.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(
+        !overlap.load(std::sync::atomic::Ordering::SeqCst),
+        "heartbeat future must drop before enrollment starts"
+    );
+    adapter.shutdown().await.expect("shutdown");
+    heartbeat.await.expect("heartbeat settles");
+
+    let result = hook_json(outcome.expect("prompt must not wait for background heartbeat"));
+    assert!(
+        result["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .expect("context")
+            .contains("context after heartbeat contention")
+    );
+    assert_eq!(elapsed, std::time::Duration::from_millis(50));
+    let calls = calls.lock().expect("calls");
+    assert!(matches!(calls[2], ObservedCall::Heartbeat(_)));
+    assert!(matches!(calls[3], ObservedCall::Enroll(_)));
+    assert!(matches!(calls[4], ObservedCall::Prepare(_)));
+    assert!(matches!(calls[5], ObservedCall::Detach(_)));
+    assert_eq!(
+        calls.len(),
+        6,
+        "preemption must not retry or overlap backend operations"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn invalid_native_session_cannot_preempt_background_heartbeat() {
+    let backend = backend(Default::default());
+    backend.pause_heartbeat.store(true, std::sync::atomic::Ordering::SeqCst);
+    let entered = backend.heartbeat_entered.clone();
+    let inflight = backend.heartbeat_inflight.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    let heartbeat = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.run_heartbeat(AvailabilityObservation::Ready).await })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    entered.notified().await;
+
+    let outcome = adapter.invoke(prompt("native_other", "wrong_session")).await;
+    let remaining = inflight.load(std::sync::atomic::Ordering::SeqCst);
+    let malformed = adapter.invoke(prompt("", "malformed_session")).await;
+    let after_malformed = inflight.load(std::sync::atomic::Ordering::SeqCst);
+    adapter.shutdown().await.expect("shutdown");
+    heartbeat.await.expect("heartbeat settles");
+
+    assert!(matches!(outcome, Err(PeerMcpError::NativeSessionChanged)));
+    assert_eq!(remaining, 1, "a foreign native session must not cancel liveness work");
+    assert!(matches!(malformed, Err(PeerMcpError::InvalidHostIdentity(_))));
+    assert_eq!(
+        after_malformed, 1,
+        "a malformed native identity must not cancel liveness work"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn prompt_preempts_queued_heartbeat_without_cancelling_foreground_work() {
+    let backend = backend(prepared("context after queued heartbeat"));
+    backend.pause_heartbeat.store(true, std::sync::atomic::Ordering::SeqCst);
+    let prepare_paused = backend.pause_prepare.clone();
+    let prepare_entered = backend.prepare_entered.clone();
+    let prepare_dropped = backend.prepare_dropped.clone();
+    let calls = backend.calls.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    let heartbeat = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.run_heartbeat(AvailabilityObservation::Ready).await })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_millis(1900)).await;
+    prepare_paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    let foreground = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.invoke(prompt("native_b", "busy")).await })
+    };
+    prepare_entered.notified().await;
+    tokio::time::advance(std::time::Duration::from_millis(100)).await;
+    tokio::task::yield_now().await;
+    let delivery = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.invoke(prompt("native_b", "next")).await })
+    };
+    tokio::task::yield_now().await;
+    assert!(
+        !foreground.is_finished(),
+        "prompt arrival must not cancel foreground preparation"
+    );
+    assert_eq!(prepare_dropped.load(std::sync::atomic::Ordering::SeqCst), 0);
+    prepare_paused.store(false, std::sync::atomic::Ordering::SeqCst);
+    foreground.abort();
+    assert!(foreground.await.expect_err("explicit test cancellation").is_cancelled());
+    let outcome = delivery.await.expect("delivery task");
+    adapter.shutdown().await.expect("shutdown");
+    heartbeat.await.expect("heartbeat settles");
+
+    let result = hook_json(outcome.expect("queued background heartbeat must not take the prompt lock"));
+    assert!(
+        result["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .expect("context")
+            .contains("context after queued heartbeat")
+    );
+    assert_eq!(prepare_dropped.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(
+        calls
+            .lock()
+            .expect("calls")
+            .iter()
+            .all(|call| !matches!(call, ObservedCall::Heartbeat(_)))
+    );
 }
