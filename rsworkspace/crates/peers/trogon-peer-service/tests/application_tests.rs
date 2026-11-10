@@ -2658,7 +2658,7 @@ async fn separate_collaborations_cannot_accept_content_even_when_peer_reads_are_
 }
 
 #[tokio::test]
-async fn offline_catalog_members_keep_historical_activity_without_a_live_availability_claim() -> TestResult {
+async fn offline_catalog_members_leave_live_roster_and_keep_historical_activity() -> TestResult {
     let mut f = Fixture::new().await?;
     let active = *f
         .clock
@@ -2700,21 +2700,16 @@ async fn offline_catalog_members_keep_historical_activity_without_a_live_availab
             },
         )
         .await?;
-    let bob = roster
-        .peers
-        .iter()
-        .find(|p| p.peer_id == f.b.peer_id)
-        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
-    assert!(bob.availability.is_none());
+    assert!(roster.peers.iter().all(|p| p.peer_id != f.b.peer_id));
+    let bob_id = PeerId::parse(
+        f.b.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let bob = f.history(&bob_id).await?;
     assert_eq!(
         bob.active_at.as_option(),
         Some(&trogonai_proto::convert::timestamp_from_datetime(&active))
-    );
-    assert_eq!(
-        bob.observed_at.as_option(),
-        Some(&trogonai_proto::convert::timestamp_from_datetime(
-            &(active + chrono::Duration::seconds(11))
-        ))
     );
     let id =
         f.b.peer_id
