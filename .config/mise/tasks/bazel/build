@@ -2,4 +2,4 @@
 #MISE description="Build the migrated native Bazel targets"
 set -euo pipefail
 
-exec bazelisk build //:build "$@"
+exec bazel build //:build "$@"

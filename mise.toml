@@ -1,5 +1,5 @@
 [tools]
-bazelisk = "1.30.0"
+bazel = "9.3.2"
 buf = "1.70.0"
 go = "1.26.5"
 "ubi:open-telemetry/weaver" = { version = "0.24.2", exe = "weaver" }

@@ -37,10 +37,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Bazelisk via mise
+      - name: Install Bazel via mise
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
-          install_args: bazelisk
+          install_args: bazel
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Restore Bazel cache
         id: bazel-cache
@@ -49,10 +50,9 @@ jobs:
           path: |
             ${{ runner.temp }}/bazel-disk-cache
             ${{ runner.temp }}/bazel-repository-cache
-            ~/.cache/bazelisk
-          key: bazel-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: bazel-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            bazel-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion') }}-
+            bazel-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml') }}-
 
       - name: Test native targets
         run: mise run --skip-tools github:workflows:ci-bazel:test
@@ -67,5 +67,4 @@ jobs:
           path: |
             ${{ runner.temp }}/bazel-disk-cache
             ${{ runner.temp }}/bazel-repository-cache
-            ~/.cache/bazelisk
           key: ${{ steps.bazel-cache.outputs.cache-primary-key }}

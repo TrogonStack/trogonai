@@ -9,17 +9,17 @@ generated-code checks.
 
 ## Run the native targets
 
-Install the pinned launcher, then invoke the repository tasks:
+Install the pinned Bazel version, then invoke the repository tasks:
 
 ```sh
-mise install bazelisk
+mise install bazel
 mise run --skip-tools bazel:build
 mise run --skip-tools bazel:test
 ```
 
-Bazelisk selects the Bazel release in `.bazelversion`. Bazel downloads its pinned
-Rust, Go, protobuf, and Buf tools rather than invoking Cargo or Go build wrappers.
-The initial execution platforms are macOS ARM64 and Linux x86-64.
+`mise.toml` pins Bazel itself. Bazel downloads its pinned Rust, Go, protobuf,
+and Buf tools rather than invoking Cargo or Go build wrappers. The initial
+execution platforms are macOS ARM64 and Linux x86-64.
 
 The build task builds `//:build`; the test task runs `bazel test //...`.
 Arguments are forwarded to Bazel, so a test can be selected without changing
@@ -58,7 +58,7 @@ mise run --skip-tools bazel:graph
 Inspect the commands, tools, and files involved in WIT generation:
 
 ```sh
-mise exec bazelisk@1.30.0 -- bazelisk aquery 'deps(//proto/trogonai/scheduler/schedules/v1:schedule_status_wit)'
+mise exec bazel -- bazel aquery 'deps(//proto/trogonai/scheduler/schedules/v1:schedule_status_wit)'
 ```
 
 The schema and compiled Go plugin are declared inputs to generation. Changes to
@@ -68,16 +68,17 @@ and actual cache results as well.
 
 ## GitHub Actions caching
 
-The `CI Bazel` workflow restores Bazelisk downloads, the repository download
-cache, and the action disk cache from GitHub Actions. Successful pushes to `main`
-publish cache entries. Pull requests can restore available entries and run all
-checks, but do not save them.
+The `CI Bazel` workflow restores the repository download cache and action disk
+cache from GitHub Actions. Successful pushes to `main` publish cache entries.
+Pull requests can restore available entries and run all checks, but do not save
+them.
 
 Cache archives have an immutable key for each commit and workflow
 attempt, with a restore prefix partitioned by runner operating system,
-architecture, and pinned Bazel version. Source-only updates can therefore add
-new action results to a later archive. Bazel's own content keys decide which
-entries in a restored archive remain reusable.
+architecture, and the `mise.toml` hash. Changes to any managed tool configuration
+start a new cache namespace. Source-only updates can add new action results to
+a later archive. Bazel's own content keys decide which entries in a restored
+archive remain reusable.
 
 This cache follows GitHub's repository and branch access rules and eviction
 limits. It accelerates Actions jobs; it is not a globally writable cache endpoint

@@ -2,4 +2,4 @@
 #MISE description="Test the migrated native Bazel targets"
 set -euo pipefail
 
-exec bazelisk test //... "$@"
+exec bazel test //... "$@"
