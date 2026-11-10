@@ -37,6 +37,10 @@ pub(crate) async fn load_peer_history_with_position<Store: StreamRead<PeerId>>(
     if read.events.len() as u64 > MAX_HISTORY_EVENTS {
         return Err(HistoryError::Limit);
     }
+    let validated_position = read.events.last().map(|event| event.stream_position);
+    if validated_position != read.current_position {
+        return Err(HistoryError::Incomplete);
+    }
     let mut result = PeerHistory::initial();
     for event in read.events {
         let decoded = event
@@ -46,5 +50,5 @@ pub(crate) async fn load_peer_history_with_position<Store: StreamRead<PeerId>>(
             .ok_or(HistoryError::UnknownEvent)?;
         result = result.evolve(&decoded).map_err(HistoryError::Evolve)?;
     }
-    Ok((result, read.current_position))
+    Ok((result, validated_position))
 }
