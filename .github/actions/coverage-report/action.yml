@@ -146,14 +146,16 @@ runs:
     env:
       COVERAGE_PATH: ${{ inputs.path }}
       COVERAGE_LOW_ONLY: ${{ inputs.report-low-coverage-only }}
-  - name: Fetch report from ${{ inputs.diff-storage }}
+  - name: Prepare storage working tree
     if: inputs.skip-diff-storage != 'true'
-    uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-    with:
-      path: ${{ inputs.diff-storage }}
-      ref: ${{ inputs.diff-storage }}
-      fetch-depth: '0'
-      token: ${{ inputs.token }}
+    run: mise run github:actions:coverage-report:storage-prepare
+    shell: bash
+    env:
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+      COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+      COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_TOKEN: ${{ inputs.token }}
   - name: Get token identity
     if: inputs.skip-diff-storage != 'true'
     id: identity
@@ -178,6 +180,7 @@ runs:
       COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
       COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
       COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_TOKEN: ${{ inputs.token }}
     run: mise run github:actions:coverage-report:initialize
     shell: bash
   - name: Push storage branch
@@ -188,6 +191,7 @@ runs:
       COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
       COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
       COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_TOKEN: ${{ inputs.token }}
     run: mise run github:actions:coverage-report:push-initial
     shell: bash
   - name: Generate diff against ${{ inputs.diff-branch }}
@@ -250,6 +254,7 @@ runs:
       COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
       COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
       COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_TOKEN: ${{ inputs.token }}
     run: mise run github:actions:coverage-report:push-badge
     shell: bash
   - name: Determine repository visibility
@@ -340,6 +345,7 @@ runs:
       COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
       COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
       COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_TOKEN: ${{ inputs.token }}
     run: mise run github:actions:coverage-report:push-report
     shell: bash
   - name: Check threshold
@@ -366,3 +372,4 @@ runs:
     shell: bash
     env:
       COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_SKIP_STORAGE: ${{ inputs.skip-diff-storage }}
