@@ -5,6 +5,11 @@ use std::future::Future;
 /// Authorize the tenant, seal the text, and return a ClaimCheck that binds stored-byte integrity.
 /// The independent semantic fingerprint must use a reviewed keyed construction and remain stable across location and nonce changes.
 /// Neither value grants read authority. No production implementation is provided here.
+///
+/// The backend must durably track every sealed candidate for retention-aware collection.
+/// Collection may reclaim only candidates confirmed unreferenced by authoritative message state;
+/// it must preserve referenced candidates and bindings whose acceptance remains uncertain.
+/// A failed send or append error alone does not establish that a candidate is unreferenced.
 pub trait ContentSeal: Send + Sync {
     fn seal(
         &self,
