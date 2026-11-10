@@ -1,16 +1,67 @@
 #!/usr/bin/env python3
 """Publish coverage commits without replacing a newer destination or baseline."""
+import base64
 import json
 import os
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
+from urllib.parse import urlsplit
+
+from sources import repository_name
 
 MAX_ATTEMPTS = 8
 
 
+def git_environment(directory=None):
+    environment = os.environ.copy()
+    if 'COVERAGE_TOKEN' in environment:
+        token = environment.pop('COVERAGE_TOKEN')
+        if not token:
+            raise RuntimeError('Coverage storage token is required')
+        server = environment.get('GITHUB_SERVER_URL', 'https://github.com').rstrip('/')
+        url = urlsplit(server)
+        if url.scheme != 'https' or not url.hostname or url.username or url.password or url.path or url.query or url.fragment:
+            raise RuntimeError('Invalid coverage storage server')
+        repository = repository_name(environment['GITHUB_REPOSITORY'])
+        routes = []
+        for arguments in [('remote', 'get-url', '--all', 'origin'), ('remote', 'get-url', '--push', '--all', 'origin')]:
+            route = subprocess.run(['git', *arguments], cwd=directory, env=environment,
+                                   text=True, capture_output=True)
+            urls = route.stdout.splitlines()
+            if route.returncode or len(urls) != 1:
+                raise RuntimeError('Invalid coverage storage remote')
+            target = urlsplit(urls[0])
+            if (target.scheme != url.scheme or target.netloc.casefold() != url.netloc.casefold()
+                    or target.username or target.password or target.query or target.fragment
+                    or target.path.rstrip('/').casefold() not in ('/' + repository, '/' + repository + '.git')):
+                raise RuntimeError('Coverage storage remote does not match the trusted repository')
+            routes.append(urls[0])
+        authorization = base64.b64encode(('x-access-token:' + token).encode()).decode()
+        settings = [('http.extraheader', ''), ('http.' + server + '/.extraheader', '')]
+        for route in dict.fromkeys(routes):
+            header = 'http.' + route + '.extraheader'
+            settings.extend([(header, ''), (header, 'AUTHORIZATION: basic ' + authorization)])
+        settings.extend([('credential.helper', ''), ('core.askPass', '')])
+        count = int(environment.get('GIT_CONFIG_COUNT', '0'))
+        if count < 0:
+            raise RuntimeError('Invalid inherited Git configuration')
+        for key, value in settings:
+            environment[f'GIT_CONFIG_KEY_{count}'] = key
+            environment[f'GIT_CONFIG_VALUE_{count}'] = value
+            count += 1
+        environment.update(GIT_CONFIG_COUNT=str(count), GIT_TERMINAL_PROMPT='0', GCM_INTERACTIVE='Never',
+                           GIT_ASKPASS='', SSH_ASKPASS='')
+    return environment
+
+
 def git(*arguments, check=True):
-    result = subprocess.run(['git', *arguments], text=True, capture_output=True)
+    operation = arguments[2] if arguments[0] == '-C' else arguments[0]
+    environment = os.environ.copy()
+    environment.pop('COVERAGE_TOKEN', None)
+    if operation in ('fetch', 'push'):
+        environment = git_environment(arguments[1] if arguments[0] == '-C' else None)
+    result = subprocess.run(['git', *arguments], text=True, capture_output=True, env=environment)
     if check and result.returncode:
         raise RuntimeError(f'git {arguments[0]} failed with exit {result.returncode}')
     return result
