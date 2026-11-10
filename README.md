@@ -20,9 +20,6 @@
 
 ## Project Areas
 
-The [Bazel build guide](docs/how-to/use-bazel.md) covers the initial native targets
-and their GitHub Actions cache. Existing language workflows remain available.
-
 - [`docs/`](docs/) - Documentation website and contribution workflow.
 - [`rsworkspace/`](rsworkspace/) - Rust components and crate documentation.
 - [`tsworkspace/`](tsworkspace/) - TypeScript workspace, including the console webapp.
