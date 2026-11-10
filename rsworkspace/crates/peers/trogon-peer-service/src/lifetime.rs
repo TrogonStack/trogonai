@@ -1,3 +1,4 @@
+use crate::constants::PEER_REPLAY_LIMIT;
 use crate::{
     attachment_input::attachment, peer_application_error::PeerApplicationError, peer_clock::PeerClock,
     peer_service::PeerService,
@@ -43,9 +44,17 @@ where
             self.clock.now(),
         );
         let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(owner.caller().as_str())?);
+        self.authorizer
+            .authorize_execution(Some(&principal), &command)
+            .map_err(|error| PeerApplicationError::Heartbeat(CommandError::Unauthorized(error)))?;
+        let (_, position) = crate::history::load_with_position(&self.store, command.attachment().peer_id())
+            .await
+            .map_err(PeerApplicationError::LifetimeHistory)?;
         let result = CommandExecution::new(&self.store, &command)
-            .with_principal(principal)
+            .with_expected_revision(position)
+            .with_principal(principal.clone())
             .with_authorizer(&self.authorizer)
+            .with_replay_limit(PEER_REPLAY_LIMIT)
             .execute()
             .await
             .map_err(PeerApplicationError::Heartbeat)?;
@@ -67,13 +76,27 @@ where
             self.clock.now(),
         );
         let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(owner.caller().as_str())?);
-        match CommandExecution::new(&self.store, &command)
-            .with_principal(principal)
-            .with_authorizer(&self.authorizer)
-            .execute()
+        self.authorizer
+            .authorize_execution(Some(&principal), &command)
+            .map_err(|error| PeerApplicationError::Detach(CommandError::Unauthorized(error)))?;
+        let (_, position) = crate::history::load_with_position(&self.store, command.attachment().peer_id())
             .await
-        {
-            Ok(_) | Err(CommandError::Decide(DetachError::AlreadyDetached)) => Ok(proto::DetachResponse {}),
+            .map_err(PeerApplicationError::LifetimeHistory)?;
+        let result = CommandExecution::new(&self.store, &command)
+            .with_expected_revision(position)
+            .with_principal(principal.clone())
+            .with_authorizer(&self.authorizer)
+            .with_replay_limit(PEER_REPLAY_LIMIT)
+            .execute()
+            .await;
+        match result {
+            Ok(_) => Ok(proto::DetachResponse {}),
+            Err(CommandError::Decide(DetachError::AlreadyDetached)) => {
+                crate::history::load(&self.store, command.attachment().peer_id())
+                    .await
+                    .map_err(PeerApplicationError::LifetimeHistory)?;
+                Ok(proto::DetachResponse {})
+            }
             Err(error) => Err(PeerApplicationError::Detach(error)),
         }
     }

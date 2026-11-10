@@ -21,6 +21,10 @@ pub type EnrollExecutionError<ReadError, AppendError> = CommandError<
 
 #[derive(Debug, thiserror::Error)]
 pub enum EnrollServiceError<ReadError, AppendError> {
+    #[error("peer attachment changed during resume: {0}")]
+    ResumeGuard(#[source] trogon_peer::HeartbeatError),
+    #[error("peer resume attachment reference is invalid: {0}")]
+    ResumeReference(#[source] PeerValueError),
     #[error("peer enrollment field {field} is missing")]
     MissingInput { field: EnrollmentField },
     #[error("invalid peer enrollment field {field}: {source}")]
