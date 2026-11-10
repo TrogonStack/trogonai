@@ -7710,6 +7710,7 @@ dependencies = [
  "trogon-nats",
  "trogon-peer",
  "trogon-peer-service",
+ "trogon-std",
  "trogonai-proto",
  "uuid",
 ]
