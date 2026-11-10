@@ -86,13 +86,13 @@ async fn serve_with_env(
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
     env: &impl ReadEnv,
 ) -> anyhow::Result<()> {
-    if !resolved.has_any_source() && !resolved.allow_empty_sources {
-        anyhow::bail!("no sources configured — provide a config file with at least one source");
-    }
-
     trogon_telemetry::init_logger(trogon_telemetry::ServiceName::TrogonGateway, [], &SystemEnv, &SystemFs);
 
     info!("trogon-gateway starting");
+
+    if !resolved.has_any_source() {
+        info!("starting with no source integrations configured");
+    }
 
     let google_pubsub_sources = prepare_google_pubsub_sources(&resolved.google_pubsub)?;
 

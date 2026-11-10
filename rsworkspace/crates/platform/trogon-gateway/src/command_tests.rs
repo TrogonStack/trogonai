@@ -165,21 +165,10 @@ fn stream_message(subject: &str, payload: Bytes) -> StreamMessage {
     }
 }
 
-#[tokio::test]
-async fn serve_rejects_empty_sources_before_connecting() {
+#[test]
+fn empty_sources_are_valid_by_default() {
     let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
-    let resolved = config::load(Some(file.path())).unwrap();
-    let error = serve(resolved, std::future::pending()).await.unwrap_err();
-    assert!(error.to_string().starts_with("no sources configured"));
-}
-
-#[tokio::test]
-async fn serve_allows_empty_sources_when_explicitly_configured() {
-    let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
-    std::fs::write(file.path(), "allow_empty_sources = true\n").unwrap();
-    let resolved = config::load(Some(file.path())).unwrap();
-    assert!(resolved.allow_empty_sources);
-    assert!(!resolved.has_any_source());
+    config::load(Some(file.path())).unwrap();
 }
 
 #[tokio::test]
