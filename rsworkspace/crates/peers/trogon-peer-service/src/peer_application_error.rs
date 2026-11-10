@@ -19,6 +19,8 @@ pub enum PeerApplicationError<ReadError, AppendError> {
     Denied(#[from] AuthorizationDeniedError),
     #[error("peer history failed: {0}")]
     History(#[from] HistoryError<ReadError>),
+    #[error("peer lifecycle execution history failed: {0}")]
+    LifetimeHistory(#[source] HistoryError<ReadError>),
     #[error("peer port failed: {0}")]
     Port(#[from] PeerPortError),
     #[error("peer heartbeat failed: {0}")]
