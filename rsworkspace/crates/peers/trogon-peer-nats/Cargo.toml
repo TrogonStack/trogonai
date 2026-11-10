@@ -16,6 +16,7 @@ trogon-decider-runtime = { workspace = true }
 trogonai-proto = { workspace = true, features = ["peers"] }
 async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 trogon-decider-nats = { workspace = true }
 trogon-nats = { path = "../../platform/trogon-nats" }
