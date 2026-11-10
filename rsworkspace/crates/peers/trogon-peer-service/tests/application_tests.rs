@@ -5045,3 +5045,130 @@ async fn public_send_keeps_unsupported_admission_seconds_owned_by_the_renderer()
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn roster_emits_ready_new_attachments_and_skips_expired_members_on_each_catalog_page() -> TestResult {
+    let mut f = Fixture::new().await?;
+    let initial = f
+        .app()
+        .roster(
+            &f.alice,
+            proto::RosterRequest {
+                attachment_ref: f.a.clone().into(),
+                ..Default::default()
+            },
+        )
+        .await?;
+    assert_eq!(initial.peers.len(), 2);
+    for presence in initial.peers {
+        assert_eq!(
+            presence.availability.and_then(|v| v.as_known()),
+            Some(proto::PeerAvailability::PEER_AVAILABILITY_READY)
+        );
+        assert!(!presence.active_at.is_set());
+    }
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? += chrono::Duration::seconds(10);
+    f.a = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone())
+        .enroll(&f.alice, Fixture::enrollment("alice"))
+        .await?
+        .attachment
+        .attachment_ref
+        .clone()
+        .into_option()
+        .ok_or(PeerPortError::Integrity)?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let mut cursor = None;
+    let mut emitted = Vec::new();
+    for _ in 0..2 {
+        let page = f
+            .app()
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    page_size: Some(1),
+                    page_token: cursor,
+                },
+            )
+            .await?;
+        cursor = page.next_page_token;
+        assert!(cursor.is_some(), "catalog cursor survives an empty filtered page");
+        for presence in page.peers {
+            assert_eq!(presence.peer_id, f.a.peer_id);
+            assert!(presence.availability.is_some());
+            emitted.push(presence);
+        }
+    }
+    assert_eq!(emitted.len(), 1);
+    assert!(
+        f.app()
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    page_size: Some(1),
+                    page_token: cursor,
+                }
+            )
+            .await?
+            .peers
+            .is_empty()
+    );
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    Ok(())
+}
+
+struct LeaseRenewalDuringSeal<'a>(&'a Fixture);
+
+impl trogon_peer_service::ContentSeal for LeaseRenewalDuringSeal<'_> {
+    async fn seal(&self, scope: &PeerAccess, text: &MessageText) -> Result<ContentBinding, PeerPortError> {
+        let result = advancing_seal::AdvancingSeal {
+            fixture: self.0,
+            elapsed: chrono::Duration::seconds(9),
+            heartbeat: Some(proto::HeartbeatRequest {
+                attachment_ref: self.0.a.clone().into(),
+                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                ..Default::default()
+            }),
+        }
+        .seal(scope, text)
+        .await?;
+        *self.0.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? += chrono::Duration::seconds(2);
+        Ok(result)
+    }
+}
+
+#[tokio::test]
+async fn send_accepts_a_renewed_lease_after_the_pre_seal_snapshot_expired() -> TestResult {
+    let f = Fixture::new().await?;
+    let initial_time = f.clock.now();
+    let app = PeerApplication::new(
+        f.store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        LeaseRenewalDuringSeal(&f),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    let sent = app
+        .send(&f.alice, f.send("renewed-across-expiry", "valid after renewal"))
+        .await?;
+    assert_eq!(
+        sent.message.accepted_at.as_option(),
+        Some(&trogonai_proto::convert::timestamp_from_datetime(
+            &(initial_time + chrono::Duration::seconds(11))
+        ))
+    );
+    let sender = PeerId::parse(f.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let history = f.history(&sender).await?;
+    assert_eq!(history.outbox.len(), 1);
+    assert_eq!(
+        history.attachment.expires_at.as_option(),
+        Some(&trogonai_proto::convert::timestamp_from_datetime(
+            &(initial_time + chrono::Duration::seconds(19))
+        ))
+    );
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 1);
+    Ok(())
+}
