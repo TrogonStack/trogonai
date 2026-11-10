@@ -73,13 +73,16 @@ where
         service = adapter.clone().serve_with_ct(transport, cancellation.clone()) => service.map_err(|error| RuntimeError::Initialize(Box::new(error)))?,
     };
     let waiting = service.waiting();
-    let heartbeat = adapter.run_heartbeat(availability);
-    tokio::pin!(waiting, heartbeat);
-    let completed = tokio::select! {
-        biased;
-        _ = &mut shutdown => None,
-        result = &mut waiting => Some(result),
-        _ = &mut heartbeat => None,
+    tokio::pin!(waiting);
+    let completed = {
+        let heartbeat = adapter.run_heartbeat(availability);
+        tokio::pin!(heartbeat);
+        tokio::select! {
+            biased;
+            _ = &mut shutdown => None,
+            result = &mut waiting => Some(result),
+            _ = &mut heartbeat => None,
+        }
     };
     cancellation.cancel();
     let detached = adapter.shutdown().await;
