@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Validate CI selection, workflow syntax, and canary helpers without building workspaces"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+npm ci --prefix tests/github_actions --ignore-scripts --no-audit --no-fund
+node --test tests/github_actions/test_ci_selection.mjs tests/github_actions/test_ci_selector_process.mjs
+python3 -m unittest discover -s tests/github_actions -p 'test_*.py'
+bash -n .config/mise/tasks/github-actions/canary-is-branch-tip
+mise exec github:rhysd/actionlint@1.7.12 -- actionlint -shellcheck=''
