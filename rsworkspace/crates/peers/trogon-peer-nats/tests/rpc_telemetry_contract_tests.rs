@@ -19,6 +19,7 @@ use trogon_peer_service::{
         StoreFixture, TestResult,
     },
 };
+use trogon_std::log_capture::{CapturedLogs, LogLevel};
 use trogonai_proto::{google::rpc::Code, peers::v1alpha1 as proto};
 
 const PRIVATE_MARKER: &str = "rpc-sensitive-marker";
@@ -211,11 +212,21 @@ struct RecordedEvent {
 struct Events {
     records: Arc<Mutex<Vec<RecordedEvent>>>,
     entered: Arc<AtomicUsize>,
+    faults_disabled: bool,
+    fault_checks: Arc<AtomicUsize>,
 }
 
 impl Subscriber for Events {
-    fn enabled(&self, _: &Metadata<'_>) -> bool {
-        true
+    fn register_callsite(&self, _: &'static Metadata<'static>) -> tracing::subscriber::Interest {
+        tracing::subscriber::Interest::sometimes()
+    }
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        if metadata.target() == FAULT_TARGET {
+            self.fault_checks.fetch_add(1, Ordering::SeqCst);
+            !self.faults_disabled
+        } else {
+            true
+        }
     }
     fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
         span::Id::from_u64(1)
@@ -393,6 +404,102 @@ async fn successful_rpc_does_not_emit_a_fault_event() -> TestResult {
         .map_err(|_| "successful roster failed")?;
     let records = events.records.lock().map_err(|_| "telemetry collector poisoned")?;
     assert!(records.iter().all(|event| event.target != FAULT_TARGET));
+    Ok(())
+}
+
+#[tokio::test]
+async fn subscriber_filtering_preserves_wire_faults_and_only_emits_enabled_bounded_events() -> TestResult {
+    for faults_disabled in [true, false, true, false] {
+        let fixture = Fixture::new().await?;
+        let adapter = adapter(&fixture, Failure::Read);
+        let events = Events {
+            faults_disabled,
+            ..Default::default()
+        };
+        let span = tracing::subscriber::with_default(events.clone(), || tracing::info_span!("filter_contract"));
+        assert_fault(
+            adapter
+                .execute(
+                    &fixture.alice,
+                    proto::RosterRequest {
+                        attachment_ref: fixture.a.clone().into(),
+                        ..Default::default()
+                    },
+                )
+                .instrument(span)
+                .with_subscriber(events.clone())
+                .await,
+            Code::UNAVAILABLE,
+            "peer storage unavailable",
+        )?;
+        assert!(events.fault_checks.load(Ordering::SeqCst) > 0);
+        if faults_disabled {
+            let records = events.records.lock().map_err(|_| "telemetry collector poisoned")?;
+            assert!(records.iter().all(|event| event.target != FAULT_TARGET));
+            assert!(
+                records
+                    .iter()
+                    .all(|event| { event.fields.values().all(|value| !value.contains(PRIVATE_MARKER)) })
+            );
+        } else {
+            assert_event(&events, "history.read", Code::UNAVAILABLE)?;
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn log_only_consumers_receive_bounded_rpc_fault_origins_without_backend_error_text() -> TestResult {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return Ok(());
+    };
+    for (failure, origin) in [(Failure::Read, "history.read"), (Failure::Append, "execution.append")] {
+        let fixture = Fixture::new().await?;
+        let adapter = adapter(&fixture, failure);
+        let before = logs.records().len();
+        if failure == Failure::Read {
+            assert_fault(
+                adapter
+                    .execute(
+                        &fixture.alice,
+                        proto::RosterRequest {
+                            attachment_ref: fixture.a.clone().into(),
+                            ..Default::default()
+                        },
+                    )
+                    .await,
+                Code::UNAVAILABLE,
+                "peer storage unavailable",
+            )?;
+        } else {
+            assert_fault(
+                adapter
+                    .execute(
+                        &fixture.alice,
+                        proto::HeartbeatRequest {
+                            attachment_ref: fixture.a.clone().into(),
+                            availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                            ..Default::default()
+                        },
+                    )
+                    .await,
+                Code::UNAVAILABLE,
+                "peer storage unavailable",
+            )?;
+        }
+        let records = logs.records();
+        assert!(records.iter().all(|record| !record.message.contains(PRIVATE_MARKER)));
+        let faults = records[before..]
+            .iter()
+            .filter(|record| record.target == FAULT_TARGET)
+            .collect::<Vec<_>>();
+        assert_eq!(faults.len(), 1);
+        assert_eq!(faults[0].level, LogLevel::Warn);
+        assert_eq!(
+            faults[0].message,
+            format!("peer RPC fault error.type=\"{origin}\" rpc.grpc.status_code=14")
+        );
+    }
     Ok(())
 }
 
