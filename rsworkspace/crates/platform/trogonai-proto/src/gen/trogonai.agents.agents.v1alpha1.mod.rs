@@ -4,6 +4,10 @@ include!("trogonai.agents.agents.v1alpha1.digest.rs");
 include!("trogonai.agents.agents.v1alpha1.configuration_artifact.rs");
 include!("trogonai.agents.agents.v1alpha1.model_selection.rs");
 include!("trogonai.agents.agents.v1alpha1.identity.rs");
+include!("trogonai.agents.agents.v1alpha1.dependencies.rs");
+include!("trogonai.agents.agents.v1alpha1.editable_surface.rs");
+include!("trogonai.agents.agents.v1alpha1.implementation.rs");
+include!("trogonai.agents.agents.v1alpha1.variables.rs");
 #[allow(
     non_camel_case_types,
     dead_code,
@@ -25,6 +29,24 @@ pub mod __buffa {
         include!("trogonai.agents.agents.v1alpha1.configuration_artifact.__view.rs");
         include!("trogonai.agents.agents.v1alpha1.model_selection.__view.rs");
         include!("trogonai.agents.agents.v1alpha1.identity.__view.rs");
+        include!("trogonai.agents.agents.v1alpha1.dependencies.__view.rs");
+        include!("trogonai.agents.agents.v1alpha1.editable_surface.__view.rs");
+        include!("trogonai.agents.agents.v1alpha1.implementation.__view.rs");
+        include!("trogonai.agents.agents.v1alpha1.variables.__view.rs");
+        pub mod oneof {
+            #[allow(unused_imports)]
+            use super::*;
+            include!("trogonai.agents.agents.v1alpha1.dependencies.__view_oneof.rs");
+            include!("trogonai.agents.agents.v1alpha1.implementation.__view_oneof.rs");
+            include!("trogonai.agents.agents.v1alpha1.variables.__view_oneof.rs");
+        }
+    }
+    pub mod oneof {
+        #[allow(unused_imports)]
+        use super::*;
+        include!("trogonai.agents.agents.v1alpha1.dependencies.__oneof.rs");
+        include!("trogonai.agents.agents.v1alpha1.implementation.__oneof.rs");
+        include!("trogonai.agents.agents.v1alpha1.variables.__oneof.rs");
     }
     /// Register this package's `Any` type entries and extension entries.
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {
@@ -41,6 +63,39 @@ pub mod __buffa {
         reg.register_json_any(super::__AGENT_ID_JSON_ANY);
         reg.register_json_any(super::__ED25519PUBLIC_JWK_JSON_ANY);
         reg.register_json_any(super::__AGENT_IDENTITY_JSON_ANY);
+        reg.register_json_any(super::__AGENT_DEPENDENCIES_JSON_ANY);
+        reg.register_json_any(super::__SKILL_DECLARATION_JSON_ANY);
+        reg.register_json_any(super::__SKILL_VERSION_REF_JSON_ANY);
+        reg.register_json_any(super::__TOOL_SELECTOR_JSON_ANY);
+        reg.register_json_any(super::__TOOL_DECLARATION_JSON_ANY);
+        reg.register_json_any(super::__EXACT_TOOL_VERSION_PIN_JSON_ANY);
+        reg.register_json_any(super::__DELEGATE_DECLARATION_JSON_ANY);
+        reg.register_json_any(super::__DELEGATE_SELECTOR_JSON_ANY);
+        reg.register_json_any(super::__EXACT_DELEGATE_REVISION_PIN_JSON_ANY);
+        reg.register_json_any(super::__MEMORY_DECLARATION_JSON_ANY);
+        reg.register_json_any(super::__MEMORY_KIND_SELECTOR_JSON_ANY);
+        reg.register_json_any(super::__CONNECTION_DECLARATION_JSON_ANY);
+        reg.register_json_any(super::__CONNECTION_SELECTOR_JSON_ANY);
+        reg.register_json_any(super::__EDITABLE_SURFACE_JSON_ANY);
+        reg.register_json_any(super::__EDITABLE_SETTINGS_PATH_JSON_ANY);
+        reg.register_json_any(super::__EDIT_CAPS_JSON_ANY);
+        reg.register_json_any(super::__PLATFORM_HARNESS_VERSION_REF_JSON_ANY);
+        reg.register_json_any(super::__REGISTERED_EXTENSION_VERSION_REF_JSON_ANY);
+        reg.register_json_any(super::__ASK_USER_CAPABILITY_JSON_ANY);
+        reg.register_json_any(super::__PROGRESS_UPDATES_CAPABILITY_JSON_ANY);
+        reg.register_json_any(super::__PLATFORM_HARNESS_CONFIGURATION_JSON_ANY);
+        reg.register_json_any(super::__INSTRUCTION_SOURCE_JSON_ANY);
+        reg.register_json_any(super::__AGENT_IMPLEMENTATION_JSON_ANY);
+        reg.register_json_any(super::__VARIABLE_SCHEMA_JSON_ANY);
+        reg.register_json_any(super::__VARIABLE_DEFINITION_JSON_ANY);
+        reg.register_json_any(super::__VARIABLE_TYPE_JSON_ANY);
+        reg.register_json_any(super::__STRING_VARIABLE_TYPE_JSON_ANY);
+        reg.register_json_any(super::__BOOLEAN_VARIABLE_TYPE_JSON_ANY);
+        reg.register_json_any(super::__INTEGER_VARIABLE_TYPE_JSON_ANY);
+        reg.register_json_any(super::__NUMBER_VARIABLE_TYPE_JSON_ANY);
+        reg.register_json_any(super::__LIST_VARIABLE_TYPE_JSON_ANY);
+        reg.register_json_any(super::__OBJECT_VARIABLE_TYPE_JSON_ANY);
+        reg.register_json_any(super::__VARIABLE_BINDINGS_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -95,5 +150,137 @@ pub use self::__buffa::view::Ed25519PublicJwkOwnedView;
 pub use self::__buffa::view::AgentIdentityView;
 #[doc(inline)]
 pub use self::__buffa::view::AgentIdentityOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::AgentDependenciesView;
+#[doc(inline)]
+pub use self::__buffa::view::AgentDependenciesOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::SkillDeclarationView;
+#[doc(inline)]
+pub use self::__buffa::view::SkillDeclarationOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::SkillVersionRefView;
+#[doc(inline)]
+pub use self::__buffa::view::SkillVersionRefOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ToolSelectorView;
+#[doc(inline)]
+pub use self::__buffa::view::ToolSelectorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ToolDeclarationView;
+#[doc(inline)]
+pub use self::__buffa::view::ToolDeclarationOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ExactToolVersionPinView;
+#[doc(inline)]
+pub use self::__buffa::view::ExactToolVersionPinOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::DelegateDeclarationView;
+#[doc(inline)]
+pub use self::__buffa::view::DelegateDeclarationOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::DelegateSelectorView;
+#[doc(inline)]
+pub use self::__buffa::view::DelegateSelectorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ExactDelegateRevisionPinView;
+#[doc(inline)]
+pub use self::__buffa::view::ExactDelegateRevisionPinOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::MemoryDeclarationView;
+#[doc(inline)]
+pub use self::__buffa::view::MemoryDeclarationOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::MemoryKindSelectorView;
+#[doc(inline)]
+pub use self::__buffa::view::MemoryKindSelectorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ConnectionDeclarationView;
+#[doc(inline)]
+pub use self::__buffa::view::ConnectionDeclarationOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ConnectionSelectorView;
+#[doc(inline)]
+pub use self::__buffa::view::ConnectionSelectorOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::EditableSurfaceView;
+#[doc(inline)]
+pub use self::__buffa::view::EditableSurfaceOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::EditableSettingsPathView;
+#[doc(inline)]
+pub use self::__buffa::view::EditableSettingsPathOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::EditCapsView;
+#[doc(inline)]
+pub use self::__buffa::view::EditCapsOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::PlatformHarnessVersionRefView;
+#[doc(inline)]
+pub use self::__buffa::view::PlatformHarnessVersionRefOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::RegisteredExtensionVersionRefView;
+#[doc(inline)]
+pub use self::__buffa::view::RegisteredExtensionVersionRefOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::AskUserCapabilityView;
+#[doc(inline)]
+pub use self::__buffa::view::AskUserCapabilityOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ProgressUpdatesCapabilityView;
+#[doc(inline)]
+pub use self::__buffa::view::ProgressUpdatesCapabilityOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::PlatformHarnessConfigurationView;
+#[doc(inline)]
+pub use self::__buffa::view::PlatformHarnessConfigurationOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::InstructionSourceView;
+#[doc(inline)]
+pub use self::__buffa::view::InstructionSourceOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::AgentImplementationView;
+#[doc(inline)]
+pub use self::__buffa::view::AgentImplementationOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::VariableSchemaView;
+#[doc(inline)]
+pub use self::__buffa::view::VariableSchemaOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::VariableDefinitionView;
+#[doc(inline)]
+pub use self::__buffa::view::VariableDefinitionOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::VariableTypeView;
+#[doc(inline)]
+pub use self::__buffa::view::VariableTypeOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::StringVariableTypeView;
+#[doc(inline)]
+pub use self::__buffa::view::StringVariableTypeOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::BooleanVariableTypeView;
+#[doc(inline)]
+pub use self::__buffa::view::BooleanVariableTypeOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::IntegerVariableTypeView;
+#[doc(inline)]
+pub use self::__buffa::view::IntegerVariableTypeOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::NumberVariableTypeView;
+#[doc(inline)]
+pub use self::__buffa::view::NumberVariableTypeOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ListVariableTypeView;
+#[doc(inline)]
+pub use self::__buffa::view::ListVariableTypeOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ObjectVariableTypeView;
+#[doc(inline)]
+pub use self::__buffa::view::ObjectVariableTypeOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::VariableBindingsView;
+#[doc(inline)]
+pub use self::__buffa::view::VariableBindingsOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;
