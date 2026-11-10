@@ -48,14 +48,30 @@ where
             self.clock.now(),
         );
         let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(owner.caller().as_str())?);
-        let result = CommandExecution::new(&self.store, &command)
-            .with_principal(principal)
-            .with_authorizer(&self.authorizer)
-            .with_replay_limit(PEER_REPLAY_LIMIT)
-            .with_conflict_retry(CONFLICT_RETRY_LIMIT)
-            .execute()
-            .await
-            .map_err(PeerApplicationError::Heartbeat)?;
+        self.authorizer
+            .authorize_execution(Some(&principal), &command)
+            .map_err(|error| PeerApplicationError::Heartbeat(CommandError::Unauthorized(error)))?;
+        let mut retries_left = CONFLICT_RETRY_LIMIT.as_u32();
+        let result = loop {
+            let (_, position) = crate::history::load_with_position(&self.store, command.attachment().peer_id())
+                .await
+                .map_err(PeerApplicationError::LifetimeHistory)?;
+            let result = CommandExecution::new(&self.store, &command)
+                .with_expected_revision(position)
+                .with_principal(principal.clone())
+                .with_authorizer(&self.authorizer)
+                .with_replay_limit(PEER_REPLAY_LIMIT)
+                .execute()
+                .await;
+            if retries_left > 0
+                && matches!(&result, Err(CommandError::Append(error))
+                if self.store.classify_append_failure(error) == trogon_decider_runtime::AppendFailure::WriteConflict)
+            {
+                retries_left -= 1;
+                continue;
+            }
+            break result.map_err(PeerApplicationError::Heartbeat)?;
+        };
         Ok(proto::HeartbeatResponse {
             attachment: result.state.attachment,
         })
@@ -77,15 +93,38 @@ where
             self.clock.now(),
         );
         let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(owner.caller().as_str())?);
-        match CommandExecution::new(&self.store, &command)
-            .with_principal(principal)
-            .with_authorizer(&self.authorizer)
-            .with_replay_limit(PEER_REPLAY_LIMIT)
-            .with_conflict_retry(CONFLICT_RETRY_LIMIT)
-            .execute()
-            .await
-        {
-            Ok(_) | Err(CommandError::Decide(DetachError::AlreadyDetached)) => Ok(proto::DetachResponse {}),
+        self.authorizer
+            .authorize_execution(Some(&principal), &command)
+            .map_err(|error| PeerApplicationError::Detach(CommandError::Unauthorized(error)))?;
+        let mut retries_left = CONFLICT_RETRY_LIMIT.as_u32();
+        let result = loop {
+            let (_, position) = crate::history::load_with_position(&self.store, command.attachment().peer_id())
+                .await
+                .map_err(PeerApplicationError::LifetimeHistory)?;
+            let result = CommandExecution::new(&self.store, &command)
+                .with_expected_revision(position)
+                .with_principal(principal.clone())
+                .with_authorizer(&self.authorizer)
+                .with_replay_limit(PEER_REPLAY_LIMIT)
+                .execute()
+                .await;
+            if retries_left > 0
+                && matches!(&result, Err(CommandError::Append(error))
+                if self.store.classify_append_failure(error) == trogon_decider_runtime::AppendFailure::WriteConflict)
+            {
+                retries_left -= 1;
+                continue;
+            }
+            break result;
+        };
+        match result {
+            Ok(_) => Ok(proto::DetachResponse {}),
+            Err(CommandError::Decide(DetachError::AlreadyDetached)) => {
+                crate::history::load(&self.store, command.attachment().peer_id())
+                    .await
+                    .map_err(PeerApplicationError::LifetimeHistory)?;
+                Ok(proto::DetachResponse {})
+            }
             Err(error) => Err(PeerApplicationError::Detach(error)),
         }
     }
