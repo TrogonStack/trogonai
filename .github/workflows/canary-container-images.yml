@@ -22,10 +22,7 @@ permissions:
 jobs:
   build-and-push:
     name: Build and push (${{ matrix.service }})
-    # GitHub-hosted ubuntu-latest is not being assigned. The homelab
-    # scale set grantline-trogonstack-linux-x64 is registered to this
-    # org and only picks up jobs with these labels. It runs Docker via dind.
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/trogonstack/images/trogonai/${{ matrix.service }}
     strategy:
