@@ -21,7 +21,6 @@ trogonai-proto = { path = "../../platform/trogonai-proto", features = ["peers"] 
 
 tokio-util = { workspace = true }
 
-grpc-nats-micro = { workspace = true }
 trogon-nats = { path = "../../platform/trogon-nats" }
 trogon-peer-nats = { path = "../../peers/trogon-peer-nats" }
 trogon-std = { workspace = true }
