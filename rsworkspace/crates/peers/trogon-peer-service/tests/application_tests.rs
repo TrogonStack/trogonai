@@ -4669,3 +4669,75 @@ impl CommandAuthorizer<Attach> for IsolatedEnrollmentFixture {
         Ok(())
     }
 }
+
+#[tokio::test]
+async fn roster_emits_ready_new_attachments_and_skips_expired_members_on_each_catalog_page() -> TestResult {
+    let mut f = Fixture::new().await?;
+    let initial = f
+        .app()
+        .roster(
+            &f.alice,
+            proto::RosterRequest {
+                attachment_ref: f.a.clone().into(),
+                ..Default::default()
+            },
+        )
+        .await?;
+    assert_eq!(initial.peers.len(), 2);
+    for presence in initial.peers {
+        assert_eq!(
+            presence.availability.and_then(|v| v.as_known()),
+            Some(proto::PeerAvailability::PEER_AVAILABILITY_READY)
+        );
+        assert!(!presence.active_at.is_set());
+    }
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? += chrono::Duration::seconds(10);
+    f.a = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone())
+        .enroll(&f.alice, Fixture::enrollment("alice"))
+        .await?
+        .attachment
+        .attachment_ref
+        .clone()
+        .into_option()
+        .ok_or(PeerPortError::Integrity)?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let mut cursor = None;
+    let mut emitted = Vec::new();
+    for _ in 0..2 {
+        let page = f
+            .app()
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    page_size: Some(1),
+                    page_token: cursor,
+                },
+            )
+            .await?;
+        cursor = page.next_page_token;
+        assert!(cursor.is_some(), "catalog cursor survives an empty filtered page");
+        for presence in page.peers {
+            assert_eq!(presence.peer_id, f.a.peer_id);
+            assert!(presence.availability.is_some());
+            emitted.push(presence);
+        }
+    }
+    assert_eq!(emitted.len(), 1);
+    assert!(
+        f.app()
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    page_size: Some(1),
+                    page_token: cursor,
+                }
+            )
+            .await?
+            .peers
+            .is_empty()
+    );
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    Ok(())
+}
