@@ -1,7 +1,7 @@
 use std::fmt;
 
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
+use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_std::{EmptySecretError, NonZeroDuration, SecretString};
 
 #[derive(Clone)]
@@ -25,7 +25,7 @@ impl fmt::Debug for TwitterConsumerSecret {
 
 pub struct TwitterConfig {
     pub consumer_secret: TwitterConsumerSecret,
-    pub subject_prefix: NatsToken,
+    pub subject_prefix: DottedNatsToken,
     pub stream_name: NatsToken,
     pub stream_max_age: StreamMaxAge,
     pub nats_ack_timeout: NonZeroDuration,

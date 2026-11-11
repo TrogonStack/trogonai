@@ -19,9 +19,106 @@ permissions:
   id-token: write
   packages: write
 
+# The binaries restore the CI Rust release cache, whose key hashes these
+# variables. Keep them identical to ci-rust.yml or every build starts cold.
+env:
+  CARGO_TERM_COLOR: always
+  MISE_TASK_RUN_AUTO_INSTALL: 'false'
+  CARGO_NET_RETRY: '10'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+
 jobs:
+  binary:
+    name: Binary (${{ matrix.service }}, ${{ matrix.arch }})
+    # Native runners: compiling arm64 under emulation took over an hour.
+    # Pinned to 24.04 so the glibc the binaries need stays below the runtime image's.
+    runs-on: ${{ matrix.runner }}
+    env:
+      IMAGE: ghcr.io/trogonstack/images/trogonai/${{ matrix.service }}
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - trogon-gateway
+        arch:
+          - amd64
+          - arm64
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
+      - name: Skip when this commit is no longer the branch tip
+        id: tip
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: mise run --skip-tools github-actions:canary-is-branch-tip
+
+      - name: Log in to GHCR
+        if: steps.tip.outputs.current == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check whether this commit is already published
+        if: steps.tip.outputs.current == 'true'
+        id: published
+        env:
+          IMAGE_REF: ${{ env.IMAGE }}:${{ github.sha }}
+        run: mise run --skip-tools github-actions:image-published
+
+      - name: Setup Rust
+        if: steps.published.outputs.published == 'false'
+        uses: ./.github/actions/setup-rust
+
+      - name: Cache dependencies
+        if: steps.published.outputs.published == 'false'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v1-rust
+          # The CI Rust build job's key: amd64 restores the release dependencies
+          # main already compiled. arm64 has no CI build, so it saves its own.
+          shared-key: build
+          workspaces: rsworkspace -> target
+          save-if: ${{ matrix.arch == 'arm64' }}
+
+      - name: Build release binary
+        if: steps.published.outputs.published == 'false'
+        env:
+          SERVICE: ${{ matrix.service }}
+          IMAGE_ARCH: ${{ matrix.arch }}
+          OUTPUT_DIR: ${{ runner.temp }}/image-binaries
+        run: mise run --skip-tools github-actions:image-binary
+
+      - name: Upload release binary
+        if: steps.published.outputs.published == 'false'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-binary-${{ matrix.service }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/image-binaries
+          if-no-files-found: error
+          retention-days: 1
+
   build-and-push:
     name: Build and push (${{ matrix.service }})
+    needs: binary
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/trogonstack/images/trogonai/${{ matrix.service }}
@@ -81,6 +178,14 @@ jobs:
             type=raw,value=canary
             type=sha,format=long,prefix=
 
+      - name: Download release binaries
+        if: steps.published.outputs.published == 'false'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: image-binary-${{ matrix.service }}-*
+          path: ${{ runner.temp }}/image-binaries
+          merge-multiple: true
+
       - name: Build and push canary image
         if: steps.published.outputs.published == 'false'
         id: build_image
@@ -88,6 +193,8 @@ jobs:
         with:
           context: .
           file: devops/docker/images/${{ matrix.service }}/Dockerfile
+          target: prebuilt
+          build-contexts: binaries=${{ runner.temp }}/image-binaries
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -131,5 +238,5 @@ jobs:
           SERVICE: ${{ matrix.service }}
           IMAGE_NAME: ${{ env.IMAGE }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
-          RUNTIME_BASE: debian:bookworm-20260518-slim
+          RUNTIME_BASE: debian:trixie-20261104-slim
         run: mise run --skip-tools github-actions:image-audit-summary

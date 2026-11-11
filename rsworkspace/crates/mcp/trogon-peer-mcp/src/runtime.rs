@@ -14,6 +14,7 @@ use crate::backend::{
     AcknowledgePeerBatch, DetachPeer, EnrollPeer, HeartbeatPeer, PreparePeerBatch, ReadPeerMessageStatus,
     ReadPeerRoster, SendPeerMessage,
 };
+use crate::observed_transport::ObservedTransport;
 use crate::peer_mcp::PeerMcp;
 use crate::rpc_peer_backend::RpcPeerBackend;
 use crate::runtime_config::RuntimeConfig;
@@ -67,6 +68,8 @@ where
 {
     tokio::pin!(shutdown);
     let cancellation = CancellationToken::new();
+    let closed = CancellationToken::new();
+    let transport = ObservedTransport::new(transport.into_transport(), closed.clone());
     let service = tokio::select! {
         biased;
         _ = &mut shutdown => return adapter.shutdown().await.map_err(RuntimeError::Connector),
@@ -80,10 +83,12 @@ where
         tokio::select! {
             biased;
             _ = &mut shutdown => None,
+            _ = closed.cancelled() => None,
             result = &mut waiting => Some(result),
             _ = &mut heartbeat => tokio::select! {
                 biased;
                 _ = &mut shutdown => None,
+                _ = closed.cancelled() => None,
                 result = &mut waiting => Some(result),
             },
         }

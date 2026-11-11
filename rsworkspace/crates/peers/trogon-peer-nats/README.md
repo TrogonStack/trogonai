@@ -146,8 +146,12 @@ The application exchange uses the actual binding, typed client and JetStream
 store. Content, presentation, catalog and policy adapters are disposable fixtures
 exposed only by `test-support`. They do not implement ADR 0083 sealing or durable
 production cache retention. The exchange checks durable send, explicit trusted
-reconciliation, lost-reply replay through reconstruction, application
-acknowledgment and separate sender settlement/status. Scope and recipient
+reconciliation, lost-reply replay after same-process registration replacement
+with shared disposable ports, application acknowledgment and separate sender
+settlement/status. Replacement waits for the old registration transport's closed
+event and attributes replay to the new registration. Cache loss preserves the
+durable winning batch and returns `RETRY_UNAVAILABLE`; durable presentation
+recovery is outside this proof. Scope and recipient
 capacity failures remain closed. These tests do not prove native-host insertion,
 model comprehension, production readiness or long-lived checkpoint recovery.
 

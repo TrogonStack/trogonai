@@ -2,6 +2,8 @@ use crate::PeerMcpErrorCode;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PeerMcpError {
+    #[error("Peer request was cancelled; remote outcome is uncertain. Retry with the same identifiers.")]
+    RequestCancelled,
     #[error("Peer detach was not confirmed; lease expiry remains the fallback.")]
     EnrollmentUncertain,
     #[error("Peer connector is detached; start a new connector runtime.")]
@@ -57,6 +59,7 @@ pub enum PeerMcpError {
 impl PeerMcpError {
     pub const fn code(&self) -> crate::PeerMcpErrorCode {
         match self {
+            Self::RequestCancelled => PeerMcpErrorCode::RequestCancelled,
             Self::EnrollmentUncertain => PeerMcpErrorCode::EnrollmentUncertain,
             Self::Detached => PeerMcpErrorCode::Detached,
             Self::Detach(_) => PeerMcpErrorCode::Detach,

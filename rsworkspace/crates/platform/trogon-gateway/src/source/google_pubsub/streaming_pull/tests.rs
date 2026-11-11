@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{MaxPayload, MockJetStreamPublisher, MockObjectStore, StreamMaxAge};
+use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_std::NonZeroDuration;
 
 use crate::source::google_pubsub::credentials::fixtures::fake_credentials;
@@ -26,7 +26,7 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 
 fn test_config() -> GooglePubSubConfig {
     GooglePubSubConfig {
-        subject_prefix: NatsToken::new("google-pubsub-primary").unwrap(),
+        subject_prefix: DottedNatsToken::new("google-pubsub-primary").unwrap(),
         stream_name: NatsToken::new("GOOGLE_PUBSUB_PRIMARY").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
