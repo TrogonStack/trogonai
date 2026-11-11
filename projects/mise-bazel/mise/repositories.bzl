@@ -1,6 +1,4 @@
-"""Expose tools installed by mise to Bazel."""
-
-load("@toml.bzl", "toml")
+"""Repository rules that link tools installed by mise."""
 
 # Bazel must never trigger installs; mise owns installation.
 _NO_INSTALL = {
@@ -8,6 +6,8 @@ _NO_INSTALL = {
     "MISE_EXEC_AUTO_INSTALL": "false",
     "MISE_NOT_FOUND_SYSTEM_FALLBACK": "false",
 }
+
+_ENVIRON = ["HOME", "PATH", "MISE_DATA_DIR", "MISE_CONFIG_DIR", "RUSTUP_HOME", "MISE_RUSTUP_HOME", "CARGO_HOME", "MISE_CARGO_HOME"]
 
 _RUST_HOSTS = {
     ("mac os x", "aarch64"): struct(
@@ -31,9 +31,13 @@ _ARCH_ALIASES = {"arm64": "aarch64", "amd64": "x86_64"}
 
 _SKIPPED = ["BUILD", "BUILD.bazel", "MODULE.bazel", "REPO.bazel", "ROOT", "WORKSPACE", "WORKSPACE.bazel"]
 
-def _mise(rctx, mise, arguments):
+def _mise(rctx, arguments):
+    mise = rctx.which("mise")
+    if mise == None:
+        fail("mise must be on PATH to locate installed tools")
+    rctx.watch(mise.realpath)
     result = rctx.execute(
-        [mise, "--no-config", "--no-env", "--no-hooks"] + arguments,
+        [str(mise), "--no-config", "--no-env", "--no-hooks"] + arguments,
         environment = _NO_INSTALL,
         quiet = True,
     )
@@ -41,63 +45,51 @@ def _mise(rctx, mise, arguments):
         fail("mise {} failed; install the configured tools with `mise install`.\n{}".format(" ".join(arguments), result.stderr))
     return result.stdout.strip()
 
-def _version(rctx, tool):
-    pin = toml.decode(rctx.read(rctx.attr.config)).get("tools", {}).get(tool)
-    if type(pin) == "list":
-        pin = pin[0] if pin else None
-    if type(pin) == "dict":
-        pin = pin.get("version")
-    if type(pin) != "string" or not pin:
-        fail("{} has no pinned version in {}".format(tool, rctx.attr.config))
-    return pin
-
-def _where(rctx, mise, tool, version):
-    path = rctx.path(_mise(rctx, mise, ["where", tool + "@" + version])).realpath
-    if not path.exists:
-        fail("{}@{} is not installed; run `mise install {}`".format(tool, version, tool))
-    rctx.watch_tree(path)
-    return path
-
-def _link(rctx, source, prefix):
+def _link_installed(rctx):
+    """Links the installed tool into the repository root and returns its real path."""
+    source = rctx.path(_mise(rctx, ["where", rctx.attr.tool + "@" + rctx.attr.version])).realpath
+    if not source.exists:
+        fail("{}@{} is not installed; run `mise install`".format(rctx.attr.tool, rctx.attr.version))
+    rctx.watch_tree(source)
     for entry in source.readdir():
         if entry.basename not in _SKIPPED:
-            rctx.symlink(entry, prefix + entry.basename)
+            rctx.symlink(entry, entry.basename)
+    return source
 
-def _tool(rctx, mise, tool, version):
-    source = _where(rctx, mise, tool, version)
+def _mise_tool_impl(rctx):
+    source = _link_installed(rctx)
     executable = None
-    for directory in _mise(rctx, mise, ["bin-paths", tool + "@" + version]).splitlines():
-        candidate = rctx.path(directory).get_child(tool)
+    for directory in _mise(rctx, ["bin-paths", rctx.attr.tool + "@" + rctx.attr.version]).splitlines():
+        candidate = rctx.path(directory).get_child(rctx.attr.executable)
         if candidate.exists:
             executable = str(candidate.realpath).removeprefix(str(source) + "/")
             break
     if executable == None:
-        fail("{}@{} provides no `{}` executable".format(tool, version, tool))
-    _link(rctx, source, "tools/{}/".format(tool))
-    rctx.file("tools/{}/BUILD.bazel".format(tool), """\
+        fail("{}@{} provides no `{}` executable".format(rctx.attr.tool, rctx.attr.version, rctx.attr.executable))
+    rctx.file("BUILD.bazel", """\
 alias(
-    name = "{tool}",
+    name = "{name}",
     actual = "{executable}",
     visibility = ["//visibility:public"],
 )
-""".format(tool = tool, executable = executable))
+""".format(name = rctx.attr.executable, executable = executable))
 
-def _go(rctx, mise, version):
-    source = _where(rctx, mise, "go", version)
+def _mise_go_impl(rctx):
+    source = _link_installed(rctx)
     lines = rctx.read(source.get_child("VERSION")).splitlines()
-    if not lines or lines[0] != "go" + version:
-        fail("The Go SDK at {} is not go{}".format(source, version))
-    _link(rctx, source, "go/")
-    rctx.file("go/ROOT", "go{}\n".format(version))
-    rctx.file("go/BUILD.bazel", 'exports_files(["ROOT"])\n')
+    if not lines or lines[0] != "go" + rctx.attr.version:
+        fail("The Go SDK at {} is not go{}".format(source, rctx.attr.version))
+    rctx.file("ROOT", "go{}\n".format(rctx.attr.version))
+    rctx.file("BUILD.bazel", 'exports_files(["ROOT"])\n')
 
-def _rust(rctx, mise, version):
+def _mise_rust_impl(rctx):
+    version = rctx.attr.version
     host = _RUST_HOSTS.get((rctx.os.name, _ARCH_ALIASES.get(rctx.os.arch, rctx.os.arch)))
     if host == None:
         fail("The mise Rust toolchain supports macOS ARM64 and Linux x86-64 only")
 
     # mise installs Rust through rustup; the real sysroot lives under RUSTUP_HOME.
-    environment = json.decode(_mise(rctx, mise, ["env", "--json", "rust@" + version]))
+    environment = json.decode(_mise(rctx, ["env", "--json", "rust@" + version]))
     if "RUSTUP_HOME" not in environment:
         fail("mise reported no RUSTUP_HOME for rust@{}".format(version))
     source = rctx.path("{}/toolchains/{}-{}".format(environment["RUSTUP_HOME"], version, host.triple))
@@ -108,13 +100,11 @@ def _rust(rctx, mise, version):
     for relative in ["bin/rustc", "bin/cargo", "lib/rustlib/{}/bin/llvm-cov".format(host.triple)]:
         if not source.get_child(relative).exists:
             fail("The Rust toolchain at {} lacks {}; check the configured components".format(source, relative))
-
-    # rules_rust resolves standard-library paths relative to the repository root.
-    _link(rctx, source, "")
-    _link(rctx, source, "rust/")
-    rctx.file("rust/ROOT", "rust{}\n".format(version))
-    rctx.file("rust/BUILD.bazel", 'exports_files(["ROOT"])\n')
-    rctx.template("BUILD.bazel", rctx.attr._rust_build, substitutions = {
+    for entry in source.readdir():
+        if entry.basename not in _SKIPPED:
+            rctx.symlink(entry, entry.basename)
+    rctx.file("ROOT", "rust{}\n".format(version))
+    rctx.template("BUILD.bazel", rctx.attr._build, substitutions = {
         "%{rust_version}": version,
         "%{rust_triple}": host.triple,
         "%{constraints}": repr(host.constraints),
@@ -123,32 +113,47 @@ def _rust(rctx, mise, version):
         "%{strip_level}": repr(host.strip_level),
     })
 
-def _mise_impl(rctx):
-    mise = rctx.which("mise")
-    if mise == None:
-        fail("mise must be on PATH to locate installed tools")
-    rctx.watch(mise.realpath)
-    mise = str(mise)
-    if "rust" not in rctx.attr.tools:
-        rctx.file("BUILD.bazel", "")
-    for tool in rctx.attr.tools:
-        version = _version(rctx, tool)
-        if tool == "go":
-            _go(rctx, mise, version)
-        elif tool == "rust":
-            _rust(rctx, mise, version)
-        else:
-            _tool(rctx, mise, tool, version)
+def _mise_hub_impl(rctx):
+    rctx.file("BUILD.bazel", "")
+    for executable, repository in rctx.attr.tools.items():
+        rctx.file("tools/{}/BUILD.bazel".format(executable), """\
+alias(
+    name = "{executable}",
+    actual = "@{repository}//:{executable}",
+    visibility = ["//visibility:public"],
+)
+""".format(executable = executable, repository = repository))
 
-mise = repository_rule(
-    implementation = _mise_impl,
-    doc = "Links tools installed by mise, at the versions pinned in `config`.",
-    attrs = {
-        "config": attr.label(mandatory = True, allow_single_file = True, doc = "The mise configuration that pins tool versions."),
-        "tools": attr.string_list(mandatory = True, doc = "Configured tools to expose."),
-        "_rust_build": attr.label(default = Label("//mise/private:rust.BUILD.bazel.tpl")),
-    },
-    environ = ["HOME", "PATH", "MISE_DATA_DIR", "MISE_CONFIG_DIR", "RUSTUP_HOME", "MISE_RUSTUP_HOME", "CARGO_HOME", "MISE_CARGO_HOME"],
+_INSTALLED = {
+    "tool": attr.string(mandatory = True),
+    "version": attr.string(mandatory = True),
+}
+
+mise_tool = repository_rule(
+    implementation = _mise_tool_impl,
+    attrs = _INSTALLED | {"executable": attr.string(mandatory = True)},
+    environ = _ENVIRON,
     local = True,
     configure = True,
+)
+
+mise_go = repository_rule(
+    implementation = _mise_go_impl,
+    attrs = _INSTALLED,
+    environ = _ENVIRON,
+    local = True,
+    configure = True,
+)
+
+mise_rust = repository_rule(
+    implementation = _mise_rust_impl,
+    attrs = _INSTALLED | {"_build": attr.label(default = Label("//mise/private:rust.BUILD.bazel.tpl"))},
+    environ = _ENVIRON,
+    local = True,
+    configure = True,
+)
+
+mise_hub = repository_rule(
+    implementation = _mise_hub_impl,
+    attrs = {"tools": attr.string_dict(mandatory = True)},
 )

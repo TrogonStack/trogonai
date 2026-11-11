@@ -9,25 +9,18 @@ local_path_override(
     path = "projects/mise-bazel",
 )
 
-# Build tools are the ones mise installed, at the versions it pins.
-mise = use_repo_rule("@mise-bazel//mise:repositories.bzl", "mise")
-
-mise(
-    name = "mise",
-    config = "//.config/mise:config.toml",
-    tools = [
-        "buf",
-        "go",
-        "rust",
-    ],
-)
+# Every tool pinned in the mise configuration, linked from mise's installs.
+# Bazel resolves a tool only when a target uses it.
+mise = use_extension("@mise-bazel//mise:extensions.bzl", "mise")
+mise.config(file = "//.config/mise:config.toml")
+use_repo(mise, "mise", "mise_go", "mise_rust")
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(versions = [])
 
 register_toolchains(
-    "@mise//:rust_toolchain",
-    "@mise//:cargo_toolchain",
+    "@mise_rust//:rust_toolchain",
+    "@mise_rust//:cargo_toolchain",
 )
 
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
@@ -37,7 +30,7 @@ crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
 crate.from_cargo(
     name = "crates",
     cargo_lockfile = "//rsworkspace:Cargo.lock",
-    host_tools = "@mise//rust:ROOT",
+    host_tools = "@mise_rust//:ROOT",
     manifests = ["//rsworkspace:Cargo.toml"],
     supported_platform_triples = [
         "aarch64-apple-darwin",
@@ -47,7 +40,7 @@ crate.from_cargo(
 use_repo(crate, "crates")
 
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
-go_sdk.wrap(root_file = "@mise//go:ROOT")
+go_sdk.wrap(root_file = "@mise_go//:ROOT")
 
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.from_file(go_mod = "//goworkspace:go.mod")

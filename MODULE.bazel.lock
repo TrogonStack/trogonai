@@ -268,6 +268,174 @@
   },
   "selectedYankedVersions": {},
   "moduleExtensions": {
+    "@@mise-bazel+//mise:extensions.bzl%mise": {
+      "general": {
+        "bzlTransitiveDigest": "73YJKc8RQdkKrtDr2y1nJ8YVocMNgw6dQJeH9TDgSSI=",
+        "usagesDigest": "dnMvMkyLB/1kjDqZO50ReUEi0SbRl1IoO08MaAMa6NE=",
+        "recordedInputs": [
+          "REPO_MAPPING:mise-bazel+,toml.bzl toml.bzl+",
+          "FILE:@@//.config/mise/config.toml 9ba26827fad58a5d647d49235155d58d7e7c79c07e35eed5108e95fbce25dff9"
+        ],
+        "generatedRepoSpecs": {
+          "mise_bazel": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "bazel",
+              "version": "9.3.2",
+              "executable": "bazel"
+            }
+          },
+          "mise_buf": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "buf",
+              "version": "1.70.0",
+              "executable": "buf"
+            }
+          },
+          "mise_go": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_go",
+            "attributes": {
+              "tool": "go",
+              "version": "1.26.5"
+            }
+          },
+          "mise_kubeconform": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "kubeconform",
+              "version": "0.8.0",
+              "executable": "kubeconform"
+            }
+          },
+          "mise_ubi_open_telemetry_weaver": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "ubi:open-telemetry/weaver",
+              "version": "0.24.2",
+              "executable": "weaver"
+            }
+          },
+          "mise_cargo_cargo_dylint": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "cargo:cargo-dylint",
+              "version": "6.0.1",
+              "executable": "cargo-dylint"
+            }
+          },
+          "mise_cargo_dylint_link": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "cargo:dylint-link",
+              "version": "6.0.1",
+              "executable": "dylint-link"
+            }
+          },
+          "mise_cargo_protoc_gen_buffa": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "cargo:protoc-gen-buffa",
+              "version": "0.9.2",
+              "executable": "protoc-gen-buffa"
+            }
+          },
+          "mise_cargo_protoc_gen_buffa_packaging": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "cargo:protoc-gen-buffa-packaging",
+              "version": "0.9.2",
+              "executable": "protoc-gen-buffa-packaging"
+            }
+          },
+          "mise_cargo_cargo_component": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "cargo:cargo-component",
+              "version": "0.21.1",
+              "executable": "cargo-component"
+            }
+          },
+          "mise_cargo_cargo_deny": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "cargo:cargo-deny",
+              "version": "0.19.8",
+              "executable": "cargo-deny"
+            }
+          },
+          "mise_cargo_wasm_tools": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "cargo:wasm-tools",
+              "version": "1.250.0",
+              "executable": "wasm-tools"
+            }
+          },
+          "mise_node": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "node",
+              "version": "26.3.0",
+              "executable": "node"
+            }
+          },
+          "mise_pnpm": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "pnpm",
+              "version": "11.5.1",
+              "executable": "pnpm"
+            }
+          },
+          "mise_python": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "python",
+              "version": "3.14.5",
+              "executable": "python"
+            }
+          },
+          "mise_uv": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "uv",
+              "version": "0.11.18",
+              "executable": "uv"
+            }
+          },
+          "mise_rust": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_rust",
+            "attributes": {
+              "tool": "rust",
+              "version": "1.96.0"
+            }
+          },
+          "mise": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_hub",
+            "attributes": {
+              "tools": {
+                "bazel": "mise_bazel",
+                "buf": "mise_buf",
+                "kubeconform": "mise_kubeconform",
+                "weaver": "mise_ubi_open_telemetry_weaver",
+                "cargo-dylint": "mise_cargo_cargo_dylint",
+                "dylint-link": "mise_cargo_dylint_link",
+                "protoc-gen-buffa": "mise_cargo_protoc_gen_buffa",
+                "protoc-gen-buffa-packaging": "mise_cargo_protoc_gen_buffa_packaging",
+                "cargo-component": "mise_cargo_cargo_component",
+                "cargo-deny": "mise_cargo_cargo_deny",
+                "wasm-tools": "mise_cargo_wasm_tools",
+                "node": "mise_node",
+                "pnpm": "mise_pnpm",
+                "python": "mise_python",
+                "uv": "mise_uv"
+              }
+            }
+          }
+        }
+      }
+    },
     "@@rules_android+//rules/android_sdk_repository:rule.bzl%android_sdk_repository_extension": {
       "general": {
         "bzlTransitiveDigest": "+rMrzIrv7sImYmkbXJYv+gFpTJQ79X3MpwwMLI2A+oA=",
@@ -482,7 +650,7 @@
     "@@rules_rust+//crate_universe:extensions.bzl%crate": {
       "general": {
         "bzlTransitiveDigest": "wYmH1VcFv0E2V4ORNI+qNX384Yfmb7cqH48dghsHqzE=",
-        "usagesDigest": "35UcTn/Ze3SGTTtf1Sm9CvHu/f/UQnbidty6XQibt7E=",
+        "usagesDigest": "ufEAgbde+82H8Ve5DisC9ksJo7dXIOW8Q6v9+H0/in4=",
         "recordedInputs": [
           "ENV:CARGO_BAZEL_DEBUG \\0",
           "ENV:CARGO_BAZEL_GENERATOR_SHA256 \\0",
@@ -492,7 +660,7 @@
           "ENV:CARGO_BAZEL_REPIN_ONLY \\0",
           "ENV:CARGO_BAZEL_TIMEOUT \\0",
           "ENV:REPIN \\0",
-          "REPO_MAPPING:,mise +mise+mise",
+          "REPO_MAPPING:,mise_rust mise-bazel++mise+mise_rust",
           "REPO_MAPPING:bazel_features+,bazel_features_globals bazel_features++version_extension+bazel_features_globals",
           "REPO_MAPPING:bazel_features+,bazel_features_version bazel_features++version_extension+bazel_features_version",
           "REPO_MAPPING:rules_cc+,bazel_skylib bazel_skylib+",

@@ -101,3 +101,5 @@ toolchain(
     toolchain = ":cargo_impl",
     toolchain_type = "@rules_rust//cargo:toolchain_type",
 )
+
+exports_files(["ROOT"])
