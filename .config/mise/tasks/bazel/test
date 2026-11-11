@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Test the migrated native Bazel targets"
+set -euo pipefail
+
+exec bazel test //... "$@"
