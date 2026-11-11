@@ -11,10 +11,10 @@ use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use tracing::{info, instrument, warn};
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_semconv::span::LINEAR_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
@@ -60,7 +60,7 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 
 async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: &ClaimCheckPublisher<P, S>,
-    subject_prefix: &NatsToken,
+    subject_prefix: &DottedNatsToken,
     reason: RejectReason,
     body: Bytes,
     ack_timeout: NonZeroDuration,
@@ -84,7 +84,7 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     webhook_secret: LinearWebhookSecret,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     timestamp_tolerance: Option<NonZeroDuration>,
     nats_ack_timeout: NonZeroDuration,
 }
@@ -94,7 +94,7 @@ struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
     publisher: ClaimCheckPublisher<P, S>,
     credential_resolver: RuntimeCredentialResolver<G>,
     runtime_key: RuntimeIntegrationKey,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     timestamp_tolerance: Option<NonZeroDuration>,
     nats_ack_timeout: NonZeroDuration,
 }
@@ -277,7 +277,7 @@ where
 
 async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     timestamp_tolerance: Option<NonZeroDuration>,
     nats_ack_timeout: NonZeroDuration,
     body: Bytes,
