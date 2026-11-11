@@ -250,17 +250,9 @@ jobs:
       - name: Run decider-test suites
         run: mise run github-actions:decider-test-suites
 
-      - name: Install nextest
-        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
-        with:
-          tool: nextest
-
+      # decider-test-suites already runs the stable compile_fail check.
       - name: Run documentation tests
         run: cargo test --doc
-        working-directory: rsworkspace
-
-      - name: Check stable compiler diagnostics
-        run: cargo nextest run -p trogon-decider-guest-macros --all-features --test compile_fail
         working-directory: rsworkspace
 
       - name: Test a2a-gateway (default features)
