@@ -1,0 +1,16 @@
+alias(
+    name = "buf",
+    actual = "@mise//tools/buf",
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "build",
+    srcs = [
+        "//goworkspace/cmd/protoc-gen-wit",
+        "//proto/trogonai/scheduler/schedules/v1:schedule_status_descriptor",
+        "//proto/trogonai/scheduler/schedules/v1:schedule_status_wit",
+        "//rsworkspace/crates/platform/trogon-config-value",
+    ],
+    visibility = ["//visibility:public"],
+)
