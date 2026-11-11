@@ -79,7 +79,17 @@ where
             .with_authorizer(&self.authorizer)
             .execute()
             .await
-            .map_err(EnrollServiceError::Execution)?;
+            .map_err(|error| match error {
+                trogon_decider_runtime::CommandError::Append(source)
+                    if self.store.classify_append_failure(&source)
+                        == trogon_decider_runtime::AppendFailure::WriteConflict =>
+                {
+                    EnrollServiceError::Execution(trogon_decider_runtime::CommandError::Decide(
+                        trogon_peer::EnrollError::AlreadyEnrolled,
+                    ))
+                }
+                error => EnrollServiceError::Execution(error),
+            })?;
         Ok(v1alpha1::EnrollResponse {
             peer_id: result.state.enrollment.peer_id.clone(),
             attachment: result.state.attachment,

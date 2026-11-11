@@ -10,6 +10,7 @@ use sha2::Sha256;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::AdvancedMockNatsClient;
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
@@ -56,7 +57,7 @@ fn current_timestamp() -> String {
 
 fn test_config() -> SlackConfig {
     SlackConfig {
-        subject_prefix: NatsToken::new("slack").unwrap(),
+        subject_prefix: DottedNatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         ack_budget: AckBudget::default(),
@@ -520,7 +521,7 @@ async fn subject_uses_configured_prefix() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
     let config = SlackConfig {
-        subject_prefix: NatsToken::new("custom").unwrap(),
+        subject_prefix: DottedNatsToken::new("custom").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         ack_budget: AckBudget::default(),
@@ -647,7 +648,7 @@ async fn ack_timeout_returns_500() {
     let _guard = tracing_guard();
     let publisher = AckFailPublisher::hanging();
     let config = SlackConfig {
-        subject_prefix: NatsToken::new("slack").unwrap(),
+        subject_prefix: DottedNatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         ack_budget: AckBudget::new(Some(NonZeroDuration::from_millis(10).unwrap())),
