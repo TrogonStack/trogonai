@@ -73,7 +73,7 @@ for (const event of ['pull_request', 'push']) {
 const rustInputs = [
   'rsworkspace/crates/platform/trogon-gateway/src/lib.rs',
   'rsworkspace/Cargo.lock', 'rsworkspace/rust-toolchain.toml',
-  '.github/actions/setup-rust/action.yml', 'mise.toml',
+  '.github/actions/setup-rust/action.yml', '.config/mise/config.toml', '.config/mise/mise.lock',
   '.config/mise/tasks/github-actions/rust-components',
   '.config/mise/tasks/github-actions/dylint-tests',
   '.config/mise/tasks/artifacts/wasm-components',
@@ -90,7 +90,8 @@ for (const file of [
   'goworkspace/internal/protowit/generate.go', 'goworkspace/go.mod',
   '.config/mise/tasks/check/go', '.config/mise/tasks/test/go/race',
   '.config/mise/tasks/build/go', '.config/mise/lib/shared.sh',
-  'proto/trogonai/scheduler/schedules/v1/schedule_completed.proto', 'buf.yaml', 'buf.lock', 'mise.toml',
+  'proto/trogonai/scheduler/schedules/v1/schedule_completed.proto', 'buf.yaml', 'buf.lock',
+  '.config/mise/config.toml', '.config/mise/mise.lock',
 ]) test(`Go dependency: ${file}`, () => assert.equal(selected('go', [file], 'pull_request'), true));
 
 for (const file of [
@@ -161,6 +162,17 @@ test('selection always runs with conservative fallback defaults', async () => {
   assert.equal((await evaluate(checkout.with['fetch-depth'], { github: { event_name: 'push' } })).coerceString(), '0');
 });
 
+test('CodeQL preserves the baseline configuration set for each selected language', async () => {
+  const matrix = workflows.codeql.jobs.analyze.strategy.matrix.language;
+  const baseline = ['go', 'javascript-typescript', 'rust'];
+  for (const language of baseline) {
+    const context = { needs: { changes: { outputs: { changes: JSON.stringify([language]) } } } };
+    const actual = Array.isArray(matrix) ? matrix
+      : (await evaluate(matrix, context)).values().map((item) => item.coerceString());
+    assert.deepEqual(actual, baseline, `${language} changes retain every baseline configuration`);
+  }
+});
+
 test('empty CodeQL matrices are skipped and selected build modes are preserved', async () => {
   const job = workflows.codeql.jobs.analyze;
   const init = job.steps.find((step) => step.name === 'Initialize CodeQL');
@@ -169,8 +181,7 @@ test('empty CodeQL matrices are skipped and selected build modes are preserved',
   for (const [language, expected] of [['go', 'autobuild'], ['rust', 'none'], ['javascript-typescript', 'none']]) {
     assert.equal((await evaluate(init.with['build-mode'], { matrix: { language } })).coerceString(), expected);
   }
-  const value = await evaluate(job.strategy.matrix.language, { needs: { changes: { outputs: { changes: '' } } } });
-  assert.deepEqual(value.values().map((item) => item.coerceString()), ['go', 'javascript-typescript', 'rust']);
+  assert.deepEqual(job.strategy.matrix.language, ['go', 'javascript-typescript', 'rust']);
 });
 
 test('actual direct and transitive mise dependencies remain selected', () => {
@@ -195,7 +206,7 @@ test('automation changes exercise the same filters, GitHub expressions, and cana
   const workflow = load('.github/workflows/ci-automation.yml');
   const files = ['tests/github_actions/test_canary_is_branch_tip.py', '.github/workflows/ci-rust.yml', '.github/filters/ci.yml'];
   for (const event of ['push', 'pull_request']) assert.equal(matches(workflow.on[event].paths, files), true);
-  assert.equal(workflow.jobs.verify.steps.at(-1).run, 'mise exec python@3.14.5 node@26.3.0 github:rhysd/actionlint@1.7.12 -- mise run --skip-tools github:workflows:ci-automation:verify');
+  assert.equal(workflow.jobs.verify.steps.at(-1).run, 'mise run --skip-tools github:workflows:ci-automation:verify');
   const task = fs.readFileSync(path.join(root, '.config/mise/tasks/github/workflows/ci-automation/verify'), 'utf8');
   assert.match(task, /node --test tests\/github_actions\/test_ci_selection.mjs/);
   assert.match(task, /python3 -m unittest discover -s tests\/github_actions/);
@@ -214,6 +225,8 @@ test('selection starts with approved actions and the repo-owned CLI', () => {
 test('actionlint installs through the supported mise backend', () => {
   const job = load('.github/workflows/ci-automation.yml').jobs.verify;
   const installer = job.steps.find((step) => step.uses?.startsWith('jdx/mise-action@'));
-  assert.match(installer.with.install_args, /github:rhysd\/actionlint@1\.7\.12/);
+  assert.match(installer.with.install_args, /github:rhysd\/actionlint/);
+  const tools = fs.readFileSync(path.join(root, '.config/mise/config.toml'), 'utf8');
+  assert.match(tools, /^"github:rhysd\/actionlint" = "\d+\.\d+\.\d+"$/m);
   assert.equal(job.steps.some((step) => step.uses?.startsWith('taiki-e/install-action@')), false);
 });
