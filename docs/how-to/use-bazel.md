@@ -17,19 +17,17 @@ mise run --skip-tools bazel:build
 mise run --skip-tools bazel:test
 ```
 
-`.config/mise/config.toml` is the version authority for Bazel, Buf, Rust, and Go. Bazel imports
-mise's installed Rust and Go SDKs as native toolchains, including their compiler
-and standard-library files as build inputs. It resolves the real Rust toolchain
-rather than running rustup launchers inside build actions. Missing SDKs fail with
-an installation hint; Bazel does not install them during a build.
+`.config/mise/config.toml` is the version authority for Bazel, Buf, Rust, and Go,
+and mise installs all of them. Bazel never downloads or installs these tools
+itself. The local [`mise-bazel`](../../projects/mise-bazel/README.md) module links
+mise's installed Buf, Go SDK, and Rust toolchain into the `@mise` repository and
+provides Go and Rust as native toolchains. Their compiler, standard-library, and
+executable files become hashed build inputs, so cached results follow the
+installed versions rather than an arbitrary `buf` or `go` on `PATH`. Missing tools
+fail with an installation hint. The Rust toolchain supports macOS ARM64 and Linux
+x86-64 execution hosts.
 
-Buf comes from the generated `.config/mise/mise.lock` through
-[`rules_mise`](https://github.com/amartani/rules_mise): Bazel downloads the
-host's locked release URL, verifies its SHA256 checksum, and materializes the
-binary for its sandbox and hashes it as a test input. It does not rely on
-an arbitrary `buf` executable on `PATH`. Rule sets and the protobuf compiler
-remain Bazel dependencies. The supported execution hosts are macOS ARM64 and
-Linux x86-64.
+Rule sets and the protobuf compiler remain Bazel dependencies.
 
 The cached build uses the `.config/mise/config.toml` pins, independent of local
 tool-version overrides. Keep the generated tool lock aligned after editing those pins:
@@ -130,7 +128,8 @@ migrate the remaining Rust crates, TypeScript packages, full Buf module, release
 automation, or Dagger pipelines.
 
 The root `MODULE.bazel` only declares the module, because Bazel requires it at
-the repository root. It includes `.config/bazel/deps.MODULE.bazel`, which pins
+the repository root. The root `BUILD.bazel` is empty and exists because
+crate_universe resolves `//:MODULE.bazel`, which needs a root package. It includes `.config/bazel/deps.MODULE.bazel`, which pins
 rule sets, toolchains, and dependency extensions. Rust dependencies come from the Cargo workspace:
 crate_universe reads `rsworkspace/Cargo.toml` and `rsworkspace/Cargo.lock`, so
 Bazel and Cargo resolve the same versions with no second list to keep aligned.

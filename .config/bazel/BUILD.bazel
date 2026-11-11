@@ -4,11 +4,6 @@ alias(
     visibility = ["//visibility:public"],
 )
 
-exports_files([
-    "mise_sdks.bzl",
-    "rust_sdk.BUILD.bazel.tpl",
-])
-
 filegroup(
     name = "build",
     srcs = [

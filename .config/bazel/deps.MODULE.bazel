@@ -3,29 +3,31 @@ bazel_dep(name = "rules_rust", version = "0.75.0")
 bazel_dep(name = "rules_go", version = "0.65.0")
 bazel_dep(name = "gazelle", version = "0.54.0")
 bazel_dep(name = "platforms", version = "1.1.0")
-bazel_dep(name = "rules_mise", version = "1.0.0")
-bazel_dep(name = "toml.bzl", version = "0.3.0")
+bazel_dep(name = "mise-bazel")
+local_path_override(
+    module_name = "mise-bazel",
+    path = "projects/mise-bazel",
+)
 
-# Downloadable tools come from the mise lockfile, verified by its checksums.
-mise = use_extension("@rules_mise//mise:extensions.bzl", "mise")
-mise.hub(lockfile = "//.config/mise:mise.lock")
-use_repo(mise, "mise")
+# Build tools are the ones mise installed, at the versions it pins.
+mise = use_repo_rule("@mise-bazel//mise:repositories.bzl", "mise")
 
-register_toolchains("@mise//toolchains:all")
-
-mise_sdks = use_repo_rule("//.config/bazel:mise_sdks.bzl", "mise_sdks")
-
-mise_sdks(
-    name = "mise_sdks",
+mise(
+    name = "mise",
     config = "//.config/mise:config.toml",
+    tools = [
+        "buf",
+        "go",
+        "rust",
+    ],
 )
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(versions = [])
 
 register_toolchains(
-    "@mise_sdks//:rust_toolchain",
-    "@mise_sdks//:cargo_toolchain",
+    "@mise//:rust_toolchain",
+    "@mise//:cargo_toolchain",
 )
 
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
@@ -35,7 +37,7 @@ crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
 crate.from_cargo(
     name = "crates",
     cargo_lockfile = "//rsworkspace:Cargo.lock",
-    host_tools = "@mise_sdks//rust:ROOT",
+    host_tools = "@mise//rust:ROOT",
     manifests = ["//rsworkspace:Cargo.toml"],
     supported_platform_triples = [
         "aarch64-apple-darwin",
@@ -45,7 +47,7 @@ crate.from_cargo(
 use_repo(crate, "crates")
 
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
-go_sdk.wrap(root_file = "@mise_sdks//go:ROOT")
+go_sdk.wrap(root_file = "@mise//go:ROOT")
 
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.from_file(go_mod = "//goworkspace:go.mod")
