@@ -19,7 +19,7 @@ mise run --skip-tools bazel:test
 
 `.config/mise/config.toml` is the version authority for Bazel, Buf, Rust, and Go,
 and mise installs all of them. Bazel never downloads or installs these tools
-itself. The local [`mise-bazel`](../../projects/mise-bazel/README.md) module links
+itself. The local `projects/mise-bazel` module links
 each tool pinned there from mise's installs into its own Bazel repository, fetched
 only when a target uses it, and provides Go and Rust as native toolchains. Their compiler, standard-library, and
 executable files become hashed build inputs, so cached results follow the

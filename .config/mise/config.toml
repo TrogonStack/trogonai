@@ -1,5 +1,6 @@
 [tools]
 bazel = "9.3.2"
+"github:rhysd/actionlint" = "1.7.12"
 buf = "1.70.0"
 go = ["1.26.5", "1.27.3"]
 kubeconform = "0.8.0"
