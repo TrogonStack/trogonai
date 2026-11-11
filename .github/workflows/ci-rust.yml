@@ -5,10 +5,13 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
+  # Rebuilds the shared Rust caches on main without waiting for a Rust change.
+  workflow_dispatch:
 
 concurrency:
   group: ci-rust-${{ github.ref }}
-  cancel-in-progress: true
+  # main runs are the only ones that save the shared caches every PR restores.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,6 +19,10 @@ env:
   # Source-built mise tools (dylint-link, cargo-component, ...) fetch crates from
   # crates.io during install; raise retry tolerance for spurious network errors.
   CARGO_NET_RETRY: '10'
+  # Debug info is most of the test target; without it the saved caches fit the
+  # repository cache quota instead of evicting each other.
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
 
 permissions:
   contents: read
@@ -58,7 +65,7 @@ jobs:
         with:
           prefix-key: v1-rust
           workspaces: rsworkspace -> target
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -108,7 +115,7 @@ jobs:
         with:
           prefix-key: v1-rust
           workspaces: rsworkspace -> target
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install coverage tools
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
@@ -138,6 +145,8 @@ jobs:
 
       - name: Run tests with coverage
         run: mise run --skip-tools github-actions:rust-coverage
+        env:
+          NEXTEST_PROFILE: ci
 
       - name: Coverage report and gate
         # TODO: Add a fork-safe read-only coverage comparison path; this action writes to
@@ -151,9 +160,12 @@ jobs:
           diff: true
           diff-branch: main
           diff-storage: _xml_coverage_reports
-          uncovered-statements-increase-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
-          new-uncovered-statements-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
-          coverage-rate-reduction-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          # Pull requests are the gate. main only records its baseline, which the
+          # action stores only after the gate passes, so failing here once would
+          # keep main red until coverage returned to the stale baseline.
+          uncovered-statements-increase-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          new-uncovered-statements-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          coverage-rate-reduction-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
           togglable-report: true
           report-low-coverage-only: true
 
@@ -182,7 +194,7 @@ jobs:
         with:
           prefix-key: v1-rust
           workspaces: rsworkspace -> target
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build release
         run: cargo build --release
@@ -210,7 +222,7 @@ jobs:
         with:
           prefix-key: v1-rust
           workspaces: rsworkspace -> target
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build decider components
         run: mise run artifacts:wasm-components
