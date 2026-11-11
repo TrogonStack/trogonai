@@ -1,0 +1,14 @@
+go:
+  - 'goworkspace/**'
+  - 'mise.toml'
+  - '.github/codeql/**'
+
+javascript-typescript:
+  - 'tsworkspace/**'
+  - 'mise.toml'
+  - '.github/codeql/**'
+
+rust:
+  - 'rsworkspace/**'
+  - 'mise.toml'
+  - '.github/codeql/**'

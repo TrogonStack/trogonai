@@ -44,7 +44,7 @@ message GetRunHistoryResponse {
   // Items rendered as RUN_HISTORY_ITEM_KIND_ELIDED because they need a variant
   // newer than the caller's contract minor.
   uint32 contract_clamped_count = 4 [features.field_presence = LEGACY_REQUIRED];
-  // Items whose content was withheld by redaction or authorization.
+  // Items whose content was withheld by redaction, authorization, or vocabulary screening.
   uint32 withheld_count = 5 [features.field_presence = LEGACY_REQUIRED];
   // How current the read model was when the scan opened. Equal on every page.
   ProjectionFreshness freshness = 6 [features.field_presence = LEGACY_REQUIRED];

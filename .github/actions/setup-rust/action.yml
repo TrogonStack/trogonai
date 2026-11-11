@@ -2,6 +2,10 @@ name: Setup Rust
 description: Install the mise-pinned Rust toolchain and required rustup components
 
 inputs:
+  install-args:
+    description: Job-specific tools to install from mise.toml
+    required: false
+    default: rust
   dylint-toolchain-dir:
     description: Directory containing the rust-toolchain.toml for repo Dylint rules
     required: false
@@ -11,6 +15,8 @@ runs:
   using: composite
   steps:
     - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+      with:
+        install_args: ${{ inputs.install-args }}
 
     - name: Install Rust components
       shell: bash

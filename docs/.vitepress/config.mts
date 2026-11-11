@@ -25,11 +25,21 @@ export default async () => {
       },
       nav: [
         { text: "Docs", link: "/get-started/" },
+        { text: "Releases", link: "/releases/" },
         { text: "ADRs", link: "/adr/" },
         { text: "Glossary", link: "/glossary/" },
         { text: "GitHub", link: "https://github.com/TrogonStack/trogonai" },
       ],
       sidebar: {
+        "/releases/": [
+          {
+            text: "Releases",
+            items: [
+              { text: "Overview", link: "/releases/" },
+              { text: "Release channels", link: "/releases/channels" },
+            ],
+          },
+        ],
         "/adr/": [
           {
             text: "Architecture Decision Records",
@@ -243,6 +253,7 @@ export default async () => {
           {
             text: "Browse",
             items: [
+              { text: "Releases", link: "/releases/" },
               { text: "Glossary", link: "/glossary/" },
               { text: "Architecture Decision Records", link: "/adr/" },
             ],

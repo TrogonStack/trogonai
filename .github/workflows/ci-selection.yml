@@ -1,0 +1,51 @@
+name: CI Selection
+
+on:
+  workflow_call:
+    inputs:
+      filters:
+        required: true
+        type: string
+    outputs:
+      rust:
+        value: ${{ jobs.filter.outputs.rust }}
+      go:
+        value: ${{ jobs.filter.outputs.go }}
+      proto:
+        value: ${{ jobs.filter.outputs.proto }}
+      changes:
+        value: ${{ jobs.filter.outputs.changes }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  filter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.filter.outputs.rust || 'true' }}
+      go: ${{ steps.filter.outputs.go || 'true' }}
+      proto: ${{ steps.filter.outputs.proto || 'true' }}
+      changes: ${{ steps.filter.outputs.changes || '["go","javascript-typescript","rust"]' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
+          persist-credentials: false
+
+      - name: Install selector runtime
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install_args: node@26.3.0
+
+      - name: Install selector dependencies
+        run: mise exec node@26.3.0 -- mise run --skip-tools github:workflows:ci-selection:install
+
+      - name: Select affected checks
+        id: filter
+        env:
+          CI_FILTERS: ${{ inputs.filters }}
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec node@26.3.0 -- mise run --skip-tools github:workflows:ci-selection:filter
