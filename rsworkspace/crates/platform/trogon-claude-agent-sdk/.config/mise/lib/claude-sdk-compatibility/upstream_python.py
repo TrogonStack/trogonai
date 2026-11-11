@@ -1,7 +1,29 @@
 import ast
 import hashlib
 
-from gate_errors import Code, GateError
+from gate_errors import Code, GateError, format_boundary
+
+
+SELECTED_ALIASES = {
+    "PermissionMode",
+    "SettingSource",
+    "EffortLevel",
+    "AssistantMessageError",
+    "MessageOriginKind",
+    "ContentBlock",
+    "Message",
+}
+
+def _literal_items(value):
+    if not isinstance(value, ast.Subscript) or not isinstance(value.value, ast.Name) or value.value.id != "Literal":
+        return None
+    items = value.slice.elts if isinstance(value.slice, ast.Tuple) else [value.slice]
+    if not items or not all(isinstance(v, ast.Constant) and isinstance(v.value, str) for v in items):
+        raise GateError(Code.FORMAT, "python-literal")
+    literals = sorted(v.value for v in items)
+    if len(literals) != len(set(literals)):
+        raise GateError(Code.FORMAT, "python-literal")
+    return literals
 
 
 def reject_unreviewed_bindings(tree, selected, approved):
@@ -36,6 +58,7 @@ def reject_unreviewed_bindings(tree, selected, approved):
     visit(tree)
 
 
+@format_boundary("python-types")
 def extract(contents, expected_hash):
     if len(contents) > 2 * 1024 * 1024 or hashlib.sha256(contents).hexdigest() != expected_hash:
         raise GateError(Code.PIN, "python-types")
@@ -48,12 +71,19 @@ def extract(contents, expected_hash):
         raise GateError(Code.FORMAT, "ClaudeAgentOptions")
     if options[0].bases or options[0].keywords or options[0].type_params:
         raise GateError(Code.FORMAT, "ClaudeAgentOptions.inheritance-or-generics")
-    selected = {"ClaudeAgentOptions", "PermissionMode", "SettingSource"}
+    selected = {"ClaudeAgentOptions"} | SELECTED_ALIASES
     approved = {id(options[0])}
+    seen_selected = set()
     for statement in tree.body:
         if isinstance(statement, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            if statement.name in selected and statement is not options[0]:
+            if statement.name in SELECTED_ALIASES:
                 raise GateError(Code.FORMAT, statement.name)
+            if statement.name in selected and statement.name in seen_selected:
+                raise GateError(Code.FORMAT, statement.name)
+            if statement.name in selected:
+                seen_selected.add(statement.name)
+            if isinstance(statement, ast.ClassDef) and statement.name in selected:
+                approved.add(id(statement))
         elif isinstance(statement, ast.TypeAlias) and statement.name.id in selected:
             raise GateError(Code.FORMAT, statement.name.id)
         elif isinstance(statement, (ast.Assign, ast.AnnAssign)):
@@ -88,19 +118,23 @@ def extract(contents, expected_hash):
             name, value = node.target.id, node.value
         elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             name, value = node.targets[0].id, node.value
-        if name not in ("PermissionMode", "SettingSource"):
+        if name not in SELECTED_ALIASES:
             continue
-        if name in aliases or not isinstance(value, ast.Subscript) or not isinstance(value.value, ast.Name) or value.value.id != "Literal":
+        if name in aliases:
             raise GateError(Code.FORMAT, name)
-        items = value.slice.elts if isinstance(value.slice, ast.Tuple) else [value.slice]
-        if not items or not all(isinstance(v, ast.Constant) and isinstance(v.value, str) for v in items):
+        if value is None:
             raise GateError(Code.FORMAT, name)
-        literals = sorted(v.value for v in items)
-        if len(literals) != len(set(literals)):
+        literals = _literal_items(value)
+        if literals is not None:
+            aliases[name] = literals
+            result[name] = {"literals": literals}
+            result.update({name + "." + literal: {"kind": "literal"} for literal in literals})
+        elif isinstance(value, (ast.BinOp, ast.Name, ast.Subscript)):
+            if any(isinstance(node, ast.BinOp) and not isinstance(node.op, ast.BitOr) for node in ast.walk(value)):
+                raise GateError(Code.FORMAT, name)
+            result[name] = {"kind": "alias", "annotation": ast.unparse(value)}
+        else:
             raise GateError(Code.FORMAT, name)
-        aliases[name] = literals
-        result[name] = {"literals": literals}
-        result.update({name + "." + value: {"kind": "literal"} for value in literals})
-    if set(aliases) != {"PermissionMode", "SettingSource"}:
+    if not {"PermissionMode", "SettingSource"}.issubset(aliases):
         raise GateError(Code.FORMAT, "selected-python-aliases")
     return result
