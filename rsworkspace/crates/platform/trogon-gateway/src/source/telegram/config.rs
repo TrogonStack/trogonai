@@ -1,8 +1,8 @@
 use std::fmt;
 
 use reqwest::Url;
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
+use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_std::{EmptySecretError, NonZeroDuration, SecretString};
 
 #[derive(Clone)]
@@ -109,7 +109,7 @@ pub struct TelegramWebhookRegistrationConfig {
 pub struct TelegramSourceConfig {
     pub webhook_secret: TelegramWebhookSecret,
     pub registration: Option<TelegramWebhookRegistrationConfig>,
-    pub subject_prefix: NatsToken,
+    pub subject_prefix: DottedNatsToken,
     pub stream_name: NatsToken,
     pub stream_max_age: StreamMaxAge,
     pub nats_ack_timeout: NonZeroDuration,
