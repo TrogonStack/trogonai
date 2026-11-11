@@ -113,6 +113,19 @@ class RustDocument:
             return {kind: [self.type(v) for v in body]}
         if kind == "slice":
             return {kind: self.type(body)}
+        if kind == "impl_trait":
+            require(isinstance(body, list), "rust-bounds")
+            for bound in body:
+                require(isinstance(bound, dict) and len(bound) == 1, "rust-bound")
+                if "trait_bound" in bound:
+                    trait = bound["trait_bound"]
+                    require(set(trait) == {"trait", "generic_params", "modifier"}
+                            and trait["modifier"] in ("none", "maybe", "maybe_const"), "rust-bound")
+                    self.path(trait["trait"])
+                    require(isinstance(trait["generic_params"], list), "rust-bound")
+                else:
+                    require(set(bound) == {"outlives"} and isinstance(bound["outlives"], str), "rust-bound")
+            return {kind: self.normalize(body)}
         fields = {"borrowed_ref": {"lifetime", "is_mutable", "type"},
                   "raw_pointer": {"is_mutable", "type"}, "array": {"type", "len"}}
         if kind in fields:

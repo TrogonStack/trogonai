@@ -46,3 +46,12 @@ class ReferenceTests(unittest.TestCase):
         for arguments in ({"future_args": []}, {"angle_bracketed": {"args": [{"future": "T"}], "constraints": []}}):
             with self.assertRaises(GateError):
                 RustDocument(self.doc).type(path(9, arguments))
+
+    def test_impl_trait_bound_uses_external_canonical_path(self):
+        value = {"impl_trait": [{"trait_bound": {"trait": path(9)["resolved_path"],
+            "generic_params": [], "modifier": "none"}}, {"outlives": "'a"}]}
+        expected = {"impl_trait": [{"trait_bound": {"trait": {"path": "alloc::vec::Vec", "args": None},
+            "generic_params": [], "modifier": "none"}}, {"outlives": "'a"}]}
+        self.assertEqual(RustDocument(self.doc).type(value), expected)
+        with self.assertRaises(GateError):
+            RustDocument(self.doc).type({"impl_trait": [{"future_bound": {}}]})
