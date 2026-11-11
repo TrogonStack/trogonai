@@ -57,6 +57,8 @@ def workspace_crate(
         args = unit_test_args,
         crate = ":" + name,
         compile_data = compile_data,
+        # A test compiles the crate again and takes features from its own attributes.
+        crate_features = crate_features,
         data = data,
         proc_macro_deps = test_proc_macro_deps,
         rustc_flags = _RUSTC_FLAGS,

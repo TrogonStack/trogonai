@@ -10,6 +10,8 @@ workspace_crate(
     integration_tests = {
         # Scans the source of sibling crates, which are not inputs of this package.
         "subject_literal_policy": {"tags": ["manual"]},
-        "tls_handshake": {},
+        "tls_handshake": {"tags": ["requires-network"]},
     },
+    # Some tests start a NATS server in a container through Docker.
+    unit_test_tags = ["requires-network"],
 )
