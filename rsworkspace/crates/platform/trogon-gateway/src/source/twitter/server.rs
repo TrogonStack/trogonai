@@ -10,10 +10,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, instrument, warn};
+use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
-use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_semconv::span::TWITTER_CRC;
 use trogon_semconv::span::TWITTER_WEBHOOK;
 use trogon_std::NonZeroDuration;
@@ -68,7 +68,7 @@ impl PayloadKind {
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     consumer_secret: TwitterConsumerSecret,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
 
@@ -77,7 +77,7 @@ struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
     publisher: ClaimCheckPublisher<P, S>,
     credential_resolver: RuntimeCredentialResolver<G>,
     runtime_key: RuntimeIntegrationKey,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
 
@@ -103,7 +103,7 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 
 async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: &ClaimCheckPublisher<P, S>,
-    subject_prefix: &NatsToken,
+    subject_prefix: &DottedNatsToken,
     reason: RejectReason,
     body: Bytes,
     ack_timeout: NonZeroDuration,
@@ -305,7 +305,7 @@ where
 
 async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
     body: Bytes,
 ) -> StatusCode {
