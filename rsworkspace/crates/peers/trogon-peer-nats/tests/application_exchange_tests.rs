@@ -1,6 +1,7 @@
 #[path = "support/application.rs"]
 mod application;
 mod support;
+use async_nats::service::ServiceExt as _;
 use grpc_nats_micro::{ContentType, ReplyError, constants::HEADER_CONTENT_TYPE};
 use std::{sync::atomic::Ordering, time::Duration};
 use support::{
@@ -77,8 +78,9 @@ async fn authenticated_two_peer_rpc_preserves_durable_exchange_replay_ack_and_se
     let config = PeerStoreConfig::new(PeerTenant::new("tenant")?, PeerStorageBudget::new(16_777_216)?);
     let store = PeerJetStreamStore::open(async_nats::jetstream::new(service.clone()), &config).await?;
     let backend = application::compose(store.clone(), &fixture);
-    let registration = serve_peer_rpc(&service, account()?, backend.clone()).await?;
-    observed_barrier(&service).await?;
+    let (registration_client, _, mut registration_closed) = broker.connect_with_closed("service").await?;
+    let registration = serve_peer_rpc(&registration_client, account()?, backend.clone()).await?;
+    observed_barrier(&registration_client).await?;
     let enrolled = alice.enroll(&Fixture::enrollment("alice")).await?;
     let recipient = bob.enroll(&Fixture::enrollment("bob")).await?;
     assert_eq!(enrolled.attachment.attachment_ref.as_option(), Some(&fixture.a));
@@ -211,15 +213,25 @@ async fn authenticated_two_peer_rpc_preserves_durable_exchange_replay_ack_and_se
     )?;
     let winning = state.batches[0].clone();
     assert!(!winning.acknowledged_at.is_set());
-    registration.stop().await?;
+    stop_registration(registration, &registration_client, &mut registration_closed).await?;
     drop(backend);
     let backend = application::compose(
         PeerJetStreamStore::open(async_nats::jetstream::new(service.clone()), &config).await?,
         &fixture,
     );
-    let _registration = serve_peer_rpc(&service, account()?, backend.clone()).await?;
-    observed_barrier(&service).await?;
+    let (registration_client, _, mut registration_closed) = broker.connect_with_closed("service").await?;
+    let registration = serve_peer_rpc(&registration_client, account()?, backend.clone()).await?;
+    observed_barrier(&registration_client).await?;
     let prepared = bob.prepare_batch(&prepare).await?;
+    let stats = registration.stats().await;
+    assert_eq!(
+        stats
+            .get("PrepareBatch")
+            .ok_or("missing replacement endpoint statistics")?
+            .requests,
+        1,
+        "lost-reply replay must be served by the replacement registration"
+    );
     assert_eq!(prepared, discarded);
     assert_eq!(
         ContentType::Protobuf.encode(&prepared)?.as_slice(),
@@ -361,8 +373,47 @@ async fn authenticated_two_peer_rpc_preserves_durable_exchange_replay_ack_and_se
         attachment_ref: fixture.b.clone().into(),
     })
     .await?;
+    stop_registration(registration, &registration_client, &mut registration_closed).await?;
     println!(
-        "authenticated TLS/nkey two-peer application exchange passed: enroll/resume isolation, durable send/retry, explicit trusted intake, lost preparation reply, store/service reconstruction, exact cached replay, application ack, separate sender settlement/status, RETRY_UNAVAILABLE and policy denial"
+        "authenticated TLS/nkey two-peer application exchange passed: enroll/resume isolation, durable send/retry, explicit trusted intake, lost preparation reply, same-process registration replacement with shared disposable ports, exact cached replay, application ack, separate sender settlement/status, RETRY_UNAVAILABLE and policy denial"
     );
+    Ok(())
+}
+
+async fn stop_registration(
+    registration: async_nats::service::Service,
+    client: &async_nats::Client,
+    closed: &mut tokio::sync::mpsc::Receiver<()>,
+) -> TestResult {
+    registration.stop().await?;
+    client.drain().await?;
+    tokio::time::timeout(PROBE_TIMEOUT, closed.recv())
+        .await?
+        .ok_or("registration transport never closed")?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn registration_teardown_closes_transport_even_before_endpoint_observes_stop() -> TestResult {
+    let broker = Broker::start().await?;
+    let (store_client, _) = broker.connect("service").await?;
+    let (registration_client, _, mut closed) = broker.connect_with_closed("service").await?;
+    let registration = registration_client.service_builder().start("teardown", "0.1.0").await?;
+    // Keeping this endpoint unpolled prevents it from observing the stop broadcast.
+    let mut endpoint = registration.endpoint("fixture.teardown").await?;
+    observed_barrier(&registration_client).await?;
+    store_client.publish("fixture.teardown", vec![1].into()).await?;
+    observed_barrier(&store_client).await?;
+    stop_registration(registration, &registration_client, &mut closed).await?;
+    let buffered = tokio::time::timeout(PROBE_TIMEOUT, futures::StreamExt::next(&mut endpoint))
+        .await?
+        .ok_or("missing buffered endpoint request")?;
+    assert_eq!(buffered.message.payload.as_ref(), &[1]);
+    assert!(
+        tokio::time::timeout(PROBE_TIMEOUT, futures::StreamExt::next(&mut endpoint))
+            .await?
+            .is_none()
+    );
+    observed_barrier(&store_client).await?;
     Ok(())
 }

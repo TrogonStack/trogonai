@@ -109,7 +109,7 @@ async fn tls_authenticated_connections_deny_impersonation_inboxes_and_all_storag
     denied_subscription(&alice, &mut errors, "_INBOX.tenant.alice.two.probe").await?;
     denied_subscription(&alice_other, &mut other_errors, "_INBOX.tenant.alice.one.probe").await?;
     let js = jetstream::new(service.clone());
-    let stream = js
+    let mut stream = js
         .create_stream(stream::Config {
             name: "PROBE".into(),
             subjects: vec!["fixture.data".into()],
@@ -159,6 +159,8 @@ async fn tls_authenticated_connections_deny_impersonation_inboxes_and_all_storag
         "TLS, nkey admission, own routes/inboxes, stream/KV reads, direct-get, consumer create/update and pull positive controls passed"
     );
     for (subject, payload) in [
+        ("fixture.data", vec![7, 8, 9]),
+        ("$KV.PROBE.key", vec![7, 8, 9]),
         (
             "$JS.API.STREAM.MSG.GET.PROBE",
             serde_json::to_vec(&StreamRead { seq: ack.sequence })?,
@@ -201,6 +203,12 @@ async fn tls_authenticated_connections_deny_impersonation_inboxes_and_all_storag
     }
     denied_subscription(&alice, &mut errors, "fixture.data").await?;
     denied_subscription(&alice, &mut errors, "$KV.PROBE.key").await?;
+    assert_eq!(stream.get_raw_message(ack.sequence).await?.payload.as_ref(), &[1, 2, 3]);
+    assert_eq!(stream.info().await?.state.messages, 1);
+    assert_eq!(
+        kv.get("key").await?.ok_or("missing KV after denial")?.as_ref(),
+        &[4, 5, 6]
+    );
     assert!(errors.try_recv().is_err());
     Ok(())
 }

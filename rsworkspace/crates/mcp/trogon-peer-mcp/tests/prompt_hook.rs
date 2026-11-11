@@ -2119,17 +2119,12 @@ async fn runtime_signal_cancels_inflight_prompt_and_unbound_shutdown_never_enrol
             stop.send(()).expect("shutdown signal");
             server.await.expect("runtime task").expect("shutdown");
             let outcome = work.await.expect("MCP work task");
-            match outcome {
-                Ok(cancellation) => {
-                    assert_eq!(cancellation.is_error, Some(true));
-                    assert_eq!(
-                        cancellation.structured_content.expect("typed cancellation")["code"],
-                        json!("detached")
-                    );
-                }
-                Err(rmcp::ServiceError::TransportClosed | rmcp::ServiceError::Cancelled { .. }) => {}
-                Err(error) => panic!("unexpected MCP shutdown result: {error:?}"),
-            }
+            let cancellation = outcome.expect("MCP cancellation response");
+            assert_eq!(cancellation.is_error, Some(true));
+            assert_eq!(
+                cancellation.structured_content.expect("typed cancellation")["code"],
+                json!("request_cancelled")
+            );
             assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 1);
             assert!(started.elapsed() <= std::time::Duration::from_secs(1));
             assert!(
