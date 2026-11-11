@@ -11,6 +11,7 @@ use axum::body::Body;
 use axum::http::Request;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
@@ -36,7 +37,7 @@ fn test_config() -> PlaidConfig {
         client_id: PlaidClientId::new("client-1").unwrap(),
         secret: PlaidSecret::new("secret-1").unwrap(),
         api_base_url: PlaidApiBaseUrl::new("https://sandbox.plaid.com").unwrap(),
-        subject_prefix: NatsToken::new("plaid").unwrap(),
+        subject_prefix: DottedNatsToken::new("plaid").unwrap(),
         stream_name: NatsToken::new("PLAID").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
