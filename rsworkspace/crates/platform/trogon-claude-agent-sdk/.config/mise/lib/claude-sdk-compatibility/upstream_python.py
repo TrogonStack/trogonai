@@ -4,6 +4,38 @@ import hashlib
 from gate_errors import Code, GateError
 
 
+def reject_unreviewed_bindings(tree, selected, approved):
+    def check(name, node):
+        if name in selected and id(node) not in approved:
+            raise GateError(Code.FORMAT, "selected-python-binding:" + name)
+
+    def visit(node):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            check(node.name, node)
+            for field, value in ast.iter_fields(node):
+                if field != "body":
+                    for child in value if isinstance(value, list) else [value]:
+                        if isinstance(child, ast.AST):
+                            visit(child)
+            return
+        if isinstance(node, ast.Lambda):
+            visit(node.args)
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            check(node.id, node)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                check(alias.asname or alias.name.split(".")[0], alias)
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+            check(node.name, node)
+        elif isinstance(node, ast.MatchMapping):
+            check(node.rest, node)
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    visit(tree)
+
+
 def extract(contents, expected_hash):
     if len(contents) > 2 * 1024 * 1024 or hashlib.sha256(contents).hexdigest() != expected_hash:
         raise GateError(Code.PIN, "python-types")
@@ -17,6 +49,7 @@ def extract(contents, expected_hash):
     if options[0].bases or options[0].keywords or options[0].type_params:
         raise GateError(Code.FORMAT, "ClaudeAgentOptions.inheritance-or-generics")
     selected = {"ClaudeAgentOptions", "PermissionMode", "SettingSource"}
+    approved = {id(options[0])}
     for statement in tree.body:
         if isinstance(statement, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             if statement.name in selected and statement is not options[0]:
@@ -28,9 +61,12 @@ def extract(contents, expected_hash):
             names = {n.id for target in targets for n in ast.walk(target) if isinstance(n, ast.Name)} & selected
             if names and (len(targets) != 1 or not isinstance(targets[0], ast.Name) or "ClaudeAgentOptions" in names):
                 raise GateError(Code.FORMAT, "selected-python-rebinding")
+            if names:
+                approved.add(id(targets[0]))
         elif isinstance(statement, (ast.Import, ast.ImportFrom)):
             if any((alias.asname or alias.name.split(".")[0]) in selected for alias in statement.names):
                 raise GateError(Code.FORMAT, "selected-python-import")
+    reject_unreviewed_bindings(tree, selected, approved)
     result = {"ClaudeAgentOptions": {"kind": "class",
                                       "decorators": [ast.unparse(node) for node in options[0].decorator_list]}}
     for node in options[0].body:

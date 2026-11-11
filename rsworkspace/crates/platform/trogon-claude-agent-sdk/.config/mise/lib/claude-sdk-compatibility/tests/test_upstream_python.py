@@ -77,3 +77,25 @@ class PythonDeclarationTests(unittest.TestCase):
         with self.assertRaises(GateError) as caught:
             read(source)
         self.assertEqual(caught.exception.code, Code.FORMAT)
+
+    def test_module_control_flow_cannot_rebind_selected_declarations(self):
+        additions = (
+            b'if True:\n    PermissionMode = Literal["other"]\n',
+            b'for SettingSource in []: pass\n',
+            b'try:\n    pass\nexcept Exception as PermissionMode:\n    pass\n',
+            b'with context() as SettingSource: pass\n',
+            b'match value:\n    case {"kind": PermissionMode}: pass\n',
+            b'if True:\n    class ClaudeAgentOptions: pass\n',
+            b'if True:\n    from other import SettingSource\n',
+            b'if True:\n    del ClaudeAgentOptions\n',
+            b'value = (PermissionMode := Literal["other"])\n',
+        )
+        for addition in additions:
+            with self.subTest(addition=addition):
+                with self.assertRaises(GateError) as caught:
+                    read(SOURCE + b"\n" + addition)
+                self.assertEqual(caught.exception.code, Code.FORMAT)
+
+    def test_unrelated_local_bindings_do_not_replace_module_declarations(self):
+        addition = b'\ndef helper():\n    PermissionMode = str\nclass Other:\n    SettingSource = str\n'
+        self.assertEqual(read(SOURCE), read(SOURCE + addition))
