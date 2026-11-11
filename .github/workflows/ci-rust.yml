@@ -120,7 +120,9 @@ jobs:
         id: rust-cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          prefix-key: v1-rust
+          # Bumped with cache-workspace-crates: rust-cache leaves it out of the key
+          # and skips saving after an exact hit, so main would keep the old cache.
+          prefix-key: v2-rust
           workspaces: rsworkspace -> target
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
