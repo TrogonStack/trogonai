@@ -1,0 +1,45 @@
+name: CI Automation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/**'
+      - '.config/mise/tasks/**'
+      - '.config/mise/lib/**'
+      - 'tests/github_actions/**'
+      - '.config/mise/config.toml'
+      - '.config/mise/mise.lock'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/**'
+      - '.config/mise/tasks/**'
+      - '.config/mise/lib/**'
+      - 'tests/github_actions/**'
+      - '.config/mise/config.toml'
+      - '.config/mise/mise.lock'
+
+concurrency:
+  group: ci-automation-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install automation test tools
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install_args: python@3.14.5 node@26.3.0 github:rhysd/actionlint@1.7.12
+
+      - name: Validate workflow selection and canary helpers
+        run: mise exec python@3.14.5 node@26.3.0 github:rhysd/actionlint@1.7.12 -- mise run --skip-tools github:workflows:ci-automation:verify
