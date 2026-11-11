@@ -179,6 +179,8 @@ async fn snapshot_create_replies_cannot_weaken_retention_bound_or_import_other_b
     let f = Fixture::new().await?;
     let original: stream::Config = serde_json::from_value(f.snapshots["config"].clone())?;
     for (label, expected) in [
+        ("retention", PeerSnapshotConfigMismatchError::Retention),
+        ("ttl", PeerSnapshotConfigMismatchError::MessageTtl),
         ("history", PeerSnapshotConfigMismatchError::History),
         ("bytes", PeerSnapshotConfigMismatchError::MaxBytes),
         ("value", PeerSnapshotConfigMismatchError::MaxValueSize),
@@ -191,6 +193,8 @@ async fn snapshot_create_replies_cannot_weaken_retention_bound_or_import_other_b
     ] {
         let mut actual = original.clone();
         match expected {
+            PeerSnapshotConfigMismatchError::Retention => actual.retention = stream::RetentionPolicy::Interest,
+            PeerSnapshotConfigMismatchError::MessageTtl => actual.allow_message_ttl = true,
             PeerSnapshotConfigMismatchError::History => actual.max_messages_per_subject = 2,
             PeerSnapshotConfigMismatchError::MaxBytes => actual.max_bytes -= 1,
             PeerSnapshotConfigMismatchError::MaxValueSize => actual.max_message_size -= 1,
@@ -257,5 +261,66 @@ async fn zero_and_negative_one_count_limits_admit_unbounded_history() -> TestRes
             result.err()
         );
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn snapshot_create_replies_require_retention_and_ttl_safety() -> TestResult {
+    let f = Fixture::new().await?;
+    let original: stream::Config = serde_json::from_value(f.snapshots["config"].clone())?;
+    assert!(
+        f.open_with("canonical_snapshot", f.config.stream_config(), Some(original.clone()))
+            .await?
+            .is_ok()
+    );
+    let mut admitted = Vec::new();
+    for label in ["interest", "work_queue", "ttl"] {
+        let mut actual = original.clone();
+        match label {
+            "interest" => actual.retention = stream::RetentionPolicy::Interest,
+            "work_queue" => actual.retention = stream::RetentionPolicy::WorkQueue,
+            "ttl" => actual.allow_message_ttl = true,
+            _ => unreachable!(),
+        }
+        if f.open_with(label, f.config.stream_config(), Some(actual))
+            .await?
+            .is_ok()
+        {
+            admitted.push(label);
+        }
+    }
+    assert!(admitted.is_empty(), "unsafe snapshot profiles admitted: {admitted:?}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn snapshot_revisions_do_not_require_rollup() -> TestResult {
+    let f = Fixture::new().await?;
+    let js = jetstream::new(f.client.clone());
+    let bucket = js.get_key_value(f.config.snapshot_bucket_name()).await?;
+    let mut config = bucket.stream.cached_info().config.clone();
+    config.allow_rollup = false;
+    js.update_stream(config).await?;
+
+    let store = open_store(js.clone(), &f.config).await?;
+    let snapshots = store.snapshot_bucket();
+    assert!(!snapshots.stream.cached_info().config.allow_rollup);
+    let first = snapshots.create("revision", vec![1].into()).await?;
+    let second = snapshots.update("revision", vec![2].into(), first).await?;
+    assert!(second > first);
+    let error = snapshots
+        .update("revision", vec![3].into(), first)
+        .await
+        .err()
+        .ok_or("stale snapshot write succeeded")?;
+    assert_eq!(error.kind(), jetstream::kv::UpdateErrorKind::WrongLastRevision);
+    let current = snapshots
+        .entry("revision")
+        .await?
+        .ok_or("snapshot missing after update")?;
+    assert_eq!(current.revision, second);
+    assert_eq!(current.value.as_ref(), &[2]);
+    let mut stream = js.get_stream(format!("KV_{}", f.config.snapshot_bucket_name())).await?;
+    assert_eq!(stream.info().await?.state.messages, 1);
     Ok(())
 }
