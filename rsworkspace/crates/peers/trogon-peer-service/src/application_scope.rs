@@ -9,8 +9,8 @@ use crate::{
     scoped_peer_store::ScopedPeerStore,
 };
 use trogon_decider_runtime::{
-    CommandAuthorizer, CommandExecution, CommandPrincipal, Decider, PrincipalId, PrincipalKind, StreamAppend,
-    StreamRead,
+    CommandAuthorizer, CommandError, CommandExecution, CommandPrincipal, Decider, PrincipalId, PrincipalKind,
+    StreamAppend, StreamRead,
 };
 use trogon_peer::{AttachmentRef, MessageError, PeerId, TrustedPeerOwner, guard_live_attachment};
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
@@ -73,7 +73,12 @@ where
         P: CommandAuthorizer<Cmd>,
     {
         let principal = self.principal(owner)?;
+        self.policy
+            .authorize_execution(Some(&principal), command)
+            .map_err(|error| PeerApplicationError::Message(CommandError::Unauthorized(error)))?;
+        let (_, position) = crate::history::load_with_position(&self.store, command.stream_id()).await?;
         Ok(CommandExecution::new(&self.store, command)
+            .with_expected_revision(position)
             .with_principal(principal)
             .with_authorizer(&self.policy)
             .with_replay_limit(PEER_REPLAY_LIMIT)
