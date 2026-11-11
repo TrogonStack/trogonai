@@ -11,13 +11,19 @@ external repository and hashes them as build inputs.
 
 ```starlark
 bazel_dep(name = "mise-bazel")
+bazel_dep(name = "rules_go", version = "0.65.0")
+bazel_dep(name = "rules_rust", version = "0.75.0")
 
 mise = use_extension("@mise-bazel//mise:extensions.bzl", "mise")
 mise.config(file = "//.config/mise:config.toml")
 use_repo(mise, "mise", "mise_go", "mise_rust")
 
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
 go_sdk.wrap(root_file = "@mise_go//:ROOT")
 
+# No downloaded Rust toolchains; the mise one is registered instead.
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(versions = [])
 register_toolchains(
     "@mise_rust//:rust_toolchain",
     "@mise_rust//:cargo_toolchain",
