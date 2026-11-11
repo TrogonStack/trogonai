@@ -1,0 +1,9 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "trogon-aauth-verify",
+    version = "0.0.1",
+    deps = ["//rsworkspace/crates/platform/trogon-identity-types"],
+    dev_deps = ["//rsworkspace/crates/platform/trogon-nats"],
+    integration_tests = {"nats_pop_roundtrip": {}},
+)

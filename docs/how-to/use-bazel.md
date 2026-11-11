@@ -2,7 +2,8 @@
 
 Bazel is available alongside the existing Cargo, Go, Buf, and pnpm workflows.
 Its current targets build the protobuf-to-WIT generator, test the Go workspace,
-test the Rust configuration-value crate, and generate WIT from the scheduler's
+build and test the foundation Rust crates (the platform, ARD, A2A pack and redaction,
+decider, and AAuth verifier crates), and generate WIT from the scheduler's
 `ScheduleStatus` schema. Existing CI remains responsible for the rest of the
 repository, Rust lint and coverage gates, Go race detection, and committed
 generated-code checks.
@@ -58,7 +59,7 @@ Useful direct target labels include:
 | Target | Result |
 | --- | --- |
 | `//rsworkspace/crates/platform/trogon-config-value:trogon-config-value` | Native Rust library |
-| `//rsworkspace/crates/platform/trogon-config-value:trogon-config-value_test` | Existing Rust unit tests |
+| `//rsworkspace/crates/platform/trogon-config-value:trogon-config-value_test` | Rust unit tests for one crate |
 | `//goworkspace/cmd/protoc-gen-wit:protoc-gen-wit` | Native Go generator binary |
 | `//goworkspace/internal/protowit:protowit_test` | Existing generator tests with pinned Buf |
 | `//goworkspace/internal/spirepolicy:spirepolicy_test` | Existing CEL policy tests |
@@ -70,6 +71,20 @@ snapshots as runfiles. Its scoped Buf module contains only those dependency-free
 schemas, avoiding unrelated registry dependencies. The selected descriptors are
 the same as those produced with the repository's full Buf module. The Go test
 sources and assertions are unchanged.
+
+## Add a Rust crate
+
+A crate's `BUILD.bazel` calls `workspace_crate` from `.config/bazel/rust.bzl`,
+which declares the library, its unit tests, and one test target per integration
+test file. Pass internal dependencies as labels, and the Cargo features, compile
+data, and test data the crate needs. External dependencies come from the crate's
+`Cargo.toml`. Add the library to `//.config/bazel:build` and its directory to the
+`CI Bazel` path filter.
+
+Tests that start NATS through Docker run as part of `bazel test //...`, as they
+do under Cargo. Tests that read files outside their package carry the `manual`
+tag; run them by label. Tests that shell out to Cargo (`trybuild`, the WIT
+feature build) have no Bazel target.
 
 ## Inspect dependencies
 

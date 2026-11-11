@@ -1,0 +1,39 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "a2a-redaction",
+    compile_data = glob(["tests/fixtures/**"]),
+    data = glob(["tests/fixtures/**"]),
+    # These tests read a fixture through the compile-time CARGO_MANIFEST_DIR,
+    # which Bazel sets to a sandbox path that is gone when the test runs.
+    unit_test_args = [
+        "--skip=wasm::tests::preload_skill_bundle_fails_when_manifest_missing",
+        "--skip=wasm::tests::preload_with_signing_pubkey_rejects_missing_sig",
+        "--skip=wasm::tests::preload_with_signing_pubkey_rejects_tampered_wasm",
+        "--skip=wasm::tests::preload_with_signing_pubkey_requires_valid_sig",
+        "--skip=wasm::tests::preload_without_signing_pubkey_skips_sig_file",
+        "--skip=wasm::tests::register_skill_bundle_file_delegates_to_preload",
+        "--skip=wasm::tests::register_skill_wasm_refused_when_signing_pubkey_configured",
+    ],
+    integration_tests = {"tier3_skill_catalog": {"compile_data": glob(["tests/fixtures/**"])}},
+)
+
+rust_binary(
+    name = "a2a-sign-bundle",
+    srcs = glob(["src/bin/**/*.rs"]),
+    crate_root = "src/bin/sign-bundle.rs",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_flags = ["-Dwarnings"],
+    visibility = ["//visibility:public"],
+    deps = [":a2a-redaction"] + all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "a2a-sign-bundle_test",
+    crate = ":a2a-sign-bundle",
+    rustc_flags = ["-Dwarnings"],
+    deps = all_crate_deps(normal_dev = True),
+)
