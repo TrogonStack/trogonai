@@ -46,7 +46,7 @@ including the additional Go version and kubeconform used by CI Workload Identity
 The first Go version remains the default for local development and native Bazel
 builds. The lockfile uses format 3 for compatibility with CI's pinned mise release.
 
-The build task builds `//.config/bazel:build`; the test task runs `bazel test //...`.
+The build task runs `bazel build //...`; the test task runs `bazel test //...`.
 Arguments are forwarded to Bazel, so a test can be selected without changing
 the task:
 
@@ -78,8 +78,9 @@ A crate's `BUILD.bazel` calls `workspace_crate` from `.config/bazel/rust.bzl`,
 which declares the library, its unit tests, and one test target per integration
 test file. Pass internal dependencies as labels, and the Cargo features, compile
 data, and test data the crate needs. External dependencies come from the crate's
-`Cargo.toml`. Add the library to `//.config/bazel:build` and its directory to the
-`CI Bazel` path filter.
+`Cargo.toml`. The build and test tasks find new packages through `//...`, and
+`CI Bazel` runs for any change under `rsworkspace/crates`, so no list needs
+updating.
 
 Tests that start NATS through Docker run as part of `bazel test //...`, as they
 do under Cargo. Tests that scan sources outside their package or shell out to
@@ -88,7 +89,7 @@ under Cargo.
 
 ## Inspect dependencies
 
-Print the build target's dependency graph in Graphviz DOT format:
+Print the dependency graph of every Bazel target in Graphviz DOT format:
 
 ```sh
 mise run --skip-tools bazel:graph
