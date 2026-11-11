@@ -371,6 +371,34 @@ async fn serve_does_not_provision_credential_management_without_the_admin_token(
 }
 
 #[tokio::test]
+async fn serve_without_sources_sizes_the_claim_bucket_from_the_default_stream_age() {
+    let server = JetStreamTestServer::start().await;
+    let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    assert!(!resolved.has_any_source());
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &trogon_std::env::InMemoryEnv::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let js = server.jetstream().await;
+    let mut claim_stream = js
+        .get_stream(format!("OBJ_{}", ClaimBucket::default().as_str()))
+        .await
+        .unwrap();
+    assert_eq!(
+        claim_stream.info().await.unwrap().config.max_age,
+        Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS) + Duration::from(CLAIM_CHECK_TTL_GRACE),
+    );
+}
+
+#[tokio::test]
 async fn serve_mounts_runtime_credentials_and_spawns_their_workers_for_flagged_sources() {
     let server = JetStreamTestServer::start().await;
     let mut file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
