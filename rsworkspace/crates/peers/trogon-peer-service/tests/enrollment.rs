@@ -122,6 +122,44 @@ fn policy() -> EnrollmentPolicy {
 }
 
 #[tokio::test]
+async fn duplicate_initial_enrollment_reports_the_core_error_without_replacing_the_attachment() {
+    let store = ObservedStore::default();
+    let grant = policy();
+    let observed = grant.observed_principals.clone();
+    let service = PeerService::new(store.clone(), grant, FixedClock(now()));
+    let first = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let second = service.enroll(&owner(), request("collaboration_alpha")).await;
+    assert!(
+        matches!(
+            second,
+            Err(EnrollServiceError::Execution(CommandError::Decide(
+                trogon_peer::EnrollError::AlreadyEnrolled
+            )))
+        ),
+        "duplicate enrollment must preserve the typed core contract: {second:?}"
+    );
+    assert_eq!(observed.lock().unwrap().len(), 2);
+    assert_eq!(store.reads.load(Ordering::SeqCst), 0);
+    assert_eq!(store.appends.load(Ordering::SeqCst), 2);
+    let peer = first.peer_id.as_deref().unwrap();
+    let history = store
+        .inner
+        .read_stream(ReadStreamRequest {
+            stream_id: peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    assert_eq!(history.events.len(), 2, "only the first enrollment may commit");
+    let attached = history.events[1]
+        .decode::<proto::PeerEvent>()
+        .unwrap()
+        .into_decoded()
+        .unwrap();
+    assert!(matches!(attached.event, Some(PeerEventCase::PeerAttached(event)) if event.attachment == first.attachment));
+}
+
+#[tokio::test]
 async fn authorized_enrollment_persists_core_events_with_trusted_owner_and_service_time() {
     let store = ObservedStore::default();
     let policy = policy();
