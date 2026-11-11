@@ -1,4 +1,5 @@
 use super::*;
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore, StreamMaxAge,
@@ -16,7 +17,7 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 fn bridge() -> GatewayBridge<MockJetStreamPublisher, MockObjectStore> {
     GatewayBridge::new(
         wrap_publisher(MockJetStreamPublisher::new()),
-        NatsToken::new("discord").unwrap(),
+        DottedNatsToken::new("discord").unwrap(),
         Duration::from_secs(5),
     )
 }
@@ -25,7 +26,7 @@ fn discord_config() -> DiscordConfig {
     DiscordConfig {
         bot_token: Some(super::super::config::DiscordBotToken::new("Bot token").unwrap()),
         intents: twilight_model::gateway::Intents::GUILDS,
-        subject_prefix: NatsToken::new("discord").unwrap(),
+        subject_prefix: DottedNatsToken::new("discord").unwrap(),
         stream_name: NatsToken::new("DISCORD").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(5).unwrap(),
@@ -63,7 +64,7 @@ fn bridge_with_mock() -> (
     let mock = MockJetStreamPublisher::new();
     let b = GatewayBridge::new(
         wrap_publisher(mock.clone()),
-        NatsToken::new("discord").unwrap(),
+        DottedNatsToken::new("discord").unwrap(),
         Duration::from_secs(5),
     );
     (b, mock)
@@ -78,7 +79,7 @@ fn bridge_with_prefix(
     let mock = MockJetStreamPublisher::new();
     let b = GatewayBridge::new(
         wrap_publisher(mock.clone()),
-        NatsToken::new(prefix).unwrap(),
+        DottedNatsToken::new(prefix).unwrap(),
         Duration::from_secs(5),
     );
     (b, mock)
@@ -317,6 +318,22 @@ async fn dispatch_sets_dedup_id_for_message_create() {
             .map(|v| v.as_str()),
         Some("message_create:msg123")
     );
+}
+
+#[tokio::test]
+async fn dispatch_preserves_events_with_non_numeric_guild_ids_without_fabricating_a_guild_header() {
+    for guild_id in [serde_json::json!(true), serde_json::json!([]), serde_json::json!({})] {
+        let (bridge, mock) = bridge_with_mock();
+        let frame = serde_json::json!({
+            "op": 0, "t": "MESSAGE_CREATE", "s": 1,
+            "d": {"id": "message", "guild_id": guild_id}
+        });
+        bridge.dispatch(&frame.to_string()).await;
+        assert_eq!(mock.published_subjects(), vec!["discord.message_create"]);
+        let messages = mock.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].headers.get(NATS_HEADER_GUILD_ID).is_none());
+    }
 }
 
 #[tokio::test]

@@ -1,5 +1,9 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PeerSnapshotConfigMismatchError {
+    #[error("peer snapshot bucket must use limits retention")]
+    Retention,
+    #[error("peer snapshot bucket must not enable per-message expiration")]
+    MessageTtl,
     #[error("peer snapshot bucket must retain one revision per key")]
     History,
     #[error("peer snapshot byte budget differs from its declared bound")]
