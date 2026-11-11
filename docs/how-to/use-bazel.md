@@ -23,9 +23,9 @@ and standard-library files as build inputs. It resolves the real Rust toolchain
 rather than running rustup launchers inside build actions. Missing SDKs fail with
 an installation hint; Bazel does not install them during a build.
 
-Buf comes from the generated `.config/mise/mise.lock` through
-[`rules_mise`](https://github.com/amartani/rules_mise). Bazel materializes the
-locked binary for its sandbox and hashes it as a test input. It does not rely on
+Buf comes from the generated `.config/mise/mise.lock`: Bazel downloads the
+host's locked release URL, verifies its SHA256 checksum, and materializes the
+binary for its sandbox and hashes it as a test input. It does not rely on
 an arbitrary `buf` executable on `PATH`. Rule sets and the protobuf compiler
 remain Bazel dependencies. The supported execution hosts are macOS ARM64 and
 Linux x86-64.

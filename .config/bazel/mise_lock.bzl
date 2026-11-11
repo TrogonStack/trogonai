@@ -1,4 +1,4 @@
-"""Validate the shared mise pins before exposing Bazel's Buf executable."""
+"""Validate the shared mise pins and fetch Bazel's locked Buf executable."""
 
 load("@toml.bzl", "toml")
 
@@ -69,6 +69,21 @@ def _validate_buf(entry):
         if len(digest) != 64 or digest.strip("0123456789abcdefABCDEF"):
             _invalid("mise.lock Buf platform %s has a malformed SHA256 checksum" % platform)
 
+def _host_platform(ctx):
+    if ctx.os.name == "mac os x" and ctx.os.arch in ["aarch64", "arm64"]:
+        return "macos-arm64"
+    if ctx.os.name == "linux" and ctx.os.arch in ["x86_64", "amd64"]:
+        return "linux-x64"
+    fail("Bazel supports macOS ARM64 and Linux x86-64 hosts, not {} {}".format(ctx.os.name, ctx.os.arch))
+
+def _fetch_buf(ctx, entry):
+    data = entry["platforms." + _host_platform(ctx)]
+    ctx.download_and_extract(
+        url = data["url"],
+        sha256 = data["checksum"][len("sha256:"):],
+        stripPrefix = "buf",
+    )
+
 def _mise_lock_impl(ctx):
     config = toml.decode(ctx.read(ctx.attr.config, watch = "yes"))
     lockfile = toml.decode(ctx.read(ctx.attr.lockfile, watch = "yes"))
@@ -80,14 +95,15 @@ def _mise_lock_impl(ctx):
         entry = _locked_tool(locked, tool, _version(requested.get(tool), tool))
         if tool == "buf":
             _validate_buf(entry)
+            _fetch_buf(ctx, entry)
     ctx.file(
         "BUILD.bazel",
         """alias(
     name = "buf",
-    actual = %s,
+    actual = "bin/buf",
     visibility = ["//visibility:public"],
 )
-""" % repr(str(ctx.attr.tool)),
+""",
         executable = False,
     )
 
@@ -96,6 +112,5 @@ mise_lock = repository_rule(
     attrs = {
         "config": attr.label(mandatory = True, allow_single_file = True),
         "lockfile": attr.label(mandatory = True, allow_single_file = True),
-        "tool": attr.label(mandatory = True),
     },
 )
