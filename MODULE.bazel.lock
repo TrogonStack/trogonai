@@ -229,7 +229,7 @@
   "moduleExtensions": {
     "@@mise-bazel+//mise:extensions.bzl%mise": {
       "general": {
-        "bzlTransitiveDigest": "73YJKc8RQdkKrtDr2y1nJ8YVocMNgw6dQJeH9TDgSSI=",
+        "bzlTransitiveDigest": "Lr7gOQqDfhFd1voTCCS0JemfOigTdEE9RjuoMYqwc6I=",
         "usagesDigest": "dnMvMkyLB/1kjDqZO50ReUEi0SbRl1IoO08MaAMa6NE=",
         "recordedInputs": [
           "REPO_MAPPING:mise-bazel+,toml.bzl toml.bzl+",

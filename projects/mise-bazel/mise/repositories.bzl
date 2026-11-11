@@ -89,10 +89,15 @@ def _mise_rust_impl(rctx):
         fail("The mise Rust toolchain supports macOS ARM64 and Linux x86-64 only")
 
     # mise installs Rust through rustup; the real sysroot lives under RUSTUP_HOME.
-    environment = json.decode(_mise(rctx, ["env", "--json", "rust@" + version]))
-    if "RUSTUP_HOME" not in environment:
-        fail("mise reported no RUSTUP_HOME for rust@{}".format(version))
-    source = rctx.path("{}/toolchains/{}-{}".format(environment["RUSTUP_HOME"], version, host.triple))
+    # Resolve it the way mise does instead of asking `mise env`, which installs
+    # missing tools passed as arguments.
+    rustup_home = rctx.getenv("MISE_RUSTUP_HOME") or rctx.getenv("RUSTUP_HOME") or "~/.rustup"
+    if rustup_home == "~" or rustup_home.startswith("~/"):
+        home = rctx.getenv("HOME")
+        if not home:
+            fail("Set HOME, RUSTUP_HOME, or MISE_RUSTUP_HOME to locate rust@{}".format(version))
+        rustup_home = home + rustup_home.removeprefix("~")
+    source = rctx.path("{}/toolchains/{}-{}".format(rustup_home, version, host.triple))
     if not source.exists:
         fail("rust@{} for {} is not installed; run `mise install rust`".format(version, host.triple))
     source = source.realpath
