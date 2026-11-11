@@ -1,3 +1,4 @@
+use super::constants::ATTACHMENT_LEASE;
 use super::domain::{AttachmentRef, PeerId, PeerObservation, TrustedPeerOwner};
 use super::state::{self, EvolveError};
 use buffa::MessageField;
@@ -97,7 +98,7 @@ impl Decider for Heartbeat {
         }
         let deadline = command
             .now
-            .checked_add_signed(chrono::Duration::seconds(10))
+            .checked_add_signed(ATTACHMENT_LEASE)
             .filter(|at| (-62_135_596_800..=253_402_300_799).contains(&at.timestamp()))
             .ok_or(HeartbeatError::LeaseDeadlineOverflow)?;
         if command.now.timestamp_subsec_nanos() >= 1_000_000_000 {
