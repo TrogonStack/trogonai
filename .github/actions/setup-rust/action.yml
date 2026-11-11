@@ -3,7 +3,7 @@ description: Install the mise-pinned Rust toolchain and required rustup componen
 
 inputs:
   install-args:
-    description: Job-specific tools to install from mise.toml
+    description: Job-specific tools to install from the mise config
     required: false
     default: rust
   dylint-toolchain-dir:

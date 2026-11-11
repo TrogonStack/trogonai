@@ -5,4 +5,4 @@ set -euo pipefail
 exec bazel build \
   --disk_cache="${RUNNER_TEMP:?}/bazel-disk-cache" \
   --repository_cache="${RUNNER_TEMP:?}/bazel-repository-cache" \
-  //:build
+  //.config/bazel:build

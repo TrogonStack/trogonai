@@ -1,5 +1,7 @@
 """Import installed mise SDKs as declared native Bazel toolchains."""
 
+load("@toml.bzl", "toml")
+
 _NO_INSTALL = {
     "MISE_AUTO_INSTALL": "false",
     "MISE_EXEC_AUTO_INSTALL": "false",
@@ -21,12 +23,24 @@ def _mise(ctx, executable, arguments, description):
     )
 
 def _pin(ctx, mise, key):
+    configured = toml.decode(ctx.read(ctx.attr.config))["tools"][key.removeprefix("tools.")]
+    if type(configured) == "dict":
+        key += ".version"
     value = _mise(
         ctx,
         mise,
         ["config", "get", "--file", str(ctx.path(ctx.attr.config)), key],
         "Reading {} from mise.toml".format(key),
     )
+    if value.startswith("["):
+        value = json.decode(value)
+        if type(value) != "list" or not value:
+            fail("{} must pin at least one version in mise.toml".format(key))
+        value = value[0]
+    if type(value) == "dict":
+        value = value.get("version")
+    if type(value) != "string":
+        fail("{} must pin an exact numeric release in mise.toml".format(key))
     parts = value.split(".")
     if len(parts) != 3 or any([not part or part.strip("0123456789") for part in parts]):
         fail("{} must pin an exact numeric release in mise.toml".format(key))
@@ -161,7 +175,7 @@ def _mise_sdks_impl(ctx):
     ctx.watch(ctx.path(ctx.attr.config))
     host = _host(ctx)
     _go_sdk(ctx, mise, _pin(ctx, mise, "tools.go"), host)
-    _rust_sdk(ctx, mise, _pin(ctx, mise, "tools.rust.version"), host)
+    _rust_sdk(ctx, mise, _pin(ctx, mise, "tools.rust"), host)
 
 mise_sdks = repository_rule(
     implementation = _mise_sdks_impl,

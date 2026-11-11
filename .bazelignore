@@ -1,5 +1,5 @@
 # Task scripts named build collide with BUILD on case-insensitive filesystems.
-.config/mise
+.config/mise/tasks
 .trogonai
 docs/node_modules
 rsworkspace/target

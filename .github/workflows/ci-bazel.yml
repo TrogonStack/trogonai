@@ -10,12 +10,13 @@ on:
       - 'MODULE.bazel*'
       - '**/BUILD.bazel'
       - '**/*.bzl'
-      - 'mise.toml'
+      - '.config/mise/config.toml'
+      - '.config/mise/mise.lock'
       - '.config/bazel/**'
       - '.config/mise/tasks/bazel/**'
       - '.config/mise/tasks/github/workflows/ci-bazel/**'
       - 'rsworkspace/Cargo.lock'
-      - 'rsworkspace/Cargo.toml'
+      - 'rsworkspace/**/Cargo.toml'
       - 'rsworkspace/crates/platform/trogon-config-value/**'
       - 'goworkspace/**'
       - 'proto/trogonai/scheduler/schedules/v1/**'
@@ -50,9 +51,9 @@ jobs:
           path: |
             ${{ runner.temp }}/bazel-disk-cache
             ${{ runner.temp }}/bazel-repository-cache
-          key: bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', '.config/bazel/mise.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.config/mise/config.toml', '.config/mise/mise.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', '.config/bazel/mise.lock') }}-
+            bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.config/mise/config.toml', '.config/mise/mise.lock') }}-
 
       - name: Test native targets
         run: mise run --skip-tools github:workflows:ci-bazel:test

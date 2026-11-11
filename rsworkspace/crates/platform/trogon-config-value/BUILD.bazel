@@ -1,3 +1,4 @@
+load("@crates//:defs.bzl", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
@@ -9,14 +10,12 @@ rust_library(
     rustc_flags = ["-Dwarnings"],
     version = "0.1.0",
     visibility = ["//visibility:public"],
-    deps = [
-        "@crates//:base64",
-        "@crates//:thiserror",
-    ],
+    deps = all_crate_deps(normal = True),
 )
 
 rust_test(
     name = "trogon-config-value_test",
     crate = ":trogon-config-value",
     rustc_flags = ["-Dwarnings"],
+    deps = all_crate_deps(normal_dev = True),
 )
