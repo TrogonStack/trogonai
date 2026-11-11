@@ -38,7 +38,7 @@ def extract(contents, expected_hash):
             continue
         if isinstance(node, ast.Pass):
             continue
-        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
+        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name) or node.simple != 1:
             raise GateError(Code.FORMAT, "ClaudeAgentOptions.member")
         key = "ClaudeAgentOptions." + node.target.id
         if key in result:

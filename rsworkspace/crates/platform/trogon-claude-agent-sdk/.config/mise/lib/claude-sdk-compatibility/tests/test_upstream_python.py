@@ -71,3 +71,9 @@ class PythonDeclarationTests(unittest.TestCase):
             with self.subTest(decorator=decorator):
                 self.assertNotEqual(baseline, read(changed))
         self.assertEqual(baseline["ClaudeAgentOptions"].get("decorators"), ["dataclass"])
+
+    def test_parenthesized_annotation_cannot_hide_a_missing_dataclass_field(self):
+        source = SOURCE.replace(b"    model:", b"    (model):")
+        with self.assertRaises(GateError) as caught:
+            read(source)
+        self.assertEqual(caught.exception.code, Code.FORMAT)
