@@ -54,3 +54,41 @@ def inherent_members(reader, name, body):
             require(key not in result, "duplicate-member:" + key)
             result[key] = {**member_shape(reader, member), **context}
     return result
+import json
+
+
+
+def members(reader, identifiers):
+    result = {}
+    for identifier in identifiers:
+        item = reader.item(identifier)
+        name = item["name"]
+        require(isinstance(name, str) and name not in result, "duplicate-trait-member")
+        result[name] = member_shape(reader, item)
+    return result
+
+
+def trait_shapes(reader, name, body):
+    generics(reader, body["generics"])
+    shape = reader.normalize({k: v for k, v in body.items() if k not in ("items", "implementations")})
+    result = {name: {"kind": "trait", "shape": shape}}
+    result.update({name + "::" + key: value for key, value in members(reader, body["items"]).items()})
+    return result
+
+
+def manual_traits(reader, body):
+    result = []
+    for identifier in body["impls"]:
+        node = reader.item(identifier)
+        require(set(node["inner"]) == {"impl"}, "rust-impl")
+        impl = node["inner"]["impl"]
+        if impl["trait"] is None:
+            continue
+        if impl["is_synthetic"] or impl["blanket_impl"] is not None or "automatically_derived" in node["attrs"]:
+            continue
+        result.append({"trait": reader.path(impl["trait"]), "for": reader.type(impl["for"]),
+                       "generics": generics(reader, impl["generics"]),
+                       "is_unsafe": impl["is_unsafe"], "is_negative": impl["is_negative"],
+                       "provided_trait_methods": impl["provided_trait_methods"],
+                       "items": members(reader, impl["items"])})
+    return sorted(result, key=lambda shape: json.dumps(shape, sort_keys=True))

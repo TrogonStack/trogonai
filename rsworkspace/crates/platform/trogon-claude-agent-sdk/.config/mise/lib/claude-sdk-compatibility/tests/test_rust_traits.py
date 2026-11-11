@@ -21,3 +21,24 @@ def trait_document():
     doc["index"]["8"]["attrs"] = ["automatically_derived"]
     return doc
 
+
+class TraitTests(unittest.TestCase):
+    def test_trait_declaration_and_manual_implementation_keep_all_members(self):
+        result = extract(trait_document())
+        self.assertFalse(result["Convert::convert"]["has_body"])
+        self.assertEqual(result["Convert::Output"]["shape"]["bounds"], [])
+        traits = result["Value"]["manual_trait_impls"]
+        self.assertEqual(len(traits), 1)
+        self.assertEqual(traits[0]["trait"]["path"], "Convert")
+        self.assertEqual(set(traits[0]["items"]), {"convert", "Output"})
+        self.assertEqual(traits[0]["provided_trait_methods"], [])
+        self.assertFalse(traits[0]["is_negative"])
+
+    def test_manual_unknown_or_missing_members_fail_closed(self):
+        for mutation in (lambda d: d["index"]["5"]["inner"]["impl"]["items"].append(100),
+                         lambda d: d["index"]["4"].update(inner={"future_member": {}}),
+                         lambda d: d["index"]["4"].update(name="convert")):
+            doc = trait_document()
+            mutation(doc)
+            with self.assertRaises(GateError):
+                extract(doc)
