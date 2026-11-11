@@ -364,6 +364,11 @@ fn typed_error_codes_have_distinct_stable_wire_names_without_serializing_sources
     }
     let errors = [
         (
+            PeerMcpError::RequestCancelled,
+            PeerMcpErrorCode::RequestCancelled,
+            "request_cancelled",
+        ),
+        (
             PeerMcpError::EnrollmentUncertain,
             PeerMcpErrorCode::EnrollmentUncertain,
             "enrollment_uncertain",
