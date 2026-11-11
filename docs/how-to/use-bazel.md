@@ -23,7 +23,8 @@ and standard-library files as build inputs. It resolves the real Rust toolchain
 rather than running rustup launchers inside build actions. Missing SDKs fail with
 an installation hint; Bazel does not install them during a build.
 
-Buf comes from the generated `.config/mise/mise.lock`: Bazel downloads the
+Buf comes from the generated `.config/mise/mise.lock` through
+[`rules_mise`](https://github.com/amartani/rules_mise): Bazel downloads the
 host's locked release URL, verifies its SHA256 checksum, and materializes the
 binary for its sandbox and hashes it as a test input. It does not rely on
 an arbitrary `buf` executable on `PATH`. Rule sets and the protobuf compiler
@@ -42,8 +43,6 @@ Commit `.config/mise/mise.lock` with pin updates. It covers every configured rep
 including the additional Go version and kubeconform used by CI Workload Identity.
 The first Go version remains the default for local development and native Bazel
 builds. The lockfile uses format 3 for compatibility with CI's pinned mise release.
-Bazel rejects a missing primary version, duplicate locked versions, missing Buf
-platform entries, and missing Buf SHA256 checksums.
 
 The build task builds `//.config/bazel:build`; the test task runs `bazel test //...`.
 Arguments are forwarded to Bazel, so a test can be selected without changing
