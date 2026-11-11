@@ -2,7 +2,8 @@
 
 Bazel is available alongside the existing Cargo, Go, Buf, and pnpm workflows.
 Its current targets build the protobuf-to-WIT generator, test the Go workspace,
-test the Rust configuration-value crate, and generate WIT from the scheduler's
+build and test the foundation Rust crates (the platform, ARD, A2A pack and redaction,
+decider, and AAuth verifier crates), and generate WIT from the scheduler's
 `ScheduleStatus` schema. Existing CI remains responsible for the rest of the
 repository, Rust lint and coverage gates, Go race detection, and committed
 generated-code checks.
@@ -45,7 +46,7 @@ including the additional Go version and kubeconform used by CI Workload Identity
 The first Go version remains the default for local development and native Bazel
 builds. The lockfile uses format 3 for compatibility with CI's pinned mise release.
 
-The build task builds `//.config/bazel:build`; the test task runs `bazel test //...`.
+The build task runs `bazel build //...`; the test task runs `bazel test //...`.
 Arguments are forwarded to Bazel, so a test can be selected without changing
 the task:
 
@@ -58,7 +59,7 @@ Useful direct target labels include:
 | Target | Result |
 | --- | --- |
 | `//rsworkspace/crates/platform/trogon-config-value:trogon-config-value` | Native Rust library |
-| `//rsworkspace/crates/platform/trogon-config-value:trogon-config-value_test` | Existing Rust unit tests |
+| `//rsworkspace/crates/platform/trogon-config-value:trogon-config-value_test` | Rust unit tests for one crate |
 | `//goworkspace/cmd/protoc-gen-wit:protoc-gen-wit` | Native Go generator binary |
 | `//goworkspace/internal/protowit:protowit_test` | Existing generator tests with pinned Buf |
 | `//goworkspace/internal/spirepolicy:spirepolicy_test` | Existing CEL policy tests |
@@ -71,9 +72,24 @@ schemas, avoiding unrelated registry dependencies. The selected descriptors are
 the same as those produced with the repository's full Buf module. The Go test
 sources and assertions are unchanged.
 
+## Add a Rust crate
+
+A crate's `BUILD.bazel` calls `workspace_crate` from `.config/bazel/rust.bzl`,
+which declares the library, its unit tests, and one test target per integration
+test file. Pass internal dependencies as labels, and the Cargo features, compile
+data, and test data the crate needs. External dependencies come from the crate's
+`Cargo.toml`. The build and test tasks find new packages through `//...`, and
+`CI Bazel` runs for any change under `rsworkspace/crates`, so no list needs
+updating.
+
+Tests that start NATS through Docker run as part of `bazel test //...`, as they
+do under Cargo. Tests that scan sources outside their package or shell out to
+Cargo (`trybuild`, the WIT feature build) have no Bazel target and run only
+under Cargo.
+
 ## Inspect dependencies
 
-Print the build target's dependency graph in Graphviz DOT format:
+Print the dependency graph of every Bazel target in Graphviz DOT format:
 
 ```sh
 mise run --skip-tools bazel:graph
