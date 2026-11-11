@@ -55,7 +55,10 @@ export default async () => {
         "/": [
           {
             text: "Get Started",
-            items: [{ text: "Overview", link: "/get-started/" }],
+            items: [
+              { text: "Overview", link: "/get-started/" },
+              { text: "Build with Bazel", link: "/how-to/use-bazel" },
+            ],
           },
           {
             text: "Agents",
