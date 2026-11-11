@@ -145,6 +145,8 @@ jobs:
 
       - name: Run tests with coverage
         run: mise run --skip-tools github-actions:rust-coverage
+        env:
+          NEXTEST_PROFILE: ci
 
       - name: Coverage report and gate
         # TODO: Add a fork-safe read-only coverage comparison path; this action writes to
