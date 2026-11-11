@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM rust:1.96.0-slim-bookworm AS builder
+FROM rust:1.96.0-slim-trixie AS builder
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential cmake pkg-config \
@@ -19,7 +19,9 @@ RUN --mount=type=bind,source=rsworkspace,target=/src,rw \
     && CARGO_PROFILE_RELEASE_STRIP=symbols cargo build --locked --release --package trogon-gateway --bin trogon-gateway \
     && install -D /cargo-target/release/trogon-gateway /out/trogon-gateway
 
-FROM debian:bookworm-20260518-slim AS runtime
+# Trixie's glibc is newer than the one on the CI runners that compile the
+# prebuilt binaries, so those binaries load here.
+FROM debian:trixie-20261104-slim AS base
 
 ARG OCI_REVISION
 LABEL org.opencontainers.image.source="https://github.com/TrogonStack/trogonai" \
@@ -31,8 +33,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --no-create-home --shell /usr/sbin/nologin trogon
 
-COPY --from=builder /out/trogon-gateway /usr/local/bin/trogon-gateway
-
 USER trogon
 
 EXPOSE 8080
@@ -40,3 +40,14 @@ EXPOSE 8080
 STOPSIGNAL SIGTERM
 
 ENTRYPOINT ["/usr/local/bin/trogon-gateway", "serve"]
+
+# CI compiles each architecture natively with a warm cache; compiling inside
+# an emulated arm64 build took over an hour.
+FROM base AS prebuilt
+
+ARG TARGETARCH
+COPY --from=binaries --chmod=0755 ${TARGETARCH}/trogon-gateway /usr/local/bin/trogon-gateway
+
+FROM base AS runtime
+
+COPY --from=builder /out/trogon-gateway /usr/local/bin/trogon-gateway

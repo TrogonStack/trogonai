@@ -71,10 +71,18 @@ impl Broker {
         Ok(Self { server, files, seeds })
     }
     pub async fn connect(&self, identity: &str) -> TestResult<(Client, Receiver<ServerError>)> {
+        let (client, errors, _) = self.connect_with_closed(identity).await?;
+        Ok((client, errors))
+    }
+    pub async fn connect_with_closed(
+        &self,
+        identity: &str,
+    ) -> TestResult<(Client, Receiver<ServerError>, Receiver<()>)> {
         let path = self.seeds.get(identity).ok_or("unknown fixture credential")?;
         let auth = NatsAuth::NKey(NKeySeed::File(Location::Path(path.clone())));
         let (send, receive) = mpsc::channel(64);
         let send = Arc::new(send);
+        let (closed, receive_closed) = mpsc::channel(1);
         let options = self
             .server
             .connect_options(auth)
@@ -82,15 +90,22 @@ impl Broker {
             .connection_timeout(PROBE_TIMEOUT)
             .event_callback(move |event| {
                 let send = send.clone();
+                let closed = closed.clone();
                 async move {
-                    if let async_nats::Event::ServerError(error) = event {
-                        let _ = send.try_send(error);
+                    match event {
+                        async_nats::Event::ServerError(error) => {
+                            let _ = send.try_send(error);
+                        }
+                        async_nats::Event::Closed => {
+                            let _ = closed.try_send(());
+                        }
+                        _ => {}
                     }
                 }
             });
         let client = options.connect(self.server.address()).await?;
         assert!(client.server_info().tls_required);
-        Ok((client, receive))
+        Ok((client, receive, receive_closed))
     }
     pub fn credential_path(&self, identity: &str) -> TestResult<std::path::PathBuf> {
         self.seeds
