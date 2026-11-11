@@ -13,4 +13,5 @@ def extract(document):
             result.update(enum_shapes(reader, name, body))
         else:
             result[name] = data_shape(reader, name, kind, body)
+        result[name]["attributes"] = reader.attributes(node)
     return result

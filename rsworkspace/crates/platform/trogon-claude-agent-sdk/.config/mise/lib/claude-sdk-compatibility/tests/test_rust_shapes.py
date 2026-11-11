@@ -1,3 +1,4 @@
+import copy
 import unittest
 
 from gate_errors import GateError
@@ -43,4 +44,29 @@ class DataShapeTests(unittest.TestCase):
             doc = document()
             add(doc, node(1, "ClaudeAgentOptions", kind, body))
             with self.subTest(body=body), self.assertRaises(GateError):
+                extract(doc)
+
+    def test_non_exhaustive_and_other_type_attributes_change_the_contract(self):
+        doc = document()
+        add(doc, node(1, "Record", "struct", {"kind": "unit", "generics": generics(), "impls": []}))
+        add(doc, node(2, "Choice", "enum", {"variants": [3], "has_stripped_variants": False,
+                                          "generics": generics(), "impls": []}))
+        add(doc, node(3, "One", "variant", {"kind": "plain", "discriminant": None}), False)
+        baseline = extract(doc)
+        for identifier in (1, 2, 3):
+            for attribute in ("non_exhaustive", {"must_use": {"reason": "keep the result"}},
+                              {"repr": {"kind": "c", "align": None, "packed": None, "int": None}},
+                              {"other": "#[serde(untagged)]"}):
+                changed = copy.deepcopy(doc)
+                changed["index"][str(identifier)]["attrs"] = [attribute]
+                with self.subTest(identifier=identifier, attribute=attribute):
+                    self.assertNotEqual(baseline, extract(changed))
+
+    def test_malformed_or_unknown_attributes_fail_closed(self):
+        for attributes in (None, {}, [42], ["future_attribute"], [{"other": 1}],
+                           [{"must_use": {"reason": 42}}], [{"repr": {"kind": "c"}}]):
+            doc = document()
+            item = add(doc, node(1, "Record", "struct", {"kind": "unit", "generics": generics(), "impls": []}))
+            item["attrs"] = attributes
+            with self.subTest(attributes=attributes), self.assertRaises(GateError):
                 extract(doc)

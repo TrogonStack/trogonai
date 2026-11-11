@@ -59,7 +59,8 @@ def enum_shapes(reader, name, body):
             payload = fields(reader, kind["struct"]["fields"])
         else:
             raise GateError(Code.FORMAT, key)
-        result[key] = {"kind": "variant", "payload": payload, "discriminant": discriminant(value["discriminant"])}
+        result[key] = {"kind": "variant", "attributes": reader.attributes(variant),
+                       "payload": payload, "discriminant": discriminant(value["discriminant"])}
     return result
 
 
