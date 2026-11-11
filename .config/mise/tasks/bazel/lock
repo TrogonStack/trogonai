@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Refresh the repository mise tool lockfile"
+set -euo pipefail
+
+# CI Workload Identity pins a mise release that reads lockfile format 3.
+if [[ ! -f .config/mise/mise.lock ]]; then
+  printf 'lockfile_version = 3\n' > .config/mise/mise.lock
+fi
+
+exec mise --no-env --no-hooks lock --platform linux-x64,linux-arm64,macos-arm64,macos-x64 "$@"

@@ -15,10 +15,10 @@ use axum::{
 use std::future::Future;
 use std::pin::Pin;
 use tracing::{info, instrument, warn};
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, ProvisionedStreamField, PublishOutcome,
 };
+use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_semconv::span::GITLAB_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
@@ -44,7 +44,7 @@ impl RejectReason {
 
 async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: &ClaimCheckPublisher<P, S>,
-    subject_prefix: &NatsToken,
+    subject_prefix: &DottedNatsToken,
     verified: &signature::VerifiedWebhook,
     reason: RejectReason,
     body: Bytes,
@@ -83,7 +83,7 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     signing_token: GitLabSigningToken,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
     timestamp_tolerance: NonZeroDuration,
 }
@@ -93,7 +93,7 @@ struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
     publisher: ClaimCheckPublisher<P, S>,
     credential_resolver: RuntimeCredentialResolver<G>,
     runtime_key: RuntimeIntegrationKey,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
     timestamp_tolerance: NonZeroDuration,
 }
@@ -271,7 +271,7 @@ where
 
 async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
     verified: &signature::VerifiedWebhook,
     headers: HeaderMap,
