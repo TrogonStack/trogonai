@@ -83,20 +83,23 @@ where
             return Err(PeerApplicationError::Scope);
         }
         let sender = self.load(owner, reference.peer_id()).await?;
-        self.live(owner, &reference, &sender)?;
-        let accepted_at = self.clock.now();
-        let command = SendMessage::new(
-            owner.clone(),
-            reference,
-            key.clone(),
-            message_id,
-            recipient,
-            collaboration.clone(),
-            binding.content().clone(),
-            reply,
-            accepted_at,
-        );
-        let message = match self.execute_message(owner, &command).await {
+        let authorized_at = self.live(owner, &reference, &sender)?;
+        let message = match self
+            .execute_message_with_builder(owner, authorized_at, |accepted_at| {
+                SendMessage::new(
+                    owner.clone(),
+                    reference.clone(),
+                    key.clone(),
+                    message_id.clone(),
+                    recipient.clone(),
+                    collaboration.clone(),
+                    binding.content().clone(),
+                    reply.clone(),
+                    accepted_at,
+                )
+            })
+            .await
+        {
             Ok(state) => state
                 .outbox
                 .iter()
