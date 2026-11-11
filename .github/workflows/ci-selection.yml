@@ -39,6 +39,7 @@ jobs:
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install_args: node@26.3.0
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install selector dependencies
         run: mise exec node@26.3.0 -- mise run --skip-tools github:workflows:ci-selection:install
