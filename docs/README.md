@@ -4,11 +4,6 @@ Browse the [documentation home](./index.md) for the full project navigation.
 Documents distinguish proposed architecture, normative contract reference and
 runtime acceptance evidence.
 
-## Development
-
-Use the [Bazel build guide](./how-to/use-bazel.md) for the native target slice,
-dependency graph inspection, and GitHub Actions cache behavior.
-
 ## Workload identity
 
 The proposed [workload identity profile](./reference/workload-identity.md)
