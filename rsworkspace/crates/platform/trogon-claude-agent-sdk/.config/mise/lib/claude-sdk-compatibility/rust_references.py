@@ -113,6 +113,12 @@ class RustDocument:
             return {kind: [self.type(v) for v in body]}
         if kind == "slice":
             return {kind: self.type(body)}
+        if kind == "qualified_path":
+            require(isinstance(body, dict) and set(body) == {"name", "args", "self_type", "trait"}
+                    and isinstance(body["name"], str), "rust-qualified-path")
+            return {kind: {"name": body["name"], "args": self.arguments(body["args"]),
+                           "self_type": self.type(body["self_type"]),
+                           "trait": None if body["trait"] is None else self.path(body["trait"])}}
         if kind == "impl_trait":
             require(isinstance(body, list), "rust-bounds")
             for bound in body:

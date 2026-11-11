@@ -55,3 +55,12 @@ class ReferenceTests(unittest.TestCase):
         self.assertEqual(RustDocument(self.doc).type(value), expected)
         with self.assertRaises(GateError):
             RustDocument(self.doc).type({"impl_trait": [{"future_bound": {}}]})
+
+    def test_qualified_associated_type_keeps_self_trait_and_arguments(self):
+        value = {"qualified_path": {"name": "Item", "args": None,
+            "self_type": {"generic": "T"}, "trait": path(9)["resolved_path"]}}
+        expected = {"qualified_path": {"name": "Item", "args": None,
+            "self_type": {"generic": "T"}, "trait": {"path": "alloc::vec::Vec", "args": None}}}
+        self.assertEqual(RustDocument(self.doc).type(value), expected)
+        with self.assertRaises(GateError):
+            RustDocument(self.doc).type({"qualified_path": {"name": "Item"}})
