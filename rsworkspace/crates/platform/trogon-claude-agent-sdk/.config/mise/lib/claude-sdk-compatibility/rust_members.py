@@ -1,4 +1,5 @@
 from gate_errors import Code, GateError
+from rust_bounds import bounds
 from rust_data import generics
 from rust_references import require
 
@@ -32,6 +33,7 @@ def member_shape(reader, item):
             reader.type(body["type"])
         if kind == "assoc_type":
             generics(reader, body["generics"])
+            bounds(reader, body["bounds"])
         return {"kind": kind, "shape": reader.normalize(body), **metadata}
     raise GateError(Code.FORMAT, "rust-member:" + kind)
 
@@ -48,7 +50,7 @@ def inherent_members(reader, name, body):
                    "impl_for": reader.type(impl["for"]), "impl_is_unsafe": impl["is_unsafe"]}
         for member_id in impl["items"]:
             member = reader.item(member_id)
-            if member["visibility"] != "public":
+            if not reader.is_public(member):
                 continue
             key = name + "::" + member["name"]
             require(key not in result, "duplicate-member:" + key)
@@ -70,6 +72,7 @@ def members(reader, identifiers):
 
 def trait_shapes(reader, name, body):
     generics(reader, body["generics"])
+    bounds(reader, body["bounds"])
     shape = reader.normalize({k: v for k, v in body.items() if k not in ("items", "implementations")})
     result = {name: {"kind": "trait", "shape": shape}}
     result.update({name + "::" + key: value for key, value in members(reader, body["items"]).items()})
@@ -84,6 +87,11 @@ def manual_traits(reader, body):
         impl = node["inner"]["impl"]
         if impl["trait"] is None:
             continue
+        require(all(type(impl[key]) is bool for key in ("is_synthetic", "is_unsafe", "is_negative")), "rust-impl-flags")
+        require(isinstance(node["attrs"], list) and all(
+            isinstance(value, str) or (isinstance(value, dict) and set(value) == {"other"}
+                                       and isinstance(value["other"], str))
+            for value in node["attrs"]), "rust-impl-attributes")
         if impl["is_synthetic"] or impl["blanket_impl"] is not None or "automatically_derived" in node["attrs"]:
             continue
         result.append({"trait": reader.path(impl["trait"]), "for": reader.type(impl["for"]),

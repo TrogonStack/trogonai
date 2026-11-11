@@ -1,4 +1,4 @@
-from gate_errors import Code, GateError
+from gate_errors import Code, GateError, format_boundary
 from rust_scalars import type_scalars
 
 
@@ -8,6 +8,7 @@ def require(condition, selector):
 
 
 class RustDocument:
+    @format_boundary("rustdoc")
     def __init__(self, document, aliases=None):
         require(isinstance(document, dict) and type(document.get("format_version")) is int
                 and document["format_version"] == 57, "rustdoc")
@@ -36,10 +37,12 @@ class RustDocument:
                 and isinstance(item.get("inner"), dict) and len(item["inner"]) == 1, "rust-node")
         return item
 
+    @format_boundary("rust-path")
     def path(self, value):
         require(isinstance(value, dict) and set(value) == {"path", "id", "args"}, "rust-path")
         return {"path": self.qualified(value["id"]), "args": self.arguments(value["args"])}
 
+    @format_boundary("rust-generics")
     def arguments(self, value):
         from rust_generic_values import argument, associated
         if value is None:
@@ -100,6 +103,7 @@ class RustDocument:
             return self.type(value)
         return {key: self.normalize(v) for key, v in value.items()}
 
+    @format_boundary("rust-type")
     def type(self, value):
         require(isinstance(value, dict) and len(value) == 1, "rust-type")
         kind, body = next(iter(value.items()))
@@ -140,4 +144,17 @@ class RustDocument:
             return {kind: {**body, "type": self.type(body["type"])}}
         # Other type forms require an explicit reader extension before comparison.
         raise GateError(Code.FORMAT, "rust-type:" + kind)
+
+    def bounds(self, values):
+        from rust_bounds import bounds
+        return bounds(self, values)
+
+    def is_public(self, item):
+        visibility = item.get("visibility")
+        if isinstance(visibility, str):
+            require(visibility in ("public", "default", "crate"), "rust-visibility")
+        else:
+            require(isinstance(visibility, dict) and set(visibility) == {"restricted"}
+                    and set(visibility["restricted"]) == {"parent", "path"}, "rust-visibility")
+        return visibility == "public"
 

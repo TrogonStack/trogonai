@@ -1,6 +1,8 @@
+from gate_errors import format_boundary
 from rust_references import RustDocument, require
 
 
+@format_boundary("public-exports")
 def inventory(document):
     reader = RustDocument(document)
     exported = {}
@@ -22,7 +24,7 @@ def inventory(document):
         require(isinstance(body.get("items"), list), "public-module")
         for identifier in body["items"]:
             node = reader.item(identifier)
-            if node.get("visibility") != "public":
+            if not reader.is_public(node):
                 continue
             if "use" in node["inner"]:
                 require(isinstance(node["inner"]["use"], dict), "public-reexport")
