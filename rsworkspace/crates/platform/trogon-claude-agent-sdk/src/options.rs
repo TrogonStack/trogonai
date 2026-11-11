@@ -1,6 +1,6 @@
 use std::{num::NonZeroUsize, path::PathBuf};
 
-use crate::{PermissionMode, SettingSource};
+use crate::{EffortLevel, PermissionMode, SettingSource, UsdBudget};
 
 #[derive(Clone, Debug, Default)]
 pub struct ClaudeAgentOptions {
@@ -11,4 +11,6 @@ pub struct ClaudeAgentOptions {
     /// Filesystem settings to load: `None` inherits CLI defaults; an empty list disables them.
     pub setting_sources: Option<Vec<SettingSource>>,
     pub max_turns: Option<NonZeroUsize>,
+    pub max_budget_usd: Option<UsdBudget>,
+    pub effort: Option<EffortLevel>,
 }

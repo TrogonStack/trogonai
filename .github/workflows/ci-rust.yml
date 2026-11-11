@@ -5,16 +5,6 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    paths:
-      - 'rsworkspace/**'
-      - 'devops/docker/compose/compose.yml'
-      - 'devops/docker/compose/services/a2a-gateway/**'
-      - 'devops/docker/compose/services/nats/**'
-      - 'LICENSE'
-      - 'mise.toml'
-      - '.config/mise/tasks/**'
-      - '.github/actions/setup-rust/**'
-      - '.github/workflows/ci-rust.yml'
 
 concurrency:
   group: ci-rust-${{ github.ref }}
@@ -22,6 +12,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  MISE_TASK_RUN_AUTO_INSTALL: 'false'
   # Source-built mise tools (dylint-link, cargo-component, ...) fetch crates from
   # crates.io during install; raise retry tolerance for spurious network errors.
   CARGO_NET_RETRY: '10'
@@ -30,7 +21,17 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Select Rust checks
+    uses: ./.github/workflows/ci-selection.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      filters: .github/filters/ci.yml
   lint:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -43,6 +44,7 @@ jobs:
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
         with:
+          install-args: rust python cargo:cargo-dylint cargo:dylint-link cargo:cargo-deny
           dylint-toolchain-dir: rsworkspace/dylints/trogonai_dylint
 
       - name: Enforce crate licenses
@@ -54,10 +56,9 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          prefix-key: v1-rust
           workspaces: rsworkspace -> target
-          save-if: true
-          cache-on-failure: true
-          cache-workspace-crates: true
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -82,6 +83,8 @@ jobs:
         working-directory: rsworkspace
 
   test:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -97,14 +100,15 @@ jobs:
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
+        with:
+          install-args: rust python buf cargo:cargo-component cargo:wasm-tools
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          prefix-key: v1-rust
           workspaces: rsworkspace -> target
-          save-if: true
-          cache-on-failure: true
-          cache-workspace-crates: true
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Install coverage tools
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
@@ -160,6 +164,8 @@ jobs:
         run: mkdir -p rsworkspace/target/tests/{target,trybuild}
 
   build:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -175,16 +181,17 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          prefix-key: v1-rust
           workspaces: rsworkspace -> target
-          save-if: true
-          cache-on-failure: true
-          cache-workspace-crates: true
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Build release
         run: cargo build --release
         working-directory: rsworkspace
 
   wasm-decider:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -196,12 +203,15 @@ jobs:
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
+        with:
+          install-args: rust python buf cargo:cargo-component cargo:wasm-tools
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          prefix-key: v1-rust
           workspaces: rsworkspace -> target
-          save-if: always
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Build decider components
         run: mise run artifacts:wasm-components
