@@ -7,7 +7,6 @@ rust:
   - 'buf.lock'
   - 'proto/trogonai/scheduler/schedules/**'
   - '.github/actions/setup-rust/**'
-  - '.github/workflows/ci-rust.yml'
   - '.config/mise/lib/**'
   - '.config/mise/tasks/github-actions/rust-*'
   - '.config/mise/tasks/github-actions/enforce-cargo-license'
