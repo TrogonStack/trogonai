@@ -7,9 +7,9 @@ workspace_crate(
         "//rsworkspace/crates/platform/trogon-semconv",
         "//rsworkspace/crates/platform/trogon-std",
     ],
+    # subject_literal_policy scans the sources of sibling crates, so it runs only
+    # under Cargo.
     integration_tests = {
-        # Scans the source of sibling crates, which are not inputs of this package.
-        "subject_literal_policy": {"tags": ["manual"]},
         "tls_handshake": {"tags": ["requires-network"]},
     },
     # Some tests start a NATS server in a container through Docker.

@@ -82,9 +82,9 @@ data, and test data the crate needs. External dependencies come from the crate's
 `CI Bazel` path filter.
 
 Tests that start NATS through Docker run as part of `bazel test //...`, as they
-do under Cargo. Tests that read files outside their package carry the `manual`
-tag; run them by label. Tests that shell out to Cargo (`trybuild`, the WIT
-feature build) have no Bazel target.
+do under Cargo. Tests that scan sources outside their package or shell out to
+Cargo (`trybuild`, the WIT feature build) have no Bazel target and run only
+under Cargo.
 
 ## Inspect dependencies
 
