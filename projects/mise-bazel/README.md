@@ -42,3 +42,8 @@ the last segment of the tool name, so `ubi:open-telemetry/weaver` provides
 `weaver`, and an `exe` option overrides it.
 
 The Rust toolchain supports macOS ARM64 and Linux x86-64 hosts.
+
+Bazel does not watch files in repositories that another module extension
+creates, so crate_universe keeps its cached resolution when the Rust pin
+changes. After changing the pin, delete `MODULE.bazel.lock` and run
+`bazel mod deps` so crate_universe resolves again with the new Cargo.

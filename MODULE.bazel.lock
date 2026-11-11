@@ -233,7 +233,7 @@
         "usagesDigest": "dnMvMkyLB/1kjDqZO50ReUEi0SbRl1IoO08MaAMa6NE=",
         "recordedInputs": [
           "REPO_MAPPING:mise-bazel+,toml.bzl toml.bzl+",
-          "FILE:@@//.config/mise/config.toml 9ba26827fad58a5d647d49235155d58d7e7c79c07e35eed5108e95fbce25dff9"
+          "FILE:@@//.config/mise/config.toml 43f4697b257b6a878835ef35ba0464cbe9f9d92a39139892bb231f8fb187d09a"
         ],
         "generatedRepoSpecs": {
           "mise_bazel": {
@@ -242,6 +242,14 @@
               "tool": "bazel",
               "version": "9.3.2",
               "executable": "bazel"
+            }
+          },
+          "mise_github_rhysd_actionlint": {
+            "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
+            "attributes": {
+              "tool": "github:rhysd/actionlint",
+              "version": "1.7.12",
+              "executable": "actionlint"
             }
           },
           "mise_buf": {
@@ -375,6 +383,7 @@
             "attributes": {
               "tools": {
                 "bazel": "mise_bazel",
+                "actionlint": "mise_github_rhysd_actionlint",
                 "buf": "mise_buf",
                 "kubeconform": "mise_kubeconform",
                 "weaver": "mise_ubi_open_telemetry_weaver",
