@@ -54,3 +54,12 @@ test('rejects missing, duplicate, nonexported, and unsupported selected declarat
     source.replace("'default' | 'plan'", "'plan' | 'plan'"),
   ]) rejects(text);
 });
+
+test('rejects competing selected type declarations, generic aliases, and initializers', () => {
+  for (const text of [
+    source + '\nexport interface Options { hidden: number }',
+    source + '\nexport class PermissionMode {}',
+    source.replace('type Options =', 'type Options<T> ='),
+    source.replace('model?: string;', 'model?: string = "default";'),
+  ]) rejects(text);
+});

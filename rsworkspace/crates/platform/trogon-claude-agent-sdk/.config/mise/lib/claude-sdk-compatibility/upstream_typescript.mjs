@@ -29,6 +29,8 @@ export function extract(contents, expectedHash) {
   const result = {};
   const declarations = new Map();
   for (const statement of source.statements) {
+    const selected = ['Options', 'PermissionMode', 'SettingSource'].includes(statement.name?.text);
+    if (selected && !ts.isTypeAliasDeclaration(statement)) unsupported(statement.name.text);
     if (!ts.isTypeAliasDeclaration(statement)) continue;
     const name = statement.name.text;
     if (!['Options', 'PermissionMode', 'SettingSource'].includes(name)) continue;
@@ -41,7 +43,7 @@ export function extract(contents, expectedHash) {
   if (!ts.isTypeLiteralNode(options)) unsupported('Options');
   result.Options = { kind: 'type-alias' };
   for (const member of options.members) {
-    if (!ts.isPropertySignature(member) || !ts.isIdentifier(member.name) || !member.type) unsupported('Options.member');
+    if (!ts.isPropertySignature(member) || !ts.isIdentifier(member.name) || !member.type || member.initializer) unsupported('Options.member');
     const key = `Options.${member.name.text}`;
     if (Object.hasOwn(result, key)) unsupported(key);
     result[key] = {
