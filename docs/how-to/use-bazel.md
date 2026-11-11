@@ -27,7 +27,10 @@ installed versions rather than an arbitrary `buf` or `go` on `PATH`. Missing too
 fail with an installation hint. The Rust toolchain supports macOS ARM64 and Linux
 x86-64 execution hosts.
 
-Rule sets and the protobuf compiler remain Bazel dependencies.
+Only rule sets remain Bazel dependencies. Buf compiles the scheduler schema into
+its descriptor set and runs the WIT plugin, so Bazel builds no protobuf compiler.
+On macOS, `.bazelrc` points C toolchain detection at `/usr/bin/clang` so a mise
+shim earlier on `PATH` cannot stand in for the system compiler.
 
 The cached build uses the `.config/mise/config.toml` pins, independent of local
 tool-version overrides. Keep the generated tool lock aligned after editing those pins:
@@ -59,7 +62,7 @@ Useful direct target labels include:
 | `//goworkspace/cmd/protoc-gen-wit:protoc-gen-wit` | Native Go generator binary |
 | `//goworkspace/internal/protowit:protowit_test` | Existing generator tests with pinned Buf |
 | `//goworkspace/internal/spirepolicy:spirepolicy_test` | Existing CEL policy tests |
-| `//proto/trogonai/scheduler/schedules/v1:schedule_status_proto` | Protobuf descriptor |
+| `//proto/trogonai/scheduler/schedules/v1:schedule_status_descriptor` | Protobuf descriptor set |
 | `//proto/trogonai/scheduler/schedules/v1:schedule_status_wit` | Generated WIT artifact |
 
 The generator test launcher stages the original scheduler fixture sources and
