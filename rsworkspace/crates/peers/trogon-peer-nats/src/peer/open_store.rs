@@ -67,6 +67,12 @@ fn validate_snapshots(
     required: &jetstream::kv::Config,
     actual: &stream::Config,
 ) -> Result<(), PeerSnapshotConfigMismatchError> {
+    if actual.retention != stream::RetentionPolicy::Limits {
+        return Err(PeerSnapshotConfigMismatchError::Retention);
+    }
+    if actual.allow_message_ttl {
+        return Err(PeerSnapshotConfigMismatchError::MessageTtl);
+    }
     if actual.max_messages_per_subject != required.history {
         return Err(PeerSnapshotConfigMismatchError::History);
     }
