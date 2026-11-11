@@ -61,3 +61,13 @@ class PythonDeclarationTests(unittest.TestCase):
                        SOURCE.replace(b'class ClaudeAgentOptions:', b'class ClaudeAgentOptions(Base):')):
             with self.subTest(source=source), self.assertRaises(GateError):
                 read(source)
+
+    def test_options_decorators_are_part_of_the_selected_contract(self):
+        source = SOURCE.replace(b"class ClaudeAgentOptions:", b"@dataclass\nclass ClaudeAgentOptions:")
+        baseline = read(source)
+        for decorator in (b"", b"@dataclass(init=False)\n", b"@dataclass(kw_only=True)\n",
+                          b"@dataclass(frozen=True, slots=True)\n", b"@other_decorator\n"):
+            changed = source.replace(b"@dataclass\n", decorator)
+            with self.subTest(decorator=decorator):
+                self.assertNotEqual(baseline, read(changed))
+        self.assertEqual(baseline["ClaudeAgentOptions"].get("decorators"), ["dataclass"])
