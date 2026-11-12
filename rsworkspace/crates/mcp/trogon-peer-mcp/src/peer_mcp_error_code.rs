@@ -8,6 +8,9 @@ pub enum PeerMcpErrorCode {
     InvalidBatch,
     InvalidConfig,
     InvalidHostIdentity,
+    InvalidModelInput,
+    InvalidMetadata,
+    MetadataEncoding,
     InvalidEnrollment,
     InvalidEnrollmentIdentity,
     UnsupportedTool,
@@ -15,4 +18,8 @@ pub enum PeerMcpErrorCode {
     Encode,
     Enroll,
     Prepare,
+    Acknowledge,
+    Roster,
+    Send,
+    Status,
 }

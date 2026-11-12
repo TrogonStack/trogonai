@@ -93,6 +93,37 @@ impl PreparePeerBatch for Backend {
     }
 }
 
+impl trogon_peer_mcp::ReadPeerRoster for Backend {
+    type Error = BackendError;
+    async fn roster(&self, _request: v1::RosterRequest) -> Result<v1::RosterResponse, Self::Error> {
+        Err(BackendError)
+    }
+}
+
+impl trogon_peer_mcp::SendPeerMessage for Backend {
+    type Error = BackendError;
+    async fn send(&self, _request: v1::SendRequest) -> Result<v1::SendResponse, Self::Error> {
+        Err(BackendError)
+    }
+}
+
+impl trogon_peer_mcp::ReadPeerMessageStatus for Backend {
+    type Error = BackendError;
+    async fn status(&self, _request: v1::StatusRequest) -> Result<v1::StatusResponse, Self::Error> {
+        Err(BackendError)
+    }
+}
+
+impl trogon_peer_mcp::AcknowledgePeerBatch for Backend {
+    type Error = BackendError;
+    async fn acknowledge_batch(
+        &self,
+        _request: v1::AcknowledgeBatchRequest,
+    ) -> Result<v1::AcknowledgeBatchResponse, Self::Error> {
+        Err(BackendError)
+    }
+}
+
 fn adapter(backend: Backend) -> PeerMcp<Backend> {
     PeerMcp::new(
         backend,
@@ -199,6 +230,41 @@ fn typed_error_codes_have_distinct_stable_wire_names_without_serializing_sources
         serde_json::from_value::<String>(json!({"untrusted_argument_content":true})).expect_err("invalid string")
     }
     let errors = [
+        (
+            PeerMcpError::InvalidModelInput(trogon_peer::PeerValueError::Empty),
+            PeerMcpErrorCode::InvalidModelInput,
+            "invalid_model_input",
+        ),
+        (
+            PeerMcpError::InvalidMetadata,
+            PeerMcpErrorCode::InvalidMetadata,
+            "invalid_metadata",
+        ),
+        (
+            PeerMcpError::MetadataEncoding(json_error()),
+            PeerMcpErrorCode::MetadataEncoding,
+            "metadata_encoding",
+        ),
+        (
+            PeerMcpError::Acknowledge(Box::new(BackendError)),
+            PeerMcpErrorCode::Acknowledge,
+            "acknowledge",
+        ),
+        (
+            PeerMcpError::Roster(Box::new(BackendError)),
+            PeerMcpErrorCode::Roster,
+            "roster",
+        ),
+        (
+            PeerMcpError::Send(Box::new(BackendError)),
+            PeerMcpErrorCode::Send,
+            "send",
+        ),
+        (
+            PeerMcpError::Status(Box::new(BackendError)),
+            PeerMcpErrorCode::Status,
+            "status",
+        ),
         (
             PeerMcpError::PromptDeadline,
             PeerMcpErrorCode::PromptDeadline,

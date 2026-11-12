@@ -16,6 +16,12 @@ pub enum PeerMcpError {
     InvalidConfig(#[source] trogon_peer::PeerValueError),
     #[error("Peer tool arguments are invalid.")]
     InvalidHostIdentity(#[source] trogon_peer::PeerValueError),
+    #[error("Peer tool arguments are invalid.")]
+    InvalidModelInput(#[source] trogon_peer::PeerValueError),
+    #[error("Peer service returned invalid operation metadata.")]
+    InvalidMetadata,
+    #[error("Peer service returned invalid operation metadata.")]
+    MetadataEncoding(#[source] serde_json::Error),
     #[error("Peer service returned an invalid enrollment.")]
     InvalidEnrollment,
     #[error("Peer service returned an invalid enrollment.")]
@@ -30,6 +36,14 @@ pub enum PeerMcpError {
     Enroll(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("Peer service is unavailable; pending delivery remains queued.")]
     Prepare(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Peer application acknowledgment was not confirmed; retry the same batch.")]
+    Acknowledge(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Peer metadata is unavailable.")]
+    Roster(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Peer send outcome was not confirmed; retry with the same idempotency key.")]
+    Send(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Peer metadata is unavailable.")]
+    Status(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl PeerMcpError {
@@ -42,6 +56,9 @@ impl PeerMcpError {
             Self::InvalidBatch(_) => PeerMcpErrorCode::InvalidBatch,
             Self::InvalidConfig(_) => PeerMcpErrorCode::InvalidConfig,
             Self::InvalidHostIdentity(_) => PeerMcpErrorCode::InvalidHostIdentity,
+            Self::InvalidModelInput(_) => PeerMcpErrorCode::InvalidModelInput,
+            Self::InvalidMetadata => PeerMcpErrorCode::InvalidMetadata,
+            Self::MetadataEncoding(_) => PeerMcpErrorCode::MetadataEncoding,
             Self::InvalidEnrollment => PeerMcpErrorCode::InvalidEnrollment,
             Self::InvalidEnrollmentIdentity(_) => PeerMcpErrorCode::InvalidEnrollmentIdentity,
             Self::UnsupportedTool => PeerMcpErrorCode::UnsupportedTool,
@@ -49,6 +66,10 @@ impl PeerMcpError {
             Self::Encode(_) => PeerMcpErrorCode::Encode,
             Self::Enroll(_) => PeerMcpErrorCode::Enroll,
             Self::Prepare(_) => PeerMcpErrorCode::Prepare,
+            Self::Acknowledge(_) => PeerMcpErrorCode::Acknowledge,
+            Self::Roster(_) => PeerMcpErrorCode::Roster,
+            Self::Send(_) => PeerMcpErrorCode::Send,
+            Self::Status(_) => PeerMcpErrorCode::Status,
         }
     }
 }

@@ -6,7 +6,10 @@ use buffa::MessageField;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::{ServerHandler, ServiceExt};
 use serde_json::{Value, json};
-use trogon_peer_mcp::{ConnectorConfigInput, EnrollPeer, PeerMcp, PeerMcpError, PreparePeerBatch};
+use trogon_peer_mcp::{
+    AcknowledgePeerBatch, ConnectorConfigInput, EnrollPeer, PeerMcp, PeerMcpError, PreparePeerBatch,
+    ReadPeerMessageStatus, ReadPeerRoster, SendPeerMessage,
+};
 use trogonai_proto::peers::v1alpha1 as v1;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,12 +24,48 @@ struct Backend {
     response: v1::PrepareBatchResponse,
     enrollment: Arc<Mutex<v1::EnrollResponse>>,
     fail_enroll: bool,
+    pause_enroll: Arc<std::sync::atomic::AtomicBool>,
     fail_prepare: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error("operation is not configured in the prompt-hook fixture")]
 struct UnconfiguredOperationError;
+
+impl ReadPeerRoster for Backend {
+    type Error = UnconfiguredOperationError;
+
+    async fn roster(&self, _request: v1::RosterRequest) -> Result<v1::RosterResponse, Self::Error> {
+        Err(UnconfiguredOperationError)
+    }
+}
+
+impl SendPeerMessage for Backend {
+    type Error = UnconfiguredOperationError;
+
+    async fn send(&self, _request: v1::SendRequest) -> Result<v1::SendResponse, Self::Error> {
+        Err(UnconfiguredOperationError)
+    }
+}
+
+impl ReadPeerMessageStatus for Backend {
+    type Error = UnconfiguredOperationError;
+
+    async fn status(&self, _request: v1::StatusRequest) -> Result<v1::StatusResponse, Self::Error> {
+        Err(UnconfiguredOperationError)
+    }
+}
+
+impl AcknowledgePeerBatch for Backend {
+    type Error = UnconfiguredOperationError;
+
+    async fn acknowledge_batch(
+        &self,
+        _request: v1::AcknowledgeBatchRequest,
+    ) -> Result<v1::AcknowledgeBatchResponse, Self::Error> {
+        Err(UnconfiguredOperationError)
+    }
+}
 
 fn sender_peer_id() -> String {
     "a".repeat(64)
@@ -56,6 +95,9 @@ impl EnrollPeer for Backend {
             .lock()
             .expect("call recorder")
             .push(ObservedCall::Enroll(request));
+        if self.pause_enroll.load(std::sync::atomic::Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         if self.fail_enroll {
             return Err(UnconfiguredOperationError);
         }
@@ -118,6 +160,7 @@ fn backend(response: v1::PrepareBatchResponse) -> Backend {
         response,
         enrollment: Arc::new(Mutex::new(enrollment())),
         fail_enroll: false,
+        pause_enroll: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         fail_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     }
 }
@@ -444,7 +487,7 @@ fn early_wire_error(result: &Value, expected: &str) {
 }
 
 #[tokio::test]
-async fn early_jsonrpc_dispatch_rejects_invalid_inputs_and_preserves_reserved_model_boundaries() {
+async fn jsonrpc_dispatch_rejects_invalid_inputs_and_maps_unconfigured_model_ports() {
     let backend = backend(Default::default());
     let calls = backend.calls.clone();
     let adapter = PeerMcp::new(backend, config()).expect("config");
@@ -471,13 +514,14 @@ async fn early_jsonrpc_dispatch_rejects_invalid_inputs_and_preserves_reserved_mo
         &results[6],
         "This connector belongs to another native session; reconnect it for this session.",
     );
-    for result in &results[7..] {
-        early_wire_error(result, "Peer operation is not available in this adapter layer.");
+    early_wire_error(&results[7], "Peer metadata is unavailable.");
+    for result in &results[8..] {
+        early_wire_error(result, "Peer tool arguments are invalid.");
     }
     assert_eq!(
         calls.lock().expect("calls").len(),
         2,
-        "invalid, unbound, unknown or reserved operations reached a backend port"
+        "invalid, unbound or unknown operations reached an enrollment or preparation port"
     );
 }
 
@@ -848,4 +892,27 @@ fn direct_server_tool_lookup_exposes_only_the_bound_prompt_hook() {
     assert_eq!(tool.name, "peer_prompt_hook");
     assert!(adapter.get_tool("unknown").is_none());
     assert!(adapter.get_tool("peer_prompt_hook.extra").is_none());
+}
+
+#[tokio::test]
+async fn cancelled_reenrollment_does_not_reuse_the_prior_model_attachment() {
+    let backend = backend(Default::default());
+    let paused = backend.pause_enroll.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    {
+        let enrollment = adapter.invoke(prompt("native_b", "cancelled_resume"));
+        tokio::pin!(enrollment);
+        assert!(
+            std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(enrollment.as_mut(), cx).is_pending())
+            })
+            .await
+        );
+    }
+    assert!(matches!(
+        adapter.invoke(request("peer_roster", json!({}))).await,
+        Err(PeerMcpError::Unbound)
+    ));
 }
