@@ -104,7 +104,8 @@ where
                     crate::history::load_with_position(&self.store, command.identity().peer_id())
                         .await
                         .map_err(EnrollServiceError::History)?;
-                match CommandExecution::new(&self.store, &attach)
+                let resume_store = crate::resume_store::ResumeStore(&self.store);
+                match CommandExecution::new(&resume_store, &attach)
                     .with_expected_revision(validated_position)
                     .with_replay_limit(PEER_REPLAY_LIMIT)
                     .with_principal(principal)
