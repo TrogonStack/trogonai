@@ -280,8 +280,9 @@ test('runner selection runs in its own job and fails loudly', async () => {
   assert.equal(selection.jobs.filter.steps.some((item) => item.id === 'runner'), false);
   assert.equal(selection.jobs.filter.outputs.runners, undefined);
   for (const [suite, workflow] of Object.entries(workflows)) {
-    const wanted = suite === 'rust' ? 'write' : undefined;
-    assert.equal(workflow.jobs.changes.permissions['id-token'], wanted, suite);
+    // A caller below what any job of the called workflow requests fails to
+    // start, even when that job would be skipped.
+    assert.equal(workflow.jobs.changes.permissions['id-token'], 'write', suite);
     assert.equal(workflow.jobs.changes.secrets, undefined, suite);
   }
 });
