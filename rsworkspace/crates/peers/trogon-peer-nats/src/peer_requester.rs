@@ -18,6 +18,16 @@ impl PeerRequester {
     }
 
     pub async fn request(&self, method: PeerMethod, payload: Vec<u8>) -> Result<async_nats::Message, PeerRequestError> {
+        self.request_with_headers(method, async_nats::HeaderMap::new(), payload)
+            .await
+    }
+
+    pub async fn request_with_headers(
+        &self,
+        method: PeerMethod,
+        headers: async_nats::HeaderMap,
+        payload: Vec<u8>,
+    ) -> Result<async_nats::Message, PeerRequestError> {
         let principal = PeerPrincipal::new(self.config.account().tenant().clone(), self.config.caller().clone());
         let route = PeerRoute::new(principal.clone(), method);
         let subject = PeerIngress::new(self.config.account().clone()).subject(&route)?;
@@ -34,6 +44,7 @@ impl PeerRequester {
         )?;
         let timeout = self.config.timeout().as_duration();
         let request = async_nats::Request::new()
+            .headers(headers)
             .inbox(reply.as_str().to_owned())
             // The outer deadline includes subscription and publish setup.
             .timeout(None)
