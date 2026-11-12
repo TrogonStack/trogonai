@@ -318,6 +318,43 @@ struct BackwardClock {
     regress_on: usize,
     reads: Arc<AtomicUsize>,
 }
+struct AuthorizedBackwardClock {
+    steady: chrono::DateTime<chrono::Utc>,
+    regressed: chrono::DateTime<chrono::Utc>,
+    armed: Arc<AtomicBool>,
+}
+
+impl PeerClock for AuthorizedBackwardClock {
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        if self.armed.load(Ordering::SeqCst) {
+            self.regressed
+        } else {
+            self.steady
+        }
+    }
+}
+
+struct RegressOnSendAuthorization {
+    inner: PolicyFixture,
+    armed: Arc<AtomicBool>,
+    authorizations: Arc<AtomicUsize>,
+}
+
+impl CommandAuthorizer<PeerAccess> for RegressOnSendAuthorization {
+    fn authorize(&self, principal: &CommandPrincipal, command: &PeerAccess) -> Result<(), AuthorizationDeniedError> {
+        self.inner.authorize(principal, command)
+    }
+}
+
+impl CommandAuthorizer<SendMessage> for RegressOnSendAuthorization {
+    fn authorize(&self, principal: &CommandPrincipal, command: &SendMessage) -> Result<(), AuthorizationDeniedError> {
+        self.inner.authorize(principal, command)?;
+        self.authorizations.fetch_add(1, Ordering::SeqCst);
+        self.armed.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
 impl PeerClock for BackwardClock {
     fn now(&self) -> chrono::DateTime<chrono::Utc> {
         if self.reads.fetch_add(1, Ordering::SeqCst) >= self.regress_on {
@@ -352,15 +389,19 @@ async fn renew_at_next_second(
 async fn send_does_not_retry_a_backward_clock_without_a_new_history_revision() -> TestResult {
     let f = Fixture::new().await?;
     let previous = renew_at_next_second(&f, &f.alice, &f.a).await?;
-    let reads = Arc::new(AtomicUsize::new(0));
+    let armed = Arc::new(AtomicBool::new(false));
+    let authorizations = Arc::new(AtomicUsize::new(0));
     let app = PeerApplication::new(
         f.store.clone(),
-        f.policy.clone(),
-        BackwardClock {
+        RegressOnSendAuthorization {
+            inner: f.policy.clone(),
+            armed: armed.clone(),
+            authorizations: authorizations.clone(),
+        },
+        AuthorizedBackwardClock {
             steady: f.clock.now(),
             regressed: previous,
-            regress_on: 3,
-            reads: reads.clone(),
+            armed,
         },
         f.content.clone(),
         f.cache.clone(),
@@ -377,8 +418,8 @@ async fn send_does_not_retry_a_backward_clock_without_a_new_history_revision() -
         ))
     ));
     assert_eq!(
-        reads.load(Ordering::SeqCst),
-        4,
+        authorizations.load(Ordering::SeqCst),
+        2,
         "a genuine clock regression must not spend a conflict retry"
     );
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
