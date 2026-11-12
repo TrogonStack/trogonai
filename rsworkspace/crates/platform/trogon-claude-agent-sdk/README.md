@@ -108,3 +108,13 @@ resolving policy conflicts during configuration assembly.
 
 The example checks API composition; it does not run a session. Further options
 and runtime behavior belong in separate review slices.
+
+## Typed input values
+
+These are Rust value objects around upstream scalar inputs or Rust host limits,
+not claims that Python or TypeScript exports identically named classes.
+They prepare values for later runtime slices without implementing wire dispatch.
+
+| Rust value | Upstream scalar or purpose | Rust boundary |
+| --- | --- | --- |
+| `Prompt` | [Python `ClaudeSDKClient.query(prompt=...)`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L272) / TypeScript `query` string prompt | Infallible owned string storage; empty strings and control characters remain unchanged. |

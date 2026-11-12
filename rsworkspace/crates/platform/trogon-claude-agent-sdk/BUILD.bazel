@@ -12,6 +12,7 @@ workspace_crate(
         "environment": {},
         "max_turns": {},
         "permission_mode": {},
+        "prompt": {},
         "public_api": {},
         "setting_sources": {},
         "tool_rule_storage": {},

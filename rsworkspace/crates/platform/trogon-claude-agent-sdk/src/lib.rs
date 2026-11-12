@@ -9,6 +9,7 @@ mod error;
 mod model_name;
 mod options;
 mod permission_mode;
+mod prompt;
 mod sensitive_string;
 mod setting_source;
 mod tool_rule;
@@ -31,3 +32,5 @@ pub use effort_level::EffortLevel;
 pub use agent_name::AgentName;
 
 pub use tool_rule::ToolRule;
+
+pub use prompt::Prompt;
