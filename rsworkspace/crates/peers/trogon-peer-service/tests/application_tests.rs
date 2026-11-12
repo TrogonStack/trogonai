@@ -1245,7 +1245,7 @@ async fn operations_without_required_fields_return_typed_errors_before_ports() -
     ));
     assert!(matches!(
         app.acknowledge_batch(&f.bob, Default::default()).await,
-        Err(PeerApplicationError::NotImplemented)
+        Err(PeerApplicationError::Input)
     ));
     assert!(matches!(
         app.roster(&f.bob, Default::default()).await,
@@ -1986,6 +1986,76 @@ async fn preparation_fenced_during_content_open_orphans_only_its_rejected_candid
             .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
             .contains(&winner_key)
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn application_ack_is_backend_owned_once_and_distinct_from_sender_settlement() -> TestResult {
+    let f = Fixture::new().await?;
+    let sent = f.intake("key", "act on this").await?;
+    let prepared = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    assert!(!f.history(&sender).await?.outbox[0].settlement.is_set());
+    let id = MessageId::new(
+        sent.message
+            .message_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    f.app().reconcile(&f.alice, &sender, &[id], WorkLimit::new(1)?).await?;
+    assert!(f.history(&sender).await?.outbox[0].settlement.is_set());
+    let ack = proto::AcknowledgeBatchRequest {
+        attachment_ref: f.b.clone().into(),
+        batch_id: prepared.batch.batch_id.clone(),
+    };
+    assert!(f.app().acknowledge_batch(&f.alice, ack.clone()).await.is_err());
+    let before = f.store.appends.load(Ordering::SeqCst);
+    let acknowledged = f.app().acknowledge_batch(&f.bob, ack.clone()).await?;
+    assert!(acknowledged.batch.acknowledged_at.is_set());
+    assert_eq!(f.app().acknowledge_batch(&f.bob, ack).await?, acknowledged);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before + 1);
+    assert!(!f.app().prepare_batch(&f.bob, f.prepare()).await?.batch.is_set());
+    let status = f
+        .app()
+        .status(
+            &f.alice,
+            proto::StatusRequest {
+                attachment_ref: f.a.clone().into(),
+                idempotency_key: Some("key".into()),
+            },
+        )
+        .await?;
+    assert_eq!(
+        status.status.and_then(|v| v.as_known()),
+        Some(proto::MessageStatus::MESSAGE_STATUS_APPLICATION_ACKNOWLEDGED)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn acknowledging_an_unknown_batch_cannot_release_capacity_or_append_a_receipt() -> TestResult {
+    let f = Fixture::new().await?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app()
+            .acknowledge_batch(
+                &f.bob,
+                proto::AcknowledgeBatchRequest {
+                    attachment_ref: f.b.clone().into(),
+                    batch_id: Some("unknown-batch".into()),
+                }
+            )
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Message(
+            trogon_decider_runtime::CommandError::Decide(trogon_peer::MessageError::BatchNotFound)
+        ))
+    ));
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert!(!f.app().prepare_batch(&f.bob, f.prepare()).await?.batch.is_set());
     Ok(())
 }
 
@@ -3037,6 +3107,27 @@ async fn public_preparation_rejects_a_leap_clock_before_allocating_or_opening_co
             .is_empty()
     );
     Ok(())
+}
+
+impl Fixture {
+    pub async fn history(&self, peer: &PeerId) -> TestResult<trogonai_proto::peers::state_v1alpha1::PeerState> {
+        let read = self
+            .store
+            .read_stream(ReadStreamRequest {
+                stream_id: peer,
+                from: ReadFrom::Beginning,
+            })
+            .await?;
+        let mut state = trogon_peer::commands::state::initial_state();
+        for event in read.events {
+            let event = event
+                .decode::<proto::PeerEvent>()?
+                .into_decoded()
+                .ok_or(PeerPortError::Integrity)?;
+            state = trogon_peer::commands::state::evolve(state, &event)?;
+        }
+        Ok(state)
+    }
 }
 
 #[derive(Clone)]
