@@ -167,18 +167,19 @@ where
             let Some(binding) = self.binding.get() else {
                 return Ok(());
             };
-            let mut current = binding.lock().await;
+            let current = binding.lock().await;
             if current.detach_confirmed() {
                 return Ok(());
             }
             let attachment = current.attachment().ok_or(PeerMcpError::EnrollmentUncertain)?;
+            drop(current);
             self.backend
                 .detach(v1::DetachRequest {
                     attachment_ref: crate::model_tools::wire_attachment(&attachment).into(),
                 })
                 .await
                 .map_err(|error| PeerMcpError::Detach(Box::new(error)))?;
-            current.confirm_detach();
+            binding.lock().await.confirm_detach();
             Ok(())
         })
         .await
