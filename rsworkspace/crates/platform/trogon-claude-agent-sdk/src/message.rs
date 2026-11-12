@@ -16,6 +16,18 @@ pub struct AssistantMessage {
 }
 
 #[derive(Clone, Debug)]
+pub struct UserMessage {
+    pub content: Content,
+    pub parent_tool_use_id: Option<ToolUseId>,
+    pub session_id: Option<SessionId>,
+    pub uuid: Option<MessageId>,
+    pub origin: Option<MessageOrigin>,
+    pub tool_use_result: Option<serde_json::Value>,
+    pub additional_fields: JsonObject,
+    pub message_fields: JsonObject,
+}
+
+#[derive(Clone, Debug)]
 pub enum Content {
     Text(String),
     Blocks(Vec<ContentBlock>),
