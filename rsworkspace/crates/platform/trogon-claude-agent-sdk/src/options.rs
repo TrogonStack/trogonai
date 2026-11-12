@@ -21,7 +21,12 @@ impl std::fmt::Debug for ClaudeAgentOptions {
         formatter
             .debug_struct("ClaudeAgentOptions")
             .field("cli_path", &self.cli_path)
+            .field("cwd", &self.cwd)
             .field("permission_mode", &self.permission_mode)
+            .field("setting_sources", &self.setting_sources)
+            .field("max_turns", &self.max_turns)
+            .field("max_budget_usd", &self.max_budget_usd)
+            .field("effort", &self.effort)
             .finish_non_exhaustive()
     }
 }

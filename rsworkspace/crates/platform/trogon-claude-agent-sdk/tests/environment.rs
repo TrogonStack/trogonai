@@ -44,3 +44,22 @@ fn options_debug_does_not_disclose_environment_entries_or_model_strings() {
         assert!(!debug.contains(value));
     }
 }
+
+#[test]
+fn options_debug_shows_non_sensitive_settings() {
+    let options = ClaudeAgentOptions {
+        cwd: Some("fixture-cwd".into()),
+        max_turns: std::num::NonZeroUsize::new(7),
+        ..ClaudeAgentOptions::default()
+    };
+    let debug = format!("{options:?}");
+    for field in [
+        "cwd: Some(\"fixture-cwd\")",
+        "max_turns: Some(7)",
+        "setting_sources",
+        "max_budget_usd",
+        "effort",
+    ] {
+        assert!(debug.contains(field), "{debug}");
+    }
+}
