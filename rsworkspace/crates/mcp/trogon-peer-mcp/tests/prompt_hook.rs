@@ -2065,7 +2065,10 @@ async fn detach_cancels_inflight_resume_and_old_generation_heartbeat_without_res
         tokio::spawn(async move { adapter.invoke(prompt("native_b", "resume")).await })
     };
     tokio::task::yield_now().await;
-    adapter.invoke(detach("native_b")).await.expect("detach during resume");
+    assert!(matches!(
+        adapter.invoke(detach("native_b")).await,
+        Err(PeerMcpError::EnrollmentUncertain)
+    ));
     assert!(matches!(
         prompt_task.await.expect("prompt task"),
         Err(PeerMcpError::Detached)
@@ -2079,11 +2082,13 @@ async fn detach_cancels_inflight_resume_and_old_generation_heartbeat_without_res
         Err(PeerMcpError::Detached)
     ));
     assert_eq!(calls.lock().expect("calls").len(), before);
-    assert_eq!(
-        calls.lock().expect("calls").last(),
-        Some(&ObservedCall::Detach(v1::DetachRequest {
-            attachment_ref: attachment().into()
-        }))
+    assert!(
+        calls
+            .lock()
+            .expect("calls")
+            .iter()
+            .all(|call| !matches!(call, ObservedCall::Detach(_))),
+        "an uncertain resumed enrollment must not detach the prior generation"
     );
 }
 
@@ -2435,4 +2440,159 @@ async fn prompt_preempts_queued_heartbeat_without_cancelling_foreground_work() {
             .iter()
             .all(|call| !matches!(call, ObservedCall::Heartbeat(_)))
     );
+}
+
+#[tokio::test]
+async fn cancelled_reenrollment_does_not_reuse_the_prior_model_attachment() {
+    let backend = backend(Default::default());
+    let paused = backend.pause_enroll.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    {
+        let enrollment = adapter.invoke(prompt("native_b", "cancelled_resume"));
+        tokio::pin!(enrollment);
+        assert!(
+            std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(enrollment.as_mut(), cx).is_pending())
+            })
+            .await
+        );
+    }
+    assert!(matches!(
+        adapter.invoke(request("peer_roster", json!({}))).await,
+        Err(PeerMcpError::Unbound)
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn lost_reenrollment_reply_cannot_confirm_detach_with_the_prior_generation() {
+    for shutdown in [false, true] {
+        for deadline in [false, true] {
+            let backend = backend(Default::default());
+            let paused = backend.pause_enroll.clone();
+            let calls = backend.calls.clone();
+            let response = backend.enrollment.clone();
+            let committed = backend.committed_enrollments.clone();
+            let adapter = PeerMcp::new(backend, config()).expect("config");
+            adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+            response
+                .lock()
+                .expect("response")
+                .attachment
+                .as_option_mut()
+                .expect("lease")
+                .attachment_ref
+                .as_option_mut()
+                .expect("attachment")
+                .generation = Some(2);
+            paused.store(true, std::sync::atomic::Ordering::SeqCst);
+            {
+                let enrollment = adapter.invoke(prompt("native_b", "generation_2"));
+                tokio::pin!(enrollment);
+                assert!(poll_fn(|cx| Poll::Ready(enrollment.as_mut().poll(cx).is_pending())).await);
+                assert_eq!(committed.lock().expect("remote enrollment state").len(), 2);
+                if deadline {
+                    assert!(matches!(enrollment.await, Err(PeerMcpError::PromptDeadline)));
+                }
+            }
+
+            let result = if shutdown {
+                adapter.shutdown().await
+            } else {
+                adapter.invoke(detach("native_b")).await.map(|_| ())
+            };
+            assert!(
+                matches!(result, Err(PeerMcpError::EnrollmentUncertain)),
+                "a lost generation-two reply must not confirm generation-one detach"
+            );
+            assert!(matches!(
+                adapter.shutdown().await,
+                Err(PeerMcpError::EnrollmentUncertain)
+            ));
+            assert_eq!(
+                calls.lock().expect("calls").len(),
+                3,
+                "no stale detach or recovery enrollment"
+            );
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn lost_reenrollment_reply_suspends_stale_attachment_use_until_valid_retry() {
+    let backend = backend(Default::default());
+    let paused = backend.pause_enroll.clone();
+    let calls = backend.calls.clone();
+    let response = backend.enrollment.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    let heartbeat = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.run_heartbeat(AvailabilityObservation::Ready).await })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    let heartbeat_count = || {
+        calls
+            .lock()
+            .expect("calls")
+            .iter()
+            .filter(|call| matches!(call, ObservedCall::Heartbeat(_)))
+            .count()
+    };
+    assert_eq!(heartbeat_count(), 1);
+    response
+        .lock()
+        .expect("response")
+        .attachment
+        .as_option_mut()
+        .expect("lease")
+        .attachment_ref
+        .as_option_mut()
+        .expect("attachment")
+        .generation = Some(2);
+    paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(matches!(
+        adapter.invoke(prompt("native_b", "generation_2")).await,
+        Err(PeerMcpError::PromptDeadline)
+    ));
+    let before = heartbeat_count();
+    for _ in 0..3 {
+        tokio::time::advance(std::time::Duration::from_secs(2)).await;
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        heartbeat_count(),
+        before,
+        "uncertain enrollment cannot advertise the prior generation"
+    );
+    assert!(matches!(
+        adapter.invoke(request("peer_roster", json!({}))).await,
+        Err(PeerMcpError::Unbound)
+    ));
+    paused.store(false, std::sync::atomic::Ordering::SeqCst);
+    adapter
+        .invoke(prompt("native_b", "generation_2"))
+        .await
+        .expect("valid retry rebinds generation two");
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(heartbeat_count(), before + 1);
+    adapter.shutdown().await.expect("detach validated generation two");
+    heartbeat.await.expect("heartbeat task");
+    let observed = calls.lock().expect("calls");
+    let Some(ObservedCall::Detach(detach)) = observed.last() else {
+        panic!("detach");
+    };
+    assert_eq!(detach.attachment_ref.generation, Some(2));
+    let Some(ObservedCall::Heartbeat(heartbeat)) = observed
+        .iter()
+        .rev()
+        .find(|call| matches!(call, ObservedCall::Heartbeat(_)))
+    else {
+        panic!("heartbeat");
+    };
+    assert_eq!(heartbeat.attachment_ref.generation, Some(2));
 }
