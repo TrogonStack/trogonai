@@ -22,6 +22,7 @@ pinned [TypeScript `0.3.319` declaration archive](https://registry.npmjs.org/@an
 | `env: Environment` | [`env`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2492) | `env` |
 | `additional_directories: Vec<PathBuf>` | [`add_dirs`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2486) | `additionalDirectories` |
 | `agent: Option<AgentName>` | Not exposed in pinned Python | `agent` |
+| `allowed_tools: Vec<ToolRule>` | [`allowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2353) | `allowedTools` |
 
 `PermissionMode` mirrors Python's
 [`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L25)
@@ -93,6 +94,12 @@ the reviewed Python options do not expose a counterpart. `AgentName` stores
 the string unchanged without identifier restrictions during configuration
 assembly. Process-start checks belong to the later runtime boundary. This draft
 stores the selection without starting an agent.
+
+`allowed_tools` stores ordered tool rules and defaults to empty.
+`ToolRule` stores strings unchanged, including empty values, control characters,
+and commas, like the upstream option fields. Duplicate rules remain present.
+Process-start validation belongs to the later runtime boundary; this draft
+applies no permission policy.
 
 The example checks API composition; it does not run a session. Further options
 and runtime behavior belong in separate review slices.

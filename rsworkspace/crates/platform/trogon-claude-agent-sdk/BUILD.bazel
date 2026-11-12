@@ -6,12 +6,14 @@ workspace_crate(
     integration_tests = {
         "additional_directories": {},
         "agent": {},
+        "allowed_tools": {},
         "effort": {},
         "environment": {},
         "max_turns": {},
         "permission_mode": {},
         "public_api": {},
         "setting_sources": {},
+        "tool_rule_storage": {},
         "usd_budget": {},
     },
 )
