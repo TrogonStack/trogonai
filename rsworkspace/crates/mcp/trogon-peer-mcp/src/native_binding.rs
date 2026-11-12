@@ -8,7 +8,13 @@ use crate::connector_config::ConnectorConfig;
 pub(crate) struct NativeBinding {
     native_session_id: NativeSessionId,
     attachment: Option<watch::Sender<AttachmentRef>>,
+    enrollment: EnrollmentState,
     detach_confirmed: bool,
+}
+
+enum EnrollmentState {
+    Uncertain,
+    Replied,
 }
 
 impl NativeBinding {
@@ -16,6 +22,7 @@ impl NativeBinding {
         Self {
             native_session_id,
             attachment: None,
+            enrollment: EnrollmentState::Uncertain,
             detach_confirmed: false,
         }
     }
@@ -25,11 +32,23 @@ impl NativeBinding {
     }
 
     pub(crate) fn attachment(&self) -> Option<AttachmentRef> {
-        self.attachment.as_ref().map(|attachment| attachment.borrow().clone())
+        match self.enrollment {
+            EnrollmentState::Uncertain => None,
+            EnrollmentState::Replied => self.last_attachment(),
+        }
     }
 
     pub(crate) fn attachment_subscription(&self) -> Option<watch::Receiver<AttachmentRef>> {
+        self.attachment()?;
         self.attachment.as_ref().map(watch::Sender::subscribe)
+    }
+
+    pub(crate) fn enrollment_started(&mut self) {
+        self.enrollment = EnrollmentState::Uncertain;
+    }
+
+    fn last_attachment(&self) -> Option<AttachmentRef> {
+        self.attachment.as_ref().map(|attachment| attachment.borrow().clone())
     }
 
     pub(crate) fn detach_confirmed(&self) -> bool {
@@ -45,6 +64,7 @@ impl NativeBinding {
         response: &v1::EnrollResponse,
         config: &ConnectorConfig,
     ) -> Result<AttachmentRef, PeerMcpError> {
+        self.enrollment = EnrollmentState::Replied;
         let peer_id = response.peer_id.as_deref().ok_or(PeerMcpError::InvalidEnrollment)?;
         let peer_id = PeerId::parse(peer_id).map_err(PeerMcpError::InvalidEnrollmentIdentity)?;
         let lease = response.attachment.as_option().ok_or(PeerMcpError::InvalidEnrollment)?;
@@ -80,7 +100,7 @@ impl NativeBinding {
         let attachment =
             AttachmentRef::new(peer_id, connector_id, generation).map_err(PeerMcpError::InvalidEnrollmentIdentity)?;
         if self
-            .attachment()
+            .last_attachment()
             .as_ref()
             .is_some_and(|prior| prior.peer_id() != attachment.peer_id())
         {
