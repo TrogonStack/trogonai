@@ -26,3 +26,21 @@ mod attachment_ref;
 mod peer_observation;
 pub use attachment_ref::AttachmentRef;
 pub use peer_observation::{PeerObservation, PeerObservationError};
+
+mod message_id;
+pub use message_id::MessageId;
+
+mod batch_id;
+pub use batch_id::BatchId;
+
+mod idempotency_key;
+pub use idempotency_key::IdempotencyKey;
+
+mod sealed_content_ref;
+pub use sealed_content_ref::SealedContentRef;
+
+mod trusted_content;
+pub use trusted_content::TrustedContent;
+
+mod content_semantic_fingerprint;
+pub use content_semantic_fingerprint::ContentSemanticFingerprint;
