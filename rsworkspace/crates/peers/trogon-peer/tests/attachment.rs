@@ -90,6 +90,32 @@ fn an_expired_attachment_advances_generation_without_replacing_mailbox_history()
         .then_state(expected);
 }
 
+#[test]
+fn replacement_does_not_report_the_previous_connectors_blocked_condition() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let now = start + chrono::Duration::seconds(10);
+    let mut before = state(start);
+    before.availability = Some(proto::PeerAvailability::PEER_AVAILABILITY_BLOCKED.into());
+    before.condition = Some(proto::PeerCondition::PEER_CONDITION_RATE_LIMIT.into());
+    let next = attachment(&identity(), "new_connector", 2, now);
+    let mut expected = before.clone();
+    expected.attachment = MessageField::some(next.clone());
+    expected.availability = Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into());
+    expected.condition = None;
+    TestCase::<Attach>::new()
+        .given_state(before)
+        .when(command("new_connector", "collaboration", now))
+        .then([proto::PeerEvent {
+            event: Some(
+                proto::PeerAttached {
+                    attachment: MessageField::some(next),
+                }
+                .into(),
+            ),
+        }])
+        .then_state(expected);
+}
+
 fn command(connector: &str, collaboration: &str, now: DateTime<Utc>) -> Attach {
     Attach::new(
         identity(),
