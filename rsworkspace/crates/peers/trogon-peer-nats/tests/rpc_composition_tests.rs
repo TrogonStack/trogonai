@@ -1,4 +1,13 @@
+use futures::StreamExt as _;
 use grpc_nats_micro::ServiceFault;
+use grpc_nats_micro::SubjectPrefixError;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use trogon_peer_nats::PeerAccount;
+use trogon_peer_nats::PeerRpcServeError;
+use trogon_peer_nats::PeerTenant;
+use trogon_peer_nats::serve_peer_rpc;
 use trogon_peer_nats::{PeerRpcApplication, PeerRpcOperation};
 use trogon_peer_service::{PeerService, test_support::Fixture};
 use trogonai_proto::peers::v1alpha1 as proto;
@@ -38,5 +47,116 @@ async fn malformed_application_inputs_produce_sanitized_canonical_status() -> Te
     assert_eq!(error.status().code, 3);
     assert_eq!(error.message(), "invalid peer request");
     assert!(error.status().details.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn service_discovery_registers_the_annotated_methods_and_queue() -> TestResult {
+    let fixture = Fixture::new().await?;
+    let backend = std::sync::Arc::new(PeerRpcApplication::new(
+        PeerService::new(fixture.store.clone(), fixture.policy.clone(), fixture.clock.clone()),
+        fixture.app(),
+    ));
+    let broker = trogon_nats::test_support::JetStreamTestServer::start_with_atomic_batches().await;
+    let client = broker.client().await;
+    let account = trogon_peer_nats::PeerAccount::SharedFixture {
+        tenant: trogon_peer_nats::PeerTenant::new("tenant")?,
+    };
+    let _service = trogon_peer_nats::serve_peer_rpc(&client, account, backend).await?;
+    let response = client.request("$SRV.INFO.PeerService", Vec::new().into()).await?;
+    let info: serde_json::Value = serde_json::from_slice(&response.payload)?;
+    assert_eq!(info["version"], "0.1.0");
+    assert_eq!(info["description"], "Coordinates enrolled peer communication");
+    let endpoints = info["endpoints"].as_array().ok_or("no endpoints")?;
+    assert_eq!(endpoints.len(), 8);
+    let mut names = Vec::new();
+    for endpoint in endpoints {
+        let name = endpoint["name"].as_str().ok_or("no method")?;
+        assert_eq!(endpoint["subject"], format!("tenant.peer.v1.*.PeerService.{name}"));
+        assert_eq!(endpoint["queue_group"], "q");
+        names.push(name);
+    }
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [
+            "AcknowledgeBatch",
+            "Detach",
+            "Enroll",
+            "Heartbeat",
+            "PrepareBatch",
+            "Roster",
+            "Send",
+            "Status"
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn named_peer_registration_preserves_the_existing_shared_prefix_boundary() -> TestResult {
+    let fixture = Fixture::new().await?;
+    let backend = Arc::new(PeerRpcApplication::new(
+        PeerService::new(fixture.store.clone(), fixture.policy.clone(), fixture.clock.clone()),
+        fixture.app(),
+    ));
+    let broker = trogon_nats::test_support::JetStreamTestServer::start_with_atomic_batches().await;
+    let client = broker.client().await;
+    let reads = fixture.store.reads.load(Ordering::SeqCst);
+    let appends = fixture.store.appends.load(Ordering::SeqCst);
+    let accepted = "a".repeat(120);
+    let service = tokio::time::timeout(
+        Duration::from_secs(2),
+        serve_peer_rpc(
+            &client,
+            PeerAccount::SharedFixture {
+                tenant: PeerTenant::new(accepted.clone())?,
+            },
+            Arc::clone(&backend),
+        ),
+    )
+    .await??;
+    let barrier = client.new_inbox();
+    let mut observed = client.subscribe(barrier.clone()).await?;
+    client.publish(barrier, vec![0].into()).await?;
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), observed.next())
+            .await?
+            .ok_or("peer registration barrier was not observed")?
+            .payload
+            .as_ref(),
+        &[0]
+    );
+    let response = tokio::time::timeout(
+        Duration::from_secs(2),
+        client.request("$SRV.INFO.PeerService", Vec::new().into()),
+    )
+    .await??;
+    let info: serde_json::Value = serde_json::from_slice(&response.payload)?;
+    let endpoints = info["endpoints"].as_array().ok_or("missing peer endpoints")?;
+    assert_eq!(endpoints.len(), 8);
+    for endpoint in endpoints {
+        let method = endpoint["name"].as_str().ok_or("missing peer method")?;
+        assert_eq!(
+            endpoint["subject"],
+            format!("{accepted}.peer.v1.*.PeerService.{method}")
+        );
+        assert_eq!(endpoint["queue_group"], "q");
+    }
+    tokio::time::timeout(Duration::from_secs(2), service.stop()).await??;
+    for length in 121..=128 {
+        let tenant = PeerTenant::new("a".repeat(length))?;
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            serve_peer_rpc(&client, PeerAccount::SharedFixture { tenant }, Arc::clone(&backend)),
+        )
+        .await?;
+        let error = result.err().ok_or("oversized shared prefix registered")?;
+        assert!(
+            matches!(error, PeerRpcServeError::Prefix(SubjectPrefixError::TooLong(bytes)) if bytes == length + ".peer.v1".len())
+        );
+    }
+    assert_eq!(fixture.store.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(fixture.store.appends.load(Ordering::SeqCst), appends);
     Ok(())
 }

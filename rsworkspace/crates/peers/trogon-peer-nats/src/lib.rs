@@ -51,4 +51,8 @@ pub use rpc_application::PeerRpcApplication;
 pub use rpc_backend::PeerRpcBackend;
 
 mod rpc_fault;
+mod rpc_serve_error;
+mod rpc_server;
 mod telemetry;
+pub use rpc_serve_error::PeerRpcServeError;
+pub use rpc_server::serve_peer_rpc;
