@@ -1,6 +1,8 @@
 use crate::constants::MAX_HISTORY_EVENTS;
 use crate::history_error::HistoryError;
-use trogon_decider_runtime::{ReadFrom, ReadStreamRequest, StreamPosition, StreamRead, read_stream_for_execution};
+use trogon_decider_runtime::{
+    ReadFrom, ReadStreamRequest, ReadStreamResponse, StreamPosition, StreamRead, read_stream_for_execution,
+};
 use trogon_peer::{PeerHistory, PeerId};
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1::PeerEvent};
 
@@ -34,6 +36,11 @@ pub(crate) async fn load_peer_history_with_position<Store: StreamRead<PeerId>>(
     )
     .await
     .map_err(HistoryError::Read)?;
+    let history = validate(&read)?;
+    Ok((history, read.current_position))
+}
+
+pub(crate) fn validate<ReadError>(read: &ReadStreamResponse) -> Result<PeerHistory, HistoryError<ReadError>> {
     if read.events.len() as u64 > MAX_HISTORY_EVENTS {
         return Err(HistoryError::Limit);
     }
@@ -42,7 +49,7 @@ pub(crate) async fn load_peer_history_with_position<Store: StreamRead<PeerId>>(
         return Err(HistoryError::Incomplete);
     }
     let mut result = PeerHistory::initial();
-    for event in read.events {
+    for event in &read.events {
         let decoded = event
             .decode::<PeerEvent>()
             .map_err(HistoryError::Decode)?
@@ -50,5 +57,5 @@ pub(crate) async fn load_peer_history_with_position<Store: StreamRead<PeerId>>(
             .ok_or(HistoryError::UnknownEvent)?;
         result = result.evolve(&decoded).map_err(HistoryError::Evolve)?;
     }
-    Ok((result, validated_position))
+    Ok(result)
 }

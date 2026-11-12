@@ -105,6 +105,7 @@ pub(crate) fn enrollment<R, A>(error: EnrollServiceError<R, A>) -> ServiceFault 
             fault(Code::INVALID_ARGUMENT, "invalid peer request")
         }
         EnrollServiceError::Execution(error) => execution(error),
+        EnrollServiceError::Attach(CommandError::ReadStream(error)) => history(error),
         EnrollServiceError::Attach(error) => execution(error),
         EnrollServiceError::History(error) => history(error),
         EnrollServiceError::ResumeGuard(_) => fault(Code::FAILED_PRECONDITION, "peer attachment changed"),
