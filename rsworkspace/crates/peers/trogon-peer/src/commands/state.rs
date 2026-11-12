@@ -42,6 +42,10 @@ pub enum EvolveError {
     IdentityMismatch,
     #[error("peer attachment generation, status, or lease is invalid")]
     InvalidAttachment,
+    #[error("peer heartbeat observation is invalid")]
+    InvalidObservation,
+    #[error("peer observation value is invalid: {0}")]
+    InvalidObservationValue(#[source] super::domain::PeerObservationError),
 }
 
 pub fn initial_state() -> PeerState {
@@ -100,6 +104,55 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
             }
             state.attachment = MessageField::some(attachment.clone());
             state.availability = Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into());
+            state.condition = None;
+        }
+        PeerEventCase::PeerHeartbeatRecorded(event) => {
+            let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
+            let previous = state.attachment.as_option().ok_or(EvolveError::InvalidAttachment)?;
+            let attachment = event.attachment.as_option().ok_or(EvolveError::InvalidAttachment)?;
+            validate_attachment(enrollment, previous)?;
+            validate_attachment(enrollment, attachment)?;
+            let observed = read_time(attachment.observed_at.as_option(), "attachment.observed_at")?;
+            let previous_observed = read_time(previous.observed_at.as_option(), "attachment.observed_at")?;
+            let previous_expires = read_time(previous.expires_at.as_option(), "attachment.expires_at")?;
+            if previous.attachment_ref != attachment.attachment_ref
+                || previous.status.and_then(|status| status.as_known())
+                    != Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
+                || attachment.status != previous.status
+                || observed < previous_observed
+                || observed >= previous_expires
+            {
+                return Err(EvolveError::InvalidAttachment);
+            }
+            let availability = event
+                .availability
+                .and_then(|value| value.as_known())
+                .ok_or(EvolveError::InvalidObservation)?;
+            let condition = event
+                .condition
+                .map(|value| value.as_known().ok_or(EvolveError::InvalidObservation))
+                .transpose()?;
+            let active_at = event
+                .active_at
+                .as_option()
+                .map(|at| read_time(Some(at), "active_at"))
+                .transpose()?;
+            super::domain::PeerObservation::new(availability, condition, active_at)
+                .map_err(EvolveError::InvalidObservationValue)?;
+            let previous_active = state
+                .active_at
+                .as_option()
+                .map(|at| read_time(Some(at), "active_at"))
+                .transpose()?;
+            if active_at.is_some_and(|at| at > observed)
+                || previous_active.is_some_and(|old| active_at.is_none_or(|at| at < old))
+            {
+                return Err(EvolveError::InvalidObservation);
+            }
+            state.attachment = MessageField::some(attachment.clone());
+            state.availability = event.availability;
+            state.condition = event.condition;
+            state.active_at = event.active_at.clone();
         }
         _ => return Err(EvolveError::UnsupportedEvent),
     }
