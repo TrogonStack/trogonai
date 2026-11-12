@@ -56,3 +56,6 @@ mod rpc_server;
 mod telemetry;
 pub use rpc_serve_error::PeerRpcServeError;
 pub use rpc_server::serve_peer_rpc;
+
+#[cfg(feature = "test-support")]
+pub mod test_support;
