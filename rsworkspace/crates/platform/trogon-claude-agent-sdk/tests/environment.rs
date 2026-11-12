@@ -1,11 +1,10 @@
-use std::collections::BTreeMap;
-use trogon_claude_agent_sdk::ClaudeAgentOptions;
+use trogon_claude_agent_sdk::{ClaudeAgentOptions, Environment};
 
 #[test]
 fn environment_overrides_are_owned_and_preserve_empty_values() {
     assert!(ClaudeAgentOptions::default().env.is_empty());
     let options = ClaudeAgentOptions {
-        env: BTreeMap::from([
+        env: Environment::from([
             ("SDK_FIXTURE_SETTING".into(), "fixture-value".into()),
             ("SDK_FIXTURE_EMPTY".into(), String::new()),
         ]),
@@ -13,22 +12,16 @@ fn environment_overrides_are_owned_and_preserve_empty_values() {
     };
     let mut cloned = options.clone();
     cloned.env.insert("SDK_FIXTURE_SETTING".into(), "changed".into());
-    assert_eq!(
-        options.env.get("SDK_FIXTURE_SETTING").map(String::as_str),
-        Some("fixture-value")
-    );
-    assert_eq!(options.env.get("SDK_FIXTURE_EMPTY").map(String::as_str), Some(""));
-    assert_eq!(
-        cloned.env.get("SDK_FIXTURE_SETTING").map(String::as_str),
-        Some("changed")
-    );
+    assert_eq!(options.env.get("SDK_FIXTURE_SETTING"), Some("fixture-value"));
+    assert_eq!(options.env.get("SDK_FIXTURE_EMPTY"), Some(""));
+    assert_eq!(cloned.env.get("SDK_FIXTURE_SETTING"), Some("changed"));
 }
 
 #[test]
 fn options_debug_does_not_disclose_environment_entries_or_model_strings() {
     let options = ClaudeAgentOptions {
         model: Some("fixture-model-canary".into()),
-        env: BTreeMap::from([(
+        env: Environment::from([(
             "FIXTURE_ENVIRONMENT_KEY".into(),
             "fixture-environment-value-canary".into(),
         )]),
@@ -62,4 +55,14 @@ fn options_debug_shows_non_sensitive_settings() {
     ] {
         assert!(debug.contains(field), "{debug}");
     }
+}
+
+#[test]
+fn environment_debug_reports_only_the_entry_count() {
+    let environment = Environment::from([("FIXTURE_KEY".to_owned(), "fixture-value".to_owned())]);
+    assert_eq!(format!("{environment:?}"), "Environment { len: 1, .. }");
+    assert_eq!(
+        environment.iter().collect::<Vec<_>>(),
+        [("FIXTURE_KEY", "fixture-value")]
+    );
 }

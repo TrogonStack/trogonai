@@ -76,8 +76,8 @@ from any selected level.
 `env` defaults to an empty string map and stores caller overrides without
 reading or changing the process environment. Like Python, Rust stores string
 values; the pinned TypeScript declaration additionally admits `undefined`.
-Options debug output shows the other settings but omits environment entries
-and model strings.
+`Environment` and `ModelName` keep their contents out of debug output, so
+options debug output shows every other setting without listing fields by hand.
 
 `additional_directories` stores an ordered path list and defaults to
 empty. Paths are not canonicalized, deduplicated, or restricted during

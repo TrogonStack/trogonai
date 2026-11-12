@@ -5,7 +5,7 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-use trogon_claude_agent_sdk::{ClaudeAgentOptions, ClaudeSdkClient, Error};
+use trogon_claude_agent_sdk::{ClaudeAgentOptions, ClaudeSdkClient, Error, ModelName};
 
 /// The API draft must not pretend that a connection was established.
 #[test]
@@ -36,6 +36,6 @@ fn configuration_preserves_upstream_optional_values() {
         };
         assert_eq!(options.cli_path, Some(PathBuf::from(cli_path)));
         assert_eq!(options.cwd, Some(PathBuf::from("workspace")));
-        assert_eq!(options.model.as_deref(), Some(model));
+        assert_eq!(options.model.as_ref().map(ModelName::as_str), Some(model));
     }
 }
