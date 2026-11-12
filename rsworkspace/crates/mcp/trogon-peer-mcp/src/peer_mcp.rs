@@ -367,9 +367,14 @@ where
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let result = match self.invoke(request).await {
+        let outcome = tokio::select! {
+            biased;
+            _ = context.ct.cancelled() => Err(PeerMcpError::RequestCancelled),
+            result = self.invoke(request) => result,
+        };
+        let result = match outcome {
             Ok(result) => result,
             Err(error) => {
                 let mut result = CallToolResult::error(vec![ContentBlock::text(error.to_string())]);

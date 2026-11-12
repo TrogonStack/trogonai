@@ -43,3 +43,16 @@ mod runtime_config;
 mod runtime_config_error;
 pub use runtime_config::RuntimeConfig;
 pub use runtime_config_error::RuntimeConfigError;
+
+mod rpc_peer_backend;
+mod runtime;
+mod runtime_error;
+pub use rpc_peer_backend::RpcPeerBackend;
+pub use runtime::{run_stdio, serve_connector};
+pub use runtime_error::RuntimeError;
+
+#[cfg(unix)]
+mod native_pipe;
+mod stdio_transport;
+
+mod observed_transport;
