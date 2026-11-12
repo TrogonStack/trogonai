@@ -9,10 +9,15 @@ exclude = [".config/**"]
 [lints]
 workspace = true
 
+[features]
+default = []
+test-support = []
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "sync"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
