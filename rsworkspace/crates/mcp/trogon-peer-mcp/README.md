@@ -129,6 +129,10 @@ one-second budget. These transport bounds do not create delivery facts.
 
 ## Evidence boundaries
 
+The [opt-in installed-host fixture](../../../../docs/how-to/run-peer-native-host-acceptance.md)
+runs the published plugin against a disposable authenticated broker. It is
+separate from ordinary test runs because it makes bounded model calls.
+
 The executable tests run the repository rmcp client over real child-process
 stdin/stdout, authenticated TLS/nkey broker grants, `PeerRpcApplication` and
 JetStream. Disposable content, policy, catalog and presentation adapters use
