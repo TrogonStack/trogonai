@@ -10,7 +10,7 @@ use futures::StreamExt as _;
 use probes::{denied_publish, denied_subscription};
 use serde::Serialize;
 use support::{
-    broker::{Broker, TestResult},
+    broker::{Broker, TestResult, observed_barrier},
     constants::PROBE_TIMEOUT,
 };
 
@@ -60,6 +60,7 @@ async fn tls_authenticated_connections_deny_impersonation_inboxes_and_all_storag
     let (alice_other, mut other_errors) = broker.connect("alice_other").await?;
     let (bob, mut bob_errors) = broker.connect("bob").await?;
     println!("credentialed TLS connections admitted");
+    observed_barrier(&service).await?;
     let mut requests = service.subscribe("tenant.peer.v1.*.PeerService.Enroll").await?;
     // Commands on one connection are ordered; observing this publish proves the subscription reached the broker.
     service
