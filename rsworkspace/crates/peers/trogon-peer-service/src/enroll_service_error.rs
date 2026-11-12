@@ -1,7 +1,9 @@
 use std::convert::Infallible;
 
+use crate::execution_error::ExecutionError;
+use crate::history_error::HistoryError;
 use trogon_decider_runtime::{CommandError, PrincipalIdError};
-use trogon_peer::{EnrollError, EvolveError, PeerValueError};
+use trogon_peer::{AttachError, EnrollError, EvolveError, PeerValueError};
 use trogonai_proto::peers::{PeerEventPayloadError, v1alpha1};
 
 use crate::EnrollmentField;
@@ -19,6 +21,10 @@ pub type EnrollExecutionError<ReadError, AppendError> = CommandError<
 
 #[derive(Debug, thiserror::Error)]
 pub enum EnrollServiceError<ReadError, AppendError> {
+    #[error("peer attachment changed during resume: {0}")]
+    ResumeGuard(#[source] trogon_peer::HeartbeatError),
+    #[error("peer resume attachment reference is invalid: {0}")]
+    ResumeReference(#[source] PeerValueError),
     #[error("peer enrollment field {field} is missing")]
     MissingInput { field: EnrollmentField },
     #[error("invalid peer enrollment field {field}: {source}")]
@@ -29,6 +35,10 @@ pub enum EnrollServiceError<ReadError, AppendError> {
     },
     #[error("trusted peer owner cannot form a command principal: {0}")]
     Principal(#[from] PrincipalIdError),
+    #[error("peer attachment execution failed: {0}")]
+    Attach(#[source] ExecutionError<AttachError, HistoryError<ReadError>, AppendError>),
+    #[error("peer history read failed: {0}")]
+    History(#[source] HistoryError<ReadError>),
     #[error("peer enrollment execution failed: {0}")]
     Execution(#[source] EnrollExecutionError<ReadError, AppendError>),
 }
