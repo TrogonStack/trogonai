@@ -38,8 +38,27 @@ class RustDocument:
 
     def path(self, value):
         require(isinstance(value, dict) and set(value) == {"path", "id", "args"}, "rust-path")
-        require(value["args"] is None, "rust-generics")
-        return {"path": self.qualified(value["id"]), "args": None}
+        return {"path": self.qualified(value["id"]), "args": self.arguments(value["args"])}
+
+    def arguments(self, value):
+        from rust_generic_values import argument, associated
+        if value is None:
+            return None
+        require(isinstance(value, dict) and len(value) == 1, "rust-generics")
+        if "angle_bracketed" in value:
+            body = value["angle_bracketed"]
+            require(isinstance(body, dict) and set(body) == {"args", "constraints"}
+                    and isinstance(body["args"], list) and isinstance(body["constraints"], list), "rust-generics")
+            return {"angle_bracketed": {
+                "args": [argument(self, arg) for arg in body["args"]],
+                "constraints": [associated(self, value) for value in body["constraints"]],
+            }}
+        if "parenthesized" in value:
+            body = value["parenthesized"]
+            require(isinstance(body, dict) and set(body) == {"inputs", "output"} and isinstance(body["inputs"], list), "rust-generics")
+            return {"parenthesized": {"inputs": [self.type(v) for v in body["inputs"]],
+                                      "output": None if body["output"] is None else self.type(body["output"])}}
+        raise GateError(Code.FORMAT, "rust-generics")
 
     def normalize(self, value):
         if isinstance(value, list):
