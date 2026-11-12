@@ -181,10 +181,23 @@ test('CodeQL result reports every outcome so branch rules can require it', () =>
   assert.deepEqual(job.needs, ['changes', 'analyze']);
   assert.equal(job.if, '${{ always() }}');
   const step = job.steps.at(-1);
-  assert.equal(step.env.ANALYZE_RESULT, '${{ needs.analyze.result }}');
-  for (const [result, status] of [['success', 0], ['skipped', 0], ['failure', 1], ['cancelled', 1]]) {
-    const run = spawnSync('bash', ['-c', step.run], { env: { ...process.env, ANALYZE_RESULT: result }, encoding: 'utf8' });
-    assert.equal(run.status, status, `analyze ${result}`);
+  assert.deepEqual(step.env, {
+    SELECTION_RESULT: '${{ needs.changes.result }}',
+    SELECTED_LANGUAGES: '${{ needs.changes.outputs.changes }}',
+    ANALYZE_RESULT: '${{ needs.analyze.result }}',
+  });
+  for (const [selection, languages, analyze, status] of [
+    ['success', '["rust"]', 'success', 0],
+    ['failure', '', 'success', 0],
+    ['success', '[]', 'skipped', 0],
+    ['cancelled', '', 'skipped', 1],
+    ['success', '["rust"]', 'skipped', 1],
+    ['success', '["rust"]', 'failure', 1],
+    ['success', '["rust"]', 'cancelled', 1],
+  ]) {
+    const env = { ...process.env, SELECTION_RESULT: selection, SELECTED_LANGUAGES: languages, ANALYZE_RESULT: analyze };
+    const run = spawnSync('bash', ['-c', step.run], { env, encoding: 'utf8' });
+    assert.equal(run.status, status, `selection ${selection} ${languages}, analyze ${analyze}`);
   }
 });
 
