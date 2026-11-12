@@ -1,0 +1,17 @@
+[package]
+name = "trogon-peer-context"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+trogon-peer = { path = "../trogon-peer" }
+trogonai-proto = { path = "../../platform/trogonai-proto", features = ["peers"] }

@@ -7655,6 +7655,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-peer-context"
+version = "0.1.0"
+dependencies = [
+ "buffa",
+ "buffa-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "trogon-peer",
+ "trogonai-proto",
+]
+
+[[package]]
 name = "trogon-peer-nats"
 version = "0.1.0"
 dependencies = [
