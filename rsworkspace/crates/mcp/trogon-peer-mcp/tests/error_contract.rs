@@ -49,6 +49,7 @@ struct Backend {
     enrollments: Arc<Mutex<Vec<v1::EnrollRequest>>>,
     preparations: Arc<Mutex<Vec<v1::PrepareBatchRequest>>>,
     enrollment: v1::EnrollResponse,
+    detach_work: Work,
 }
 
 impl Backend {
@@ -67,6 +68,7 @@ impl Backend {
                 }
             }))
             .expect("enrollment fixture"),
+            detach_work: Work::Fail,
         }
     }
 }
@@ -120,6 +122,21 @@ impl trogon_peer_mcp::AcknowledgePeerBatch for Backend {
         &self,
         _request: v1::AcknowledgeBatchRequest,
     ) -> Result<v1::AcknowledgeBatchResponse, Self::Error> {
+        Err(BackendError)
+    }
+}
+
+impl trogon_peer_mcp::HeartbeatPeer for Backend {
+    type Error = BackendError;
+    async fn heartbeat(&self, _request: v1::HeartbeatRequest) -> Result<v1::HeartbeatResponse, Self::Error> {
+        Err(BackendError)
+    }
+}
+
+impl trogon_peer_mcp::DetachPeer for Backend {
+    type Error = BackendError;
+    async fn detach(&self, _request: v1::DetachRequest) -> Result<v1::DetachResponse, Self::Error> {
+        self.detach_work.run().await?;
         Err(BackendError)
     }
 }
@@ -224,12 +241,144 @@ async fn served_prompt_deadline_has_a_safe_stable_code() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn served_codes_distinguish_model_and_detach_failures_without_source_content() {
+    let detach = || {
+        request(
+            "peer_detach_hook",
+            json!({"session_id":"native_b","hook_event_name":"SessionEnd"}),
+        )
+    };
+    let results = served(
+        Backend::new(Work::Ready, Work::Ready),
+        vec![
+            prompt("native_b"),
+            request("peer_roster", json!({})),
+            request("peer_status", json!({"idempotency_key":"stable_key"})),
+            request(
+                "peer_send",
+                json!({"recipient_peer_id":"a".repeat(64),"idempotency_key":"stable_key","text":"body"}),
+            ),
+            request("peer_acknowledge_batch", json!({"batch_id":"batch_1"})),
+            detach(),
+            prompt("native_b"),
+        ],
+    )
+    .await;
+    assert_eq!(results[1]["content"], results[2]["content"]);
+    for (result, code) in results[1..]
+        .iter()
+        .zip(["roster", "status", "send", "acknowledge", "detach", "detached"])
+    {
+        assert_code(result, code);
+    }
+    let mut backend = Backend::new(Work::Ready, Work::Ready);
+    backend.detach_work = Work::Pending;
+    let results = served(backend, vec![prompt("native_b"), detach()]).await;
+    assert_code(&results[1], "detach_deadline");
+    let results = served(
+        Backend::new(Work::Pending, Work::Ready),
+        vec![prompt("native_b"), detach()],
+    )
+    .await;
+    assert_code(&results[1], "enrollment_uncertain");
+}
+
+#[tokio::test(start_paused = true)]
+async fn prompt_deadline_bounds_pending_backend_and_preserves_identity_for_retry() {
+    for (enroll_work, prepare_work) in [(Work::Pending, Work::Ready), (Work::Ready, Work::Pending)] {
+        let backend = Backend::new(enroll_work, prepare_work);
+        let connector = adapter(backend.clone());
+        let started = tokio::time::Instant::now();
+        let outcome = tokio::time::timeout(Duration::from_millis(2100), connector.invoke(prompt("native_b")))
+            .await
+            .expect("connector must enforce its own total deadline");
+        assert!(outcome.is_err());
+        assert_eq!(started.elapsed(), Duration::from_secs(2));
+        assert!(matches!(
+            connector.invoke(prompt("native_other")).await,
+            Err(trogon_peer_mcp::PeerMcpError::NativeSessionChanged)
+        ));
+        *backend.enroll_work.lock().expect("enroll work") = Work::Ready;
+        *backend.prepare_work.lock().expect("prepare work") = Work::Ready;
+        connector.invoke(prompt("native_b")).await.expect("retry");
+        let enrollments = backend.enrollments.lock().expect("enrollments");
+        assert_eq!(enrollments.len(), 2);
+        assert_eq!(enrollments[0], enrollments[1]);
+        let preparations = backend.preparations.lock().expect("preparations");
+        if preparations.len() == 2 {
+            assert_eq!(preparations[0], preparations[1]);
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn prompt_deadline_is_one_total_budget_for_enrollment_and_preparation() {
+    let connector = adapter(Backend::new(
+        Work::Delay(Duration::from_millis(1500)),
+        Work::Delay(Duration::from_millis(1500)),
+    ));
+    let started = tokio::time::Instant::now();
+    let outcome = connector.invoke(prompt("native_b")).await;
+    assert!(outcome.is_err(), "backend steps must share the hook budget");
+    assert_eq!(started.elapsed(), Duration::from_secs(2));
+}
+
+#[tokio::test(start_paused = true)]
+async fn prompt_deadline_includes_lock_wait_without_starting_more_backend_work() {
+    let backend = Backend::new(Work::Pending, Work::Ready);
+    let connector = adapter(backend.clone());
+    let mut first = Box::pin(connector.invoke(prompt("native_b")));
+    poll_fn(|context| {
+        assert!(first.as_mut().poll(context).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    assert_eq!(backend.enrollments.lock().expect("enrollments").len(), 1);
+    let started = tokio::time::Instant::now();
+    let outcome = tokio::time::timeout(Duration::from_millis(2100), connector.invoke(prompt("native_b")))
+        .await
+        .expect("connector deadline must include the binding lock wait");
+    assert!(outcome.is_err());
+    assert_eq!(started.elapsed(), Duration::from_secs(2));
+    assert_eq!(backend.enrollments.lock().expect("enrollments").len(), 1);
+    assert!(backend.preparations.lock().expect("preparations").is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn prompt_completion_at_the_total_deadline_keeps_the_completed_result() {
+    let connector = adapter(Backend::new(
+        Work::Ready,
+        Work::Until(tokio::time::Instant::now() + Duration::from_secs(2)),
+    ));
+    let started = tokio::time::Instant::now();
+    let result = connector.invoke(prompt("native_b")).await.expect("completed prompt");
+    assert_eq!(started.elapsed(), Duration::from_secs(2));
+    assert_ne!(result.is_error, Some(true));
+}
+
 #[test]
 fn typed_error_codes_have_distinct_stable_wire_names_without_serializing_sources() {
     fn json_error() -> serde_json::Error {
         serde_json::from_value::<String>(json!({"untrusted_argument_content":true})).expect_err("invalid string")
     }
     let errors = [
+        (
+            PeerMcpError::EnrollmentUncertain,
+            PeerMcpErrorCode::EnrollmentUncertain,
+            "enrollment_uncertain",
+        ),
+        (PeerMcpError::Detached, PeerMcpErrorCode::Detached, "detached"),
+        (
+            PeerMcpError::Detach(Box::new(BackendError)),
+            PeerMcpErrorCode::Detach,
+            "detach",
+        ),
+        (
+            PeerMcpError::DetachDeadline,
+            PeerMcpErrorCode::DetachDeadline,
+            "detach_deadline",
+        ),
         (
             PeerMcpError::InvalidModelInput(trogon_peer::PeerValueError::Empty),
             PeerMcpErrorCode::InvalidModelInput,
@@ -340,77 +489,4 @@ fn typed_error_codes_have_distinct_stable_wire_names_without_serializing_sources
             .expect("retained source")
             .is::<BackendError>()
     );
-}
-
-#[tokio::test(start_paused = true)]
-async fn prompt_deadline_bounds_pending_backend_and_preserves_identity_for_retry() {
-    for (enroll_work, prepare_work) in [(Work::Pending, Work::Ready), (Work::Ready, Work::Pending)] {
-        let backend = Backend::new(enroll_work, prepare_work);
-        let connector = adapter(backend.clone());
-        let started = tokio::time::Instant::now();
-        let outcome = tokio::time::timeout(Duration::from_millis(2100), connector.invoke(prompt("native_b")))
-            .await
-            .expect("connector must enforce its own total deadline");
-        assert!(outcome.is_err());
-        assert_eq!(started.elapsed(), Duration::from_secs(2));
-        assert!(matches!(
-            connector.invoke(prompt("native_other")).await,
-            Err(trogon_peer_mcp::PeerMcpError::NativeSessionChanged)
-        ));
-        *backend.enroll_work.lock().expect("enroll work") = Work::Ready;
-        *backend.prepare_work.lock().expect("prepare work") = Work::Ready;
-        connector.invoke(prompt("native_b")).await.expect("retry");
-        let enrollments = backend.enrollments.lock().expect("enrollments");
-        assert_eq!(enrollments.len(), 2);
-        assert_eq!(enrollments[0], enrollments[1]);
-        let preparations = backend.preparations.lock().expect("preparations");
-        if preparations.len() == 2 {
-            assert_eq!(preparations[0], preparations[1]);
-        }
-    }
-}
-
-#[tokio::test(start_paused = true)]
-async fn prompt_deadline_is_one_total_budget_for_enrollment_and_preparation() {
-    let connector = adapter(Backend::new(
-        Work::Delay(Duration::from_millis(1500)),
-        Work::Delay(Duration::from_millis(1500)),
-    ));
-    let started = tokio::time::Instant::now();
-    let outcome = connector.invoke(prompt("native_b")).await;
-    assert!(outcome.is_err(), "backend steps must share the hook budget");
-    assert_eq!(started.elapsed(), Duration::from_secs(2));
-}
-
-#[tokio::test(start_paused = true)]
-async fn prompt_deadline_includes_lock_wait_without_starting_more_backend_work() {
-    let backend = Backend::new(Work::Pending, Work::Ready);
-    let connector = adapter(backend.clone());
-    let mut first = Box::pin(connector.invoke(prompt("native_b")));
-    poll_fn(|context| {
-        assert!(first.as_mut().poll(context).is_pending());
-        Poll::Ready(())
-    })
-    .await;
-    assert_eq!(backend.enrollments.lock().expect("enrollments").len(), 1);
-    let started = tokio::time::Instant::now();
-    let outcome = tokio::time::timeout(Duration::from_millis(2100), connector.invoke(prompt("native_b")))
-        .await
-        .expect("connector deadline must include the binding lock wait");
-    assert!(outcome.is_err());
-    assert_eq!(started.elapsed(), Duration::from_secs(2));
-    assert_eq!(backend.enrollments.lock().expect("enrollments").len(), 1);
-    assert!(backend.preparations.lock().expect("preparations").is_empty());
-}
-
-#[tokio::test(start_paused = true)]
-async fn prompt_completion_at_the_total_deadline_keeps_the_completed_result() {
-    let connector = adapter(Backend::new(
-        Work::Ready,
-        Work::Until(tokio::time::Instant::now() + Duration::from_secs(2)),
-    ));
-    let started = tokio::time::Instant::now();
-    let result = connector.invoke(prompt("native_b")).await.expect("completed prompt");
-    assert_eq!(started.elapsed(), Duration::from_secs(2));
-    assert_ne!(result.is_error, Some(true));
 }

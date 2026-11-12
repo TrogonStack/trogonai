@@ -24,9 +24,17 @@ mod prompt_tool;
 mod status_metadata_projection;
 
 pub use backend::{
-    AcknowledgePeerBatch, EnrollPeer, PreparePeerBatch, ReadPeerMessageStatus, ReadPeerRoster, SendPeerMessage,
+    AcknowledgePeerBatch, DetachPeer, EnrollPeer, HeartbeatPeer, PreparePeerBatch, ReadPeerMessageStatus,
+    ReadPeerRoster, SendPeerMessage,
 };
 pub use connector_config_input::ConnectorConfigInput;
 pub use peer_mcp::PeerMcp;
 pub use peer_mcp_error::PeerMcpError;
 pub use peer_mcp_error_code::PeerMcpErrorCode;
+
+mod availability_observation;
+pub use availability_observation::AvailabilityObservation;
+
+mod detach_hook_event;
+mod detach_hook_input;
+mod detach_tool;

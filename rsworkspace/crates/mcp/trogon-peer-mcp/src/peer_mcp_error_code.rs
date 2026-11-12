@@ -1,6 +1,10 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PeerMcpErrorCode {
+    EnrollmentUncertain,
+    Detached,
+    Detach,
+    DetachDeadline,
     PromptDeadline,
     Unbound,
     NativeSessionChanged,

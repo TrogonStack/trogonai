@@ -47,3 +47,21 @@ pub trait AcknowledgePeerBatch: Send + Sync + 'static {
         request: AcknowledgeBatchRequest,
     ) -> impl Future<Output = Result<AcknowledgeBatchResponse, Self::Error>> + Send;
 }
+
+pub trait HeartbeatPeer: Send + Sync + 'static {
+    type Error: Error + Send + Sync + 'static;
+
+    fn heartbeat(
+        &self,
+        request: trogonai_proto::peers::v1alpha1::HeartbeatRequest,
+    ) -> impl Future<Output = Result<trogonai_proto::peers::v1alpha1::HeartbeatResponse, Self::Error>> + Send;
+}
+
+pub trait DetachPeer: Send + Sync + 'static {
+    type Error: Error + Send + Sync + 'static;
+
+    fn detach(
+        &self,
+        request: trogonai_proto::peers::v1alpha1::DetachRequest,
+    ) -> impl Future<Output = Result<trogonai_proto::peers::v1alpha1::DetachResponse, Self::Error>> + Send;
+}

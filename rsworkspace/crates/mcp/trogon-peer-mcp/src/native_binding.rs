@@ -1,3 +1,4 @@
+use tokio::sync::watch;
 use trogon_peer::{AttachmentRef, ConnectorId, NativeSessionId, PeerId};
 use trogonai_proto::peers::v1alpha1 as v1;
 
@@ -6,8 +7,9 @@ use crate::connector_config::ConnectorConfig;
 
 pub(crate) struct NativeBinding {
     native_session_id: NativeSessionId,
-    attachment: Option<AttachmentRef>,
+    attachment: Option<watch::Sender<AttachmentRef>>,
     enrollment: EnrollmentState,
+    detach_confirmed: bool,
 }
 
 enum EnrollmentState {
@@ -21,6 +23,7 @@ impl NativeBinding {
             native_session_id,
             attachment: None,
             enrollment: EnrollmentState::Uncertain,
+            detach_confirmed: false,
         }
     }
 
@@ -28,19 +31,32 @@ impl NativeBinding {
         &self.native_session_id
     }
 
-    pub(crate) fn attachment(&self) -> Option<&AttachmentRef> {
+    pub(crate) fn attachment(&self) -> Option<AttachmentRef> {
         match self.enrollment {
             EnrollmentState::Uncertain => None,
             EnrollmentState::Replied => self.last_attachment(),
         }
     }
 
+    pub(crate) fn attachment_subscription(&self) -> Option<watch::Receiver<AttachmentRef>> {
+        self.attachment()?;
+        self.attachment.as_ref().map(watch::Sender::subscribe)
+    }
+
     pub(crate) fn enrollment_started(&mut self) {
         self.enrollment = EnrollmentState::Uncertain;
     }
 
-    fn last_attachment(&self) -> Option<&AttachmentRef> {
-        self.attachment.as_ref()
+    fn last_attachment(&self) -> Option<AttachmentRef> {
+        self.attachment.as_ref().map(|attachment| attachment.borrow().clone())
+    }
+
+    pub(crate) fn detach_confirmed(&self) -> bool {
+        self.detach_confirmed
+    }
+
+    pub(crate) fn confirm_detach(&mut self) {
+        self.detach_confirmed = true;
     }
 
     pub(crate) fn revalidate(
@@ -84,13 +100,18 @@ impl NativeBinding {
         let attachment =
             AttachmentRef::new(peer_id, connector_id, generation).map_err(PeerMcpError::InvalidEnrollmentIdentity)?;
         if self
-            .attachment
+            .last_attachment()
             .as_ref()
             .is_some_and(|prior| prior.peer_id() != attachment.peer_id())
         {
             return Err(PeerMcpError::InvalidEnrollment);
         }
-        self.attachment = Some(attachment.clone());
+        match &self.attachment {
+            Some(current) => {
+                current.send_replace(attachment.clone());
+            }
+            None => self.attachment = Some(watch::channel(attachment.clone()).0),
+        }
         Ok(attachment)
     }
 }
