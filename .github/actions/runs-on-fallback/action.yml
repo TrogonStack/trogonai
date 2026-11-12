@@ -51,8 +51,8 @@ outputs:
       Read one with `fromJSON(...).name`.
   runs-on:
     description: >-
-      The first job's labels as a JSON array, for `runs-on: ${{ fromJSON(...) }}`
-      when one job is placed.
+      The first job's labels as a JSON array, to read with `fromJSON` in
+      `runs-on` when one job is placed.
   self-hosted:
     description: "`true` when the first job is self-hosted, otherwise `false`."
   self-hosted-count:

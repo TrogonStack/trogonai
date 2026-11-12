@@ -422,3 +422,17 @@ test('defaults apply to empty scope and jobs', async () => {
   assert.equal(result.reason, 'idle-runner');
   assert.match(fetch.calls[0].url, /\/repos\//);
 });
+
+test('action metadata has no expressions, which GitHub would evaluate and fail to load', () => {
+  const actions = path.join(path.dirname(new URL(import.meta.url).pathname), '../../.github/actions');
+  for (const name of fs.readdirSync(actions)) {
+    const file = path.join(actions, name, 'action.yml');
+    if (!fs.existsSync(file)) continue;
+    const text = fs.readFileSync(file, 'utf8');
+    const metadata = text.slice(0, text.search(/^runs:/m) === -1 ? text.length : text.search(/^runs:/m));
+    for (const line of metadata.split('\n')) {
+      if (/^\s+value:/.test(line)) continue;
+      assert.doesNotMatch(line, /\$\{\{/, `${name}/action.yml: ${line.trim()}`);
+    }
+  }
+});

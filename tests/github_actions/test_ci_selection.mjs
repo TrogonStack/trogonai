@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -275,9 +276,30 @@ test('runner selection runs right after checkout and cannot fail selection', asy
   assert.equal(selection.on.workflow_call.inputs['runner-jobs'].default, 'default');
   assert.equal(selection.on.workflow_call.inputs['runner-jobs'].required, false);
   assert.equal(workflows.rust.jobs.changes.secrets['runner-status-token'], '${{ secrets.RUNNER_STATUS_TOKEN }}');
-  assert.equal(job.outputs.runners, '${{ steps.runner.outputs.runners }}');
-  assert.doesNotMatch(job.outputs.runners, /\|\|/);
-  assert.equal((await evaluate(job.outputs.runners, { steps: { runner: { outputs: { runners: '{"default":["homelab"]}' } } } })).coerceString(), '{"default":["homelab"]}');
+  assert.equal(job.outputs.runners, '${{ steps.runner.outputs.runners || steps.hosted.outputs.runners }}');
+  const chosen = { runner: { outputs: { runners: '{"default":["homelab"]}' } }, hosted: { outputs: {} } };
+  assert.equal((await evaluate(job.outputs.runners, { steps: chosen })).coerceString(), '{"default":["homelab"]}');
+  const failed = { runner: { outputs: {} }, hosted: { outputs: { runners: '{"default":["ubuntu-latest"]}' } } };
+  assert.equal((await evaluate(job.outputs.runners, { steps: failed })).coerceString(), '{"default":["ubuntu-latest"]}');
+});
+
+test('a runner choice that fails to start still gives every job a hosted runner', () => {
+  const steps = load('.github/workflows/ci-selection.yml').jobs.filter.steps;
+  const hosted = steps.find((item) => item.id === 'hosted');
+  assert.equal(steps[2], hosted);
+  assert.equal(hosted.if, "${{ steps.runner.outcome == 'failure' }}");
+  assert.equal(hosted.env.RUNNER_JOBS, '${{ inputs.runner-jobs }}');
+  const run = (jobs) => {
+    const output = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hosted-')), 'output');
+    fs.writeFileSync(output, '');
+    const result = spawnSync('bash', ['-c', hosted.run], { env: { PATH: process.env.PATH, RUNNER_JOBS: jobs, GITHUB_OUTPUT: output }, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(fs.readFileSync(output, 'utf8').trim().replace(/^runners=/, ''));
+  };
+  const all = ['test', 'build', 'wasm-decider', 'lint'];
+  assert.deepEqual(run(workflows.rust.jobs.changes.with['runner-jobs']), Object.fromEntries(all.map((name) => [name, ['ubuntu-latest']])));
+  assert.deepEqual(run('test,\nbuild'), { test: ['ubuntu-latest'], build: ['ubuntu-latest'] });
+  assert.deepEqual(run('default'), { default: ['ubuntu-latest'] });
 });
 
 test('actionlint installs through the supported mise backend', () => {
