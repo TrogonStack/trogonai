@@ -12,6 +12,7 @@
     feature = "gateway",
     feature = "schedules",
     feature = "decider",
+    feature = "peers",
     feature = "grpc-nats-micro",
     feature = "policy",
     feature = "model-access",
@@ -35,6 +36,9 @@ pub mod scheduler;
 
 #[cfg(feature = "decider")]
 pub mod decider;
+
+#[cfg(feature = "peers")]
+pub mod peers;
 
 #[cfg(feature = "schedules")]
 pub use crate::r#gen::trogon::content;

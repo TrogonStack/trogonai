@@ -1,0 +1,375 @@
+---
+# yamllint disable rule:line-length
+name: Code Coverage Report Action
+author: Inisghts Engineering
+description: Action that converts a Cobertura XML report into a markdown report.
+
+inputs:
+  token:
+    description: Github token to use to publish the check.
+    required: false
+    default: ${{ github.token }}
+  path:
+    description: Path to the Cobertura coverage XML report.
+    required: false
+    default: coverage.xml
+  threshold:
+    description: The minimum allowed coverage percentage, as a real number.
+    required: false
+    default: 0
+  fail:
+    description: Fail the action when the minimum coverage was not met.
+    required: false
+    default: true
+  publish:
+    description: Publish the coverage report as an issue comment.
+    required: false
+    default: false
+  diff:
+    description: Create a diff of the coverage report.
+    required: false
+    default: false
+  diff-branch:
+    description: Branch to diff against.
+    required: false
+    default: main
+  storage-subdirectory:
+    description: Subdirectory in the diff-storage branch where the XML reports will be stored.
+    required: false
+    default: "."
+  diff-storage:
+    description: Branch where coverage reports are stored for diff purposes.
+    required: false
+    default: _xml_coverage_reports
+  skip-diff-storage:
+    description: |
+      Skip all interactions with the `diff-storage` branch (fetch, diff
+      generation, badge build, commit, and push). When `true`, the action
+      only produces a coverage report from the input XML and does not
+      require write access to the repo. The PR comment falls back to a
+      text coverage line instead of the badge image.
+    required: false
+    default: false
+  coverage-summary-title:
+    description: Title for the code coverage summary in the Pull Request comment.
+    required: false
+    default: "Code Coverage Summary"
+  uncovered-statements-increase-failure:
+    description: |
+      Fail the action if any changed file has an increase in uncovered lines compared to the `diff-branch`.
+      This corresponds to pycobertura exit code 2, which indicates that at least one changed file has
+      more uncovered lines than before (Miss > 0). Note that this is different from coverage rate
+      reduction - it specifically checks for increases in the absolute number of uncovered lines.
+    required: false
+    default: false
+  new-uncovered-statements-failure:
+    description: |
+      Fail the action if new uncovered statements are introduced AND overall coverage improved
+      (total uncovered lines decreased) compared to the `diff-branch`.
+      This corresponds to pycobertura exit code 3, which only occurs when total uncovered lines
+      decreased (Miss <= 0) but there are still new uncovered statements (Missing != []).
+      To fail on ALL new uncovered statements regardless of overall coverage improvement,
+      use this flag together with `coverage-reduction-failure: true`.
+    required: false
+    default: false
+  coverage-rate-reduction-failure:
+    description: |
+      Fail the action if the overall coverage percentage (rate) decreases compared to the `diff-branch`.
+      This is different from `uncovered-statements-increase-failure` which checks for absolute
+      increases in uncovered lines. This flag specifically looks at the coverage percentage
+      and fails if it goes down, regardless of whether uncovered lines increased or decreased.
+      This is a more forgiving approach that focuses on the relative coverage rate rather than
+      absolute uncovered line counts.
+    required: false
+    default: false
+  pycobertura-exception-failure:
+    description: Fail the action in case of a `Pycobertura` exception.
+    required: false
+    default: true
+  togglable-report:
+    description: Make the code coverage report togglable.
+    required: false
+    default: false
+  report-low-coverage-only:
+    description: |
+      When true, the detailed coverage report will only include files where
+      coverage is less than 100%. The TOTAL summary line is always included.
+    required: false
+    default: false
+  exclude-detailed-coverage:
+    description: |
+      Whether a detailed coverage report should be excluded from the PR comment.
+      The detailed coverage report contains the following information per file:
+      number of code statements, number of statements not covered by any test,
+      coverage percentage, and line numbers not covered by any test.
+    required: false
+    default: false
+
+outputs:
+  summary:
+    description: Summary of coverage report
+    value: ${{ steps.create-output.outputs.summary }}
+
+branding:  # https://feathericons.com/
+  icon: "umbrella"
+  color: "red"
+
+runs:
+  using: composite
+  steps:
+  - name: Setup Python
+    uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+    with:
+      python-version: '3.11'
+  - name: Initialize coverage gate evidence
+    run: mise run github:actions:coverage-report:begin
+    shell: bash
+  - name: Verify coverage publication
+    run: mise run github:actions:coverage-report:verify
+    shell: bash
+  - name: Install pycobertura
+    uses: insightsengineering/pip-action@905c7a9be173f62965b791e91d0079355d99f19b
+    with:
+      packages: pycobertura==3.0.0
+  - name: Get branch names
+    id: branch-names
+    uses: tj-actions/branch-names@6c999acf206f5561e19f46301bb310e9e70d8815
+  - name: Capture verified publication sources
+    if: contains(inputs.diff, 'true') && inputs.skip-diff-storage != 'true'
+    run: mise run github:actions:coverage-report:capture
+    shell: bash
+    env:
+      COVERAGE_PROVENANCE_REPORT: ${{ inputs.path }}
+  - name: Generate text report
+    run: mise run github:actions:coverage-report:report
+    shell: bash
+    env:
+      COVERAGE_PATH: ${{ inputs.path }}
+      COVERAGE_LOW_ONLY: ${{ inputs.report-low-coverage-only }}
+  - name: Prepare storage working tree
+    if: inputs.skip-diff-storage != 'true'
+    run: mise run github:actions:coverage-report:storage-prepare
+    shell: bash
+    env:
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+      COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+      COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_TOKEN: ${{ inputs.token }}
+  - name: Get token identity
+    if: inputs.skip-diff-storage != 'true'
+    id: identity
+    uses: octokit/graphql-action@f7836e89a7e5bac63911bbe9653c21147b3d9bc3
+    with:
+      query: "query {\n  viewer {\n    databaseId\n    login\n  }\n}\n"
+    env:
+      GITHUB_TOKEN: ${{ inputs.token }}
+  - name: Configure git
+    if: inputs.skip-diff-storage != 'true'
+    run: mise run github:actions:coverage-report:configure-git
+    shell: bash
+    env:
+      COVERAGE_GIT_NAME: ${{ fromJSON(steps.identity.outputs.data).viewer.login }}
+      COVERAGE_GIT_EMAIL: ${{ format('{0}+{1}@users.noreply.github.com', fromJSON(steps.identity.outputs.data).viewer.databaseId,
+        fromJSON(steps.identity.outputs.data).viewer.login) }}
+  - name: Initialize storage branch
+    if: inputs.skip-diff-storage != 'true'
+    working-directory: ${{ inputs.diff-storage }}
+    env:
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+      COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+      COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_TOKEN: ${{ inputs.token }}
+    run: mise run github:actions:coverage-report:initialize
+    shell: bash
+  - name: Push storage branch
+    if: inputs.skip-diff-storage != 'true'
+    working-directory: ${{ inputs.diff-storage }}
+    env:
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+      COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+      COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_TOKEN: ${{ inputs.token }}
+    run: mise run github:actions:coverage-report:push-initial
+    shell: bash
+  - name: Generate diff against ${{ inputs.diff-branch }}
+    if: contains(inputs.diff, 'true') && inputs.skip-diff-storage != 'true'
+    run: mise run github:actions:coverage-report:compare
+    shell: bash
+    env:
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+  - name: Extract diff-branch coverage percentage
+    if: contains(inputs.diff, 'true') && contains(inputs.coverage-rate-reduction-failure, 'true') && inputs.skip-diff-storage
+      != 'true'
+    run: mise run github:actions:coverage-report:baseline-rate
+    shell: bash
+    env:
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+  - name: Get total
+    run: mise run github:actions:coverage-report:total
+    shell: bash
+  - name: Store coverage percent
+    id: coverage_percent
+    run: mise run github:actions:coverage-report:store-percent
+    shell: bash
+    env:
+      COVERAGE_PATH: ${{ inputs.path }}
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+  - name: Generate the badge SVG image
+    if: inputs.skip-diff-storage != 'true'
+    uses: emibcn/badge-action@808173dd03e2f30c980d03ee49e181626088eee8
+    id: badge
+    with:
+      label: Test Coverage
+      status: ${{ steps.coverage_percent.outputs.coverage_total }}%
+      color: ${{ steps.coverage_percent.outputs.coverage_total > 90 && 'green'              || steps.coverage_percent.outputs.coverage_total
+        > 80 && 'yellow,green'       || steps.coverage_percent.outputs.coverage_total > 70 && 'yellow'             ||
+        steps.coverage_percent.outputs.coverage_total > 60 && 'orange,yellow'      || steps.coverage_percent.outputs.coverage_total
+        > 50 && 'orange'             || steps.coverage_percent.outputs.coverage_total > 40 && 'red,orange'         ||
+        steps.coverage_percent.outputs.coverage_total > 30 && 'red,red,orange'     || steps.coverage_percent.outputs.coverage_total
+        > 20 && 'red,red,red,orange' || 'red' }}
+      path: ${{ inputs.diff-storage }}/data/${{ env.diff_storage_branch }}/${{ inputs.storage-subdirectory }}/badge.svg
+  - name: Commit badge
+    if: inputs.skip-diff-storage != 'true'
+    working-directory: ${{ inputs.diff-storage }}/data
+    run: mise run github:actions:coverage-report:commit-badge
+    shell: bash
+    env:
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_REPORT_BRANCH: ${{ env.diff_storage_branch }}
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+      GITHUB_SHA: ${{ github.sha }}
+  - name: Push badges
+    if: inputs.skip-diff-storage != 'true'
+    working-directory: ${{ inputs.diff-storage }}
+    env:
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+      COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+      COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_TOKEN: ${{ inputs.token }}
+    run: mise run github:actions:coverage-report:push-badge
+    shell: bash
+  - name: Determine repository visibility
+    if: contains(inputs.publish, 'true')
+    id: repository-visibility
+    uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+    with:
+      script: "const result = await github.rest.repos.get({\n  owner: \"${{ github.repository_owner }}\",\n  repo:\
+        \ \"${{ github.repository }}\".split(\"/\")[1]\n});\nreturn result.data.visibility;\n"
+      result-encoding: string
+  - name: Generate issue comment body
+    if: contains(inputs.publish, 'true')
+    run: mise run github:actions:coverage-report:full-comment
+    shell: bash
+    env:
+      COVERAGE_REPORT_BRANCH: ${{ env.diff_storage_branch }}
+      COVERAGE_VISIBILITY: ${{ steps.repository-visibility.outputs.result }}
+      COVERAGE_SKIP_STORAGE: ${{ inputs.skip-diff-storage }}
+      GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+      COVERAGE_REPOSITORY_NAME: ${{ github.event.repository.name }}
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+      COVERAGE_TOTAL: ${{ steps.coverage_percent.outputs.coverage_total }}
+      COVERAGE_SUMMARY_TITLE: ${{ inputs.coverage-summary-title }}
+      COVERAGE_EXCLUDE_DETAIL: ${{ inputs.exclude-detailed-coverage }}
+      COVERAGE_TOGGLE: ${{ inputs.togglable-report }}
+      COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+      GITHUB_SHA: ${{ github.sha }}
+      GITHUB_EVENT_NAME: ${{ github.event_name }}
+      COVERAGE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      COVERAGE_THRESHOLD: ${{ inputs.threshold }}
+      COVERAGE_PUBLISH: ${{ inputs.publish }}
+  - name: Upload complete coverage evidence
+    id: coverage-evidence
+    uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+    with:
+      name: ${{ steps.coverage_percent.outputs.artifact_name }}
+      path: '${{ inputs.path }}
+
+        coverage-action
+
+        .coverage-output
+
+        .coverage-output.diff
+
+        .coverage-output.final
+
+        '
+      include-hidden-files: 'true'
+      if-no-files-found: error
+  - name: Bound coverage comment
+    if: contains(inputs.publish, 'true')
+    env:
+      COVERAGE_ARTIFACT_URL: ${{ steps.coverage-evidence.outputs.artifact-url }}
+      COVERAGE_THRESHOLD: ${{ inputs.threshold }}
+      COVERAGE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    run: mise run github:actions:coverage-report:bound-comment
+    shell: bash
+  - name: Post as comment
+    if: contains(inputs.publish, 'true')
+    uses: marocchino/sticky-pull-request-comment@773744901bac0e8cbb5a0dc842800d45e9b2b405
+    with:
+      GITHUB_TOKEN: ${{ inputs.token }}
+      header: ${{ inputs.path }}
+      path: .coverage-output.comment
+  - name: Set as output
+    id: create-output
+    run: mise run github:actions:coverage-report:output
+    shell: bash
+  - name: Commit XML report to ${{ inputs.diff-storage }}
+    if: 'contains(inputs.diff, ''true'') && inputs.skip-diff-storage != ''true''
+
+      '
+    working-directory: ${{ inputs.diff-storage }}
+    run: mise run github:actions:coverage-report:commit-report
+    shell: bash
+    env:
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_REPORT_BRANCH: ${{ env.diff_storage_branch }}
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+      GITHUB_SHA: ${{ github.sha }}
+  - name: Push XML report to ${{ inputs.diff-storage }}
+    if: contains(inputs.diff, 'true') && inputs.skip-diff-storage != 'true'
+    working-directory: ${{ inputs.diff-storage }}
+    env:
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_STORAGE_SUBDIRECTORY: ${{ inputs.storage-subdirectory }}
+      COVERAGE_DIFF_BRANCH: ${{ inputs.diff-branch }}
+      COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_TOKEN: ${{ inputs.token }}
+    run: mise run github:actions:coverage-report:push-report
+    shell: bash
+  - name: Check threshold
+    if: always() && (contains(inputs.fail, 'true'))
+    run: mise run github:actions:coverage-report:threshold
+    shell: bash
+    env:
+      COVERAGE_THRESHOLD: ${{ inputs.threshold }}
+  - name: Fail if coverage worsened
+    if: always() && (contains(inputs.diff, 'true'))
+    run: mise run github:actions:coverage-report:diff-gate
+    shell: bash
+    env:
+      COVERAGE_DIFF_ENABLED: ${{ inputs.diff }}
+      COVERAGE_SKIP_STORAGE: ${{ inputs.skip-diff-storage }}
+      COVERAGE_PYCOBERTURA_STATUS: ${{ env.pycobertura_status }}
+      COVERAGE_INCREASE_FAILURE: ${{ inputs.uncovered-statements-increase-failure }}
+      COVERAGE_NEW_FAILURE: ${{ inputs.new-uncovered-statements-failure }}
+      COVERAGE_EXCEPTION_FAILURE: ${{ inputs.pycobertura-exception-failure }}
+      COVERAGE_RATE_FAILURE: ${{ inputs.coverage-rate-reduction-failure }}
+  - name: Clean up intermediate files
+    if: always()
+    run: mise run github:actions:coverage-report:cleanup
+    shell: bash
+    env:
+      COVERAGE_STORAGE_BRANCH: ${{ inputs.diff-storage }}
+      COVERAGE_SKIP_STORAGE: ${{ inputs.skip-diff-storage }}

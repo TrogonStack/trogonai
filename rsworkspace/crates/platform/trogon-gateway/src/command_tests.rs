@@ -168,7 +168,77 @@ fn stream_message(subject: &str, payload: Bytes) -> StreamMessage {
 #[test]
 fn empty_sources_are_valid_by_default() {
     let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
-    config::load(Some(file.path())).unwrap();
+    let resolved = config::load(Some(file.path())).unwrap();
+    assert!(!resolved.has_any_source());
+    assert_eq!(
+        claim_retention_for_sources(&resolved).unwrap().bucket_max_age(),
+        Duration::from_secs(8 * 24 * 60 * 60)
+    );
+}
+
+#[test]
+fn claim_retention_tracks_the_default_for_a_configured_source() {
+    let resolved = resolved_config();
+    assert!(resolved.has_any_source());
+    assert_eq!(
+        claim_retention_for_sources(&resolved).unwrap().bucket_max_age(),
+        Duration::from_secs(8 * 24 * 60 * 60)
+    );
+}
+
+#[test]
+fn claim_retention_tracks_the_longest_configured_age_without_a_default_floor() {
+    for longest_age in [7200, 14 * 24 * 60 * 60] {
+        let mut file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+        write!(
+            file,
+            r#"
+[sources.notion.integrations.short]
+stream_max_age_secs = 3600
+[sources.notion.integrations.short.webhook]
+verification_token = "configured-short"
+
+[sources.notion.integrations.long]
+stream_max_age_secs = {longest_age}
+[sources.notion.integrations.long.webhook]
+verification_token = "configured-long"
+"#
+        )
+        .unwrap();
+        let resolved = config::load(Some(file.path())).unwrap();
+        assert_eq!(
+            claim_retention_for_sources(&resolved).unwrap().bucket_max_age(),
+            Duration::from_secs(longest_age) + Duration::from(CLAIM_CHECK_TTL_GRACE)
+        );
+    }
+}
+
+#[tokio::test]
+async fn empty_source_mode_logs_and_reaches_connection_setup() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::INFO);
+    let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    resolved.nats.auth =
+        trogon_nats::NatsAuth::Credentials(trogon_nats::Location::Path(directory.path().join("missing.creds")));
+    let error = tokio::time::timeout(
+        Duration::from_secs(5),
+        serve_with_env(resolved, std::future::pending(), &trogon_std::env::InMemoryEnv::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<trogon_nats::ConnectError>(),
+        Some(trogon_nats::ConnectError::InvalidCredentials(_))
+    ));
+    assert!(
+        events
+            .events()
+            .iter()
+            .any(|event| event.message() == Some("starting with no source integrations configured"))
+    );
 }
 
 #[tokio::test]
