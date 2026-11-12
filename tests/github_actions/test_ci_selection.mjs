@@ -261,22 +261,55 @@ test('Rust heavy jobs read their own entry of the selected runners', async () =>
   }
 });
 
-test('runner selection runs right after checkout and fails loudly', async () => {
+test('runner selection runs in its own job and fails loudly', async () => {
   const selection = load('.github/workflows/ci-selection.yml');
-  const job = selection.jobs.filter;
+  const job = selection.jobs.runner;
   const step = job.steps.find((item) => item.id === 'runner');
   assert.equal(step.uses, './.github/actions/runs-on-fallback');
   assert.equal(step['continue-on-error'], undefined);
   assert.ok(job.steps[0].uses.startsWith('actions/checkout@'));
-  assert.equal(job.steps[1], step);
+  assert.equal(job.steps.at(-1), step);
   assert.equal(step.with.scope, 'organization');
   assert.equal(step.with.jobs, '${{ inputs.runner-jobs }}');
-  assert.equal(selection.on.workflow_call.secrets['runner-status-token'].required, false);
-  assert.equal(selection.on.workflow_call.inputs['runner-jobs'].default, 'default');
+  assert.equal(step.with['github-token'], '${{ steps.baton.outputs.token }}');
+  assert.equal(selection.on.workflow_call.secrets, undefined);
+  assert.equal(selection.on.workflow_call.inputs['runner-jobs'].default, '');
   assert.equal(selection.on.workflow_call.inputs['runner-jobs'].required, false);
-  assert.equal(workflows.rust.jobs.changes.secrets['runner-status-token'], '${{ secrets.RUNNER_STATUS_TOKEN }}');
+  assert.equal(selection.on.workflow_call.outputs.runners.value, '${{ jobs.runner.outputs.runners }}');
   assert.equal(job.outputs.runners, '${{ steps.runner.outputs.runners }}');
-  assert.equal(job.steps.find((item) => item.id === 'hosted'), undefined);
+  assert.equal(selection.jobs.filter.steps.some((item) => item.id === 'runner'), false);
+  assert.equal(selection.jobs.filter.outputs.runners, undefined);
+  for (const [suite, workflow] of Object.entries(workflows)) {
+    const wanted = suite === 'rust' ? 'write' : undefined;
+    assert.equal(workflow.jobs.changes.permissions['id-token'], wanted, suite);
+    assert.equal(workflow.jobs.changes.secrets, undefined, suite);
+  }
+});
+
+test('only main pushes and dispatches can read the Baton key', async () => {
+  const job = load('.github/workflows/ci-selection.yml').jobs.runner;
+  assert.equal(job.permissions['id-token'], 'write');
+  const auth = job.steps.find((item) => item.id === 'gcp');
+  const cases = [
+    ['push', 'refs/heads/main', true],
+    ['workflow_dispatch', 'refs/heads/main', true],
+    ['pull_request', 'refs/pull/1/merge', false],
+    ['pull_request_target', 'refs/heads/main', false],
+    ['merge_group', 'refs/heads/gh-readonly-queue/main/pr-1', false],
+    ['push', 'refs/heads/feature', false],
+  ];
+  for (const [event_name, ref, trusted] of cases) {
+    const context = { github: { event_name, ref } };
+    assert.equal((await evaluate(job.environment, context)).coerceString(), trusted ? 'github-app-baton' : '', `${event_name} ${ref}`);
+    assert.equal((await evaluate(auth.if, context)).coerceString(), String(trusted), `${event_name} ${ref}`);
+  }
+  for (const id of ['gcp', 'baton_key', 'baton']) {
+    assert.equal(job.steps.find((item) => item.id === id)['continue-on-error'], true, id);
+  }
+  const token = job.steps.find((item) => item.id === 'baton');
+  assert.equal(token.with.owner, '${{ github.repository_owner }}');
+  assert.equal(token.with['permission-organization-self-hosted-runners'], 'read');
+  assert.deepEqual(Object.keys(token.with).filter((key) => key.startsWith('permission-')), ['permission-organization-self-hosted-runners']);
 });
 
 test('actionlint installs through the supported mise backend', () => {

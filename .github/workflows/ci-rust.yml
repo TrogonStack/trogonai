@@ -34,13 +34,13 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # Only the runner selection job uses it, to read the Baton key on main.
+      id-token: write
     with:
       filters: .github/filters/ci.yml
       # Idle runners go to the first names, so these follow job duration, longest
       # first.
       runner-jobs: test build wasm-decider lint
-    secrets:
-      runner-status-token: ${{ secrets.RUNNER_STATUS_TOKEN }}
   lint:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
