@@ -8,6 +8,7 @@ mod enroll_service_error;
 mod enrollment_field;
 mod peer_clock;
 mod peer_service;
+mod resume_store;
 
 pub use enroll_service_error::{EnrollExecutionError, EnrollResult, EnrollServiceError};
 pub use enrollment_field::EnrollmentField;

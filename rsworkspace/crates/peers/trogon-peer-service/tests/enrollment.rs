@@ -905,16 +905,17 @@ async fn expired_replacement_cannot_append_after_authority_changes_past_its_vali
     assert!(
         matches!(
             &result,
-            Err(EnrollServiceError::Attach(CommandError::Append(error)))
-                if store.classify_append_failure(error) == AppendFailure::WriteConflict
+            Err(EnrollServiceError::Attach(CommandError::ReadStream(
+                trogon_peer_service::HistoryError::UnknownEvent
+            )))
         ),
-        "the validated position must fence a competing unknown authority event: {result:?}"
+        "the command replay must reject a competing unknown authority event: {result:?}"
     );
     assert!(!store.armed.load(Ordering::SeqCst));
     assert_eq!(
         inner.appends.load(Ordering::SeqCst),
-        appends + 3,
-        "create rejection, competing envelope, and one fenced attachment attempt are the only append calls"
+        appends + 2,
+        "only the rejected create and competing authority envelope may append"
     );
     let injected = store
         .injected_history
@@ -951,9 +952,9 @@ async fn live_resume_rechecks_unknown_authority_that_raced_its_validated_history
         .await;
     assert!(matches!(
         result,
-        Err(EnrollServiceError::History(
+        Err(EnrollServiceError::Attach(CommandError::ReadStream(
             trogon_peer_service::HistoryError::UnknownEvent
-        ))
+        )))
     ));
     assert!(!store.armed.load(Ordering::SeqCst));
     assert_eq!(
@@ -1168,4 +1169,124 @@ async fn expired_resume_refuses_a_page_that_omits_its_announced_history_tail() {
 #[tokio::test]
 async fn expired_resume_refuses_an_empty_page_with_an_announced_history_tail() {
     expired_resume_refuses_an_incomplete_announced_history_tail(true).await;
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ResumeReplayFault {
+    MissingTail,
+    UnknownEvent,
+}
+
+struct UntrustedResumeReplay {
+    inner: ObservedStore,
+    reads: AtomicUsize,
+    fault: ResumeReplayFault,
+}
+
+impl StreamRead<PeerId> for UntrustedResumeReplay {
+    type Error = <ObservedStore as StreamRead<PeerId>>::Error;
+
+    async fn read_stream(&self, request: ReadStreamRequest<'_, PeerId>) -> Result<ReadStreamResponse, Self::Error> {
+        let from = request.from;
+        let mut read = self.inner.read_stream(request).await?;
+        if self.reads.fetch_add(1, Ordering::SeqCst) > 0 {
+            match self.fault {
+                ResumeReplayFault::MissingTail if from == ReadFrom::Beginning => {
+                    read.events.pop();
+                }
+                ResumeReplayFault::MissingTail => read.events.clear(),
+                ResumeReplayFault::UnknownEvent => {
+                    read.events.last_mut().unwrap().event.r#type =
+                        "trogonai.peers.future.PeerAuthorityTransferred".into();
+                }
+            }
+        }
+        Ok(read)
+    }
+}
+
+impl StreamAppend<PeerId> for UntrustedResumeReplay {
+    type Error = <ObservedStore as StreamAppend<PeerId>>::Error;
+
+    async fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, PeerId>,
+    ) -> Result<AppendStreamResponse, Self::Error> {
+        self.inner.append_stream(request).await
+    }
+
+    fn classify_append_failure(&self, error: &Self::Error) -> AppendFailure {
+        self.inner.classify_append_failure(error)
+    }
+}
+
+async fn expired_resume_rejects_untrusted_command_replay(fault: ResumeReplayFault) {
+    let inner = ObservedStore::default();
+    let enrolled = PeerService::new(inner.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let peer = PeerId::parse(enrolled.peer_id.clone().unwrap()).unwrap();
+    PeerService::new(
+        inner.clone(),
+        policy(),
+        FixedClock(now() + chrono::Duration::seconds(11)),
+    )
+    .enroll(&owner(), request("collaboration_alpha"))
+    .await
+    .unwrap();
+    let before = inner
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    let appends = inner.appends.load(Ordering::SeqCst);
+    let store = UntrustedResumeReplay {
+        inner: inner.clone(),
+        reads: AtomicUsize::new(0),
+        fault,
+    };
+    let mut replacement = request("collaboration_alpha");
+    replacement.connector_id = Some("replacement_connector".into());
+    let result = PeerService::new(store, policy(), FixedClock(now() + chrono::Duration::seconds(30)))
+        .enroll(&owner(), replacement)
+        .await;
+    assert!(
+        matches!(
+            (&fault, &result),
+            (
+                ResumeReplayFault::MissingTail,
+                Err(EnrollServiceError::Attach(CommandError::ReadStream(
+                    trogon_peer_service::HistoryError::Incomplete
+                )))
+            ) | (
+                ResumeReplayFault::UnknownEvent,
+                Err(EnrollServiceError::Attach(CommandError::ReadStream(
+                    trogon_peer_service::HistoryError::UnknownEvent
+                )))
+            )
+        ),
+        "the actual command replay must be trusted before appending: {fault:?}: {result:?}"
+    );
+    assert_eq!(inner.appends.load(Ordering::SeqCst), appends + 1);
+    let after = inner
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    assert_same_durable_history(&after, &before);
+}
+
+#[tokio::test]
+async fn expired_resume_rejects_an_incomplete_command_replay_after_a_valid_history_precheck() {
+    expired_resume_rejects_untrusted_command_replay(ResumeReplayFault::MissingTail).await;
+}
+
+#[tokio::test]
+async fn expired_resume_rejects_an_unknown_command_replay_event_after_a_valid_history_precheck() {
+    expired_resume_rejects_untrusted_command_replay(ResumeReplayFault::UnknownEvent).await;
 }
