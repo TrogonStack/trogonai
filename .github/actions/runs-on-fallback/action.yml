@@ -1,0 +1,63 @@
+name: Runs-on fallback
+description: >-
+  Chooses between an optional self-hosted runner and GitHub-hosted runners for a
+  workflow's jobs, using the self-hosted one only for trusted events and only
+  while one of its runners is idle.
+author: TrogonStack
+
+inputs:
+  github-token:
+    description: >-
+      Token that can list self-hosted runners: Administration read for the
+      `repository` scope, Self-hosted runners read for the `organization` scope.
+      The default `GITHUB_TOKEN` cannot, so pass a GitHub App token or a
+      fine-grained personal access token. Empty selects the fallback.
+    required: false
+    default: ""
+  primary-labels:
+    description: >-
+      Labels of the self-hosted runner, separated by commas or newlines. A runner
+      must carry all of them to count. Empty means nothing is configured, and
+      selects the fallback without calling the API.
+    required: false
+    default: ""
+  fallback-labels:
+    description: Labels to schedule on when the self-hosted runner is not chosen.
+    required: false
+    default: ubuntu-latest
+  scope:
+    description: >-
+      Where the runners are registered: `repository` or `organization`. An
+      organization scope lists the runners of the owner of this repository.
+    required: false
+    default: repository
+  slots:
+    description: >-
+      How many jobs the caller wants to place, a whole number of at least 1. Each
+      idle runner carrying every primary label takes one slot, lowest first, and
+      the remaining slots take the fallback labels.
+    required: false
+    default: "1"
+
+outputs:
+  runners:
+    description: >-
+      JSON array with exactly `slots` entries, each a label array. Read one with
+      `fromJSON(...)[n]` to place the nth job.
+  runs-on:
+    description: >-
+      Slot 0 as a JSON label array, for `runs-on: ${{ fromJSON(...) }}` when one
+      job is placed.
+  self-hosted:
+    description: "`true` when slot 0 has the primary labels, otherwise `false`."
+  self-hosted-slots:
+    description: How many slots have the primary labels.
+  reason:
+    description: >-
+      Why that choice: `idle-runner` (at least one slot is primary),
+      `no-idle-runner`, `not-configured`, `no-token`, `api-error`,
+      `untrusted-event` or `fork-pull-request`.
+
+runs:
+  using: node24
+  main: lib/main.mjs

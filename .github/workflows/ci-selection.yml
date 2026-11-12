@@ -6,6 +6,15 @@ on:
       filters:
         required: true
         type: string
+      runner-slots:
+        required: false
+        type: number
+        default: 1
+    secrets:
+      # Listing self-hosted runners needs a GitHub App token or fine-grained
+      # token; the default token cannot. Absent, jobs stay on hosted runners.
+      runner-status-token:
+        required: false
     outputs:
       rust:
         value: ${{ jobs.filter.outputs.rust }}
@@ -15,6 +24,8 @@ on:
         value: ${{ jobs.filter.outputs.proto }}
       changes:
         value: ${{ jobs.filter.outputs.changes }}
+      runners:
+        value: ${{ jobs.filter.outputs.runners }}
 
 permissions:
   contents: read
@@ -29,6 +40,7 @@ jobs:
       go: ${{ steps.filter.outputs.go || 'true' }}
       proto: ${{ steps.filter.outputs.proto || 'true' }}
       changes: ${{ steps.filter.outputs.changes || '["go","javascript-typescript","rust"]' }}
+      runners: ${{ steps.runner.outputs.runners || '[]' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,3 +62,15 @@ jobs:
           CI_FILTERS: ${{ inputs.filters }}
           GH_TOKEN: ${{ github.token }}
         run: mise exec node@26.3.0 -- mise run --skip-tools github:workflows:ci-selection:filter
+
+      # Never allowed to fail the selection: a missing answer is the hosted
+      # fallback, which callers also apply when this output is empty.
+      - name: Choose runner
+        id: runner
+        continue-on-error: true
+        uses: ./.github/actions/runs-on-fallback
+        with:
+          github-token: ${{ secrets.runner-status-token }}
+          primary-labels: ${{ vars.SELF_HOSTED_RUNNER_LABELS }}
+          scope: organization
+          slots: ${{ inputs.runner-slots }}
