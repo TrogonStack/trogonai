@@ -103,3 +103,12 @@ pub struct ResultMessage {
     pub queued_turn_count: Option<u64>,
     pub additional_fields: JsonObject,
 }
+
+#[derive(Clone, Debug)]
+pub struct StreamEvent {
+    pub uuid: String,
+    pub session_id: SessionId,
+    pub event: JsonObject,
+    pub parent_tool_use_id: Option<ToolUseId>,
+    pub additional_fields: JsonObject,
+}
