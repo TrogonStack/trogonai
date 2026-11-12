@@ -1,5 +1,9 @@
+#[path = "support/advancing_seal.rs"]
+mod advancing_seal;
+
 use chrono::Duration;
 use chrono::TimeZone;
+use chrono::Timelike;
 use std::sync::atomic::Ordering;
 use trogon_decider_runtime::CommandError;
 use trogon_decider_runtime::CommandExecution;
@@ -46,6 +50,235 @@ use trogonai_proto::peers::PeerEventCase;
 mod support;
 use support::*;
 use trogonai_proto::peers::v1alpha1 as proto;
+
+#[tokio::test]
+async fn send_acceptance_uses_current_service_time_after_a_heartbeat_during_seal() -> TestResult {
+    let f = Fixture::new().await?;
+    let seal = advancing_seal::AdvancingSeal {
+        fixture: &f,
+        elapsed: chrono::Duration::seconds(1),
+        heartbeat: Some(proto::HeartbeatRequest {
+            attachment_ref: f.a.clone().into(),
+            availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+            ..Default::default()
+        }),
+    };
+    let app = trogon_peer_service::PeerApplication::new(
+        f.store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        seal,
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    let sent = app
+        .send(
+            &f.alice,
+            f.send("heartbeat_during_seal", "concurrent activity is valid"),
+        )
+        .await?;
+    let now = *f
+        .clock
+        .time
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
+    assert_eq!(
+        sent.message.accepted_at.as_option(),
+        Some(&trogonai_proto::convert::timestamp_from_datetime(&now))
+    );
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let state = f.history(&sender).await?;
+    assert_eq!(
+        state.attachment.observed_at.as_option(),
+        sent.message.accepted_at.as_option()
+    );
+    assert_eq!(state.outbox.len(), 1);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 1);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let retry = app
+        .send(
+            &f.alice,
+            f.send("heartbeat_during_seal", "concurrent activity is valid"),
+        )
+        .await?;
+    assert_eq!(retry, sent);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn send_acceptance_still_denies_a_lease_that_expires_during_seal() -> TestResult {
+    let f = Fixture::new().await?;
+    let seal = advancing_seal::AdvancingSeal {
+        fixture: &f,
+        elapsed: chrono::Duration::seconds(10),
+        heartbeat: None,
+    };
+    let app = trogon_peer_service::PeerApplication::new(
+        f.store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        seal,
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        app.send(&f.alice, f.send("expired_during_seal", "must remain fenced"))
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Evidence(
+            trogon_peer::MessageError::Guard(trogon_peer::HeartbeatError::Expired)
+        ))
+    ));
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    assert!(f.history(&sender).await?.outbox.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn send_render_admission_rejects_unrenderable_new_content_before_sealing_or_acceptance() -> TestResult {
+    let f = Fixture::new().await?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app().send(&f.alice, f.send("unrenderable", &"<".repeat(2048))).await,
+        Err(trogon_peer_service::PeerApplicationError::Context(
+            trogon_peer_context::PeerContextError::ContractViolation
+        ))
+    ));
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    assert!(f.history(&sender).await?.outbox.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn send_render_admission_reserves_full_batch_identity_and_preserves_exact_retries() -> TestResult {
+    let f = Fixture::new().await?;
+    let now = *f
+        .clock
+        .time
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
+    let admission_at = now
+        .with_nanosecond(999_999_999)
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    let mut batch = proto::PeerBatch {
+        batch_id: Some(trogon_peer::BatchId::new("b".repeat(128))?.as_str().to_owned()),
+        message_ids: vec!["message-0".into()],
+        prepared_at: trogonai_proto::convert::timestamp_from_datetime(&now).into(),
+        ..Default::default()
+    };
+    let mut candidate = proto::PreparedMessage {
+        metadata: proto::MessageMetadata {
+            message_id: Some("message-0".into()),
+            sender_peer_id: f.a.peer_id.clone(),
+            recipient_peer_id: f.b.peer_id.clone(),
+            collaboration_ref: Some("shared".into()),
+            accepted_at: trogonai_proto::convert::timestamp_from_datetime(&admission_at).into(),
+            ..Default::default()
+        }
+        .into(),
+        text: None,
+    };
+    let mut fitting = None;
+    for suffix in 0..=848 {
+        let text = format!("{}{}", "<".repeat(1200), "a".repeat(suffix));
+        candidate.text = Some(text.clone());
+        candidate
+            .metadata
+            .as_option_mut()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+            .content_size_bytes = Some(text.len() as u32);
+        if trogon_peer_context::PeerContext::render(&batch, std::slice::from_ref(&candidate)).is_err() {
+            break;
+        }
+        fitting = Some(text);
+    }
+    let fitting = fitting.ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    assert!(fitting.len() < 2048);
+    let oversized = format!("{fitting}a");
+    candidate.text = Some(oversized.clone());
+    candidate
+        .metadata
+        .as_option_mut()
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?
+        .content_size_bytes = Some(oversized.len() as u32);
+    assert!(trogon_peer_context::PeerContext::render(&batch, std::slice::from_ref(&candidate)).is_err());
+    batch.batch_id = Some("batch-1".into());
+    assert!(trogon_peer_context::PeerContext::render(&batch, &[candidate]).is_ok());
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app()
+            .send(&f.alice, f.send("too_large_future_batch", &oversized))
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Context(
+            trogon_peer_context::PeerContextError::ContractViolation
+        ))
+    ));
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    let accepted = f.app().send(&f.alice, f.send("tight_fit", &fitting)).await?;
+    f.ids.0.store(usize::MAX - 1, Ordering::SeqCst);
+    let retry = f.app().send(&f.alice, f.send("tight_fit", &fitting)).await?;
+    assert_eq!(retry, accepted);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn send_render_admission_keeps_normal_and_fitting_escaped_exchange_metadata_exact() -> TestResult {
+    for text in ["a".repeat(2048), "<".repeat(1000)] {
+        let f = Fixture::new().await?;
+        let accepted = f.intake("fits", &text).await?;
+        let prepared = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+        assert_eq!(prepared.messages.len(), 1);
+        assert_eq!(prepared.messages[0].metadata, accepted.message);
+        assert_eq!(prepared.messages[0].text.as_deref(), Some(text.as_str()));
+        let mut worst_batch = prepared
+            .batch
+            .into_option()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+        worst_batch.batch_id = Some(trogon_peer::BatchId::new("b".repeat(128))?.as_str().to_owned());
+        assert!(trogon_peer_context::PeerContext::render(&worst_batch, &prepared.messages).is_ok());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn send_render_admission_keeps_existing_key_semantic_conflicts_owned_by_core() -> TestResult {
+    let f = Fixture::new().await?;
+    let accepted = f.app().send(&f.alice, f.send("accepted", "original")).await?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let seals = f.content.calls.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app().send(&f.alice, f.send("accepted", &"<".repeat(2048))).await,
+        Err(trogon_peer_service::PeerApplicationError::Message(
+            trogon_decider_runtime::CommandError::Decide(trogon_peer::MessageError::Conflict)
+        ))
+    ));
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), seals + 1);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.app().send(&f.alice, f.send("accepted", "original")).await?, accepted);
+    Ok(())
+}
 
 #[tokio::test]
 async fn durable_acceptance_survives_reconstruction_and_exact_retry_with_new_content_location() -> TestResult {
@@ -4670,6 +4903,149 @@ impl CommandAuthorizer<Attach> for IsolatedEnrollmentFixture {
     }
 }
 
+#[derive(Clone)]
+struct SendAdmissionObservationClock {
+    live_at: chrono::DateTime<chrono::Utc>,
+    admission_at: chrono::DateTime<chrono::Utc>,
+    reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl trogon_peer_service::PeerClock for SendAdmissionObservationClock {
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        if self.reads.fetch_add(1, Ordering::SeqCst) == 1 {
+            self.admission_at
+        } else {
+            self.live_at
+        }
+    }
+}
+
+#[tokio::test]
+async fn public_send_rejects_a_leap_admission_clock_before_sealing_and_keeps_exact_retry() -> TestResult {
+    let mut f = Fixture::new().await?;
+    let renewed_at = f.clock.now() + Duration::seconds(58);
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = renewed_at;
+    f.a = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone())
+        .enroll(&f.alice, Fixture::enrollment("alice"))
+        .await?
+        .attachment
+        .attachment_ref
+        .clone()
+        .into_option()
+        .ok_or(PeerPortError::Integrity)?;
+    let ordinary = renewed_at + Duration::seconds(1);
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = ordinary;
+    let leap = chrono::Utc
+        .timestamp_opt(ordinary.timestamp(), 1_500_000_000)
+        .single()
+        .ok_or(PeerPortError::Integrity)?;
+    let clock = SendAdmissionObservationClock {
+        live_at: ordinary,
+        admission_at: leap,
+        reads: std::sync::Arc::default(),
+    };
+    let app = PeerApplication::new(
+        f.store.clone(),
+        f.policy.clone(),
+        clock.clone(),
+        f.content.clone(),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let ids = f.ids.0.load(Ordering::SeqCst);
+    let owner = f.alice.clone();
+    let request = f.send("admission_clock", "durable message");
+    let joined = tokio::spawn(async move { app.send(&owner, request).await }).await;
+    assert!(
+        joined.is_ok(),
+        "public send must reject an unrepresentable admission clock without panicking"
+    );
+    assert!(matches!(
+        joined?,
+        Err(PeerApplicationError::Evidence(MessageError::InvalidState(
+            EvolveError::TimestampRange { field: "accepted_at" }
+        )))
+    ));
+    assert_eq!(clock.reads.load(Ordering::SeqCst), 2);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.ids.0.load(Ordering::SeqCst), ids + 1);
+    let accepted = f
+        .app()
+        .send(&f.alice, f.send("admission_clock", "durable message"))
+        .await?;
+    assert_eq!(
+        accepted.message.accepted_at,
+        buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&ordinary))
+    );
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
+    let retry_clock = SendAdmissionObservationClock {
+        live_at: ordinary,
+        admission_at: leap,
+        reads: std::sync::Arc::default(),
+    };
+    let retry_app = PeerApplication::new(
+        f.store.clone(),
+        f.policy.clone(),
+        retry_clock.clone(),
+        f.content.clone(),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    let retry = retry_app
+        .send(&f.alice, f.send("admission_clock", "durable message"))
+        .await?;
+    assert_eq!(retry, accepted);
+    assert_eq!(retry_clock.reads.load(Ordering::SeqCst), 3);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.ids.0.load(Ordering::SeqCst), ids + 3);
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_send_keeps_unsupported_admission_seconds_owned_by_the_renderer() -> TestResult {
+    for seconds in [-62_135_596_801, 253_402_300_800] {
+        let f = Fixture::new().await?;
+        let invalid = chrono::Utc
+            .timestamp_opt(seconds, 0)
+            .single()
+            .ok_or(PeerPortError::Integrity)?;
+        let clock = SendAdmissionObservationClock {
+            live_at: f.clock.now(),
+            admission_at: invalid,
+            reads: std::sync::Arc::default(),
+        };
+        let app = PeerApplication::new(
+            f.store.clone(),
+            f.policy.clone(),
+            clock.clone(),
+            f.content.clone(),
+            f.cache.clone(),
+            f.ids.clone(),
+            f.catalog.clone(),
+        );
+        let appends = f.store.appends.load(Ordering::SeqCst);
+        assert!(matches!(
+            app.send(&f.alice, f.send("admission_seconds", "durable message")).await,
+            Err(PeerApplicationError::Context(
+                trogon_peer_context::PeerContextError::ContractViolation
+            ))
+        ));
+        assert_eq!(clock.reads.load(Ordering::SeqCst), 2);
+        assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+        assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(f.ids.0.load(Ordering::SeqCst), 1);
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn roster_emits_ready_new_attachments_and_skips_expired_members_on_each_catalog_page() -> TestResult {
     let mut f = Fixture::new().await?;
@@ -4739,6 +5115,61 @@ async fn roster_emits_ready_new_attachments_and_skips_expired_members_on_each_ca
             .is_empty()
     );
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    Ok(())
+}
+
+struct LeaseRenewalDuringSeal<'a>(&'a Fixture);
+
+impl trogon_peer_service::ContentSeal for LeaseRenewalDuringSeal<'_> {
+    async fn seal(&self, scope: &PeerAccess, text: &MessageText) -> Result<ContentBinding, PeerPortError> {
+        let result = advancing_seal::AdvancingSeal {
+            fixture: self.0,
+            elapsed: chrono::Duration::seconds(9),
+            heartbeat: Some(proto::HeartbeatRequest {
+                attachment_ref: self.0.a.clone().into(),
+                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                ..Default::default()
+            }),
+        }
+        .seal(scope, text)
+        .await?;
+        *self.0.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? += chrono::Duration::seconds(2);
+        Ok(result)
+    }
+}
+
+#[tokio::test]
+async fn send_accepts_a_renewed_lease_after_the_pre_seal_snapshot_expired() -> TestResult {
+    let f = Fixture::new().await?;
+    let initial_time = f.clock.now();
+    let app = PeerApplication::new(
+        f.store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        LeaseRenewalDuringSeal(&f),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    let sent = app
+        .send(&f.alice, f.send("renewed-across-expiry", "valid after renewal"))
+        .await?;
+    assert_eq!(
+        sent.message.accepted_at.as_option(),
+        Some(&trogonai_proto::convert::timestamp_from_datetime(
+            &(initial_time + chrono::Duration::seconds(11))
+        ))
+    );
+    let sender = PeerId::parse(f.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let history = f.history(&sender).await?;
+    assert_eq!(history.outbox.len(), 1);
+    assert_eq!(
+        history.attachment.expires_at.as_option(),
+        Some(&trogonai_proto::convert::timestamp_from_datetime(
+            &(initial_time + chrono::Duration::seconds(19))
+        ))
+    );
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 1);
     Ok(())
 }
 

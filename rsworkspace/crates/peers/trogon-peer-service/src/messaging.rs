@@ -1,5 +1,6 @@
 use crate::{
     attachment_input::attachment,
+    constants::{MAX_BATCH_ID_BYTES, MAX_TIMESTAMP_NANOS},
     content_ports::ContentSeal,
     identity_ports::MessageIdGenerator,
     message_text::MessageText,
@@ -12,7 +13,8 @@ use crate::{
 };
 use buffa::MessageField;
 use trogon_decider_runtime::{CommandAuthorizer, CommandError, StreamAppend, StreamRead};
-use trogon_peer::{IdempotencyKey, MessageError, MessageId, PeerId, SendMessage, TrustedPeerOwner};
+use trogon_peer::{BatchId, IdempotencyKey, MessageError, MessageId, PeerId, SendMessage, TrustedPeerOwner};
+use trogon_peer_context::PeerContext;
 use trogonai_proto::{convert::timestamp_from_datetime, peers::v1alpha1 as proto};
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerApplication<S, P, C, Content, Cache, Ids, Catalog>
 where
@@ -41,13 +43,49 @@ where
         if target.collaboration() != collaboration {
             return Err(PeerApplicationError::Scope);
         }
+        let message_id = self.ids.message_id()?;
+        if !sender
+            .outbox
+            .iter()
+            .any(|entry| entry.idempotency_key.as_deref() == Some(key.as_str()))
+        {
+            let batch_id = BatchId::new("b".repeat(MAX_BATCH_ID_BYTES))?;
+            let admission_time = self.clock.now();
+            if admission_time.timestamp_subsec_nanos() >= 1_000_000_000 {
+                return Err(PeerApplicationError::Evidence(trogon_peer::MessageError::InvalidState(
+                    trogon_peer::EvolveError::TimestampRange { field: "accepted_at" },
+                )));
+            }
+            let mut admission_at = timestamp_from_datetime(&admission_time);
+            admission_at.nanos = MAX_TIMESTAMP_NANOS;
+            let batch = proto::PeerBatch {
+                batch_id: Some(batch_id.as_str().to_owned()),
+                message_ids: vec![message_id.as_str().to_owned()],
+                prepared_at: MessageField::some(admission_at.clone()),
+                ..Default::default()
+            };
+            let message = proto::PreparedMessage {
+                metadata: MessageField::some(proto::MessageMetadata {
+                    message_id: Some(message_id.as_str().to_owned()),
+                    sender_peer_id: Some(reference.peer_id().to_string()),
+                    recipient_peer_id: Some(recipient.to_string()),
+                    collaboration_ref: Some(collaboration.as_str().to_owned()),
+                    content_size_bytes: Some(text.as_str().len() as u32),
+                    accepted_at: MessageField::some(admission_at),
+                    ..Default::default()
+                }),
+                text: Some(text.as_str().to_owned()),
+            };
+            PeerContext::render(&batch, &[message])?;
+        }
         let binding = self.content.seal(&scope, &text).await?;
         if binding.tenant() != owner.tenant() || binding.content().size() as usize != text.as_str().len() {
             return Err(PeerApplicationError::Scope);
         }
-        let message_id = self.ids.message_id()?;
+        let sender = self.load(owner, reference.peer_id()).await?;
+        let authorized_at = self.live(owner, &reference, &sender)?;
         let message = match self
-            .execute_message_with_builder(owner, self.clock.now(), |accepted_at| {
+            .execute_message_with_builder(owner, authorized_at, |accepted_at| {
                 SendMessage::new(
                     owner.clone(),
                     reference.clone(),
