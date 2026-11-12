@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "Initial public Rust API for Claude Code"
+exclude = [".config/**"]
 
 [lints]
 workspace = true
