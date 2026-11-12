@@ -40,7 +40,7 @@ pub use discovery_metadata_input::DiscoveryMetadataInput;
 pub use endpoint_subject::{EndpointSubject, EndpointSubjectError};
 pub use method_name::{MethodName, MethodNameError};
 pub use method_name_input::MethodNameInput;
-pub use server::{EndpointHandler, ServeError, serve};
+pub use server::{AdmittedEndpoint, EndpointHandler, ServeError, serve, serve_admitted};
 pub use service_error_code::{ServiceErrorCode, ServiceErrorCodeError};
 pub use service_error_code_input::ServiceErrorCodeInput;
 pub use service_fault::ServiceFault;
@@ -51,3 +51,12 @@ pub use service_version_input::ServiceVersionInput;
 pub use status_codec::{EncodedReply, Outcome, ReplyError, ServiceError};
 pub use subject_prefix::{SubjectPrefix, SubjectPrefixError};
 pub use subject_prefix_input::SubjectPrefixInput;
+
+pub mod endpoint_admission;
+pub mod request_metadata;
+pub mod server_subject_pattern;
+pub use endpoint_admission::EndpointAdmission;
+pub use request_metadata::RequestMetadata;
+pub use server_subject_pattern::{ServerSubjectPattern, ServerSubjectPatternError};
+
+pub mod endpoint_handler;
