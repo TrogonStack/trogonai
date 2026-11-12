@@ -1922,6 +1922,51 @@ async fn heartbeat_waits_for_a_confirmed_attachment_when_the_native_session_is_o
     assert_eq!(calls.lock().expect("calls").len(), 1);
 }
 
+#[tokio::test]
+async fn lifecycle_stale_enrollment_cannot_replace_a_newer_generation() {
+    let backend = backend(Default::default());
+    let response = backend.enrollment.clone();
+    response
+        .lock()
+        .expect("response")
+        .attachment
+        .as_option_mut()
+        .expect("lease")
+        .attachment_ref
+        .as_option_mut()
+        .expect("attachment")
+        .generation = Some(2);
+    let calls = backend.calls.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    adapter
+        .invoke(prompt("native_b", "initial"))
+        .await
+        .expect("bind generation two");
+    response
+        .lock()
+        .expect("response")
+        .attachment
+        .as_option_mut()
+        .expect("lease")
+        .attachment_ref
+        .as_option_mut()
+        .expect("attachment")
+        .generation = Some(1);
+    assert!(matches!(
+        adapter.invoke(prompt("native_b", "later")).await,
+        Err(PeerMcpError::InvalidEnrollment)
+    ));
+    adapter
+        .invoke(detach("native_b"))
+        .await
+        .expect("detach retained generation");
+    let calls = calls.lock().expect("calls");
+    let Some(ObservedCall::Detach(request)) = calls.last() else {
+        panic!("detach");
+    };
+    assert_eq!(request.attachment_ref.generation, Some(2));
+}
+
 struct PanickingReceiveTransport<T> {
     inner: T,
     fail: Arc<tokio::sync::Notify>,
