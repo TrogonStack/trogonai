@@ -11,6 +11,7 @@ mod environment;
 mod error;
 mod mcp_server_name;
 mod mcp_tool_name;
+mod message;
 mod message_id;
 mod message_origin;
 mod model_name;
@@ -71,6 +72,7 @@ pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 
 pub use timeout::{Timeout, TimeoutError};
 
+pub use message::{Content, ContentBlock, ToolResultStatus};
 pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use stderr_tail::StderrTail;
 
