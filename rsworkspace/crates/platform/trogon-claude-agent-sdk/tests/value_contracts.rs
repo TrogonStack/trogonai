@@ -305,6 +305,14 @@ fn callback_configuration_debug_reports_structure_without_callback_or_input_deta
             "matcher":"fixture-private-matcher","hookCallbackIds":["callback-one"],"onFailure":"continue"
         })
     );
+    let unmatched = HookRegistration {
+        matcher: None,
+        ..registration.clone()
+    };
+    assert_eq!(
+        unmatched.to_wire_json(&["callback-one".into()])?,
+        json!({"hookCallbackIds":["callback-one"],"onFailure":"continue"})
+    );
     let debug = format!("{registration:?}");
     assert!(debug.contains("callback_count: 0"));
     assert!(!debug.contains("fixture-private-matcher"));

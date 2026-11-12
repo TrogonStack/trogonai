@@ -1,4 +1,4 @@
-use crate::{CallbackError, CancellationToken, JsonObject, McpServerName, ToolUseId};
+use crate::{CallbackError, CancellationToken, DialogKind, JsonObject, McpServerName, ToolUseId};
 use serde::Serialize;
 use serde_json::Value;
 use std::{future::Future, pin::Pin};
@@ -70,7 +70,7 @@ where
 
 #[derive(Clone, Debug)]
 pub struct UserDialogRequest {
-    pub dialog_kind: String,
+    pub dialog_kind: DialogKind,
     pub payload: JsonObject,
     pub tool_use_id: Option<ToolUseId>,
     pub signal: CancellationToken,

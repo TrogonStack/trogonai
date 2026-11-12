@@ -222,6 +222,7 @@ struct SyncHookOutputWire<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HookRegistrationWire<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
     matcher: Option<&'a str>,
     hook_callback_ids: &'a [String],
     on_failure: &'static str,

@@ -66,7 +66,7 @@ async fn closures_are_elicitation_handlers_with_an_opaque_debug_form() -> TestRe
 async fn closures_are_user_dialog_handlers_with_an_opaque_debug_form() -> TestResult {
     let handler: Arc<dyn UserDialogHandler> = Arc::new(|request: UserDialogRequest| async move {
         Ok(UserDialogResponse::Completed {
-            result: json!({"kind": request.dialog_kind}),
+            result: json!({"kind": request.dialog_kind.as_str()}),
         })
     });
     let response = handler

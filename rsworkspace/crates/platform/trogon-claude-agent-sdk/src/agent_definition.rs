@@ -1,4 +1,4 @@
-use crate::{EffortLevel, McpServerName, McpServerOptions, PermissionMode, Prompt, SettingSource, ToolName};
+use crate::{EffortLevel, McpServerName, McpServerOptions, ModelName, PermissionMode, Prompt, SettingSource, ToolName};
 use serde::Serialize;
 use serde_json::Value;
 use std::{collections::BTreeMap, num::NonZeroUsize};
@@ -21,7 +21,7 @@ pub struct AgentDefinition {
     pub prompt: Prompt,
     pub tools: Option<Vec<ToolName>>,
     pub disallowed_tools: Option<Vec<ToolName>>,
-    pub model: Option<String>,
+    pub model: Option<ModelName>,
     pub skills: Option<Vec<String>>,
     pub memory: Option<SettingSource>,
     pub initial_prompt: Option<Prompt>,
@@ -109,7 +109,7 @@ impl AgentDefinition {
                 .disallowed_tools
                 .as_ref()
                 .map(|tools| tools.iter().map(ToolName::as_str).collect()),
-            model: self.model.as_deref(),
+            model: self.model.as_ref().map(ModelName::as_str),
             skills: self.skills.as_deref(),
             memory: self.memory.map(SettingSource::as_str),
             initial_prompt: self.initial_prompt.as_ref().map(Prompt::as_str),
