@@ -5,6 +5,7 @@ fn valid_opaque_values_are_preserved_without_format_restrictions() {
     for input in ["opaque-value", "unicode café value", "  "] {
         let value = TaskId::from(input);
         assert_eq!(value.as_str(), input);
+        assert_eq!(value.to_string(), input);
         assert_eq!(value.clone(), value);
     }
 }
@@ -14,6 +15,7 @@ fn empty_and_control_values_are_stored_as_received() {
     for input in ["", "value\nidentifier", "value\0identifier", "value\u{7f}"] {
         let value = TaskId::from(input);
         assert_eq!(value.as_str(), input);
+        assert_eq!(value.to_string(), input);
     }
 }
 
