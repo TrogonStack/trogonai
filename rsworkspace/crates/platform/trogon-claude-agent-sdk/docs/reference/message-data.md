@@ -1,10 +1,7 @@
 # Message data reference
 
 These Rust declarations support public data composition. They do not decode
-CLI frames or start a session. Message structs keep their existing Clone and
-Debug derives; this layer adds no Serialize or Deserialize implementation to
-Message, its payload structs or content enums. MessageOrigin has its existing
-validated serde implementation.
+CLI frames or start a session.
 
 The lifecycle remains an API draft: connect and disconnect return the typed
 NotImplemented error. No process, wire parser or permission policy is added.
@@ -19,7 +16,7 @@ they do not assert runtime parity or complete upstream union coverage.
 JsonObject is serde_json::Map<String, serde_json::Value>, used for object-valued
 payloads and explicit extension maps. Python uses dict[str, Any] for fields such
 as ToolUseBlock.input. TypeScript object and Record types have comparable
-object-valued roles, while Any and unknown can also represent non-object data.
+object-valued roles, while any and unknown can also represent non-object data.
 The Rust alias is not a claim that either SDK exports a type named JsonObject.
 The generic serde_json object decoder rejects scalar and array roots while
 retaining nested nulls, arrays and objects. This is not an SDK frame decoder.
