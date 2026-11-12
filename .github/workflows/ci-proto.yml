@@ -20,6 +20,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # GitHub checks every job of the called workflow against this, even the
+      # runner job this workflow skips, and refuses to start without it.
+      id-token: write
     with:
       filters: .github/filters/ci.yml
   format:
