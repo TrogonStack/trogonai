@@ -32,8 +32,8 @@ struct Backend {
     committed_enrollments: Arc<Mutex<Vec<v1::EnrollRequest>>>,
     enrollment_committed: Arc<tokio::sync::Notify>,
     fail_enroll: bool,
-    pause_enroll: Arc<std::sync::atomic::AtomicBool>,
     fail_prepare: Arc<std::sync::atomic::AtomicBool>,
+    pause_enroll: Arc<std::sync::atomic::AtomicBool>,
     pause_prepare: Arc<std::sync::atomic::AtomicBool>,
     prepare_entered: Arc<tokio::sync::Notify>,
     prepare_dropped: Arc<std::sync::atomic::AtomicUsize>,
@@ -218,8 +218,8 @@ fn backend(response: v1::PrepareBatchResponse) -> Backend {
         committed_enrollments: Arc::new(Mutex::new(Vec::new())),
         enrollment_committed: Arc::new(tokio::sync::Notify::new()),
         fail_enroll: false,
-        pause_enroll: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         fail_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        pause_enroll: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         pause_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         prepare_entered: Arc::new(tokio::sync::Notify::new()),
         prepare_dropped: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -1993,6 +1993,159 @@ async fn diagnostics_keep_untrusted_arguments_and_backend_sources_opaque() {
         std::error::Error::source(&error).is_some(),
         "typed sources remain inspectable"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancellation_after_enrollment_and_prepare_error_recover_with_stable_public_retries() {
+    let backend = backend(prepared("retained response"));
+    let paused = backend.pause_prepare.clone();
+    let failing = backend.fail_prepare.clone();
+    let calls = backend.calls.clone();
+    paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    let task = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.invoke(prompt("native_b", "stable_prompt")).await })
+    };
+    tokio::task::yield_now().await;
+    tokio::task::yield_now().await;
+    assert_eq!(calls.lock().expect("calls").len(), 2);
+    task.abort();
+    assert!(task.await.expect_err("cancelled prompt").is_cancelled());
+    assert!(matches!(
+        adapter.invoke(prompt("native_c", "other")).await,
+        Err(PeerMcpError::NativeSessionChanged)
+    ));
+    paused.store(false, std::sync::atomic::Ordering::SeqCst);
+    failing.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(matches!(
+        adapter.invoke(prompt("native_b", "stable_prompt")).await,
+        Err(PeerMcpError::Prepare(_))
+    ));
+    failing.store(false, std::sync::atomic::Ordering::SeqCst);
+    let result = hook_json(
+        adapter
+            .invoke(prompt("native_b", "stable_prompt"))
+            .await
+            .expect("recovery"),
+    );
+    assert!(
+        result["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .expect("context")
+            .contains("retained response")
+    );
+    let calls = calls.lock().expect("calls");
+    assert_eq!(calls.len(), 6);
+    assert_eq!(calls[0], calls[2]);
+    assert_eq!(calls[2], calls[4]);
+    assert_eq!(calls[1], calls[3]);
+    assert_eq!(calls[3], calls[5]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn detach_cancels_inflight_resume_and_old_generation_heartbeat_without_resurrection() {
+    let backend = backend(Default::default());
+    let paused = backend.pause_enroll.clone();
+    let calls = backend.calls.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    let heartbeats = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move {
+            adapter
+                .run_heartbeat(trogon_peer_mcp::AvailabilityObservation::Busy)
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+    paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    let prompt_task = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.invoke(prompt("native_b", "resume")).await })
+    };
+    tokio::task::yield_now().await;
+    assert!(matches!(
+        adapter.invoke(detach("native_b")).await,
+        Err(PeerMcpError::EnrollmentUncertain)
+    ));
+    assert!(matches!(
+        prompt_task.await.expect("prompt task"),
+        Err(PeerMcpError::Detached)
+    ));
+    heartbeats.await.expect("heartbeat cancelled");
+    paused.store(false, std::sync::atomic::Ordering::SeqCst);
+    let before = calls.lock().expect("calls").len();
+    tokio::time::advance(std::time::Duration::from_secs(20)).await;
+    assert!(matches!(
+        adapter.invoke(prompt("native_b", "resume")).await,
+        Err(PeerMcpError::Detached)
+    ));
+    assert_eq!(calls.lock().expect("calls").len(), before);
+    assert!(
+        calls
+            .lock()
+            .expect("calls")
+            .iter()
+            .all(|call| !matches!(call, ObservedCall::Detach(_))),
+        "an uncertain resumed enrollment must not detach the prior generation"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn runtime_signal_cancels_inflight_prompt_and_unbound_shutdown_never_enrolls() {
+    for bound in [false, true] {
+        let backend = backend(Default::default());
+        let paused = backend.pause_prepare.clone();
+        let entered = backend.prepare_entered.clone();
+        let dropped = backend.prepare_dropped.clone();
+        let calls = backend.calls.clone();
+        let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+        let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(trogon_peer_mcp::serve_connector(
+            adapter,
+            server_transport,
+            trogon_peer_mcp::AvailabilityObservation::Ready,
+            async move {
+                let _ = stopped.await;
+            },
+        ));
+        let client = ().serve(client_transport).await.expect("handshake");
+        if bound {
+            client.call_tool(prompt("native_b", "initial")).await.expect("bind");
+            paused.store(true, std::sync::atomic::Ordering::SeqCst);
+            let pending = client.peer().clone();
+            let work = tokio::spawn(async move { pending.call_tool(prompt("native_b", "pending")).await });
+            entered.notified().await;
+            assert!(!work.is_finished(), "prepare must be in flight before shutdown");
+            assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 0);
+            let started = tokio::time::Instant::now();
+            stop.send(()).expect("shutdown signal");
+            server.await.expect("runtime task").expect("shutdown");
+            let outcome = work.await.expect("MCP work task");
+            let cancellation = outcome.expect("MCP cancellation response");
+            assert_eq!(cancellation.is_error, Some(true));
+            assert_eq!(
+                cancellation.structured_content.expect("typed cancellation")["code"],
+                json!("request_cancelled")
+            );
+            assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert!(started.elapsed() <= std::time::Duration::from_secs(1));
+            assert!(
+                calls
+                    .lock()
+                    .expect("calls")
+                    .iter()
+                    .any(|call| matches!(call, ObservedCall::Detach(_)))
+            );
+        } else {
+            let _ = stop.send(());
+            server.await.expect("runtime task").expect("shutdown");
+            assert!(calls.lock().expect("calls").is_empty());
+        }
+        client.cancel().await.expect("client cleanup");
+    }
 }
 
 struct PanickingReceiveTransport<T> {
