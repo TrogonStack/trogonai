@@ -1,4 +1,4 @@
-use crate::{JsonObject, SessionId, ToolName, ToolUseId};
+use crate::{JsonObject, MessageId, MessageOrigin, SessionId, ToolName, ToolUseId};
 
 #[derive(Clone, Debug)]
 pub enum Content {
@@ -43,4 +43,36 @@ pub struct SystemMessage {
     pub subtype: String,
     pub session_id: Option<SessionId>,
     pub data: JsonObject,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResultStatus {
+    Success,
+    Error,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResultMessage {
+    pub subtype: String,
+    pub status: ResultStatus,
+    pub duration_ms: u64,
+    pub duration_api_ms: u64,
+    pub num_turns: u64,
+    pub session_id: SessionId,
+    pub total_cost_usd: Option<f64>,
+    pub result: Option<String>,
+    pub structured_output: Option<serde_json::Value>,
+    pub usage: Option<JsonObject>,
+    pub errors: Option<Vec<String>>,
+    pub uuid: Option<MessageId>,
+    pub stop_reason: Option<String>,
+    pub terminal_reason: Option<String>,
+    pub origin: Option<MessageOrigin>,
+    pub model_usage: Option<JsonObject>,
+    pub permission_denials: Option<Vec<serde_json::Value>>,
+    pub deferred_tool_use: Option<JsonObject>,
+    pub api_error_status: Option<u16>,
+    pub result_index: Option<u64>,
+    pub queued_turn_count: Option<u64>,
+    pub additional_fields: JsonObject,
 }
