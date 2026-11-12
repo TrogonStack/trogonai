@@ -11,6 +11,8 @@ workspace_crate(
         "effort": {},
         "environment": {},
         "max_turns": {},
+        "message_id": {},
+        "message_id_storage": {},
         "permission_mode": {},
         "prompt": {},
         "public_api": {},
