@@ -5,6 +5,7 @@ workspace_crate(
     compile_data = ["README.md"],
     integration_tests = {
         "additional_directories": {},
+        "agent": {},
         "effort": {},
         "environment": {},
         "max_turns": {},
