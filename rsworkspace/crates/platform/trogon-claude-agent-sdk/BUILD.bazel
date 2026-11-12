@@ -22,6 +22,7 @@ workspace_crate(
         "mcp_server_name_storage": {},
         "mcp_tool_name": {},
         "mcp_tool_name_storage": {},
+        "message": {},
         "message_content": {},
         "message_id": {},
         "message_id_storage": {},
