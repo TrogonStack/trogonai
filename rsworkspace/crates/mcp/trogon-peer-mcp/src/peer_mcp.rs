@@ -78,12 +78,12 @@ where
     }
 
     pub async fn run_heartbeat(&self, availability: crate::AvailabilityObservation) {
-        let attachment = loop {
+        let (binding, attachment) = loop {
             let notified = self.bound.notified();
             if let Some(binding) = self.binding.get()
                 && let Some(attachment) = binding.lock().await.attachment_subscription()
             {
-                break attachment;
+                break (binding, attachment);
             }
             tokio::select! {
                 biased;
@@ -103,7 +103,7 @@ where
             tokio::select! {
                 biased;
                 _ = self.stopped.cancelled() => return,
-                _ = tokio::time::timeout(period, self.heartbeat_once(availability, &attachment)) => {},
+                _ = tokio::time::timeout(period, self.heartbeat_once(availability, binding, &attachment)) => {},
             }
         }
     }
@@ -111,6 +111,7 @@ where
     async fn heartbeat_once(
         &self,
         availability: crate::AvailabilityObservation,
+        binding: &Mutex<NativeBinding>,
         attachment: &watch::Receiver<AttachmentRef>,
     ) {
         let prompted = self.prompt_arrived.notified();
@@ -121,6 +122,9 @@ where
             _ = &mut prompted => {},
             _ = async {
                 let _operation = self.operation.lock().await;
+                if binding.lock().await.attachment().is_none() {
+                    return;
+                }
                 let attachment = attachment.borrow().clone();
                 let _result = self
                     .backend
@@ -244,10 +248,11 @@ where
             .get_or_init(|| async { Mutex::new(NativeBinding::new(session_id.clone())) })
             .await;
         let session = {
-            let current = binding.lock().await;
+            let mut current = binding.lock().await;
             if current.native_session_id() != &session_id {
                 return Err(PeerMcpError::NativeSessionChanged);
             }
+            current.enrollment_started();
             current.native_session_id().clone()
         };
         let enrollment = self
