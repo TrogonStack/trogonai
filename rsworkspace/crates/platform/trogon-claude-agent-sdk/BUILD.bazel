@@ -118,5 +118,6 @@ workspace_crate(
         "user_input": {},
         "user_message": {},
         "value_contracts": {},
+        "windows_batch_cli": {},
     },
 )
