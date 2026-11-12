@@ -1,8 +1,8 @@
-use std::{num::NonZeroUsize, path::PathBuf};
+use std::{collections::BTreeMap, num::NonZeroUsize, path::PathBuf};
 
 use crate::{EffortLevel, PermissionMode, SettingSource, UsdBudget};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct ClaudeAgentOptions {
     pub cli_path: Option<PathBuf>,
     pub cwd: Option<PathBuf>,
@@ -13,4 +13,20 @@ pub struct ClaudeAgentOptions {
     pub max_turns: Option<NonZeroUsize>,
     pub max_budget_usd: Option<UsdBudget>,
     pub effort: Option<EffortLevel>,
+    pub env: BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for ClaudeAgentOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ClaudeAgentOptions")
+            .field("cli_path", &self.cli_path)
+            .field("cwd", &self.cwd)
+            .field("permission_mode", &self.permission_mode)
+            .field("setting_sources", &self.setting_sources)
+            .field("max_turns", &self.max_turns)
+            .field("max_budget_usd", &self.max_budget_usd)
+            .field("effort", &self.effort)
+            .finish_non_exhaustive()
+    }
 }

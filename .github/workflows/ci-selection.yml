@@ -57,8 +57,6 @@ jobs:
         uses: ./.github/actions/runs-on-fallback
         with:
           github-token: ${{ secrets.runner-status-token }}
-          # Repository variable holding the self-hosted runner labels. Unset or
-          # empty keeps every job on ubuntu-latest.
           primary-labels: ${{ vars.SELF_HOSTED_RUNNER_LABELS }}
           scope: organization
           jobs: ${{ inputs.runner-jobs }}
