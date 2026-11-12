@@ -57,13 +57,11 @@ checkout and can be the first step.
 
 `runners` holds an entry for every name in `jobs`, already set to the fallback
 labels when the job is not self-hosted, so a job needs no fallback expression of
-its own. The price is that the output must exist. If the job that runs this
-fails, GitHub skips the dependent jobs. If it succeeds without the output, for
-example because the step errored under `continue-on-error: true`, the dependent
-jobs fail with an expression error on the empty output instead of falling back.
-Keep the step first, or right after the checkout, and when it may error, add a
-step that writes the fallback labels for every job when its `outcome` is
-`failure`.
+its own. The price is that the output must exist. The action never fails for an
+API error, only for a bad input, and then the job that runs it fails and GitHub
+skips the dependent jobs. Do not put `continue-on-error: true` on the step: the
+job would succeed without the output, and the dependent jobs would fail with an
+expression error on the empty output.
 
 A job that uses the output also needs `needs:` on the job that produces it, or it
 reads an empty string.

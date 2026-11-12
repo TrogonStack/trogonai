@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -262,12 +261,12 @@ test('Rust heavy jobs read their own entry of the selected runners', async () =>
   }
 });
 
-test('runner selection runs right after checkout and cannot fail selection', async () => {
+test('runner selection runs right after checkout and fails loudly', async () => {
   const selection = load('.github/workflows/ci-selection.yml');
   const job = selection.jobs.filter;
   const step = job.steps.find((item) => item.id === 'runner');
   assert.equal(step.uses, './.github/actions/runs-on-fallback');
-  assert.equal(step['continue-on-error'], true);
+  assert.equal(step['continue-on-error'], undefined);
   assert.ok(job.steps[0].uses.startsWith('actions/checkout@'));
   assert.equal(job.steps[1], step);
   assert.equal(step.with.scope, 'organization');
@@ -276,30 +275,8 @@ test('runner selection runs right after checkout and cannot fail selection', asy
   assert.equal(selection.on.workflow_call.inputs['runner-jobs'].default, 'default');
   assert.equal(selection.on.workflow_call.inputs['runner-jobs'].required, false);
   assert.equal(workflows.rust.jobs.changes.secrets['runner-status-token'], '${{ secrets.RUNNER_STATUS_TOKEN }}');
-  assert.equal(job.outputs.runners, '${{ steps.runner.outputs.runners || steps.hosted.outputs.runners }}');
-  const chosen = { runner: { outputs: { runners: '{"default":["homelab"]}' } }, hosted: { outputs: {} } };
-  assert.equal((await evaluate(job.outputs.runners, { steps: chosen })).coerceString(), '{"default":["homelab"]}');
-  const failed = { runner: { outputs: {} }, hosted: { outputs: { runners: '{"default":["ubuntu-latest"]}' } } };
-  assert.equal((await evaluate(job.outputs.runners, { steps: failed })).coerceString(), '{"default":["ubuntu-latest"]}');
-});
-
-test('a runner choice that fails to start still gives every job a hosted runner', () => {
-  const steps = load('.github/workflows/ci-selection.yml').jobs.filter.steps;
-  const hosted = steps.find((item) => item.id === 'hosted');
-  assert.equal(steps[2], hosted);
-  assert.equal(hosted.if, "${{ steps.runner.outcome == 'failure' }}");
-  assert.equal(hosted.env.RUNNER_JOBS, '${{ inputs.runner-jobs }}');
-  const run = (jobs) => {
-    const output = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hosted-')), 'output');
-    fs.writeFileSync(output, '');
-    const result = spawnSync('bash', ['-c', hosted.run], { env: { PATH: process.env.PATH, RUNNER_JOBS: jobs, GITHUB_OUTPUT: output }, encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-    return JSON.parse(fs.readFileSync(output, 'utf8').trim().replace(/^runners=/, ''));
-  };
-  const all = ['test', 'build', 'wasm-decider', 'lint'];
-  assert.deepEqual(run(workflows.rust.jobs.changes.with['runner-jobs']), Object.fromEntries(all.map((name) => [name, ['ubuntu-latest']])));
-  assert.deepEqual(run('test,\nbuild'), { test: ['ubuntu-latest'], build: ['ubuntu-latest'] });
-  assert.deepEqual(run('default'), { default: ['ubuntu-latest'] });
+  assert.equal(job.outputs.runners, '${{ steps.runner.outputs.runners }}');
+  assert.equal(job.steps.find((item) => item.id === 'hosted'), undefined);
 });
 
 test('actionlint installs through the supported mise backend', () => {

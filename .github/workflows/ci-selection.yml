@@ -41,7 +41,7 @@ jobs:
       go: ${{ steps.filter.outputs.go || 'true' }}
       proto: ${{ steps.filter.outputs.proto || 'true' }}
       changes: ${{ steps.filter.outputs.changes || '["go","javascript-typescript","rust"]' }}
-      runners: ${{ steps.runner.outputs.runners || steps.hosted.outputs.runners }}
+      runners: ${{ steps.runner.outputs.runners }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,30 +49,17 @@ jobs:
           persist-credentials: false
 
       # Right after checkout so that a failure in the selector tooling below
-      # cannot take the runner choice down with it. It must not fail the job;
-      # the next step covers a choice that errors.
+      # cannot take the runner choice down with it. The action already falls
+      # back on its own for API errors, so a failure here is a bug or a bad
+      # input, and it fails the job instead of leaving runs-on unreadable.
       - name: Choose runner
         id: runner
-        continue-on-error: true
         uses: ./.github/actions/runs-on-fallback
         with:
           github-token: ${{ secrets.runner-status-token }}
           primary-labels: ${{ vars.SELF_HOSTED_RUNNER_LABELS }}
           scope: organization
           jobs: ${{ inputs.runner-jobs }}
-
-      # The choice can fail before the action runs, for example when its
-      # metadata does not load, which leaves no output at all. Every listed job
-      # then gets a hosted runner instead of a runs-on that cannot be read.
-      - name: Fall back to hosted runners
-        id: hosted
-        if: ${{ steps.runner.outcome == 'failure' }}
-        env:
-          RUNNER_JOBS: ${{ inputs.runner-jobs }}
-        run: |
-          echo "::warning::Runner choice failed, so every job runs on ubuntu-latest"
-          runners=$(printf '%s' "$RUNNER_JOBS" | tr ',\n' '  ' | jq -Rc 'split(" ") | map(select(length > 0) | {(.): ["ubuntu-latest"]}) | add // {}')
-          echo "runners=$runners" >> "$GITHUB_OUTPUT"
 
       - name: Install selector runtime
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
