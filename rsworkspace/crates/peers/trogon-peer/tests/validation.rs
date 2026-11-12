@@ -249,7 +249,7 @@ fn enrollment_cannot_be_decided_or_replayed_twice() {
         .then_error(EnrollError::AlreadyEnrolled);
     let attachment_event = attached(attachment());
     let state = evolve(state, &attachment_event).unwrap();
-    assert_eq!(evolve(state, &attachment_event), Err(EvolveError::AlreadyAttached));
+    assert_eq!(evolve(state, &attachment_event), Err(EvolveError::InvalidAttachment));
 }
 
 #[test]
