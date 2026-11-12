@@ -51,12 +51,20 @@ impl<F: SessionFileSystem> MaterializedSession<F> {
     }
 
     /// Removes the temporary configuration directory, retrying while another process briefly holds a handle on it.
+    ///
+    /// The lease is only marked removed once the work is finished, so cancelling this future mid-retry still lets
+    /// `Drop` make its best-effort removal of the private tree.
     pub async fn cleanup(mut self) {
-        self.removed = true;
         for _ in 0..CLEANUP_ATTEMPTS {
             match self.filesystem.remove_dir_all(&self.path) {
-                Ok(()) => return,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+                Ok(()) => {
+                    self.removed = true;
+                    return;
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    self.removed = true;
+                    return;
+                }
                 Err(error)
                     if matches!(
                         error.kind(),
@@ -75,6 +83,7 @@ impl<F: SessionFileSystem> MaterializedSession<F> {
         {
             tracing::warn!(path = %self.path.display(), %error, "could not remove the resume configuration directory");
         }
+        self.removed = true;
     }
 }
 

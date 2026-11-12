@@ -229,6 +229,23 @@ async fn w3_cleanup_retries_a_busy_directory_and_then_removes_it() -> TestResult
 }
 
 #[tokio::test(start_paused = true)]
+async fn w3_cancelling_cleanup_mid_retry_still_removes_the_directory_on_drop() -> TestResult {
+    let fixture = Fixture::new().await?;
+    let runtime = fixture.resume().await?;
+    let config = runtime.config_dir.clone().ok_or("missing config directory")?;
+    fixture
+        .filesystem
+        .fail(Operation::RemoveDirectoryAll, None, io::ErrorKind::ResourceBusy, 1)?;
+    let SessionRuntime { materialized, .. } = runtime;
+    let cleanup = materialized.ok_or("missing materialized session")?.cleanup();
+    let outcome = tokio::time::timeout(std::time::Duration::from_millis(1), cleanup).await;
+    assert!(outcome.is_err(), "cleanup must still be sleeping between attempts");
+    assert!(!fixture.filesystem.exists(&config));
+    assert_eq!(fixture.filesystem.paths(Operation::RemoveDirectoryAll)?.len(), 2);
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
 async fn w3_cleanup_gives_up_after_bounded_attempts_without_failing() -> TestResult {
     let fixture = Fixture::new().await?;
     let runtime = fixture.resume().await?;
