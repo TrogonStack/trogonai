@@ -28,33 +28,38 @@ inputs:
   scope:
     description: >-
       Where the runners are registered: `repository` or `organization`. An
-      organization scope lists the runners of the owner of this repository.
+      organization scope lists the runner groups visible to this repository, in
+      the organization that owns it, and skips groups limited to selected
+      workflows.
     required: false
     default: repository
-  slots:
+  jobs:
     description: >-
-      How many jobs the caller wants to place, a whole number of at least 1. Each
-      idle runner carrying every primary label takes one slot, lowest first, and
-      the remaining slots take the fallback labels.
+      Names of the jobs to place, separated by spaces, commas or newlines, in
+      priority order. Lowercase letters, digits, dashes and underscores, starting
+      with a letter or digit, and unique. Each idle runner carrying every primary
+      label takes one job, first name first, and the other jobs take the fallback
+      labels.
     required: false
-    default: "1"
+    default: default
 
 outputs:
   runners:
     description: >-
-      JSON array with exactly `slots` entries, each a label array. Read one with
-      `fromJSON(...)[n]` to place the nth job.
+      JSON object with an entry for every name in `jobs`, each a label array: the
+      primary labels when that job is self-hosted, the fallback labels otherwise.
+      Read one with `fromJSON(...).name`.
   runs-on:
     description: >-
-      Slot 0 as a JSON label array, for `runs-on: ${{ fromJSON(...) }}` when one
-      job is placed.
+      The first job's labels as a JSON array, for `runs-on: ${{ fromJSON(...) }}`
+      when one job is placed.
   self-hosted:
-    description: "`true` when slot 0 has the primary labels, otherwise `false`."
-  self-hosted-slots:
-    description: How many slots have the primary labels.
+    description: "`true` when the first job is self-hosted, otherwise `false`."
+  self-hosted-count:
+    description: How many jobs are self-hosted.
   reason:
     description: >-
-      Why that choice: `idle-runner` (at least one slot is primary),
+      Why that choice: `idle-runner` (at least one job is self-hosted),
       `no-idle-runner`, `not-configured`, `no-token`, `api-error`,
       `untrusted-event` or `fork-pull-request`.
 

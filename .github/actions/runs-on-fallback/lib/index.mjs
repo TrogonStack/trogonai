@@ -7,6 +7,12 @@ const PER_PAGE = 100;
 // A runaway Link chain must not hold a job open; 50 pages is 5000 runners.
 const MAX_PAGES = 50;
 
+// A hung API call must not hold the selection job open; the fallback is always
+// available, so waiting longer than this buys nothing.
+const REQUEST_TIMEOUT_MS = 15000;
+
+const JOB_NAME = /^[a-z0-9][a-z0-9_-]*$/;
+
 const SCOPES = ["repository", "organization"];
 
 // Events whose code was reviewed and merged, or started by someone with write
@@ -24,10 +30,11 @@ export function parseLabels(text) {
     .filter((label) => label.length > 0);
 }
 
-// A self-hosted runner keeps its state between jobs and usually sits on a
-// private network, so only code a maintainer has accepted may reach it. A fork
-// pull request runs the fork author's workflow edits, which is the case this
-// exists to keep out.
+// Routing hygiene, not a security boundary. A pull request from a fork controls
+// the workflow files and this action, so it can write the self-hosted labels
+// into `runs-on` itself. This only keeps events that were never meant to reach
+// the runner from being routed there by accident; the real controls are the
+// repository and runner group settings described in the README.
 export function decideTrust({ eventName, event, repository }) {
   if (!event) {
     return { trusted: false, reason: "untrusted-event" };
@@ -58,12 +65,23 @@ export function countIdle(runners, labels) {
   return runners.filter((runner) => isIdle(runner, labels)).length;
 }
 
-function parseSlots(text) {
-  const value = (text ?? "").trim() || "1";
-  if (!/^\d+$/.test(value) || Number(value) < 1) {
-    throw new InputError("The `slots` input must be a whole number of at least 1.");
+function parseJobs(text) {
+  const names = (text ?? "").split(/[\s,]+/).filter((name) => name.length > 0);
+  if (names.length === 0) {
+    names.push("default");
   }
-  return Number(value);
+
+  if (!names.every((name) => JOB_NAME.test(name))) {
+    throw new InputError(
+      "Every name in the `jobs` input must be lowercase letters, digits, dashes and underscores, starting with a letter or digit.",
+    );
+  }
+
+  if (new Set(names).size !== names.length) {
+    throw new InputError("The names in the `jobs` input must be unique.");
+  }
+
+  return names;
 }
 
 function readEvent(path) {
@@ -75,17 +93,13 @@ function readEvent(path) {
   }
 }
 
-function runnersUrl({ scope, repository, apiUrl, page }) {
-  const [owner] = repository.split("/");
-  const base = scope === "organization" ? `orgs/${owner}` : `repos/${repository}`;
-  return `${apiUrl}/${base}/actions/runners?per_page=${PER_PAGE}&page=${page}`;
+function listUrl({ apiUrl, path, query }) {
+  return (page) => `${apiUrl}/${path}?${query}per_page=${PER_PAGE}&page=${page}`;
 }
 
-// Stops once every slot is covered: the rest of a long list cannot change a
-// decision already reached.
-async function countIdleUpTo({ fetch, token, url, labels, limit }) {
-  let idle = 0;
-
+// Calls `visit` with each page's items until it returns true or the pages run
+// out. One walker serves every listing, so none of them can forget to paginate.
+async function eachPage({ fetch, token, url, key, visit }) {
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const response = await fetch(url(page), {
       headers: {
@@ -93,31 +107,86 @@ async function countIdleUpTo({ fetch, token, url, labels, limit }) {
         Authorization: `Bearer ${token}`,
         "X-GitHub-Api-Version": "2022-11-28",
       },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
     if (!response.ok) {
-      throw new Error(`the runners API answered HTTP ${response.status}`);
+      throw new Error(`the ${key} API answered HTTP ${response.status}`);
     }
 
     const body = await response.json();
-    if (!Array.isArray(body?.runners)) {
-      throw new Error("the runners API answered without a runners list");
+    if (!Array.isArray(body?.[key])) {
+      throw new Error(`the ${key} API answered without a ${key} list`);
     }
 
-    idle += countIdle(body.runners, labels);
-    if (idle >= limit) {
-      return limit;
+    if (visit(body[key])) {
+      return;
     }
 
     // A full page is the only sign of more; Link is the authority when sent.
     const link = response.headers?.get?.("link");
     const more = link == null ? true : /rel="next"/.test(link);
-    if (body.runners.length < PER_PAGE || !more) {
-      return idle;
+    if (body[key].length < PER_PAGE || !more) {
+      return;
+    }
+  }
+}
+
+// Stops once every job is covered: the rest of a long list cannot change a
+// decision already reached.
+async function countIdleUpTo({ fetch, token, scope, repository, apiUrl, labels, limit }) {
+  const [owner, name] = repository.split("/");
+  let idle = 0;
+
+  const countFrom = (path) =>
+    eachPage({
+      fetch,
+      token,
+      key: "runners",
+      url: listUrl({ apiUrl, path, query: "" }),
+      visit: (runners) => {
+        idle += countIdle(runners, labels);
+        return idle >= limit;
+      },
+    });
+
+  if (scope === "repository") {
+    await countFrom(`repos/${repository}/actions/runners`);
+    return Math.min(idle, limit);
+  }
+
+  // The organization-wide list includes runners in groups this repository may
+  // not use, and a job sent to one would queue forever. Only the groups GitHub
+  // reports as visible to this repository are asked about.
+  const groups = [];
+  await eachPage({
+    fetch,
+    token,
+    key: "runner_groups",
+    url: listUrl({
+      apiUrl,
+      path: `orgs/${owner}/actions/runner-groups`,
+      query: `visible_to_repository=${encodeURIComponent(name)}&`,
+    }),
+    visit: (page) => {
+      groups.push(...page);
+      return false;
+    },
+  });
+
+  for (const group of groups) {
+    // Which workflows such a group admits cannot be checked reliably from here,
+    // so it counts as unavailable rather than risking a job that queues forever.
+    if (group.restricted_to_workflows === true) {
+      continue;
+    }
+    await countFrom(`orgs/${owner}/actions/runner-groups/${group.id}/runners`);
+    if (idle >= limit) {
+      break;
     }
   }
 
-  return idle;
+  return Math.min(idle, limit);
 }
 
 // Decides without touching the process, so the tests drive the code that ships
@@ -128,7 +197,7 @@ export async function select({
   primaryLabels,
   fallbackLabels,
   scope,
-  slots,
+  jobs,
   env = process.env,
   fetch = globalThis.fetch,
 }) {
@@ -137,7 +206,7 @@ export async function select({
     throw new InputError(`The \`scope\` input must be one of: ${SCOPES.join(", ")}.`);
   }
 
-  const wanted = parseSlots(slots);
+  const names = parseJobs(jobs);
 
   const fallback = parseLabels(fallbackLabels);
   if (fallback.length === 0) {
@@ -147,15 +216,18 @@ export async function select({
   const primary = parseLabels(primaryLabels);
   const warnings = [];
 
-  // The first `taken` slots get the primary labels, so a caller orders its
-  // slots by how long each job runs and the longest ones land on the runner.
+  // Every name gets an entry, already holding the fallback when it is not
+  // self-hosted, so a caller reads its job's labels without a fallback of its
+  // own. The first names take the runners, so callers list the longest job first.
   const result = (taken, reason, message) => {
-    const runners = Array.from({ length: wanted }, (_, slot) => (slot < taken ? primary : fallback));
+    const runners = Object.fromEntries(
+      names.map((name, index) => [name, index < taken ? primary : fallback]),
+    );
     return {
       runners,
-      runsOn: runners[0],
+      runsOn: runners[names[0]],
       selfHosted: taken > 0,
-      selfHostedSlots: taken,
+      selfHostedCount: taken,
       reason,
       warnings,
       message,
@@ -186,14 +258,15 @@ export async function select({
     const idle = await countIdleUpTo({
       fetch,
       token: githubToken,
+      scope: chosenScope,
+      repository: env.GITHUB_REPOSITORY,
+      apiUrl,
       labels: primary,
-      limit: wanted,
-      url: (page) =>
-        runnersUrl({ scope: chosenScope, repository: env.GITHUB_REPOSITORY, apiUrl, page }),
+      limit: names.length,
     });
 
     if (idle > 0) {
-      return result(idle, "idle-runner", `${idle} of ${wanted} slot(s) go to idle runners carrying ${primary.join(", ")}.`);
+      return result(idle, "idle-runner", `${idle} of ${names.length} job(s) go to idle runners carrying ${primary.join(", ")}.`);
     }
     return fell("no-idle-runner", `No idle runner carries ${primary.join(", ")}.`);
   } catch (thrown) {
@@ -209,7 +282,7 @@ export async function main() {
       primaryLabels: getInput("primary-labels"),
       fallbackLabels: getInput("fallback-labels"),
       scope: getInput("scope"),
-      slots: getInput("slots"),
+      jobs: getInput("jobs"),
     });
 
     for (const line of result.warnings) {
@@ -217,14 +290,15 @@ export async function main() {
     }
 
     const target = result.selfHosted ? "self-hosted" : "fallback";
-    const summary = `runs-on: ${JSON.stringify(result.runsOn)} (${target}, ${result.reason}), ${result.selfHostedSlots} of ${result.runners.length} slot(s) self-hosted`;
+    const total = Object.keys(result.runners).length;
+    const summary = `runs-on: ${JSON.stringify(result.runsOn)} (${target}, ${result.reason}), ${result.selfHostedCount} of ${total} job(s) self-hosted`;
     info(`${summary}. ${result.message}`);
     appendSummary(summary);
 
     setOutput("runs-on", JSON.stringify(result.runsOn));
     setOutput("runners", JSON.stringify(result.runners));
     setOutput("self-hosted", String(result.selfHosted));
-    setOutput("self-hosted-slots", String(result.selfHostedSlots));
+    setOutput("self-hosted-count", String(result.selfHostedCount));
     setOutput("reason", result.reason);
   } catch (thrown) {
     if (thrown instanceof InputError) {

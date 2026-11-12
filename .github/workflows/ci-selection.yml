@@ -6,10 +6,11 @@ on:
       filters:
         required: true
         type: string
-      runner-slots:
+      runner-jobs:
+        description: Job names to place on runners, in priority order.
         required: false
-        type: number
-        default: 1
+        type: string
+        default: default
     secrets:
       # Listing self-hosted runners needs a GitHub App token or fine-grained
       # token; the default token cannot. Absent, jobs stay on hosted runners.
@@ -40,12 +41,25 @@ jobs:
       go: ${{ steps.filter.outputs.go || 'true' }}
       proto: ${{ steps.filter.outputs.proto || 'true' }}
       changes: ${{ steps.filter.outputs.changes || '["go","javascript-typescript","rust"]' }}
-      runners: ${{ steps.runner.outputs.runners || '[]' }}
+      runners: ${{ steps.runner.outputs.runners }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
           persist-credentials: false
+
+      # Right after checkout so that a failure in the selector tooling below
+      # cannot take the runner choice down with it. It must not fail the job: a
+      # step that errors leaves the output empty and dependents see no runners.
+      - name: Choose runner
+        id: runner
+        continue-on-error: true
+        uses: ./.github/actions/runs-on-fallback
+        with:
+          github-token: ${{ secrets.runner-status-token }}
+          primary-labels: ${{ vars.SELF_HOSTED_RUNNER_LABELS }}
+          scope: organization
+          jobs: ${{ inputs.runner-jobs }}
 
       - name: Install selector runtime
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
@@ -62,15 +76,3 @@ jobs:
           CI_FILTERS: ${{ inputs.filters }}
           GH_TOKEN: ${{ github.token }}
         run: mise exec node@26.3.0 -- mise run --skip-tools github:workflows:ci-selection:filter
-
-      # Never allowed to fail the selection: a missing answer is the hosted
-      # fallback, which callers also apply when this output is empty.
-      - name: Choose runner
-        id: runner
-        continue-on-error: true
-        uses: ./.github/actions/runs-on-fallback
-        with:
-          github-token: ${{ secrets.runner-status-token }}
-          primary-labels: ${{ vars.SELF_HOSTED_RUNNER_LABELS }}
-          scope: organization
-          slots: ${{ inputs.runner-slots }}

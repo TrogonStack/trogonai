@@ -36,15 +36,15 @@ jobs:
       pull-requests: read
     with:
       filters: .github/filters/ci.yml
-      # Idle runners fill the lowest slots, so slots follow job duration, longest
-      # first: test=0, build=1, wasm-decider=2, lint=3.
-      runner-slots: 4
+      # Idle runners go to the first names, so these follow job duration, longest
+      # first.
+      runner-jobs: test build wasm-decider lint
     secrets:
       runner-status-token: ${{ secrets.RUNNER_STATUS_TOKEN }}
   lint:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners || '[]')[3] || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners).lint }}
     permissions:
       actions: write
       contents: read
@@ -103,7 +103,7 @@ jobs:
   test:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners || '[]')[0] || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners).test }}
     permissions:
       actions: write
       contents: write
@@ -189,7 +189,7 @@ jobs:
   build:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners || '[]')[1] || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners).build }}
     permissions:
       actions: write
       contents: read
@@ -221,7 +221,7 @@ jobs:
   wasm-decider:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners || '[]')[2] || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners).wasm-decider }}
     permissions:
       actions: write
       contents: read

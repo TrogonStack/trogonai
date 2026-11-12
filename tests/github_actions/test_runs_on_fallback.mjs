@@ -50,7 +50,7 @@ const base = (overrides = {}) => ({
   primaryLabels: 'homelab, linux',
   fallbackLabels: 'ubuntu-latest',
   scope: 'repository',
-  slots: '1',
+  jobs: 'default',
   env: pushEnv(),
   fetch: fakeFetch([response([runner(['self-hosted', 'homelab', 'linux'])])]),
   ...overrides,
@@ -131,10 +131,113 @@ test('an idle trusted runner is selected', async () => {
   assert.equal(fetch.calls[0].init.headers.Authorization, 'Bearer token');
 });
 
-test('organization scope lists the owner runners', async () => {
-  const fetch = fakeFetch([response([runner(['homelab', 'linux'])])]);
-  await select(base({ scope: 'organization', fetch }));
-  assert.match(fetch.calls[0].url, /^https:\/\/api\.github\.com\/orgs\/TrogonStack\/actions\/runners\?/);
+const groupsUrl = /\/orgs\/TrogonStack\/actions\/runner-groups\?/;
+const groupRunnersUrl = (id) => new RegExp(`/orgs/TrogonStack/actions/runner-groups/${id}/runners\\?`);
+
+function groupResponse(groups, options) {
+  const res = response([], options);
+  res.json = async () => ({ total_count: groups.length, runner_groups: groups });
+  return res;
+}
+
+// Answers by URL, so a test states which endpoints exist rather than the order
+// they are called in. An unrouted URL is a failure: it was never meant to be asked.
+function routedFetch(routes) {
+  const calls = [];
+  const fn = async (url, init) => {
+    calls.push({ url: String(url), init });
+    const route = routes.find(([pattern]) => pattern.test(String(url)));
+    if (!route) throw new Error(`unrouted request ${url}`);
+    const [, answers] = route;
+    const index = calls.filter((call) => route[0].test(call.url)).length - 1;
+    return answers[Math.min(index, answers.length - 1)];
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+const orgBase = (fetch, overrides = {}) => base({ scope: 'organization', fetch, ...overrides });
+
+test('organization scope asks for the groups visible to this repository', async () => {
+  const fetch = routedFetch([[groupsUrl, [groupResponse([])]]]);
+  const result = await select(orgBase(fetch));
+  assert.equal(result.reason, 'no-idle-runner');
+  assert.equal(fetch.calls[0].url, 'https://api.github.com/orgs/TrogonStack/actions/runner-groups?visible_to_repository=trogonai&per_page=100&page=1');
+});
+
+test('organization scope counts runners of the visible group only', async () => {
+  const fetch = routedFetch([
+    [groupsUrl, [groupResponse([{ id: 7, restricted_to_workflows: false }])]],
+    [groupRunnersUrl(7), [response([runner(['homelab', 'linux'])])]],
+  ]);
+  const result = await select(orgBase(fetch));
+  assert.equal(result.reason, 'idle-runner');
+  assert.equal(fetch.calls[1].url, 'https://api.github.com/orgs/TrogonStack/actions/runner-groups/7/runners?per_page=100&page=1');
+  assert.equal(fetch.calls.some((call) => /\/actions\/runners\?/.test(call.url)), false);
+});
+
+test('a group invisible to this repository is never requested', async () => {
+  const fetch = routedFetch([
+    [groupsUrl, [groupResponse([{ id: 7, restricted_to_workflows: false }])]],
+    [groupRunnersUrl(7), [response([runner(['homelab', 'linux'], { busy: true })])]],
+  ]);
+  await select(orgBase(fetch));
+  assert.equal(fetch.calls.some((call) => /runner-groups\/9\//.test(call.url)), false);
+  assert.equal(fetch.calls.length, 2);
+});
+
+test('a workflow-restricted group is skipped without listing its runners', async () => {
+  const fetch = routedFetch([
+    [groupsUrl, [groupResponse([{ id: 5, restricted_to_workflows: true }])]],
+  ]);
+  const result = await select(orgBase(fetch));
+  assert.equal(result.reason, 'no-idle-runner');
+  assert.equal(fetch.calls.length, 1);
+});
+
+test('idle runners of several groups are summed', async () => {
+  const fetch = routedFetch([
+    [groupsUrl, [groupResponse([{ id: 1 }, { id: 5, restricted_to_workflows: true }, { id: 2, restricted_to_workflows: false }])]],
+    [groupRunnersUrl(1), [response([runner(['homelab', 'linux']), runner(['homelab', 'linux'], { busy: true })])]],
+    [groupRunnersUrl(2), [response([runner(['homelab', 'linux']), runner(['other'])])]],
+  ]);
+  const result = await select(orgBase(fetch, { jobs: 'a b c' }));
+  assert.equal(result.selfHostedCount, 2);
+  assert.deepEqual(result.runners, { a: ['homelab', 'linux'], b: ['homelab', 'linux'], c: ['ubuntu-latest'] });
+});
+
+test('group listing and group runner listing both paginate', async () => {
+  const groups = Array.from({ length: 100 }, (_, i) => ({ id: 100 + i, restricted_to_workflows: true }));
+  const next = '<https://api.github.com/x?page=2>; rel="next"';
+  const busy = Array.from({ length: 100 }, () => runner(['homelab', 'linux'], { busy: true }));
+  const fetch = routedFetch([
+    [groupsUrl, [groupResponse(groups, { link: next }), groupResponse([{ id: 3 }])]],
+    [groupRunnersUrl(3), [response(busy, { link: next }), response([runner(['homelab', 'linux'])])]],
+  ]);
+  const result = await select(orgBase(fetch));
+  assert.equal(result.reason, 'idle-runner');
+  assert.equal(fetch.calls.length, 4);
+  assert.match(fetch.calls[1].url, /runner-groups\?.*page=2/);
+  assert.match(fetch.calls[3].url, /runner-groups\/3\/runners\?.*page=2/);
+});
+
+test('group runner listing stops early once every job is placed', async () => {
+  const idle = Array.from({ length: 100 }, () => runner(['homelab', 'linux']));
+  const fetch = routedFetch([
+    [groupsUrl, [groupResponse([{ id: 1 }, { id: 2 }])]],
+    [groupRunnersUrl(1), [response(idle, { link: '<x>; rel="next"' })]],
+    [groupRunnersUrl(2), [response(idle)]],
+  ]);
+  const result = await select(orgBase(fetch, { jobs: 'a b' }));
+  assert.equal(result.selfHostedCount, 2);
+  assert.equal(fetch.calls.length, 2);
+});
+
+test('a failing group call falls back with a warning', async () => {
+  const fetch = routedFetch([[groupsUrl, [groupResponse([], { status: 404 })]]]);
+  const result = await select(orgBase(fetch));
+  assert.equal(result.reason, 'api-error');
+  assert.match(result.warnings[0], /404/);
 });
 
 test('API URL honours GITHUB_API_URL', async () => {
@@ -152,47 +255,58 @@ test('no idle runner falls back', async () => {
   assert.deepEqual(result.warnings, []);
 });
 
-test('idle runners fill the first slots and the rest take the fallback', async () => {
+test('idle runners go to the first jobs and the rest take the fallback', async () => {
   const runners = [runner(['homelab', 'linux']), runner(['homelab', 'linux']), runner(['homelab', 'linux'], { busy: true })];
-  const result = await select(base({ slots: '4', fetch: fakeFetch([response(runners)]) }));
-  assert.deepEqual(result.runners, [['homelab', 'linux'], ['homelab', 'linux'], ['ubuntu-latest'], ['ubuntu-latest']]);
+  const result = await select(base({ jobs: 'test build wasm-decider, lint', fetch: fakeFetch([response(runners)]) }));
+  assert.deepEqual(result.runners, {
+    test: ['homelab', 'linux'],
+    build: ['homelab', 'linux'],
+    'wasm-decider': ['ubuntu-latest'],
+    lint: ['ubuntu-latest'],
+  });
   assert.deepEqual(result.runsOn, ['homelab', 'linux']);
-  assert.equal(result.selfHostedSlots, 2);
+  assert.equal(result.selfHostedCount, 2);
   assert.equal(result.selfHosted, true);
   assert.equal(result.reason, 'idle-runner');
 });
 
-test('more idle runners than slots leaves no fallback slot', async () => {
+test('more idle runners than jobs leaves no job on the fallback', async () => {
   const runners = Array.from({ length: 5 }, () => runner(['homelab', 'linux']));
-  const result = await select(base({ slots: '2', fetch: fakeFetch([response(runners)]) }));
-  assert.deepEqual(result.runners, [['homelab', 'linux'], ['homelab', 'linux']]);
-  assert.equal(result.selfHostedSlots, 2);
+  const result = await select(base({ jobs: 'a b', fetch: fakeFetch([response(runners)]) }));
+  assert.deepEqual(result.runners, { a: ['homelab', 'linux'], b: ['homelab', 'linux'] });
+  assert.equal(result.selfHostedCount, 2);
 });
 
-test('fallback results carry one fallback entry per slot', async () => {
-  const result = await select(base({ slots: '3', primaryLabels: '' }));
-  assert.deepEqual(result.runners, [['ubuntu-latest'], ['ubuntu-latest'], ['ubuntu-latest']]);
-  assert.equal(result.selfHostedSlots, 0);
+test('every job holds the fallback when nothing is self-hosted', async () => {
+  const result = await select(base({ jobs: 'a\nb, c', primaryLabels: '' }));
+  assert.deepEqual(result.runners, { a: ['ubuntu-latest'], b: ['ubuntu-latest'], c: ['ubuntu-latest'] });
+  assert.equal(result.selfHostedCount, 0);
   assert.equal(result.selfHosted, false);
 });
 
-test('pagination stops once the slots are filled', async () => {
+test('the default job name is default', async () => {
+  const result = await select(base({ jobs: '' }));
+  assert.deepEqual(Object.keys(result.runners), ['default']);
+});
+
+test('pagination stops once every job is placed', async () => {
   const page = Array.from({ length: 100 }, () => runner(['homelab', 'linux']));
   const fetch = fakeFetch([response(page, { link: '<https://api.github.com/x?page=2>; rel="next"' }), response(page)]);
-  const result = await select(base({ slots: '3', fetch }));
-  assert.equal(result.selfHostedSlots, 3);
+  const result = await select(base({ jobs: 'a b c', fetch }));
+  assert.equal(result.selfHostedCount, 3);
   assert.equal(fetch.calls.length, 1);
 });
 
-test('idle runners counted across pages fill slots', async () => {
+test('idle runners counted across pages are placed', async () => {
   const idle = Array.from({ length: 99 }, () => runner(['homelab', 'linux']));
   const fetch = fakeFetch([
     response([...idle, runner(['homelab', 'linux'], { busy: true })], { link: '<https://api.github.com/x?page=2>; rel="next"' }),
     response([runner(['homelab', 'linux'])]),
   ]);
-  const result = await select(base({ slots: '101', fetch }));
-  assert.equal(result.selfHostedSlots, 100);
-  assert.equal(result.runners.length, 101);
+  const names = Array.from({ length: 101 }, (_, i) => `j${i}`).join(' ');
+  const result = await select(base({ jobs: names, fetch }));
+  assert.equal(result.selfHostedCount, 100);
+  assert.equal(Object.keys(result.runners).length, 101);
 });
 
 test('not configured falls back without an API call', async () => {
@@ -263,6 +377,16 @@ test('a thrown fetch falls back with a warning', async () => {
   assert.match(result.warnings[0], /socket hang up/);
 });
 
+test('every request carries a timeout signal and an abort falls back', async () => {
+  const fetch = fakeFetch([response([runner(['homelab', 'linux'])])]);
+  await select(base({ fetch }));
+  assert.ok(fetch.calls[0].init.signal instanceof AbortSignal);
+  const aborted = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+  const result = await select(base({ fetch: fakeFetch([aborted]) }));
+  assert.equal(result.reason, 'api-error');
+  assert.match(result.warnings[0], /timeout/);
+});
+
 test('a malformed response body falls back with a warning', async () => {
   const bad = { ...response([]), json: async () => ({ nope: true }) };
   const result = await select(base({ fetch: fakeFetch([bad]) }));
@@ -282,19 +406,19 @@ test('the result is shaped for runs-on and fromJSON', async () => {
 test('bad inputs throw InputError', async () => {
   for (const overrides of [
     { scope: 'enterprise' },
-    { slots: 'two' },
-    { slots: '1.5' },
-    { slots: '0' },
-    { slots: '-1' },
+    { jobs: 'Test' },
+    { jobs: '-lint' },
+    { jobs: 'a b a' },
+    { jobs: 'a.b' },
     { fallbackLabels: ' , ' },
   ]) {
     await assert.rejects(select(base(overrides)), InputError, JSON.stringify(overrides));
   }
 });
 
-test('defaults apply to empty scope and slots', async () => {
+test('defaults apply to empty scope and jobs', async () => {
   const fetch = fakeFetch([response([runner(['homelab', 'linux'])])]);
-  const result = await select(base({ scope: '', slots: '', fetch }));
+  const result = await select(base({ scope: '', jobs: '', fetch }));
   assert.equal(result.reason, 'idle-runner');
   assert.match(fetch.calls[0].url, /\/repos\//);
 });

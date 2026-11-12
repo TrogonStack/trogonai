@@ -239,22 +239,21 @@ test('selection starts with approved actions and the repo-owned CLI', () => {
   assert.equal(filter.env.GH_TOKEN, '${{ github.token }}');
 });
 
-test('Rust heavy jobs take their slot of the selected runners with a hosted fallback', async () => {
-  const slots = { test: 0, build: 1, 'wasm-decider': 2, lint: 3 };
-  assert.equal(workflows.rust.jobs.changes.with['runner-slots'], Object.keys(slots).length);
-  const labels = async (id, runners) => {
+test('Rust heavy jobs read their own entry of the selected runners', async () => {
+  const names = ['test', 'build', 'wasm-decider', 'lint'];
+  assert.equal(workflows.rust.jobs.changes.with['runner-jobs'], names.join(' '));
+  const labels = async (id, outputs) => {
     const inner = workflows.rust.jobs[id]['runs-on'].replace(/^\$\{\{\s*/, '').replace(/\s*\}\}$/, '');
-    const context = { needs: { changes: { outputs: runners === undefined ? {} : { runners } } } };
+    const context = { needs: { changes: { outputs } } };
     return JSON.parse((await evaluate(`toJSON(${inner})`, context)).coerceString());
   };
-  const placed = JSON.stringify([['homelab'], ['homelab'], ['ubuntu-latest'], ['ubuntu-latest']]);
-  for (const [id, slot] of Object.entries(slots)) {
-    assert.equal(workflows.rust.jobs[id].needs, 'changes');
-    assert.deepEqual(await labels(id, undefined), 'ubuntu-latest', `${id} without output`);
-    assert.deepEqual(await labels(id, ''), 'ubuntu-latest', `${id} empty output`);
-    assert.deepEqual(await labels(id, '[]'), 'ubuntu-latest', `${id} empty array`);
-    assert.deepEqual(await labels(id, JSON.stringify([['homelab']])), slot === 0 ? ['homelab'] : 'ubuntu-latest', `${id} short array`);
-    assert.deepEqual(await labels(id, placed), slot < 2 ? ['homelab'] : ['ubuntu-latest'], `${id} placed`);
+  const hosted = Object.fromEntries(names.map((name) => [name, ['ubuntu-latest']]));
+  const mixed = { ...hosted, test: ['homelab'], build: ['homelab'] };
+  for (const name of names) {
+    assert.equal(workflows.rust.jobs[name].needs, 'changes');
+    assert.doesNotMatch(workflows.rust.jobs[name]['runs-on'], /\|\|/);
+    assert.deepEqual(await labels(name, { runners: JSON.stringify(hosted) }), ['ubuntu-latest'], name);
+    assert.deepEqual(await labels(name, { runners: JSON.stringify(mixed) }), mixed[name], name);
   }
   for (const [suite, workflow] of Object.entries(workflows)) {
     if (suite === 'rust') continue;
@@ -262,23 +261,23 @@ test('Rust heavy jobs take their slot of the selected runners with a hosted fall
   }
 });
 
-test('runner selection cannot fail selection or change its outputs', async () => {
+test('runner selection runs right after checkout and cannot fail selection', async () => {
   const selection = load('.github/workflows/ci-selection.yml');
   const job = selection.jobs.filter;
   const step = job.steps.find((item) => item.id === 'runner');
-  const position = (match) => job.steps.findIndex(match);
   assert.equal(step.uses, './.github/actions/runs-on-fallback');
   assert.equal(step['continue-on-error'], true);
-  assert.ok(position((item) => item === step) > position((item) => item.id === 'filter'));
-  assert.ok(position((item) => item === step) > position((item) => item.uses?.startsWith('actions/checkout@')));
+  assert.ok(job.steps[0].uses.startsWith('actions/checkout@'));
+  assert.equal(job.steps[1], step);
   assert.equal(step.with.scope, 'organization');
+  assert.equal(step.with.jobs, '${{ inputs.runner-jobs }}');
   assert.equal(selection.on.workflow_call.secrets['runner-status-token'].required, false);
+  assert.equal(selection.on.workflow_call.inputs['runner-jobs'].default, 'default');
+  assert.equal(selection.on.workflow_call.inputs['runner-jobs'].required, false);
   assert.equal(workflows.rust.jobs.changes.secrets['runner-status-token'], '${{ secrets.RUNNER_STATUS_TOKEN }}');
-  assert.equal(step.with.slots, '${{ inputs.runner-slots }}');
-  assert.equal(selection.on.workflow_call.inputs['runner-slots'].default, 1);
-  assert.equal(selection.on.workflow_call.inputs['runner-slots'].required, false);
-  assert.equal((await evaluate(job.outputs.runners, { steps: { runner: { outputs: {} } } })).coerceString(), '[]');
-  assert.equal((await evaluate(job.outputs.runners, { steps: { runner: { outputs: { runners: '[["homelab"]]' } } } })).coerceString(), '[["homelab"]]');
+  assert.equal(job.outputs.runners, '${{ steps.runner.outputs.runners }}');
+  assert.doesNotMatch(job.outputs.runners, /\|\|/);
+  assert.equal((await evaluate(job.outputs.runners, { steps: { runner: { outputs: { runners: '{"default":["homelab"]}' } } } })).coerceString(), '{"default":["homelab"]}');
 });
 
 test('actionlint installs through the supported mise backend', () => {
