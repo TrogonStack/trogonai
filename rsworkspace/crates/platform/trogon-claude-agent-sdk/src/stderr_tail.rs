@@ -1,4 +1,5 @@
-/// A bounded diagnostic tail. Formatting this value never prints its contents.
+/// Diagnostic bytes with content-free debug output; only an empty default is public.
+/// This API slice implements no producer, capture, or retention bound.
 #[derive(Default)]
 pub struct StderrTail(pub(crate) Vec<u8>);
 
