@@ -1,3 +1,5 @@
+/// Rust host queue policy; constructing a value creates no channel.
+/// The defaults are local policy, not upstream SDK requirements.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct QueueCapacity(usize);
 
