@@ -100,6 +100,32 @@ async fn configured_request_preserves_explicit_headers_and_reports_no_responders
     let (response, served) = tokio::join!(requester.request(PeerMethod::Roster, vec![1, 2, 3]), respond);
     assert_eq!(response?.payload.as_ref(), &[4]);
     served?;
+    let mut explicit = async_nats::HeaderMap::new();
+    explicit.insert("X-Peer-Test", "preserved");
+    for headers in [async_nats::HeaderMap::new(), explicit] {
+        let expected = if headers.is_empty() {
+            None
+        } else {
+            Some(headers.clone())
+        };
+        let respond = async {
+            let message = tokio::time::timeout(Duration::from_secs(2), incoming.next())
+                .await?
+                .ok_or("no explicit-header request")?;
+            assert_eq!(message.headers, expected);
+            assert_eq!(message.payload.as_ref(), &[5, 6]);
+            service
+                .publish(message.reply.ok_or("no scoped reply")?, vec![7].into())
+                .await?;
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+        let (response, served) = tokio::join!(
+            requester.request_with_headers(PeerMethod::Roster, headers, vec![5, 6]),
+            respond
+        );
+        assert_eq!(response?.payload.as_ref(), &[7]);
+        served?;
+    }
     Ok(())
 }
 
