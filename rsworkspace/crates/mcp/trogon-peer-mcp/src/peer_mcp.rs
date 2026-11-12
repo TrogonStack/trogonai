@@ -76,6 +76,7 @@ impl<B: EnrollPeer + PreparePeerBatch> PeerMcp<B> {
             return Err(PeerMcpError::NativeSessionChanged);
         }
         let current = binding.get_or_insert_with(|| NativeBinding::new(session_id));
+        current.enrollment_started();
         let enrollment = self
             .backend
             .enroll(v1::EnrollRequest {
