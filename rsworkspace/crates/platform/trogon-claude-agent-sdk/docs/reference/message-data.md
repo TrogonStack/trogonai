@@ -20,3 +20,15 @@ object-valued roles, while any and unknown can also represent non-object data.
 The Rust alias is not a claim that either SDK exports a type named JsonObject.
 The generic serde_json object decoder rejects scalar and array roots while
 retaining nested nulls, arrays and objects. This is not an SDK frame decoder.
+
+## Message origin
+
+| Rust declaration | Python source | TypeScript source | Stored representation |
+| --- | --- | --- | --- |
+| MessageOrigin.kind | MessageOrigin.kind: Required[MessageOriginKind] | SDKMessageOrigin discriminated union | String preserves known and future spellings, including empty and control-character values. |
+| MessageOrigin.additional_fields | MessageOrigin is a total=False TypedDict; its docs permit additional undocumented keys | SDKMessageOrigin variant-specific fields | Explicit JsonObject retains fields instead of reproducing the closed TypeScript union. |
+
+MessageOrigin serde keeps its kind discriminator separate from extension keys.
+The constructor rejects an extension named kind so it cannot override the
+validated discriminator. Known kinds have richer upstream meaning; a future
+kind is representable without being treated as a human-origin authorization.

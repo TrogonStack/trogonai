@@ -12,6 +12,7 @@ mod error;
 mod mcp_server_name;
 mod mcp_tool_name;
 mod message_id;
+mod message_origin;
 mod model_name;
 mod options;
 mod permission_mode;
@@ -70,6 +71,7 @@ pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 
 pub use timeout::{Timeout, TimeoutError};
 
+pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use stderr_tail::StderrTail;
 
 /// A JSON object whose schema is owned by an individual tool or upstream event.
