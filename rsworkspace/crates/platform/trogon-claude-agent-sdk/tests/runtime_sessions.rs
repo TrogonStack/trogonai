@@ -58,8 +58,12 @@ async fn coalesced_input_count_ends_the_run_after_one_result() -> TestResult {
     assert_eq!(receive_result(&mut client).await?, "coalesced");
     assert!(
         timeout(Duration::from_secs(3), async {
-            while client.next_message().await?.is_some() {}
-            Ok::<_, Error>(())
+            while let Some(message) = client.next_message().await? {
+                if matches!(message, Message::Result(_)) {
+                    return Err(std::io::Error::other("a second result followed the coalesced one").into());
+                }
+            }
+            Ok::<_, Box<dyn StdError>>(())
         })
         .await?
         .is_ok()
@@ -160,7 +164,9 @@ async fn each_result_waits_for_its_own_mirror_fence_and_controls_progress() -> T
         return Err(std::io::Error::other("missing enqueue marker").into());
     };
     assert_eq!(marker.subtype, "mirror_enqueued");
-    assert!(timeout(Duration::from_millis(30), client.next_message()).await.is_err());
+    // The permission request came after the result, so the driver has already held the result
+    // behind the fence: a single poll is enough to show it was not delivered.
+    assert!(timeout(Duration::ZERO, client.next_message()).await.is_err());
     store.gates[0].add_permits(1);
     assert_eq!(receive_result(&mut client).await?, "mirror-one");
     wait_appends(&store, 2).await?;
@@ -209,13 +215,17 @@ async fn s20_a_final_mirror_failure_does_not_fail_disconnect() -> TestResult {
     options.session_store = Some(store_options(Arc::new(FailedStore), directory.path())?);
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("mirror")).await?;
-    loop {
-        if let Some(Message::System(message)) = client.next_message().await?
-            && message.subtype == "mirror_enqueued"
-        {
-            break;
+    timeout(Duration::from_secs(4), async {
+        loop {
+            match client.next_message().await? {
+                Some(Message::System(message)) if message.subtype == "mirror_enqueued" => return Ok(()),
+                Some(_) => {}
+                None => return Err(std::io::Error::other("session closed before mirror_enqueued").into()),
+            }
         }
-    }
+    })
+    .await?
+    .map_err(|error: Box<dyn StdError>| error)?;
     client.disconnect().await?;
     Ok(())
 }
