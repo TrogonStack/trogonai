@@ -11,6 +11,10 @@ const MAX_PAGES = 50;
 // available, so waiting longer than this buys nothing.
 const REQUEST_TIMEOUT_MS = 15000;
 
+// The whole search, across every page and group, stays well inside the five
+// minutes a selection job gets, so it always reaches the fallback in time.
+const SEARCH_TIMEOUT_MS = 60000;
+
 const JOB_NAME = /^[a-z0-9][a-z0-9_-]*$/;
 
 const SCOPES = ["repository", "organization"];
@@ -99,7 +103,7 @@ function listUrl({ apiUrl, path, query }) {
 
 // Calls `visit` with each page's items until it returns true or the pages run
 // out. One walker serves every listing, so none of them can forget to paginate.
-async function eachPage({ fetch, token, url, key, visit }) {
+async function eachPage({ fetch, token, url, key, visit, deadline }) {
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const response = await fetch(url(page), {
       headers: {
@@ -107,7 +111,7 @@ async function eachPage({ fetch, token, url, key, visit }) {
         Authorization: `Bearer ${token}`,
         "X-GitHub-Api-Version": "2022-11-28",
       },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.any([deadline, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
     });
 
     if (!response.ok) {
@@ -134,7 +138,7 @@ async function eachPage({ fetch, token, url, key, visit }) {
 
 // Stops once every job is covered: the rest of a long list cannot change a
 // decision already reached.
-async function countIdleUpTo({ fetch, token, scope, repository, apiUrl, labels, limit }) {
+async function countIdleUpTo({ fetch, token, scope, repository, apiUrl, labels, limit, deadline }) {
   const [owner, name] = repository.split("/");
   let idle = 0;
 
@@ -143,6 +147,7 @@ async function countIdleUpTo({ fetch, token, scope, repository, apiUrl, labels, 
       fetch,
       token,
       key: "runners",
+      deadline,
       url: listUrl({ apiUrl, path, query: "" }),
       visit: (runners) => {
         idle += countIdle(runners, labels);
@@ -163,6 +168,7 @@ async function countIdleUpTo({ fetch, token, scope, repository, apiUrl, labels, 
     fetch,
     token,
     key: "runner_groups",
+    deadline,
     url: listUrl({
       apiUrl,
       path: `orgs/${owner}/actions/runner-groups`,
@@ -200,6 +206,7 @@ export async function select({
   jobs,
   env = process.env,
   fetch = globalThis.fetch,
+  searchTimeoutMs = SEARCH_TIMEOUT_MS,
 }) {
   const chosenScope = (scope ?? "").trim() || "repository";
   if (!SCOPES.includes(chosenScope)) {
@@ -263,6 +270,7 @@ export async function select({
       apiUrl,
       labels: primary,
       limit: names.length,
+      deadline: AbortSignal.timeout(searchTimeoutMs),
     });
 
     if (idle > 0) {

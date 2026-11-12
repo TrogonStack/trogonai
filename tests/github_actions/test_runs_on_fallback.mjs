@@ -387,6 +387,20 @@ test('every request carries a timeout signal and an abort falls back', async () 
   assert.match(result.warnings[0], /timeout/);
 });
 
+test('the whole search shares one deadline and falls back when it passes', async () => {
+  // Each page answers quickly, well inside the per-request timeout, and
+  // promises another, so only the search-wide deadline can stop the walk.
+  let calls = 0;
+  const fetch = (url, init) => new Promise((resolve, reject) => {
+    calls += 1;
+    const timer = setTimeout(() => resolve(response(Array.from({ length: 100 }, () => runner(['other'])))), 5);
+    init.signal.addEventListener('abort', () => { clearTimeout(timer); reject(init.signal.reason); }, { once: true });
+  });
+  const result = await select(base({ fetch, searchTimeoutMs: 40 }));
+  assert.equal(result.reason, 'api-error');
+  assert.ok(calls > 1 && calls < 50, `${calls} requests`);
+});
+
 test('a malformed response body falls back with a warning', async () => {
   const bad = { ...response([]), json: async () => ({ nope: true }) };
   const result = await select(base({ fetch: fakeFetch([bad]) }));
