@@ -142,9 +142,9 @@ apply to catalog candidates, so a restricted page can be empty and still have a
 continuation. A full last page can be followed by an empty terminal page.
 
 Catalog membership, lease liveness and historical activity remain separate.
-Rows use service observation time and the actual lease expiry; inactive members
-retain historical activity without claiming live availability. There are no
-live all-peer watchers or additional workflow owners.
+Roster rows include only live attachments, using service observation time and
+actual lease expiry. History retains activity independently of roster presence.
+There are no live all-peer watchers or additional workflow owners.
 
 Broker ingress, the executable adapter, reconciliation and heartbeat scheduling,
 native detach hooks, content and presentation infrastructure, retention workers,
