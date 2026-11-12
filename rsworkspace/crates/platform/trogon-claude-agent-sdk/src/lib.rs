@@ -72,7 +72,9 @@ pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 
 pub use timeout::{Timeout, TimeoutError};
 
-pub use message::{Content, ContentBlock, ResultMessage, ResultStatus, SystemMessage, ToolResultStatus};
+pub use message::{
+    AssistantMessage, Content, ContentBlock, ResultMessage, ResultStatus, SystemMessage, ToolResultStatus,
+};
 pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use stderr_tail::StderrTail;
 
