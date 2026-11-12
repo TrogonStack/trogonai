@@ -2197,6 +2197,72 @@
       "rust": [
         "src/transcript_mirror.rs"
       ]
+    },
+    {
+      "id": "s29-hook-matcher-omitted",
+      "concept": "Hook registration without a matcher",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 337,
+        "line_end": 340,
+        "sha256": "98bb703ed72a36c70a3eede335d3bb0d260ae078642d235d05b9f8146060e027"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "hookCallbackIds:l,timeout:a.timeout",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 60,
+        "sha256": "df356e3dba8b13b6529c86138e00cf57a56e3ecb78494a175cb757812ad97f08"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python always sends the matcher key and sends null when no matcher is set. TypeScript sends the key as undefined, which JSON serialization drops, so the registration has no matcher key."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "The TypeScript type declares matcher as an optional string, so null is outside the declared shape. Omitting the key sends only values the type allows."
+      },
+      "contracts": [
+        "value_contracts::callback_configuration_debug_reports_structure_without_callback_or_input_details"
+      ],
+      "rust": [
+        "src/hooks.rs"
+      ]
+    },
+    {
+      "id": "s30-user-dialog-without-handler",
+      "concept": "User dialog request that no handler answers",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 706,
+        "line_end": 706,
+        "sha256": "47b4d262ff9e80b6a31d236f4b13efcd4599933d21aa1a58f138f552632ee399"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "No onUserDialog handler for request_user_dialog",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 250,
+        "span_after": 300,
+        "sha256": "f79d49bb55a4c49036eb9788743c8b251df77c5b6c1a8f022538f1f82a2983dd"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python has no user dialog support, so the request reaches its unsupported subtype branch and is answered with an error response. TypeScript with no handler, or a handler that returns null, deliberately sends no response so a capable client can answer."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "An answer from this client would pre-empt another client that can show the dialog, and an error would end the dialog for the user. The session continues without a response."
+      },
+      "contracts": [
+        "runtime_failure_contracts::a_declared_dialog_without_a_handler_does_not_emit_a_response"
+      ],
+      "rust": [
+        "src/driver.rs"
+      ]
     }
   ]
 }
