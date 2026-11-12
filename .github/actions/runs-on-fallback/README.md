@@ -57,10 +57,13 @@ checkout and can be the first step.
 
 `runners` holds an entry for every name in `jobs`, already set to the fallback
 labels when the job is not self-hosted, so a job needs no fallback expression of
-its own. The price is that the output must exist: if the job that runs this dies
-before the step does, the dependent jobs fail with an expression error on the
-empty output instead of falling back. Keep the step first, or right after the
-checkout, and keep `continue-on-error: true` on it.
+its own. The price is that the output must exist. If the job that runs this
+fails, GitHub skips the dependent jobs. If it succeeds without the output, for
+example because the step errored under `continue-on-error: true`, the dependent
+jobs fail with an expression error on the empty output instead of falling back.
+Keep the step first, or right after the checkout, and when it may error, add a
+step that writes the fallback labels for every job when its `outcome` is
+`failure`.
 
 A job that uses the output also needs `needs:` on the job that produces it, or it
 reads an empty string.
@@ -106,8 +109,8 @@ this check altogether. What keeps it out is configuration:
   repository's Actions settings.
 - Limit the runner group to the repositories that need it, and allow public
   repositories in it only deliberately.
-- Run ephemeral or freshly cleaned runners on an isolated network, because a
-  runner keeps its disk and usually its network between jobs.
+- Run ephemeral runners, one job each, on an isolated network, because a
+  persistent runner keeps its disk and its network between jobs.
 - Never use self-hosted runners with `pull_request_target`.
 
 ## Inputs
