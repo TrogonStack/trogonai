@@ -7692,6 +7692,8 @@ dependencies = [
  "buffa",
  "buffa-types",
  "futures",
+ "grpc-nats-micro",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
