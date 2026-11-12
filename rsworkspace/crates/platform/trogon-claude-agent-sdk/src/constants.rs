@@ -20,3 +20,13 @@ pub(crate) const CLEANUP_DELAY: Duration = Duration::from_millis(100);
 
 /// Backoff before each retry of a failed transcript mirror append.
 pub(crate) const APPEND_BACKOFF_MS: [u64; 2] = [200, 800];
+
+/// Permission update `type` values this crate decodes into typed variants.
+pub(crate) const KNOWN_UPDATE_TYPES: [&str; 6] = [
+    "addRules",
+    "replaceRules",
+    "removeRules",
+    "setMode",
+    "addDirectories",
+    "removeDirectories",
+];

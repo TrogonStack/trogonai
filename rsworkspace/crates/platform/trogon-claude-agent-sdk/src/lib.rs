@@ -10,6 +10,7 @@ mod builtin_tool_name;
 mod client;
 mod config_value;
 mod constants;
+mod control;
 mod control_request_id;
 mod dialog_kind;
 mod effort_level;
@@ -22,7 +23,9 @@ mod message_id;
 mod message_origin;
 mod model_name;
 mod options;
+mod permission;
 mod permission_mode;
+mod permission_update;
 mod prompt;
 mod queue_capacity;
 mod sensitive_string;
@@ -44,11 +47,16 @@ mod tool_rule;
 mod tool_use_id;
 mod transcript_mirror;
 mod usd_budget;
+mod user_input;
 
 pub use agent_name::AgentName;
 pub use builtin_tool_name::BuiltinToolName;
 pub use client::ClaudeSdkClient;
 pub use config_value::ConfigValue;
+pub use control::{
+    ConnectionInfo, ContextUsageCategory, ContextUsageResponse, FeatureSupport, InterruptReceipt, McpEnabled,
+    McpSetServersResult, McpStatusResponse, RewindFilesResult, RewindMode,
+};
 pub use control_request_id::ControlRequestId;
 pub use dialog_kind::DialogKind;
 pub use effort_level::EffortLevel;
@@ -64,7 +72,14 @@ pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use model_name::ModelName;
 pub use options::ClaudeAgentOptions;
+pub use permission::{
+    DenialDisposition, McpServerProvenance, PermissionDecision, PermissionFuture, ToolPermissionHandler,
+    ToolPermissionRequest,
+};
 pub use permission_mode::PermissionMode;
+pub use permission_update::{
+    PermissionBehavior, PermissionRuleValue, PermissionUpdate, PermissionUpdateDestination, PermissionUpdateError,
+};
 pub use prompt::Prompt;
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 pub use sensitive_string::SensitiveString;
@@ -83,11 +98,13 @@ pub use setting_source::SettingSource;
 pub use stderr_tail::StderrTail;
 pub use task_id::TaskId;
 pub use timeout::{Timeout, TimeoutError};
+pub use tokio_util::sync::CancellationToken;
 pub use tool_name::ToolName;
 pub use tool_rule::ToolRule;
 pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
 pub use usd_budget::{UsdBudget, UsdBudgetError};
+pub use user_input::{InputBlock, UserInput};
 
 /// A JSON object whose schema is owned by an individual tool or upstream event.
 pub type JsonObject = serde_json::Map<String, serde_json::Value>;
