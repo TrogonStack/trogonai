@@ -35,6 +35,7 @@ workspace_crate(
         "session_id": {},
         "setting_sources": {},
         "stderr_tail": {},
+        "stream_event": {},
         "system_message": {},
         "task_id": {},
         "timeout": {},
