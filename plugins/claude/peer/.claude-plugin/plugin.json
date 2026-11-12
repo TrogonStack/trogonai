@@ -1,0 +1,9 @@
+{
+  "name": "trogon-peer",
+  "version": "0.1.0",
+  "description": "Peer discovery and durable messaging through MCP and native session hooks.",
+  "author": {
+    "name": "TrogonStack"
+  },
+  "license": "Apache-2.0"
+}
