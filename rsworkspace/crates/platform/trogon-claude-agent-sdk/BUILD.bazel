@@ -25,6 +25,7 @@ workspace_crate(
         "permission_mode": {},
         "prompt": {},
         "public_api": {},
+        "queue_capacity": {},
         "resume": {},
         "session_id": {},
         "setting_sources": {},
