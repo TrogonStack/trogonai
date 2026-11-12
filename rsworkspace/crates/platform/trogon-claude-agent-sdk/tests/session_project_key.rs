@@ -31,6 +31,20 @@ fn project_key_matches_upstream_utf16_replacement() -> Result<(), Box<dyn std::e
 }
 
 #[test]
+fn verbatim_windows_prefixes_do_not_change_the_key() -> Result<(), Box<dyn std::error::Error>> {
+    for (path, expected) in [
+        (r"\\?\C:\Users\me\proj", "C--Users-me-proj"),
+        (r"C:\Users\me\proj", "C--Users-me-proj"),
+        (r"\\?\UNC\srv\share\proj", "--srv-share-proj"),
+        (r"\\srv\share\proj", "--srv-share-proj"),
+    ] {
+        let key = SessionProjectKey::for_directory_with_filesystem(Path::new(path), &CanonicalPath)?;
+        assert_eq!(key.as_str(), expected, "{path}");
+    }
+    Ok(())
+}
+
+#[test]
 fn long_project_paths_are_truncated_and_suffixed_with_a_stable_hash() -> Result<(), Box<dyn std::error::Error>> {
     let path = "a".repeat(250);
     let key = SessionProjectKey::for_directory_with_filesystem(Path::new(&path), &CanonicalPath)?;

@@ -36,7 +36,7 @@ impl SessionProjectKey {
             .canonicalize(directory)
             .map_err(SessionProjectKeyError::Directory)?;
         let absolute = absolute.to_str().ok_or(SessionProjectKeyError::NotUnicode)?;
-        let normalized: String = absolute.nfc().collect();
+        let normalized: String = without_verbatim_prefix(absolute).nfc().collect();
         let sanitized: String = normalized
             .encode_utf16()
             .map(|unit| match char::from_u32(u32::from(unit)) {
@@ -67,6 +67,15 @@ impl SessionProjectKey {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Windows canonicalization returns verbatim paths (`\\?\C:\dir`, `\\?\UNC\srv\share`),
+/// while the CLI and the upstream SDKs derive the key from a realpath without that prefix.
+fn without_verbatim_prefix(path: &str) -> std::borrow::Cow<'_, str> {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return std::borrow::Cow::Owned(format!(r"\\{rest}"));
+    }
+    std::borrow::Cow::Borrowed(path.strip_prefix(r"\\?\").unwrap_or(path))
 }
 
 impl std::fmt::Display for SessionProjectKey {
