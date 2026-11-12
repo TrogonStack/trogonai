@@ -1,4 +1,4 @@
-use trogon_claude_agent_sdk::{BuiltinToolName, ToolName, ToolNameError};
+use trogon_claude_agent_sdk::{BuiltinToolName, ToolName};
 
 fn preserves_builtin_tool_name(input: &str) {
     let name = BuiltinToolName::from(input);
@@ -6,11 +6,10 @@ fn preserves_builtin_tool_name(input: &str) {
     assert_eq!(name.clone(), name);
 }
 
-fn preserves_tool_name_conversion(input: &str) -> Result<(), ToolNameError> {
-    let source = ToolName::from(input)?;
+fn preserves_tool_name_conversion(input: &str) {
+    let source = ToolName::from(input);
     let name = BuiltinToolName::from(source);
     assert_eq!(name.as_str(), input);
-    Ok(())
 }
 
 #[test]
@@ -44,16 +43,16 @@ fn default_in_a_builtin_tool_name_is_preserved() {
 }
 
 #[test]
-fn converted_tool_name_preserves_comma() -> Result<(), ToolNameError> {
+fn converted_tool_name_preserves_comma() {
     preserves_tool_name_conversion("Read,Write")
 }
 
 #[test]
-fn converted_tool_name_preserves_whitespace() -> Result<(), ToolNameError> {
+fn converted_tool_name_preserves_whitespace() {
     preserves_tool_name_conversion("with space")
 }
 
 #[test]
-fn converted_tool_name_preserves_default() -> Result<(), ToolNameError> {
+fn converted_tool_name_preserves_default() {
     preserves_tool_name_conversion("default")
 }
