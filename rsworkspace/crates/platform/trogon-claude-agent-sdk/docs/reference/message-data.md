@@ -46,3 +46,11 @@ kind is representable without being treated as a human-origin authorization.
 ToolResultStatus distinguishes absent error status from explicit success and
 error. It is a Rust enum representation, not an upstream enum spelling. Raw
 JSON can preserve content shapes beyond Python's annotated str/list/None field.
+
+## System messages
+
+| Rust field | Python SystemMessage | TypeScript SDKSystemMessage | Stored representation |
+| --- | --- | --- | --- |
+| subtype | subtype: str | subtype: 'init' for the named init type | String keeps system subtypes open. |
+| data | data: dict[str, Any] | Init metadata fields are declared on the envelope | Explicit JsonObject holds metadata without claiming the TypeScript flat type is identical. |
+| session_id | Not a declared Python SystemMessage field | session_id: string | Optional SessionId retains a possible envelope identity. |
