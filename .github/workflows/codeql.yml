@@ -49,3 +49,19 @@ jobs:
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           category: '/language:${{ matrix.language }}'
+  result:
+    # Languages without changes have no matrix entry and never report a check,
+    # so branch rules require this job instead of each language.
+    name: CodeQL result
+    needs: [changes, analyze]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CodeQL analysis
+        env:
+          ANALYZE_RESULT: ${{ needs.analyze.result }}
+        run: |
+          case "$ANALYZE_RESULT" in
+            success | skipped) ;;
+            *) echo "::error::CodeQL analysis ended with $ANALYZE_RESULT"; exit 1 ;;
+          esac
