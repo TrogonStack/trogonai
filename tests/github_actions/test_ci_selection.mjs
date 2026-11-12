@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -135,7 +136,7 @@ test('every heavy job is gated, including comparison failures and cancellation',
     assert.equal(workflow.jobs.changes.uses, './.github/workflows/ci-selection.yml');
     assert.equal(workflow.jobs.changes.permissions['pull-requests'], 'read');
     for (const [id, job] of Object.entries(workflow.jobs)) {
-      if (id === 'changes') continue;
+      if (id === 'changes' || (suite === 'codeql' && id === 'result')) continue;
       assert.equal(job.needs, 'changes');
       for (const result of ['success', 'failure']) {
         const outputs = { rust: 'false', go: 'false', proto: 'false', changes: '[]' };
@@ -172,6 +173,32 @@ test('empty CodeQL matrices are skipped and selected build modes are preserved',
   }
   const value = await evaluate(job.strategy.matrix.language, { needs: { changes: { outputs: { changes: '' } } } });
   assert.deepEqual(value.values().map((item) => item.coerceString()), ['go', 'javascript-typescript', 'rust']);
+});
+
+test('CodeQL result reports every outcome so branch rules can require it', () => {
+  const job = workflows.codeql.jobs.result;
+  assert.equal(job.name, 'CodeQL result');
+  assert.deepEqual(job.needs, ['changes', 'analyze']);
+  assert.equal(job.if, '${{ always() }}');
+  const step = job.steps.at(-1);
+  assert.deepEqual(step.env, {
+    SELECTION_RESULT: '${{ needs.changes.result }}',
+    SELECTED_LANGUAGES: '${{ needs.changes.outputs.changes }}',
+    ANALYZE_RESULT: '${{ needs.analyze.result }}',
+  });
+  for (const [selection, languages, analyze, status] of [
+    ['success', '["rust"]', 'success', 0],
+    ['failure', '', 'success', 0],
+    ['success', '[]', 'skipped', 0],
+    ['cancelled', '', 'skipped', 1],
+    ['success', '["rust"]', 'skipped', 1],
+    ['success', '["rust"]', 'failure', 1],
+    ['success', '["rust"]', 'cancelled', 1],
+  ]) {
+    const env = { ...process.env, SELECTION_RESULT: selection, SELECTED_LANGUAGES: languages, ANALYZE_RESULT: analyze };
+    const run = spawnSync('bash', ['-c', step.run], { env, encoding: 'utf8' });
+    assert.equal(run.status, status, `selection ${selection} ${languages}, analyze ${analyze}`);
+  }
 });
 
 test('actual direct and transitive mise dependencies remain selected', () => {
