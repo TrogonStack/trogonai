@@ -7,6 +7,7 @@ use axum::{
 };
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -16,6 +17,42 @@ use tower::ServiceExt;
 use trogon_provider_gateway::{Health, router};
 
 const DEADLINE: Duration = Duration::from_secs(5);
+
+#[tokio::test]
+async fn polls_shutdown_before_starting_the_accept_loop() {
+    let listener = bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).await.unwrap();
+    let initialized = Arc::new(AtomicBool::new(false));
+    let observed = Arc::clone(&initialized);
+    let shutdown = std::future::poll_fn(move |_| {
+        observed.store(true, Ordering::SeqCst);
+        std::task::Poll::Pending
+    });
+    let health = Health::default();
+    let mut server = Box::pin(serve(listener, router(health.clone()), health, shutdown));
+
+    assert!(futures_util::poll!(&mut server).is_pending());
+    assert!(
+        initialized.load(Ordering::SeqCst),
+        "shutdown listener was not initialized"
+    );
+}
+
+#[tokio::test]
+async fn an_already_completed_shutdown_is_not_polled_again() {
+    let listener = bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).await.unwrap();
+    let mut completed = false;
+    let shutdown = std::future::poll_fn(move |_| {
+        assert!(!completed, "completed shutdown was polled again");
+        completed = true;
+        std::task::Poll::Ready(())
+    });
+    let health = Health::default();
+
+    timeout(DEADLINE, serve(listener, router(health.clone()), health, shutdown))
+        .await
+        .unwrap()
+        .unwrap();
+}
 
 async fn request(address: SocketAddr, path: &str) -> String {
     let mut stream = TcpStream::connect(address).await.unwrap();
