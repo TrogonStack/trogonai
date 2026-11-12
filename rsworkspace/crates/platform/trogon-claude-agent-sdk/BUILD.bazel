@@ -20,6 +20,7 @@ workspace_crate(
         "resume": {},
         "session_id": {},
         "setting_sources": {},
+        "task_id": {},
         "tool_rule_storage": {},
         "tool_use_id": {},
         "tool_use_id_storage": {},
