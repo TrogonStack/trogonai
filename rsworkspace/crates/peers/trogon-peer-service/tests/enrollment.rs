@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{future::Future, pin::Pin};
 type ReadInterleave = (usize, Pin<Box<dyn Future<Output = ()> + Send>>);
+type AppendInterleave = Pin<Box<dyn Future<Output = ()> + Send>>;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, TimeZone, Utc};
@@ -27,6 +28,7 @@ struct ObservedStore {
     reads: Arc<AtomicUsize>,
     appends: Arc<AtomicUsize>,
     before_read: Arc<Mutex<Option<ReadInterleave>>>,
+    before_append: Arc<Mutex<Option<AppendInterleave>>>,
 }
 
 impl StreamRead<PeerId> for ObservedStore {
@@ -62,6 +64,10 @@ impl StreamAppend<PeerId> for ObservedStore {
         request: AppendStreamRequest<'_, PeerId>,
     ) -> Result<AppendStreamResponse, Self::Error> {
         self.appends.fetch_add(1, Ordering::SeqCst);
+        let action = self.before_append.lock().unwrap().take();
+        if let Some(action) = action {
+            action.await;
+        }
         self.inner
             .append_stream(AppendStreamRequest {
                 stream_id: request.stream_id.as_str(),
@@ -539,7 +545,8 @@ async fn live_connector_resume_refuses_valid_history_beyond_the_4096_event_ceili
     assert!(
         match &result {
             Err(EnrollServiceError::History(trogon_peer_service::HistoryError::Limit)) => true,
-            Err(EnrollServiceError::Execution(CommandError::ReplayLimitExceeded(detail))) => {
+            Err(EnrollServiceError::Execution(CommandError::ReplayLimitExceeded(detail)))
+            | Err(EnrollServiceError::Attach(CommandError::ReplayLimitExceeded(detail))) => {
                 assert_eq!(detail.limit.as_u64(), 4096);
                 assert_eq!(detail.replayed_event_count, 4097);
                 true
@@ -1402,6 +1409,333 @@ async fn idempotent_detach_rechecks_unknown_authority_after_its_validated_snapsh
     assert_same_durable_history(&actual, &injected);
 }
 
+#[tokio::test]
+async fn lifetime_operations_revalidate_authority_that_raced_their_history_read() {
+    for detach in [false, true] {
+        let inner = ObservedStore::default();
+        let enrolled = PeerService::new(inner.clone(), policy(), FixedClock(now()))
+            .enroll(&owner(), request("collaboration_alpha"))
+            .await
+            .unwrap();
+        let peer = PeerId::parse(enrolled.peer_id.clone().unwrap()).unwrap();
+        let store = UnknownAuthorityAfterHistoryRead {
+            inner: inner.clone(),
+            armed: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            injected_history: Arc::new(Mutex::new(None)),
+        };
+        let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+        let appends = inner.appends.load(Ordering::SeqCst);
+        let result = if detach {
+            service
+                .detach(
+                    &owner(),
+                    proto::DetachRequest {
+                        attachment_ref: enrolled.attachment.attachment_ref.clone(),
+                    },
+                )
+                .await
+                .map(|_| ())
+        } else {
+            service
+                .heartbeat(
+                    &owner(),
+                    proto::HeartbeatRequest {
+                        attachment_ref: enrolled.attachment.attachment_ref.clone(),
+                        availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map(|_| ())
+        };
+        assert!(
+            matches!(
+                result,
+                Err(PeerApplicationError::LifetimeHistory(
+                    trogon_peer_service::HistoryError::UnknownEvent
+                ))
+            ),
+            "retry must revalidate raced authority, detach={detach}: {result:?}"
+        );
+        assert!(!store.armed.load(Ordering::SeqCst));
+        let injected = store.injected_history.lock().unwrap().clone().unwrap();
+        let after = inner
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning,
+            })
+            .await
+            .unwrap();
+        assert_same_durable_history(&after, &injected);
+        assert_eq!(
+            inner.appends.load(Ordering::SeqCst),
+            appends + 2,
+            "only competing authority and one fenced write attempt are permitted"
+        );
+    }
+}
+
+#[tokio::test]
+async fn lifetime_operations_retry_a_known_heartbeat_without_losing_the_strict_history_fence() {
+    for detach in [false, true] {
+        let store = ObservedStore::default();
+        let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+        let enrolled = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+        let concurrent_store = store.clone();
+        let concurrent_reference = enrolled.attachment.attachment_ref.clone();
+        let interleave_read = store.reads.load(Ordering::SeqCst) + 2;
+        *store.before_read.lock().unwrap() = Some((
+            interleave_read,
+            Box::pin(async move {
+                PeerService::new(concurrent_store, policy(), FixedClock(now()))
+                    .heartbeat(
+                        &owner(),
+                        proto::HeartbeatRequest {
+                            attachment_ref: concurrent_reference,
+                            availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
+            }),
+        ));
+        let result = if detach {
+            service
+                .detach(
+                    &owner(),
+                    proto::DetachRequest {
+                        attachment_ref: enrolled.attachment.attachment_ref.clone(),
+                    },
+                )
+                .await
+                .map(|_| ())
+        } else {
+            service
+                .heartbeat(
+                    &owner(),
+                    proto::HeartbeatRequest {
+                        attachment_ref: enrolled.attachment.attachment_ref.clone(),
+                        availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map(|_| ())
+        };
+        assert!(
+            result.is_ok(),
+            "known concurrent activity remains retryable: {result:?}"
+        );
+        assert!(store.before_read.lock().unwrap().is_none());
+    }
+}
+
+#[derive(Clone)]
+struct ControlledClock(Arc<Mutex<DateTime<Utc>>>);
+impl PeerClock for ControlledClock {
+    fn now(&self) -> DateTime<Utc> {
+        *self.0.lock().unwrap()
+    }
+}
+async fn lifetime_refreshes_observation_after_a_later_heartbeat(detach: bool, before_read: Option<usize>) {
+    let store = ObservedStore::default();
+    let enrolled = PeerService::new(store.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let reference = enrolled.attachment.attachment_ref.clone();
+    let concurrent_reference = reference.clone();
+    let concurrent_store = store.clone();
+    let appends = store.appends.load(Ordering::SeqCst);
+    let clock = ControlledClock(Arc::new(Mutex::new(now() + chrono::Duration::seconds(1))));
+    let concurrent_clock = clock.clone();
+    let interleave: AppendInterleave = Box::pin(async move {
+        PeerService::new(
+            concurrent_store,
+            policy(),
+            FixedClock(now() + chrono::Duration::seconds(2)),
+        )
+        .heartbeat(
+            &owner(),
+            proto::HeartbeatRequest {
+                attachment_ref: concurrent_reference,
+                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        *concurrent_clock.0.lock().unwrap() = now() + chrono::Duration::seconds(3);
+    });
+    if let Some(offset) = before_read {
+        let ordinal = store.reads.load(Ordering::SeqCst) + offset;
+        *store.before_read.lock().unwrap() = Some((ordinal, interleave));
+    } else {
+        *store.before_append.lock().unwrap() = Some(interleave);
+    }
+    let service = PeerService::new(store.clone(), policy(), clock.clone());
+    let result = if detach {
+        service
+            .detach(
+                &owner(),
+                proto::DetachRequest {
+                    attachment_ref: reference,
+                },
+            )
+            .await
+            .map(|_| ())
+    } else {
+        service
+            .heartbeat(
+                &owner(),
+                proto::HeartbeatRequest {
+                    attachment_ref: reference,
+                    availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map(|_| ())
+    };
+    assert!(
+        result.is_ok(),
+        "later competing heartbeat must remain retryable, detach={detach}: {result:?}"
+    );
+    assert_eq!(
+        store.appends.load(Ordering::SeqCst),
+        appends + if before_read.is_some() { 2 } else { 3 }
+    );
+    assert!(store.before_read.lock().unwrap().is_none());
+    assert!(store.before_append.lock().unwrap().is_none());
+    let peer = PeerId::parse(enrolled.peer_id.unwrap()).unwrap();
+    let history = store
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    let last = history
+        .events
+        .last()
+        .unwrap()
+        .decode::<proto::PeerEvent>()
+        .unwrap()
+        .into_decoded()
+        .unwrap();
+    let observed = match last.event.as_ref() {
+        Some(PeerEventCase::PeerHeartbeatRecorded(event)) if !detach => event.attachment.observed_at.as_option(),
+        Some(PeerEventCase::PeerDetached(event)) if detach => event.detached_at.as_option(),
+        _ => None,
+    };
+    assert_eq!(observed, Some(&timestamp_from_datetime(&clock.now())));
+}
+#[tokio::test]
+async fn heartbeat_conflict_refreshes_observation_after_a_later_heartbeat() {
+    lifetime_refreshes_observation_after_a_later_heartbeat(false, None).await;
+}
+#[tokio::test]
+async fn detach_conflict_refreshes_observation_after_a_later_heartbeat() {
+    lifetime_refreshes_observation_after_a_later_heartbeat(true, None).await;
+}
+#[tokio::test]
+async fn heartbeat_refreshes_observation_after_preflight_reads_a_later_heartbeat() {
+    lifetime_refreshes_observation_after_a_later_heartbeat(false, Some(1)).await;
+}
+#[tokio::test]
+async fn detach_refreshes_observation_after_preflight_reads_a_later_heartbeat() {
+    lifetime_refreshes_observation_after_a_later_heartbeat(true, Some(1)).await;
+}
+#[tokio::test]
+async fn heartbeat_refreshes_observation_after_execution_replays_a_later_heartbeat() {
+    lifetime_refreshes_observation_after_a_later_heartbeat(false, Some(2)).await;
+}
+#[tokio::test]
+async fn detach_refreshes_observation_after_execution_replays_a_later_heartbeat() {
+    lifetime_refreshes_observation_after_a_later_heartbeat(true, Some(2)).await;
+}
+#[tokio::test]
+async fn unchanged_history_preserves_true_lifetime_clock_regression_without_appending() {
+    for detach in [false, true] {
+        let store = ObservedStore::default();
+        let enrolled = PeerService::new(store.clone(), policy(), FixedClock(now()))
+            .enroll(&owner(), request("collaboration_alpha"))
+            .await
+            .unwrap();
+        let peer = PeerId::parse(enrolled.peer_id.clone().unwrap()).unwrap();
+        PeerService::new(
+            store.clone(),
+            policy(),
+            FixedClock(now() + chrono::Duration::seconds(2)),
+        )
+        .heartbeat(
+            &owner(),
+            proto::HeartbeatRequest {
+                attachment_ref: enrolled.attachment.attachment_ref.clone(),
+                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let before = store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning,
+            })
+            .await
+            .unwrap();
+        let appends = store.appends.load(Ordering::SeqCst);
+        let service = PeerService::new(
+            store.clone(),
+            policy(),
+            FixedClock(now() + chrono::Duration::seconds(1)),
+        );
+        if detach {
+            let result = service
+                .detach(
+                    &owner(),
+                    proto::DetachRequest {
+                        attachment_ref: enrolled.attachment.attachment_ref.clone(),
+                    },
+                )
+                .await;
+            assert!(matches!(
+                result,
+                Err(PeerApplicationError::Detach(CommandError::Decide(
+                    trogon_peer::DetachError::ClockRegression
+                )))
+            ));
+        } else {
+            let result = service
+                .heartbeat(
+                    &owner(),
+                    proto::HeartbeatRequest {
+                        attachment_ref: enrolled.attachment.attachment_ref.clone(),
+                        availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            assert!(matches!(
+                result,
+                Err(PeerApplicationError::Heartbeat(CommandError::Decide(
+                    trogon_peer::HeartbeatError::ClockRegression
+                )))
+            ));
+        }
+        assert_eq!(store.appends.load(Ordering::SeqCst), appends);
+        let after = store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning,
+            })
+            .await
+            .unwrap();
+        assert_same_durable_history(&after, &before);
+    }
+}
 #[derive(Clone)]
 struct TruncatedHistory {
     inner: ObservedStore,

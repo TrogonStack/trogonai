@@ -1,4 +1,4 @@
-use crate::constants::PEER_REPLAY_LIMIT;
+use crate::constants::{CONFLICT_RETRY_LIMIT, PEER_REPLAY_LIMIT};
 use trogon_decider_runtime::{
     CommandAuthorizer, CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind, StreamAppend, StreamRead,
 };
@@ -78,6 +78,8 @@ where
         let result = CommandExecution::new(&self.store, &command)
             .with_principal(principal.clone())
             .with_authorizer(&self.authorizer)
+            .with_replay_limit(PEER_REPLAY_LIMIT)
+            .with_conflict_retry(CONFLICT_RETRY_LIMIT)
             .execute()
             .await;
         let state = match result {
@@ -107,9 +109,10 @@ where
                 let resume_store = crate::resume_store::ResumeStore(&self.store);
                 match CommandExecution::new(&resume_store, &attach)
                     .with_expected_revision(validated_position)
-                    .with_replay_limit(PEER_REPLAY_LIMIT)
                     .with_principal(principal)
                     .with_authorizer(&self.authorizer)
+                    .with_replay_limit(PEER_REPLAY_LIMIT)
+                    .with_conflict_retry(CONFLICT_RETRY_LIMIT)
                     .execute()
                     .await
                 {
