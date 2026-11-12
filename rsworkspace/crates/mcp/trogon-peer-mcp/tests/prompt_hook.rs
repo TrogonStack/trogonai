@@ -24,6 +24,7 @@ struct Backend {
     response: v1::PrepareBatchResponse,
     enrollment: Arc<Mutex<v1::EnrollResponse>>,
     fail_enroll: bool,
+    pause_enroll: Arc<std::sync::atomic::AtomicBool>,
     fail_prepare: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -94,6 +95,9 @@ impl EnrollPeer for Backend {
             .lock()
             .expect("call recorder")
             .push(ObservedCall::Enroll(request));
+        if self.pause_enroll.load(std::sync::atomic::Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         if self.fail_enroll {
             return Err(UnconfiguredOperationError);
         }
@@ -156,6 +160,7 @@ fn backend(response: v1::PrepareBatchResponse) -> Backend {
         response,
         enrollment: Arc::new(Mutex::new(enrollment())),
         fail_enroll: false,
+        pause_enroll: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         fail_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     }
 }
@@ -1166,4 +1171,27 @@ async fn jsonrpc_hook_failures_keep_pending_delivery_queued_and_validate_assignm
         let results = wire_results(adapter, vec![prompt("native_b", "prompt_1")]).await;
         assert_wire_error(&results[0], diagnostic);
     }
+}
+
+#[tokio::test]
+async fn cancelled_reenrollment_does_not_reuse_the_prior_model_attachment() {
+    let backend = backend(Default::default());
+    let paused = backend.pause_enroll.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    {
+        let enrollment = adapter.invoke(prompt("native_b", "cancelled_resume"));
+        tokio::pin!(enrollment);
+        assert!(
+            std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(enrollment.as_mut(), cx).is_pending())
+            })
+            .await
+        );
+    }
+    assert!(matches!(
+        adapter.invoke(request("peer_roster", json!({}))).await,
+        Err(PeerMcpError::Unbound)
+    ));
 }
