@@ -44,5 +44,6 @@ workspace_crate(
         "tool_use_id": {},
         "tool_use_id_storage": {},
         "usd_budget": {},
+        "user_message": {},
     },
 )
