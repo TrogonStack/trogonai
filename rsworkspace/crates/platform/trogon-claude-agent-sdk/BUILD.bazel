@@ -30,6 +30,7 @@ workspace_crate(
         "session_id": {},
         "setting_sources": {},
         "task_id": {},
+        "timeout": {},
         "tool_name": {},
         "tool_name_storage": {},
         "tool_rule_storage": {},
