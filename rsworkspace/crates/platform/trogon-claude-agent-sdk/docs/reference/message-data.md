@@ -32,3 +32,17 @@ MessageOrigin serde keeps its kind discriminator separate from extension keys.
 The constructor rejects an extension named kind so it cannot override the
 validated discriminator. Known kinds have richer upstream meaning; a future
 kind is representable without being treated as a human-origin authorization.
+
+## Message content
+
+| Rust declaration | Python source | TypeScript source | Stored representation |
+| --- | --- | --- | --- |
+| Content::Text / Content::Blocks | UserMessage.content: str or list[ContentBlock] | SDKUserMessage.message: MessageParam | String or Vec<ContentBlock>; no envelope decoding. |
+| Text / Thinking | TextBlock / ThinkingBlock | SDKAssistantMessage.message: BetaMessage | String text, or thinking and signature strings. |
+| ToolUse | ToolUseBlock.id/name/input | BetaMessage content tool-use blocks | ToolUseId/ToolName wrappers and JsonObject input. |
+| ToolResult | ToolResultBlock.tool_use_id/content/is_error | MessageParam content tool-result blocks | ToolUseId, raw JSON content, and separate NotReported/Success/Error status. |
+| Unknown | Python ContentBlock also names server-tool variants | TypeScript content references contain a broader block family | Explicit kind and JsonObject for manual extension data; this layer adds no fallback decoder. |
+
+ToolResultStatus distinguishes absent error status from explicit success and
+error. It is a Rust enum representation, not an upstream enum spelling. Raw
+JSON can preserve content shapes beyond Python's annotated str/list/None field.
