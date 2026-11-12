@@ -404,6 +404,7 @@ async fn registration_teardown_closes_transport_even_before_endpoint_observes_st
     observed_barrier(&registration_client).await?;
     store_client.publish("fixture.teardown", vec![1].into()).await?;
     observed_barrier(&store_client).await?;
+    observed_barrier(&registration_client).await?;
     stop_registration(registration, &registration_client, &mut closed).await?;
     let buffered = tokio::time::timeout(PROBE_TIMEOUT, futures::StreamExt::next(&mut endpoint))
         .await?
