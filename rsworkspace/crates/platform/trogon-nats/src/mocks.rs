@@ -2,7 +2,7 @@ use crate::client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use async_nats::client::{SubscribeError, SubscribeErrorKind};
 use async_nats::subject::ToSubject;
 use futures::StreamExt;
-use futures::channel::mpsc;
+use futures::channel::{mpsc, oneshot};
 use futures::stream::BoxStream;
 use std::sync::{Arc, Mutex};
 
@@ -83,6 +83,11 @@ struct MockResponse {
     payload: bytes::Bytes,
 }
 
+struct DelayedPublish {
+    subject: String,
+    entered: oneshot::Sender<()>,
+}
+
 #[derive(Clone)]
 pub struct AdvancedMockNatsClient {
     base: MockNatsClient,
@@ -92,6 +97,7 @@ pub struct AdvancedMockNatsClient {
     should_hang_request: Arc<Mutex<bool>>,
     should_hang_publish: Arc<Mutex<bool>>,
     publish_fail_count: Arc<Mutex<u32>>,
+    publish_delay: Arc<Mutex<Option<DelayedPublish>>>,
     flush_fail_count: Arc<Mutex<u32>>,
 }
 
@@ -122,6 +128,7 @@ impl AdvancedMockNatsClient {
             should_hang_request: Arc::new(Mutex::new(false)),
             should_hang_publish: Arc::new(Mutex::new(false)),
             publish_fail_count: Arc::new(Mutex::new(0)),
+            publish_delay: Arc::new(Mutex::new(None)),
             flush_fail_count: Arc::new(Mutex::new(0)),
         }
     }
@@ -137,6 +144,16 @@ impl AdvancedMockNatsClient {
     /// Fail the next `n` publish attempts. Use 4 to exhaust standard retry (1 + 3 retries).
     pub fn fail_publish_count(&self, n: u32) {
         *self.publish_fail_count.lock().unwrap() = n;
+    }
+
+    /// Keeps one chosen publish pending while a test observes unfinished background work.
+    pub fn delay_next_publish_to(&self, subject: &str) -> oneshot::Receiver<()> {
+        let (entered, receiver) = oneshot::channel();
+        *self.publish_delay.lock().unwrap() = Some(DelayedPublish {
+            subject: subject.to_owned(),
+            entered,
+        });
+        receiver
     }
 
     pub fn set_response(&self, subject: &str, response: bytes::Bytes) {
@@ -333,6 +350,21 @@ impl PublishClient for AdvancedMockNatsClient {
         headers: async_nats::HeaderMap,
         payload: bytes::Bytes,
     ) -> Result<(), MockError> {
+        let delayed = {
+            let mut pending = self.publish_delay.lock().unwrap();
+            if pending
+                .as_ref()
+                .is_some_and(|delay| delay.subject.as_str() == subject.to_subject().as_str())
+            {
+                pending.take()
+            } else {
+                None
+            }
+        };
+        if let Some(delay) = delayed {
+            let _ = delay.entered.send(());
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
         let should_hang = {
             let mut should_hang = self.should_hang_publish.lock().unwrap();
             if *should_hang {
