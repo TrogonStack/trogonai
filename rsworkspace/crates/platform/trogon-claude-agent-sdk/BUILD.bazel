@@ -7,6 +7,7 @@ workspace_crate(
         "additional_directories": {},
         "agent": {},
         "allowed_tools": {},
+        "disallowed_tools": {},
         "effort": {},
         "environment": {},
         "max_turns": {},
