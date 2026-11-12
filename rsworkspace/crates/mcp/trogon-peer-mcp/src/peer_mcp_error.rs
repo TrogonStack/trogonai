@@ -1,6 +1,6 @@
 use crate::PeerMcpErrorCode;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(thiserror::Error)]
 pub enum PeerMcpError {
     #[error("Peer request was cancelled; remote outcome is uncertain. Retry with the same identifiers.")]
     RequestCancelled,
@@ -54,6 +54,12 @@ pub enum PeerMcpError {
     Send(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("Peer metadata is unavailable.")]
     Status(#[source] Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl std::fmt::Debug for PeerMcpError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, formatter)
+    }
 }
 
 impl PeerMcpError {
