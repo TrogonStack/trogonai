@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 mod agent_name;
+mod builtin_tool_name;
 mod client;
 mod config_value;
 mod control_request_id;
@@ -50,3 +51,5 @@ pub use task_id::TaskId;
 pub use tool_use_id::ToolUseId;
 
 pub use tool_name::ToolName;
+
+pub use builtin_tool_name::BuiltinToolName;

@@ -7,6 +7,8 @@ workspace_crate(
         "additional_directories": {},
         "agent": {},
         "allowed_tools": {},
+        "builtin_tool_name": {},
+        "builtin_tool_name_storage": {},
         "control_request_id": {},
         "disallowed_tools": {},
         "effort": {},
