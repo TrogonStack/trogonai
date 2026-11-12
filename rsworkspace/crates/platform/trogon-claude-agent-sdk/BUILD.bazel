@@ -15,6 +15,7 @@ workspace_crate(
         "disallowed_tools": {},
         "effort": {},
         "environment": {},
+        "json_object": {},
         "max_turns": {},
         "mcp_server_name": {},
         "mcp_server_name_storage": {},
