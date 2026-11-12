@@ -1,13 +1,12 @@
 use trogon_claude_agent_sdk::{BuiltinToolName, ToolName};
 
 #[test]
-fn builtin_names_preserve_open_ended_names_and_converted_tool_names() -> Result<(), Box<dyn std::error::Error>> {
+fn builtin_names_preserve_open_ended_names_and_converted_tool_names() {
     for input in ["Read", "FutureTool", "default_suffix", "outil-café"] {
         let value = BuiltinToolName::new(input);
         assert_eq!(value.as_str(), input);
-        assert_eq!(BuiltinToolName::from(ToolName::new(input)?), value);
+        assert_eq!(BuiltinToolName::from(ToolName::new(input)), value);
     }
-    Ok(())
 }
 
 #[test]
