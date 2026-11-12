@@ -79,6 +79,8 @@ impl ClaudeSdkClient {
                 Some(cwd) => cwd,
                 None => adapters.environment.current_dir().map_err(Error::Io)?,
             };
+            // The CLI must run in the directory the session project key was derived from.
+            options.cwd = Some(cwd.clone());
             let runtime = crate::SessionRuntime::prepare_with_adapters(crate::SessionPreparationOptions {
                 store_options: &store_options,
                 resume,
