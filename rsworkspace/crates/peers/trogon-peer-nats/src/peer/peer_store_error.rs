@@ -4,6 +4,8 @@ use super::{PeerSnapshotConfigMismatchError, PeerStreamConfigMismatchError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PeerStoreError {
+    #[error("peer store tenant identity is invalid")]
+    Tenant(#[from] trogon_peer::PeerValueError),
     #[error("peer event stream provisioning failed: {0}")]
     Stream(#[from] EnsureStreamError),
     #[error("peer snapshot bucket provisioning failed: {0}")]
