@@ -7,6 +7,12 @@ use crate::connector_config::ConnectorConfig;
 pub(crate) struct NativeBinding {
     native_session_id: NativeSessionId,
     attachment: Option<AttachmentRef>,
+    enrollment: EnrollmentState,
+}
+
+enum EnrollmentState {
+    Uncertain,
+    Replied,
 }
 
 impl NativeBinding {
@@ -14,6 +20,7 @@ impl NativeBinding {
         Self {
             native_session_id,
             attachment: None,
+            enrollment: EnrollmentState::Uncertain,
         }
     }
 
@@ -22,6 +29,17 @@ impl NativeBinding {
     }
 
     pub(crate) fn attachment(&self) -> Option<&AttachmentRef> {
+        match self.enrollment {
+            EnrollmentState::Uncertain => None,
+            EnrollmentState::Replied => self.last_attachment(),
+        }
+    }
+
+    pub(crate) fn enrollment_started(&mut self) {
+        self.enrollment = EnrollmentState::Uncertain;
+    }
+
+    fn last_attachment(&self) -> Option<&AttachmentRef> {
         self.attachment.as_ref()
     }
 
@@ -30,6 +48,7 @@ impl NativeBinding {
         response: &v1::EnrollResponse,
         config: &ConnectorConfig,
     ) -> Result<AttachmentRef, PeerMcpError> {
+        self.enrollment = EnrollmentState::Replied;
         let peer_id = response.peer_id.as_deref().ok_or(PeerMcpError::InvalidEnrollment)?;
         let peer_id = PeerId::parse(peer_id).map_err(PeerMcpError::InvalidEnrollmentIdentity)?;
         let lease = response.attachment.as_option().ok_or(PeerMcpError::InvalidEnrollment)?;
