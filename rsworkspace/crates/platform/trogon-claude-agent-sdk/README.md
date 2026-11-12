@@ -13,13 +13,13 @@ pinned [TypeScript `0.3.319` declaration archive](https://registry.npmjs.org/@an
 | --- | --- | --- |
 | `cli_path: Option<PathBuf>` | [`cli_path`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2467) | `pathToClaudeCodeExecutable` |
 | `cwd: Option<PathBuf>` | [`cwd`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2464) | `cwd` |
-| `model: Option<String>` | [`model`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2438) | `model` |
+| `model: Option<ModelName>` | [`model`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2438) | `model` |
 | `permission_mode: Option<PermissionMode>` | [`permission_mode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2393) | `permissionMode` |
 | `setting_sources: Option<Vec<SettingSource>>` | [`setting_sources`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2666) | `settingSources` |
 | `max_turns: Option<NonZeroUsize>` | [`max_turns`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2418) | `maxTurns` |
 | `max_budget_usd: Option<UsdBudget>` | [`max_budget_usd`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2424) | `maxBudgetUsd` |
 | `effort: Option<EffortLevel>` | [`effort`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2741) | `effort` |
-| `env: BTreeMap<String, String>` | [`env`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2492) | `env` |
+| `env: Environment` | [`env`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2492) | `env` |
 | `additional_directories: Vec<PathBuf>` | [`add_dirs`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2486) | `additionalDirectories` |
 
 `PermissionMode` mirrors Python's
@@ -73,11 +73,14 @@ non-finite and negative amounts fail at construction with `UsdBudgetError`.
 `xhigh`, and `max` through `as_str()`. An omitted effort remains distinct
 from any selected level.
 
-`env` defaults to an empty string map and stores caller overrides without
-reading or changing the process environment. Like Python, Rust stores string
-values; the pinned TypeScript declaration additionally admits `undefined`.
-`Environment` and `ModelName` keep their contents out of debug output, so
-options debug output shows every other setting without listing fields by hand.
+`env` defaults to an empty map and stores caller overrides without reading or
+changing the process environment. Like Python, Rust stores string values; the
+pinned TypeScript declaration additionally admits `undefined`. Each value is a
+`ConfigValue`, which converts from a string as `Sensitive` so a value is only
+shown when the caller marks it `Plain`. Debug output lists every variable name,
+shows plain values, and prints sensitive values as `<redacted>`. `ModelName`
+keeps the model out of debug output, so options debug output shows every other
+setting without listing fields by hand.
 
 `additional_directories` stores an ordered path list and defaults to
 empty. Paths are not canonicalized, deduplicated, or restricted during
