@@ -9,6 +9,8 @@ pub trait PresentationRead: Send + Sync {
     ) -> impl Future<Output = Result<Option<PreparedPresentation>, PeerPortError>> + Send;
 }
 /// Insert must durably and atomically refuse a different existing record. It must never overwrite.
+/// Record candidates durably before returning. Preserve winning presentations for the required 24-hour retry retention, subject to authorized privacy erasure.
+/// A candidate with an uncertain event append remains retained until trusted history establishes whether it won.
 pub trait PresentationInsert: Send + Sync {
     fn insert(
         &self,
