@@ -741,6 +741,10 @@ where
                 embedded,
                 response,
             } => {
+                if self.stdin.is_none() {
+                    let _ = response.send(Err(Error::DriverStopped));
+                    return Ok(());
+                }
                 if self.pending_mcp.is_some() {
                     let _ = response.send(Err(Error::McpUpdateInProgress));
                     return Ok(());
@@ -790,6 +794,10 @@ where
                 );
             }
             Command::Prompt { input, response } => {
+                if self.stdin.is_none() {
+                    let _ = response.send(Err(Error::DriverStopped));
+                    return Ok(());
+                }
                 if self.run_state.input_done.is_some() {
                     let _ = response.send(Err(Error::InputClosed));
                     return Ok(());
@@ -830,6 +838,10 @@ where
     }
 
     async fn start_control(&mut self, response: ControlResponder, request: serde_json::Value) -> Result<(), Error> {
+        if self.stdin.is_none() {
+            response.send_error(Error::DriverStopped);
+            return Ok(());
+        }
         if self.pending.len() >= self.limits.max_pending_controls.get() {
             response.send_error(Error::TooManyControls);
             return Ok(());
@@ -1274,7 +1286,14 @@ where
     }
 
     async fn write_response(&mut self, frame: Result<serde_json::Value, ProtocolError>) -> Result<(), Error> {
-        self.write(frame?).await
+        let frame = frame?;
+        if self.stdin.is_none() {
+            // The run has settled and stdin is closed: a late callback answer has nowhere
+            // to go, and that must not stop the driver.
+            tracing::debug!("dropping a control response written after stdin closed");
+            return Ok(());
+        }
+        self.write(frame).await
     }
 
     async fn write(&mut self, frame: serde_json::Value) -> Result<(), Error> {

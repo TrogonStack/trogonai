@@ -1104,6 +1104,113 @@ async fn a_declared_dialog_without_a_handler_does_not_emit_a_response() -> TestR
     Ok(())
 }
 
+#[tokio::test]
+async fn a_control_request_after_the_run_settled_fails_only_that_request() -> TestResult {
+    let (mut client, mut cli) = connect(options()?).await?;
+    client.send_prompt(Prompt::from("settle")).await?;
+    client.finish_input().await?;
+    cli.read().await?;
+    cli.send(result()).await?;
+    assert!(matches!(client.next_message().await?, Some(Message::Result(_))));
+    assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
+    let handle = client.handle();
+    assert!(matches!(handle.set_model(None).await, Err(Error::DriverStopped)));
+    assert!(matches!(
+        handle.set_mcp_servers(BTreeMap::new(), BTreeMap::new()).await,
+        Err(Error::DriverStopped)
+    ));
+    assert!(matches!(
+        handle.send_prompt(Prompt::from("late")).await,
+        Err(Error::DriverStopped | Error::InputClosed)
+    ));
+    cli.end(0);
+    assert!(client.next_message().await?.is_none());
+    client.disconnect().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_callback_answered_after_the_run_settled_is_dropped_without_stopping_the_driver() -> TestResult {
+    let dropped = Arc::new(tokio::sync::Notify::new());
+    let _guard = tracing::subscriber::set_default(EventWatcher {
+        message: "dropping a control response written after stdin closed",
+        seen: dropped.clone(),
+    });
+    let started = Arc::new(tokio::sync::Notify::new());
+    let observed = started.clone();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let released = release.clone();
+    let mut configured = options()?;
+    configured.permission_handler = Some(Arc::new(move |_: ToolPermissionRequest| {
+        observed.notify_one();
+        let released = released.clone();
+        async move {
+            released.notified().await;
+            PermissionDecision::allow()
+        }
+    }));
+    let (process, harness) = ScriptedProcessSpawner::new();
+    let mut cli = ScriptedCli::from(harness);
+    let querying = tokio::spawn(query_turn_with_adapters(
+        Prompt::from("settle"),
+        configured,
+        adapters(process),
+    ));
+    let request = cli.read().await?;
+    cli.success(&request, json!({})).await?;
+    let mut query = querying.await??;
+    cli.read().await?;
+    cli.send(json!({"type":"control_request","request_id":"late","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}})).await?;
+    timeout(Duration::from_secs(2), started.notified()).await?;
+    cli.send(result()).await?;
+    assert!(matches!(query.next_message().await?, Some(Message::Result(_))));
+    // A turn settles while the callback is still running, which closes stdin before it answers.
+    assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
+    release.notify_one();
+    // The driver must log the dropped answer before the child exits, or it can see the exit first.
+    timeout(Duration::from_secs(2), dropped.notified()).await?;
+    cli.end(0);
+    assert!(query.next_message().await?.is_none());
+    query.close().await?;
+    Ok(())
+}
+
+/// Enables every callsite and wakes a test when an event carries `message`.
+struct EventWatcher {
+    message: &'static str,
+    seen: Arc<tokio::sync::Notify>,
+}
+
+struct MessageVisitor(String);
+
+impl tracing::field::Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.0 = format!("{value:?}");
+        }
+    }
+}
+
+impl tracing::Subscriber for EventWatcher {
+    fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn event(&self, event: &tracing::Event<'_>) {
+        let mut visitor = MessageVisitor(String::new());
+        event.record(&mut visitor);
+        if visitor.0 == self.message {
+            self.seen.notify_one();
+        }
+    }
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
+}
+
 /// Enables every callsite so the fields of a log event are evaluated, and counts the events.
 struct CountingSubscriber(Arc<AtomicUsize>);
 
