@@ -33,6 +33,7 @@ workspace_crate(
         "session_id": {},
         "setting_sources": {},
         "stderr_tail": {},
+        "system_message": {},
         "task_id": {},
         "timeout": {},
         "tool_name": {},
