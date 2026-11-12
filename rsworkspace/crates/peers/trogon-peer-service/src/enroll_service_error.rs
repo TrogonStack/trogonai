@@ -36,7 +36,7 @@ pub enum EnrollServiceError<ReadError, AppendError> {
     #[error("trusted peer owner cannot form a command principal: {0}")]
     Principal(#[from] PrincipalIdError),
     #[error("peer attachment execution failed: {0}")]
-    Attach(#[source] ExecutionError<AttachError, ReadError, AppendError>),
+    Attach(#[source] ExecutionError<AttachError, HistoryError<ReadError>, AppendError>),
     #[error("peer history read failed: {0}")]
     History(#[source] HistoryError<ReadError>),
     #[error("peer enrollment execution failed: {0}")]
