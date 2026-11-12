@@ -3,8 +3,8 @@
 These Rust declarations support public data composition. They do not decode
 CLI frames or start a session.
 
-The lifecycle remains an API draft: connect and disconnect return the typed
-NotImplemented error. No process, wire parser or permission policy is added.
+This page documents data composition. Process ownership, wire decoding and
+permission policy are separate runtime concerns.
 
 Comparison sources are pinned [Python types](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py)
 and the integrity-verified [TypeScript 0.3.319 declarations](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.319.tgz).
@@ -69,7 +69,7 @@ JSON can preserve content shapes beyond Python's annotated str/list/None field.
 | api_error_status / stop_reason / terminal_reason | optional int / str / str | api_error_status?: number or null; stop_reason; TerminalReason | Option<u16> and optional String fields; no status or terminal-reason interpretation is added. |
 | origin | optional MessageOrigin | origin?: SDKMessageOrigin | Optional MessageOrigin. |
 | result_index / queued_turn_count | Not declared on the pinned Python ResultMessage | result_index?: number / queued_turn_count?: number | Optional u64 metadata. |
-| additional_fields | Not a separate Python dataclass field | Declarations include additional version-specific fields | Explicit extension JsonObject, populated manually until a later decoder. |
+| additional_fields | Not a separate Python dataclass field | Declarations include additional version-specific fields | Explicit extension JsonObject retains fields beyond the declared shape. |
 
 A result is the declared outcome of a turn. Its presence here does not implement
 run completion, queued-turn accounting, cancellation or process shutdown.
@@ -90,7 +90,7 @@ run completion, queued-turn accounting, cancellation or process shutdown.
 | content | str or list[ContentBlock] | message: MessageParam | Content text or block data, flattened from the envelope. |
 | parent_tool_use_id / session_id / uuid | optional parent ID and uuid; no separate session_id field | nullable parent ID and optional session_id/UUID | Optional identifier wrappers. |
 | origin | optional MessageOrigin | origin?: SDKMessageOrigin | Optional validated origin object. |
-| tool_use_result | optional dict[str, Any] | tool_use_result?: unknown | Option<Value> retains every JSON kind; None is omitted data and Some(Value::Null) is explicitly present null. This data boundary does not implement wire decoding. |
+| tool_use_result | optional dict[str, Any] | tool_use_result?: unknown | Option<Value> retains every JSON kind; None is omitted data and Some(Value::Null) is explicitly present null. Wire decoding preserves omission separately from explicit null. |
 | additional_fields / message_fields | No separate typed extension fields | Envelope and MessageParam scopes differ | Explicit maps preserve manually supplied outer and nested extension data. |
 
 ## Partial events
@@ -100,7 +100,7 @@ run completion, queued-turn accounting, cancellation or process shutdown.
 | uuid / session_id | str / str | UUID / string | Existing String uuid and infallible SessionId wrapper. |
 | event | dict[str, Any] | event: BetaRawMessageStreamEvent | Raw JsonObject rather than a recreated event union. |
 | parent_tool_use_id | optional str | string or null | Optional ToolUseId. |
-| additional_fields | No separate dataclass field | ttft_ms, user_message_uuid, user_message_uuids, resume_reason and future envelope fields | Explicit JsonObject retains manually supplied outer metadata separately from event. |
+| additional_fields | No separate dataclass field | ttft_ms, user_message_uuid, user_message_uuids, resume_reason and future envelope fields | Explicit JsonObject retains outer metadata separately from event through wire decoding. |
 
 This declaration does not enable partial messages, decode deltas or reconstruct
 assistant content. Those are separate operational review boundaries.
