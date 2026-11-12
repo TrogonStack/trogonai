@@ -1,4 +1,5 @@
 from gate_errors import Code, GateError
+from rust_scalars import type_scalars
 
 
 def require(condition, selector):
@@ -34,3 +35,42 @@ class RustDocument:
         require(isinstance(item, dict) and type(item.get("id")) is int and item["id"] == identifier
                 and isinstance(item.get("inner"), dict) and len(item["inner"]) == 1, "rust-node")
         return item
+
+    def path(self, value):
+        require(isinstance(value, dict) and set(value) == {"path", "id", "args"}, "rust-path")
+        require(value["args"] is None, "rust-generics")
+        return {"path": self.qualified(value["id"]), "args": None}
+
+    def normalize(self, value):
+        if isinstance(value, list):
+            return [self.normalize(v) for v in value]
+        if not isinstance(value, dict):
+            return value
+        if "id" in value:
+            return self.path(value)
+        if "resolved_path" in value:
+            return self.type(value)
+        return {key: self.normalize(v) for key, v in value.items()}
+
+    def type(self, value):
+        require(isinstance(value, dict) and len(value) == 1, "rust-type")
+        kind, body = next(iter(value.items()))
+        if kind == "resolved_path":
+            return {kind: self.path(body)}
+        if kind in ("primitive", "generic"):
+            require(isinstance(body, str) and body, "rust-type")
+            return {kind: body}
+        if kind == "tuple":
+            require(isinstance(body, list), "rust-tuple")
+            return {kind: [self.type(v) for v in body]}
+        if kind == "slice":
+            return {kind: self.type(body)}
+        fields = {"borrowed_ref": {"lifetime", "is_mutable", "type"},
+                  "raw_pointer": {"is_mutable", "type"}, "array": {"type", "len"}}
+        if kind in fields:
+            require(isinstance(body, dict) and set(body) == fields[kind], "rust-type")
+            type_scalars(kind, body)
+            return {kind: {**body, "type": self.type(body["type"])}}
+        # Other type forms require an explicit reader extension before comparison.
+        raise GateError(Code.FORMAT, "rust-type:" + kind)
+
