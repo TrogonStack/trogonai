@@ -21,6 +21,8 @@ workspace_crate(
         "session_id": {},
         "setting_sources": {},
         "task_id": {},
+        "tool_name": {},
+        "tool_name_storage": {},
         "tool_rule_storage": {},
         "tool_use_id": {},
         "tool_use_id_storage": {},
