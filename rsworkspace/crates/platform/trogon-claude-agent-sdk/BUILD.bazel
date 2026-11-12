@@ -14,6 +14,8 @@ workspace_crate(
         "effort": {},
         "environment": {},
         "max_turns": {},
+        "mcp_server_name": {},
+        "mcp_server_name_storage": {},
         "message_id": {},
         "message_id_storage": {},
         "permission_mode": {},
