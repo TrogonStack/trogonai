@@ -7697,11 +7697,13 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "tracing",
  "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-nats",
  "trogon-peer",
  "trogon-peer-service",
+ "trogon-std",
  "trogonai-proto",
  "uuid",
 ]

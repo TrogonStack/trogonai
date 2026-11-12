@@ -11,15 +11,19 @@ workspace = true
 buffa = { workspace = true }
 serde = { workspace = true }
 grpc-nats-micro = { workspace = true }
+trogon-peer-service = { path = "../trogon-peer-service" }
+trogon-decider-runtime = { workspace = true }
 trogonai-proto = { workspace = true, features = ["peers"] }
 async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 trogon-decider-nats = { workspace = true }
 trogon-nats = { path = "../../platform/trogon-nats" }
 trogon-peer = { path = "../trogon-peer" }
 
 [dev-dependencies]
+trogon-std = { workspace = true, features = ["test-support"] }
 trogon-peer-service = { path = "../trogon-peer-service", features = ["test-support"] }
 futures = { workspace = true }
 serde_json = { workspace = true }
