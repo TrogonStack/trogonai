@@ -1,14 +1,14 @@
-use trogon_claude_agent_sdk::{ClaudeAgentOptions, ToolRule, ToolRuleError};
+use trogon_claude_agent_sdk::{ClaudeAgentOptions, ToolRule};
 
 #[test]
-fn disallowed_rules_preserve_order_and_remain_independent_of_allowed_rules() -> Result<(), ToolRuleError> {
+fn disallowed_rules_preserve_order_and_remain_independent_of_allowed_rules() {
     assert!(ClaudeAgentOptions::default().disallowed_tools.is_empty());
     let options = ClaudeAgentOptions {
-        allowed_tools: vec![ToolRule::from("Read")?],
+        allowed_tools: vec![ToolRule::from("Read")],
         disallowed_tools: vec![
-            ToolRule::from("Bash(*)")?,
-            ToolRule::from("Read")?,
-            ToolRule::from("Bash(*)")?,
+            ToolRule::from("Bash(*)"),
+            ToolRule::from("Read"),
+            ToolRule::from("Bash(*)"),
         ],
         ..ClaudeAgentOptions::default()
     };
@@ -25,5 +25,4 @@ fn disallowed_rules_preserve_order_and_remain_independent_of_allowed_rules() -> 
     assert!(cloned.disallowed_tools.is_empty());
     assert_eq!(options.disallowed_tools.len(), 3);
     assert_eq!(cloned.allowed_tools, options.allowed_tools);
-    Ok(())
 }
