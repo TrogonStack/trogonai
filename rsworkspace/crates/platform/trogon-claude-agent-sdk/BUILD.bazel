@@ -20,6 +20,8 @@ workspace_crate(
         "session_id": {},
         "setting_sources": {},
         "tool_rule_storage": {},
+        "tool_use_id": {},
+        "tool_use_id_storage": {},
         "usd_budget": {},
     },
 )
