@@ -23,6 +23,7 @@ workspace_crate(
         "mcp_tool_name_storage": {},
         "message_id": {},
         "message_id_storage": {},
+        "message_origin": {},
         "permission_mode": {},
         "prompt": {},
         "public_api": {},
