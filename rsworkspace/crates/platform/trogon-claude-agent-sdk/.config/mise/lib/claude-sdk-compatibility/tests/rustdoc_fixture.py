@@ -23,3 +23,14 @@ def add(doc, item, exported=True):
 
 def path(identifier, arguments=None):
     return {"resolved_path": {"path": "compiler_spelling", "id": identifier, "args": arguments}}
+
+
+def function(output=None):
+    return {"sig": {"inputs": [["self", {"generic": "Self"}]], "output": output, "is_c_variadic": False},
+            "generics": generics(), "header": {"is_const": False, "is_unsafe": False, "is_async": True, "abi": "Rust"}, "has_body": True}
+
+
+def implementation(for_type, items, trait=None):
+    return {"is_unsafe": False, "generics": generics(), "provided_trait_methods": [],
+            "trait": trait, "for": for_type, "items": items, "is_negative": False,
+            "is_synthetic": False, "blanket_impl": None}
