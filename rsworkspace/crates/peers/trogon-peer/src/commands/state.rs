@@ -138,7 +138,8 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
         PeerEventCase::PeerMessageIntakeRecorded(event) => super::message_rules::fold_intake(&mut state, event)?,
         PeerEventCase::PeerMessageDisposed(event) => super::message_rules::fold_disposed(&mut state, event)?,
         PeerEventCase::PeerBatchPrepared(event) => super::message_rules::fold_prepared(&mut state, event)?,
-        _ => return Err(EvolveError::UnsupportedEvent),
+        PeerEventCase::PeerBatchAcknowledged(event) => super::message_rules::fold_acknowledged(&mut state, event)?,
+        PeerEventCase::PeerMessageSettled(event) => super::message_rules::fold_settled(&mut state, event)?,
     }
     Ok(state)
 }

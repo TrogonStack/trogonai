@@ -314,7 +314,7 @@ fn incomplete_settlement_cannot_be_admitted_as_an_authority_event() {
     };
     assert_eq!(
         commands::state::evolve(enrolled("recipient", 0), &event),
-        Err(EvolveError::UnsupportedEvent)
+        Err(EvolveError::MissingField { field: "receipt" })
     );
 }
 
