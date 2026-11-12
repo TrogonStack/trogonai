@@ -875,6 +875,45 @@ async fn second_live_connector_is_refused_and_different_native_identity_gets_a_n
 }
 
 #[tokio::test]
+async fn resume_does_not_return_a_competing_connector_that_won_during_the_response_read() {
+    let store = ObservedStore::default();
+    let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+    let first = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let other = ObservedStore {
+        inner: store.inner.clone(),
+        ..Default::default()
+    };
+    let action = async move {
+        let competing = PeerService::new(other, policy(), FixedClock(now()));
+        competing
+            .detach(
+                &owner(),
+                proto::DetachRequest {
+                    attachment_ref: first.attachment.attachment_ref.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let mut request = request("collaboration_alpha");
+        request.connector_id = Some("competing_connector".into());
+        competing.enroll(&owner(), request).await.unwrap();
+    };
+    *store.before_read.lock().unwrap() = Some((store.reads.load(Ordering::SeqCst) + 3, Box::pin(action)));
+    let resumed = service.enroll(&owner(), request("collaboration_alpha")).await;
+    assert!(
+        matches!(
+            resumed,
+            Err(EnrollServiceError::ResumeGuard(trogon_peer::HeartbeatError::Fenced))
+        ),
+        "resume must refuse a connector that changed after the decision: {resumed:?}"
+    );
+    assert!(
+        store.before_read.lock().unwrap().is_none(),
+        "competing connector interleave must execute"
+    );
+}
+
+#[tokio::test]
 async fn heartbeat_grant_cannot_authorize_another_peer_or_a_detach_operation() {
     let store = ObservedStore::default();
     let enrollment = PeerService::new(store.clone(), policy(), FixedClock(now()))
