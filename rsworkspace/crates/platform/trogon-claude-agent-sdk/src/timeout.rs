@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+/// Rust host wait policy, capped at 24 hours with a 60-second default.
+/// The shutdown default is 5 seconds; these are not upstream SDK restrictions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Timeout(Duration);
 
