@@ -162,7 +162,22 @@ pub(super) fn pending_inbox(state: &PeerState) -> Result<(usize, u64), EvolveErr
                 .as_option()
                 .ok_or(EvolveError::MissingField { field: "inbox.message" })?,
         )?;
-        if !entry.disposition.is_set() {
+        let pending = if let Some(receipt) = entry.disposition.as_option() {
+            match validate_receipt(receipt)? {
+                proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED => {
+                    let batch = state
+                        .batches
+                        .iter()
+                        .find(|b| b.batch_id == receipt.batch_id)
+                        .ok_or(EvolveError::InvalidMessageTransition)?;
+                    !batch.acknowledged_at.is_set()
+                }
+                _ => false,
+            }
+        } else {
+            true
+        };
+        if pending {
             count += 1;
             bytes += u64::from(entry.message.content_size_bytes.unwrap_or(0));
         }
@@ -308,4 +323,89 @@ pub(super) fn fold_disposed(state: &mut PeerState, event: &proto::PeerMessageDis
         return Err(EvolveError::InvalidMessageTransition);
     }
     fold_receipt(state, receipt)
+}
+
+pub(super) fn eligible_inbox(
+    state: &PeerState,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<&proto::InboxEntry>, EvolveError> {
+    let mut eligible = Vec::new();
+    for entry in &state.inbox {
+        metadata(
+            entry
+                .message
+                .as_option()
+                .ok_or(EvolveError::MissingField { field: "inbox.message" })?,
+        )?;
+        if entry.intake_ordinal.unwrap_or(0) == 0 {
+            return Err(EvolveError::InvalidMessageTransition);
+        }
+        let accepted = state_values::read_time(entry.message.accepted_at.as_option(), "accepted_at")?;
+        let expires = state_values::read_time(entry.message.expires_at.as_option(), "expires_at")?;
+        if !entry.disposition.is_set() && now >= accepted && now < expires {
+            eligible.push(entry);
+        }
+    }
+    eligible.sort_by_key(|e| e.intake_ordinal);
+    if eligible
+        .windows(2)
+        .any(|pair| pair[0].intake_ordinal == pair[1].intake_ordinal)
+    {
+        return Err(EvolveError::InvalidMessageTransition);
+    }
+    Ok(eligible)
+}
+pub(super) fn valid_selection(eligible: &[&proto::InboxEntry], ids: &[String]) -> bool {
+    !ids.is_empty()
+        && ids.len() <= 4
+        && ids.len() <= eligible.len()
+        && ids
+            .iter()
+            .zip(eligible)
+            .all(|(id, entry)| entry.message.message_id.as_ref() == Some(id))
+}
+pub(super) fn fold_prepared(state: &mut PeerState, event: &proto::PeerBatchPrepared) -> Result<(), EvolveError> {
+    let batch = event
+        .batch
+        .as_option()
+        .ok_or(EvolveError::MissingField { field: "batch" })?;
+    value(
+        BatchId::new(state_values::required(&batch.batch_id, "batch_id")?),
+        "batch_id",
+    )?;
+    let now = state_values::read_time(batch.prepared_at.as_option(), "prepared_at")?;
+    if batch.acknowledged_at.is_set()
+        || state
+            .batches
+            .iter()
+            .any(|b| !b.acknowledged_at.is_set() || b.batch_id == batch.batch_id)
+        || event.receipts.len() != batch.message_ids.len()
+    {
+        return Err(EvolveError::InvalidMessageTransition);
+    }
+    let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
+    state_values::parse_enrollment(enrollment)?;
+    let attachment = state.attachment.as_option().ok_or(EvolveError::InvalidAttachment)?;
+    state_values::validate_attachment(enrollment, attachment)?;
+    if attachment.status.and_then(|s| s.as_known()) != Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
+        || now < state_values::read_time(attachment.observed_at.as_option(), "observed_at")?
+        || now >= state_values::read_time(attachment.expires_at.as_option(), "attachment.expires_at")?
+    {
+        return Err(EvolveError::InvalidMessageTransition);
+    }
+    if !valid_selection(&eligible_inbox(state, now)?, &batch.message_ids) {
+        return Err(EvolveError::InvalidMessageTransition);
+    }
+    for (id, receipt) in batch.message_ids.iter().zip(&event.receipts) {
+        if receipt.message_id.as_ref() != Some(id)
+            || receipt.batch_id != batch.batch_id
+            || receipt.decided_at != batch.prepared_at
+            || validate_receipt(receipt)? != proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED
+        {
+            return Err(EvolveError::InvalidMessageTransition);
+        }
+        fold_receipt(state, receipt)?;
+    }
+    state.batches.push(batch.clone());
+    Ok(())
 }
