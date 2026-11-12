@@ -293,7 +293,9 @@ async fn s19_mirror_never_rejects_frames_and_drains_eagerly_past_the_pending_bud
     }
     let mut loaded = 0;
     while loaded < 12 {
-        tokio::task::yield_now().await;
+        // Under paused time a sleep lets the clock advance while the mirror task runs; yielding
+        // would keep this task runnable and starve the mirror's own timers.
+        tokio::time::sleep(Duration::from_millis(1)).await;
         loaded = store.load(&key()?).await?.map_or(0, |entries| entries.len());
     }
     assert!(mirror.flush().await?.is_empty());
