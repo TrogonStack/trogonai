@@ -19,6 +19,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "process", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
+jsonschema = { workspace = true }
+url = { workspace = true }
 uuid = { workspace = true }
 unicode-normalization = "=0.1.26"
 tracing = { workspace = true }

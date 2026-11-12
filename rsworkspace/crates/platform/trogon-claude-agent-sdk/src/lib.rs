@@ -5,6 +5,7 @@ pub mod adapters;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
+mod agent_definition;
 mod agent_name;
 mod builtin_tool_name;
 mod client;
@@ -12,22 +13,31 @@ mod config_value;
 mod constants;
 mod control;
 mod control_request_id;
+mod dialog;
 mod dialog_kind;
 mod effort_level;
 mod environment;
 mod error;
+mod hooks;
 mod mcp_server_name;
+mod mcp_server_options;
+mod mcp_tool_input_schema;
 mod mcp_tool_name;
+mod mcp_url;
 mod message;
 mod message_id;
 mod message_origin;
 mod model_name;
 mod options;
+mod output_schema;
 mod permission;
 mod permission_mode;
 mod permission_update;
 mod prompt;
 mod queue_capacity;
+mod sdk_mcp_server;
+mod sdk_tool;
+mod sdk_tools;
 mod sensitive_string;
 mod session_entry;
 mod session_error;
@@ -49,6 +59,7 @@ mod transcript_mirror;
 mod usd_budget;
 mod user_input;
 
+pub use agent_definition::{AgentDefinition, AgentExecution, AgentMcpServerSpec};
 pub use agent_name::AgentName;
 pub use builtin_tool_name::BuiltinToolName;
 pub use client::ClaudeSdkClient;
@@ -58,12 +69,23 @@ pub use control::{
     McpSetServersResult, McpStatusResponse, RewindFilesResult, RewindMode,
 };
 pub use control_request_id::ControlRequestId;
+pub use dialog::{
+    ElicitationFuture, ElicitationHandler, ElicitationMode, ElicitationRequest, ElicitationResponse, UserDialogFuture,
+    UserDialogHandler, UserDialogRequest, UserDialogResponse,
+};
 pub use dialog_kind::DialogKind;
 pub use effort_level::EffortLevel;
 pub use environment::Environment;
 pub use error::Error;
+pub use hooks::{
+    CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
+    HookOutputVisibility, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, SyncHookOutput,
+};
 pub use mcp_server_name::McpServerName;
+pub use mcp_server_options::McpServerOptions;
+pub use mcp_tool_input_schema::{McpToolInputSchema, McpToolInputSchemaError};
 pub use mcp_tool_name::McpToolName;
+pub use mcp_url::{McpUrl, McpUrlError};
 pub use message::{
     AssistantMessage, Content, ContentBlock, Message, ResultMessage, ResultStatus, StreamEvent, SystemMessage,
     ToolResultStatus, UserMessage,
@@ -72,6 +94,7 @@ pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use model_name::ModelName;
 pub use options::ClaudeAgentOptions;
+pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{
     DenialDisposition, McpServerProvenance, PermissionDecision, PermissionFuture, ToolPermissionHandler,
     ToolPermissionRequest,
@@ -82,6 +105,11 @@ pub use permission_update::{
 };
 pub use prompt::Prompt;
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
+pub use sdk_mcp_server::{
+    LocalMcpServer, LocalMcpServerOptions, McpFuture, McpServerError, SdkMcpServer, SdkMcpSession,
+};
+pub use sdk_tool::{McpToolFuture, McpToolHandler, McpToolOutput, McpToolRequest, SdkTool, SdkToolOptions};
+pub use sdk_tools::{SdkTools, SdkToolsError};
 pub use sensitive_string::SensitiveString;
 pub use session_entry::{SessionEntry, SessionEntryError};
 pub use session_error::SessionError;
