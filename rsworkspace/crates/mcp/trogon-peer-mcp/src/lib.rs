@@ -38,3 +38,8 @@ pub use availability_observation::AvailabilityObservation;
 mod detach_hook_event;
 mod detach_hook_input;
 mod detach_tool;
+
+mod runtime_config;
+mod runtime_config_error;
+pub use runtime_config::RuntimeConfig;
+pub use runtime_config_error::RuntimeConfigError;

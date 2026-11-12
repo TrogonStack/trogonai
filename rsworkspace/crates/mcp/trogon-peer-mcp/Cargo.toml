@@ -21,7 +21,12 @@ trogonai-proto = { path = "../../platform/trogonai-proto", features = ["peers"] 
 
 tokio-util = { workspace = true }
 
+trogon-nats = { path = "../../platform/trogon-nats" }
+trogon-peer-nats = { path = "../../peers/trogon-peer-nats" }
+trogon-std = { workspace = true }
+uuid = { workspace = true }
+
 [dev-dependencies]
 buffa = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "io-util", "test-util"] }
-
+trogon-std = { workspace = true, features = ["test-support"] }

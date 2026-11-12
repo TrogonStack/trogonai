@@ -7680,9 +7680,13 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "trogon-nats",
  "trogon-peer",
  "trogon-peer-context",
+ "trogon-peer-nats",
+ "trogon-std",
  "trogonai-proto",
+ "uuid",
 ]
 
 [[package]]
