@@ -1,4 +1,5 @@
 use crate::constants::{CONFLICT_RETRY_LIMIT, PEER_REPLAY_LIMIT};
+use crate::scoped_peer_store::ScopedPeerStore;
 use crate::{
     attachment_input::attachment, peer_application_error::PeerApplicationError, peer_clock::PeerClock,
     peer_service::PeerService,
@@ -11,7 +12,7 @@ use trogon_peer::{Detach, DetachError, Heartbeat, HeartbeatError, PeerId, PeerOb
 use trogonai_proto::{convert::datetime_from_timestamp, peers::v1alpha1 as proto};
 impl<S, P, C> PeerService<S, P, C>
 where
-    S: StreamRead<PeerId> + StreamAppend<PeerId>,
+    S: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
     P: CommandAuthorizer<Heartbeat> + CommandAuthorizer<Detach> + Send + Sync,
     C: PeerClock,
 {
@@ -23,6 +24,9 @@ where
         proto::HeartbeatResponse,
         PeerApplicationError<<S as StreamRead<PeerId>>::Error, <S as StreamAppend<PeerId>>::Error>,
     > {
+        if self.store.tenant() != owner.tenant() {
+            return Err(PeerApplicationError::Scope);
+        }
         let reference = attachment(request.attachment_ref.as_option().ok_or(PeerApplicationError::Input)?)?;
         let availability = request
             .availability
@@ -94,6 +98,9 @@ where
         proto::DetachResponse,
         PeerApplicationError<<S as StreamRead<PeerId>>::Error, <S as StreamAppend<PeerId>>::Error>,
     > {
+        if self.store.tenant() != owner.tenant() {
+            return Err(PeerApplicationError::Scope);
+        }
         let reference = attachment(request.attachment_ref.as_option().ok_or(PeerApplicationError::Input)?)?;
         let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(owner.caller().as_str())?);
         let mut retries_left = CONFLICT_RETRY_LIMIT.as_u32();

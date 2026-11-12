@@ -22,8 +22,9 @@ use trogon_peer_service::{
 use trogonai_proto::convert::timestamp_from_datetime;
 use trogonai_proto::peers::{PeerEventCase, v1alpha1 as proto};
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct ObservedStore {
+    tenant: TenantId,
     inner: InMemoryStore,
     reads: Arc<AtomicUsize>,
     appends: Arc<AtomicUsize>,
@@ -913,6 +914,24 @@ async fn resume_does_not_return_a_competing_connector_that_won_during_the_respon
     );
 }
 
+impl Default for ObservedStore {
+    fn default() -> Self {
+        Self {
+            tenant: TenantId::new("tenant_alpha").unwrap(),
+            inner: InMemoryStore::new(),
+            reads: Arc::default(),
+            appends: Arc::default(),
+            before_read: Arc::default(),
+            before_append: Arc::default(),
+        }
+    }
+}
+impl trogon_peer_service::ScopedPeerStore for ObservedStore {
+    fn tenant(&self) -> &TenantId {
+        &self.tenant
+    }
+}
+
 #[tokio::test]
 async fn heartbeat_grant_cannot_authorize_another_peer_or_a_detach_operation() {
     let store = ObservedStore::default();
@@ -1084,6 +1103,12 @@ struct UnknownAuthorityAfterHistoryRead {
     inner: ObservedStore,
     armed: Arc<std::sync::atomic::AtomicBool>,
     injected_history: Arc<Mutex<Option<ReadStreamResponse>>>,
+}
+
+impl trogon_peer_service::ScopedPeerStore for UnknownAuthorityAfterHistoryRead {
+    fn tenant(&self) -> &TenantId {
+        trogon_peer_service::ScopedPeerStore::tenant(&self.inner)
+    }
 }
 
 impl UnknownAuthorityAfterHistoryRead {
@@ -1828,6 +1853,11 @@ impl StreamAppend<PeerId> for TruncatedHistory {
         self.inner.classify_append_failure(error)
     }
 }
+impl trogon_peer_service::ScopedPeerStore for TruncatedHistory {
+    fn tenant(&self) -> &TenantId {
+        trogon_peer_service::ScopedPeerStore::tenant(&self.inner)
+    }
+}
 async fn expired_resume_refuses_an_incomplete_announced_history_tail(empty: bool) {
     let inner = ObservedStore::default();
     let first = PeerService::new(inner.clone(), policy(), FixedClock(now()))
@@ -1954,6 +1984,12 @@ impl StreamAppend<PeerId> for UntrustedResumeReplay {
 
     fn classify_append_failure(&self, error: &Self::Error) -> AppendFailure {
         self.inner.classify_append_failure(error)
+    }
+}
+
+impl trogon_peer_service::ScopedPeerStore for UntrustedResumeReplay {
+    fn tenant(&self) -> &TenantId {
+        trogon_peer_service::ScopedPeerStore::tenant(&self.inner)
     }
 }
 

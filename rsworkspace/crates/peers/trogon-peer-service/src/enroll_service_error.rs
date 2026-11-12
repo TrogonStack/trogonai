@@ -27,6 +27,8 @@ pub enum EnrollServiceError<ReadError, AppendError> {
     #[error("peer attachment changed during resume: {0}")]
     ResumeGuard(#[source] trogon_peer::HeartbeatError),
 
+    #[error("peer enrollment is outside the injected store tenant scope")]
+    Scope,
     #[error("peer attachment changed during resume; retry enrollment")]
     ResumeChanged,
     #[error("peer enrollment field {field} is missing")]
