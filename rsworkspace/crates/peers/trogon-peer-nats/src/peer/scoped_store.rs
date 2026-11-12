@@ -7,6 +7,7 @@ use trogon_decider_runtime::{
 use trogon_peer::{PeerId, PeerValueError, TenantId};
 use trogon_peer_service::ScopedPeerStore;
 
+#[derive(Clone)]
 pub struct PeerJetStreamStore {
     inner: JetStreamStore<PeerSubjectResolver>,
     tenant: TenantId,
