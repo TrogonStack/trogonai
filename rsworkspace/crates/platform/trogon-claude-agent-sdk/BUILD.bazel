@@ -29,6 +29,7 @@ workspace_crate(
         "resume": {},
         "session_id": {},
         "setting_sources": {},
+        "stderr_tail": {},
         "task_id": {},
         "timeout": {},
         "tool_name": {},
