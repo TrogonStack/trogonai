@@ -1,6 +1,8 @@
 use std::{num::NonZeroUsize, path::PathBuf};
 
-use crate::{AgentName, EffortLevel, Environment, ModelName, PermissionMode, SettingSource, ToolRule, UsdBudget};
+use crate::{
+    AgentName, EffortLevel, Environment, ModelName, PermissionMode, SessionId, SettingSource, ToolRule, UsdBudget,
+};
 
 #[derive(Clone, Debug, Default)]
 pub struct ClaudeAgentOptions {
@@ -18,4 +20,5 @@ pub struct ClaudeAgentOptions {
     pub agent: Option<AgentName>,
     pub allowed_tools: Vec<ToolRule>,
     pub disallowed_tools: Vec<ToolRule>,
+    pub resume: Option<SessionId>,
 }
