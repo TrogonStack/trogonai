@@ -22,6 +22,7 @@ use crate::telemetry::fixture_diagnostics::FixtureDiagnostics;
 use crate::tls::NatsTls;
 
 const NATS_IMAGE_TAG: &str = "2.10.14";
+const ATOMIC_BATCH_NATS_IMAGE_TAG: &str = "2.14.2";
 const NATS_CLIENT_PORT: u16 = 4222;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const SERVER_NAMES: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
@@ -91,6 +92,14 @@ impl JetStreamTestServer {
     /// Starts the pinned NATS image and waits until it accepts client connections.
     pub async fn start() -> Self {
         Self(TestServer::start(image(&NatsServerCmd::default().with_jetstream())).await)
+    }
+
+    /// Starts an isolated server that supports guarded atomic event batches.
+    pub async fn start_with_atomic_batches() -> Self {
+        let request = Nats::default()
+            .with_tag(ATOMIC_BATCH_NATS_IMAGE_TAG)
+            .with_cmd(&NatsServerCmd::default().with_jetstream());
+        Self(TestServer::start(request).await)
     }
 
     /// Connects to the isolated server and returns its JetStream context.
