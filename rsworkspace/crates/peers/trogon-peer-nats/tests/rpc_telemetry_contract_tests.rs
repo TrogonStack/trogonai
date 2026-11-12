@@ -387,6 +387,37 @@ fn assert_event(events: &Events, origin: &str, code: Code) -> TestResult {
 }
 
 #[tokio::test]
+async fn enrollment_resume_replay_preserves_history_fault_categories() -> TestResult {
+    for (failure, origin, code, message) in [
+        (
+            Failure::ReplayRead,
+            "history.read",
+            Code::UNAVAILABLE,
+            "peer storage unavailable",
+        ),
+        (
+            Failure::ReplayMalformed,
+            "history.integrity",
+            Code::INTERNAL,
+            "peer history invalid",
+        ),
+    ] {
+        let fixture = Fixture::new().await?;
+        let adapter = adapter(&fixture, failure);
+        let events = Events::default();
+        let span = tracing::subscriber::with_default(events.clone(), || tracing::info_span!("resume_fault_contract"));
+        let result: Result<proto::EnrollResponse, ServiceFault> = adapter
+            .execute(&fixture.alice, Fixture::enrollment("alice"))
+            .instrument(span)
+            .with_subscriber(events.clone())
+            .await;
+        assert_fault(result, code, message)?;
+        assert_event(&events, origin, code)?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn successful_rpc_does_not_emit_a_fault_event() -> TestResult {
     let fixture = Fixture::new().await?;
     let adapter = adapter(&fixture, Failure::None);
@@ -507,7 +538,7 @@ async fn log_only_consumers_receive_bounded_rpc_fault_origins_without_backend_er
 async fn enrollment_and_lifetime_faults_preserve_their_server_side_origins() -> TestResult {
     for (failure, origin) in [
         (Failure::Read, "history.read"),
-        (Failure::ReplayRead, "execution.read_stream"),
+        (Failure::ReplayRead, "history.read"),
         (Failure::Append, "execution.append"),
     ] {
         let fixture = Fixture::new().await?;
