@@ -7,7 +7,7 @@ def fields(reader, identifiers, public_only=False):
     for identifier in identifiers:
         item = reader.item(identifier)
         require(set(item["inner"]) == {"struct_field"}, "rust-field")
-        if public_only and item["visibility"] != "public":
+        if public_only and not reader.is_public(item):
             continue
         name = item["name"]
         require(isinstance(name, str) and name not in result, "rust-field-name")
