@@ -18,6 +18,8 @@ workspace_crate(
         "max_turns": {},
         "mcp_server_name": {},
         "mcp_server_name_storage": {},
+        "mcp_tool_name": {},
+        "mcp_tool_name_storage": {},
         "message_id": {},
         "message_id_storage": {},
         "permission_mode": {},
