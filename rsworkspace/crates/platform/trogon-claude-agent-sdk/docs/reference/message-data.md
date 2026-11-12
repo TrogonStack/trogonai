@@ -104,3 +104,16 @@ run completion, queued-turn accounting, cancellation or process shutdown.
 
 This declaration does not enable partial messages, decode deltas or reconstruct
 assistant content. Those are separate operational review boundaries.
+
+## Message envelope
+
+Message exposes Assistant, User, System, Result, StreamEvent and Unknown
+variants. Result retains Box<ResultMessage>, preserving the existing payload
+layout across serde_json feature combinations. The other payloads remain the
+existing Rust data declarations.
+
+Python's Message union includes its named message dataclasses plus typed rate
+limit and conversation-reset variants. TypeScript SDKMessage is a broader
+union of SDK message families. This Rust enum does not claim complete typed
+union parity: Unknown can hold manually supplied kind/object data, and no
+unknown-frame fallback or wire decoding is implemented by this API-only layer.
