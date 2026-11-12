@@ -1,4 +1,4 @@
-use crate::{JsonObject, ToolName, ToolUseId};
+use crate::{JsonObject, SessionId, ToolName, ToolUseId};
 
 #[derive(Clone, Debug)]
 pub enum Content {
@@ -36,4 +36,11 @@ pub enum ToolResultStatus {
     NotReported,
     Success,
     Error,
+}
+
+#[derive(Clone, Debug)]
+pub struct SystemMessage {
+    pub subtype: String,
+    pub session_id: Option<SessionId>,
+    pub data: JsonObject,
 }
