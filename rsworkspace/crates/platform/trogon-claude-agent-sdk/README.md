@@ -23,6 +23,7 @@ pinned [TypeScript `0.3.319` declaration archive](https://registry.npmjs.org/@an
 | `additional_directories: Vec<PathBuf>` | [`add_dirs`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2486) | `additionalDirectories` |
 | `agent: Option<AgentName>` | Not exposed in pinned Python | `agent` |
 | `allowed_tools: Vec<ToolRule>` | [`allowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2353) | `allowedTools` |
+| `disallowed_tools: Vec<ToolRule>` | [`disallowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2431) | `disallowedTools` |
 
 `PermissionMode` mirrors Python's
 [`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L25)
@@ -100,6 +101,10 @@ stores the selection without starting an agent.
 and commas, like the upstream option fields. Duplicate rules remain present.
 Process-start validation belongs to the later runtime boundary; this draft
 applies no permission policy.
+
+`disallowed_tools` defaults to empty and remains independent of the
+allowed-rule list. Ordering and duplicate rules are preserved without
+resolving policy conflicts during configuration assembly.
 
 The example checks API composition; it does not run a session. Further options
 and runtime behavior belong in separate review slices.
