@@ -2202,8 +2202,11 @@ async fn runtime_shutdown_and_eof_drop_inflight_heartbeat_before_detach_lock_wai
 
 #[tokio::test(start_paused = true)]
 async fn runtime_eof_cancels_pending_prompt_before_sdk_response_drain() {
-    let backend = backend(Default::default());
+    let mut backend = backend(Default::default());
+    backend.enroll_delay = std::time::Duration::from_millis(1);
     let paused = backend.pause_prepare.clone();
+    let entered = backend.prepare_entered.clone();
+    let dropped = backend.prepare_dropped.clone();
     let calls = backend.calls.clone();
     let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
     let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
@@ -2218,13 +2221,14 @@ async fn runtime_eof_cancels_pending_prompt_before_sdk_response_drain() {
     paused.store(true, std::sync::atomic::Ordering::SeqCst);
     let pending = client.peer().clone();
     let work = tokio::spawn(async move { pending.call_tool(prompt("native_b", "pending")).await });
-    tokio::task::yield_now().await;
-    tokio::task::yield_now().await;
-    assert!(calls.lock().expect("calls").len() >= 4);
+    entered.notified().await;
+    assert!(!work.is_finished(), "prepare must be in flight before EOF");
+    assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 0);
     let started = tokio::time::Instant::now();
     client.cancel().await.expect("EOF");
     server.await.expect("runtime task").expect("EOF shutdown");
     let _outcome = work.await.expect("work task");
+    assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert!(
         started.elapsed() <= std::time::Duration::from_secs(1),
         "EOF must cancel native prompt without waiting for its deadline"
