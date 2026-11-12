@@ -1917,6 +1917,108 @@ async fn heartbeat_waits_for_a_confirmed_attachment_when_the_native_session_is_o
     assert_eq!(calls.lock().expect("calls").len(), 1);
 }
 
+struct PanickingReceiveTransport<T> {
+    inner: T,
+    fail: Arc<tokio::sync::Notify>,
+}
+
+impl<T: rmcp::transport::Transport<rmcp::service::RoleServer>> rmcp::transport::Transport<rmcp::service::RoleServer>
+    for PanickingReceiveTransport<T>
+{
+    type Error = T::Error;
+
+    fn send(
+        &mut self,
+        message: rmcp::service::TxJsonRpcMessage<rmcp::service::RoleServer>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
+        self.inner.send(message)
+    }
+
+    async fn receive(&mut self) -> Option<rmcp::service::RxJsonRpcMessage<rmcp::service::RoleServer>> {
+        tokio::select! {
+            biased;
+            _ = self.fail.notified() => panic!("synthetic host transport task failure"),
+            message = self.inner.receive() => message,
+        }
+    }
+
+    fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.inner.close()
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn runtime_transport_task_failure_preserves_typed_cause_and_detaches_exactly_once() {
+    for terminal_hook_completed in [false, true] {
+        let backend = backend(Default::default());
+        let calls = backend.calls.clone();
+        let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+        let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+        let (read, write) = tokio::io::split(server_transport);
+        let fail = Arc::new(tokio::sync::Notify::new());
+        let transport = PanickingReceiveTransport {
+            inner: rmcp::transport::async_rw::AsyncRwTransport::<rmcp::service::RoleServer, _, _>::new(read, write),
+            fail: fail.clone(),
+        };
+        let mut server = tokio::spawn(trogon_peer_mcp::serve_connector(
+            adapter.clone(),
+            transport,
+            trogon_peer_mcp::AvailabilityObservation::Ready,
+            std::future::pending::<()>(),
+        ));
+        let client = tokio::time::timeout(std::time::Duration::from_secs(1), ().serve(client_transport))
+            .await
+            .expect("bounded handshake")
+            .expect("handshake");
+        client.call_tool(prompt("native_b", "initial")).await.expect("bind");
+        if terminal_hook_completed {
+            let response = client.call_tool(detach("native_b")).await.expect("terminal hook");
+            assert_ne!(response.is_error, Some(true));
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(50), &mut server)
+                    .await
+                    .is_err()
+            );
+        }
+        fail.notify_one();
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(3), server)
+            .await
+            .expect("bounded host failure cleanup")
+            .expect("runtime task");
+        match outcome {
+            Err(trogon_peer_mcp::RuntimeError::Shutdown(source)) => assert!(source.is_panic()),
+            other => panic!("host task panic lost its typed shutdown cause: {other:?}"),
+        }
+        let observed = calls.lock().expect("calls").clone();
+        let detaches: Vec<_> = observed
+            .iter()
+            .filter_map(|call| match call {
+                ObservedCall::Detach(request) => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            detaches.len(),
+            1,
+            "host failure must detach only the validated attachment once"
+        );
+        assert_eq!(detaches[0].attachment_ref.as_option(), Some(&attachment()));
+        assert!(matches!(
+            adapter.invoke(prompt("native_b", "after_failure")).await,
+            Err(PeerMcpError::Detached)
+        ));
+        assert_eq!(
+            *calls.lock().expect("calls"),
+            observed,
+            "terminal failure must not restart enrollment"
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(1), client.cancel())
+            .await
+            .expect("bounded client cleanup")
+            .expect("client cleanup");
+    }
+}
+
 #[tokio::test]
 async fn plugin_declared_hooks_are_listed_and_invoke_through_public_mcp() {
     let adapter = PeerMcp::new(backend(Default::default()), config()).expect("config");
