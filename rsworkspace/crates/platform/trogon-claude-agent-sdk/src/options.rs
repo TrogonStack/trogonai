@@ -23,6 +23,7 @@ impl std::fmt::Debug for ClaudeAgentOptions {
             .debug_struct("ClaudeAgentOptions")
             .field("cli_path", &self.cli_path)
             .field("cwd", &self.cwd)
+            .field("additional_directories", &self.additional_directories)
             .field("permission_mode", &self.permission_mode)
             .field("setting_sources", &self.setting_sources)
             .field("max_turns", &self.max_turns)

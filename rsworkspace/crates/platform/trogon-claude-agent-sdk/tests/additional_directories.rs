@@ -21,3 +21,16 @@ fn additional_directories_preserve_order_duplicates_and_unmodified_paths() {
     assert_eq!(options.additional_directories.len(), paths.len());
     assert_eq!(options.clone().additional_directories, options.additional_directories);
 }
+
+#[test]
+fn options_debug_shows_additional_directories() {
+    let options = ClaudeAgentOptions {
+        additional_directories: vec![PathBuf::from("fixture-additional-directory")],
+        ..ClaudeAgentOptions::default()
+    };
+    let debug = format!("{options:?}");
+    assert!(
+        debug.contains(r#"additional_directories: ["fixture-additional-directory"]"#),
+        "{debug}"
+    );
+}
