@@ -1,4 +1,14 @@
 use std::sync::atomic::Ordering;
+use trogon_peer::Attach;
+use trogon_peer::Enroll;
+use trogon_peer::EnrollmentIdentity;
+use trogon_peer::Heartbeat;
+use trogon_peer::InstallationId;
+use trogon_peer::NativeSessionId;
+use trogon_peer::PeerDisplayName;
+use trogon_peer::PeerObservation;
+use trogon_peer_service::PeerService;
+use trogon_peer_service::test_support::IsolatedEnrollmentFixture;
 
 mod support;
 use support::*;
@@ -430,5 +440,442 @@ async fn terminal_and_settlement_grants_bind_authoritative_outcomes_before_stora
             .and_then(|outcome| outcome.as_known()),
         Some(proto::PreparationOutcome::PREPARATION_OUTCOME_UNAVAILABLE)
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_fixture_shared_enrollment_and_resume_reject_other_collaborations_before_storage() -> TestResult {
+    let f = Fixture::new().await?;
+    let identity = EnrollmentIdentity::new(
+        f.alice.clone(),
+        InstallationId::new("install")?,
+        NativeSessionId::new("shared_policy_control")?,
+    );
+    let actor = principal(&f.alice)?;
+    let denied = Enroll::new(
+        identity.clone(),
+        ConnectorId::new("original")?,
+        CollaborationRef::new("other")?,
+        PeerDisplayName::new("Shared policy control")?,
+        f.clock.now(),
+    );
+    denied_before_storage!(&f, &denied, actor, &f.policy);
+    let allowed = Enroll::new(
+        identity.clone(),
+        ConnectorId::new("original")?,
+        CollaborationRef::new("shared")?,
+        PeerDisplayName::new("Shared policy control")?,
+        f.clock.now(),
+    );
+    let enrolled = CommandExecution::new(&f.store, &allowed)
+        .with_principal(actor.clone())
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await?
+        .state;
+    assert_eq!(
+        enrolled.enrollment.peer_id.as_deref(),
+        Some(identity.peer_id().as_str())
+    );
+    assert_eq!(enrolled.enrollment.collaboration_ref.as_deref(), Some("shared"));
+    assert_eq!(enrolled.attachment.attachment_ref.generation, Some(1));
+    let expires = trogonai_proto::convert::datetime_from_timestamp(
+        enrolled
+            .attachment
+            .expires_at
+            .as_option()
+            .ok_or(PeerPortError::Integrity)?,
+    )?;
+    let denied = Attach::new(
+        identity.clone(),
+        ConnectorId::new("replacement")?,
+        CollaborationRef::new("other")?,
+        expires,
+    );
+    denied_before_storage!(&f, &denied, actor, &f.policy);
+    let allowed = Attach::new(
+        identity.clone(),
+        ConnectorId::new("replacement")?,
+        CollaborationRef::new("shared")?,
+        expires,
+    );
+    let before = storage_calls(&f);
+    let resumed = CommandExecution::new(&f.store, &allowed)
+        .with_principal(actor)
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await?
+        .state;
+    assert_eq!(resumed.enrollment, enrolled.enrollment);
+    assert_eq!(resumed.attachment.attachment_ref.generation, Some(2));
+    assert_eq!(
+        resumed.attachment.attachment_ref.connector_id.as_deref(),
+        Some("replacement")
+    );
+    assert_eq!(resumed.attachment.observed_at, enrolled.attachment.expires_at);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before.1 + 1);
+    assert_eq!(history(&f, identity.peer_id()).await?, resumed);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_isolated_fixture_authorizes_real_expired_resume_and_denies_other_collaborations_before_storage()
+-> TestResult {
+    let f = Fixture::new().await?;
+    let identity = EnrollmentIdentity::new(
+        f.alice.clone(),
+        InstallationId::new("install")?,
+        NativeSessionId::new("isolated_policy_control")?,
+    );
+    let actor = principal(&f.alice)?;
+    let isolated = IsolatedEnrollmentFixture(f.alice.clone());
+    let denied = Enroll::new(
+        identity.clone(),
+        ConnectorId::new("original")?,
+        CollaborationRef::new("shared")?,
+        PeerDisplayName::new("Isolated policy control")?,
+        f.clock.now(),
+    );
+    denied_before_storage!(&f, &denied, actor, &isolated);
+    let service = PeerService::new(
+        f.store.clone(),
+        IsolatedEnrollmentFixture(f.alice.clone()),
+        f.clock.clone(),
+    );
+    let mut request = Fixture::enrollment("isolated_policy_control");
+    request.collaboration_ref = Some("isolated".into());
+    request.connector_id = Some("original".into());
+    let first = service.enroll(&f.alice, request.clone()).await?;
+    assert_eq!(
+        first.attachment.attachment_ref.peer_id.as_deref(),
+        Some(identity.peer_id().as_str())
+    );
+    assert_eq!(first.attachment.attachment_ref.generation, Some(1));
+    let enrolled = history(&f, identity.peer_id()).await?;
+    assert_eq!(enrolled.enrollment.collaboration_ref.as_deref(), Some("isolated"));
+    let expires = trogonai_proto::convert::datetime_from_timestamp(
+        first
+            .attachment
+            .expires_at
+            .as_option()
+            .ok_or(PeerPortError::Integrity)?,
+    )?;
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = expires;
+    let denied = Attach::new(
+        identity.clone(),
+        ConnectorId::new("replacement")?,
+        CollaborationRef::new("shared")?,
+        expires,
+    );
+    denied_before_storage!(&f, &denied, actor, &isolated);
+    let events_before = f
+        .store
+        .read_stream_bounded(
+            ReadStreamRequest {
+                stream_id: identity.peer_id(),
+                from: ReadFrom::Beginning,
+            },
+            4096,
+        )
+        .await?
+        .events
+        .len();
+    request.connector_id = Some("replacement".into());
+    let before = storage_calls(&f);
+    let resumed = service.enroll(&f.alice, request).await?;
+    assert_eq!(
+        resumed.attachment.attachment_ref.peer_id.as_deref(),
+        Some(identity.peer_id().as_str())
+    );
+    assert_eq!(resumed.attachment.attachment_ref.generation, Some(2));
+    assert_eq!(
+        resumed.attachment.attachment_ref.connector_id.as_deref(),
+        Some("replacement")
+    );
+    assert_eq!(resumed.attachment.observed_at, first.attachment.expires_at);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before.1 + 2);
+    let events_after = f
+        .store
+        .read_stream_bounded(
+            ReadStreamRequest {
+                stream_id: identity.peer_id(),
+                from: ReadFrom::Beginning,
+            },
+            4096,
+        )
+        .await?
+        .events
+        .len();
+    assert_eq!(events_after, events_before + 1);
+    let persisted = history(&f, identity.peer_id()).await?;
+    assert_eq!(persisted.enrollment, enrolled.enrollment);
+    assert_eq!(persisted.attachment, resumed.attachment);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_fixture_owner_grant_rejects_another_peers_heartbeat_before_storage() -> TestResult {
+    let f = Fixture::new().await?;
+    let actor = principal(&f.alice)?;
+    let observation = PeerObservation::new(proto::PeerAvailability::PEER_AVAILABILITY_READY, None, None)?;
+    let denied = Heartbeat::new(f.alice.clone(), reference(&f.b)?, observation.clone(), f.clock.now());
+    denied_before_storage!(&f, &denied, actor, &f.policy);
+    let command = Heartbeat::new(f.alice.clone(), reference(&f.a)?, observation, f.clock.now());
+    let before = storage_calls(&f);
+    let updated = CommandExecution::new(&f.store, &command)
+        .with_principal(actor)
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await?
+        .state;
+    assert_eq!(
+        updated.availability.and_then(|value| value.as_known()),
+        Some(proto::PeerAvailability::PEER_AVAILABILITY_READY)
+    );
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before.1 + 1);
+    assert_eq!(history(&f, command.attachment().peer_id()).await?, updated);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_fixture_revoked_peer_grants_block_evidence_and_settlement_before_storage() -> TestResult {
+    let f = Fixture::new().await?;
+    let accepted = accepted(&f, "base_evidence_grants").await?;
+    let recipient_actor = principal(&f.bob)?;
+    let intake = IntakeMessage::new(accepted.evidence.clone(), f.clock.now());
+    let disposition = DisposeMessage::new(
+        accepted.evidence.clone(),
+        TerminalDisposition::Unavailable,
+        f.clock.now(),
+    );
+    for peer in [&accepted.sender, &accepted.recipient] {
+        let owner = f
+            .policy
+            .grants
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .remove(peer.as_str())
+            .ok_or(PeerPortError::Integrity)?;
+        denied_before_storage!(&f, &intake, recipient_actor, &f.policy);
+        denied_before_storage!(&f, &disposition, recipient_actor, &f.policy);
+        assert!(
+            f.policy
+                .grants
+                .lock()
+                .map_err(|_| PeerPortError::Unavailable)?
+                .insert(peer.as_str().to_owned(), owner)
+                .is_none()
+        );
+    }
+    CommandExecution::new(&f.store, &intake)
+        .with_principal(recipient_actor.clone())
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await?;
+    let intaken = history(&f, &accepted.recipient).await?;
+    assert_eq!(intaken.inbox.len(), 1);
+    assert_eq!(intaken.inbox[0].message.as_option(), Some(accepted.evidence.metadata()));
+    assert!(intaken.dispositions.is_empty());
+    CommandExecution::new(&f.store, &disposition)
+        .with_principal(recipient_actor)
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await?;
+    let disposed = history(&f, &accepted.recipient).await?;
+    assert_eq!(disposed.dispositions.len(), 1);
+    assert_eq!(disposed.inbox[0].disposition.as_option(), disposed.dispositions.first());
+    assert_eq!(
+        disposed.dispositions[0].outcome.and_then(|value| value.as_known()),
+        Some(proto::PreparationOutcome::PREPARATION_OUTCOME_UNAVAILABLE)
+    );
+    let receipt = AuthoritativeReceipt::from_recipient_history(&disposed, &accepted.message)?;
+    let settlement = SettleMessage::new(accepted.sender.clone(), receipt);
+    let sender_actor = principal(&f.alice)?;
+    let owner = f
+        .policy
+        .grants
+        .lock()
+        .map_err(|_| PeerPortError::Unavailable)?
+        .remove(accepted.sender.as_str())
+        .ok_or(PeerPortError::Integrity)?;
+    denied_before_storage!(&f, &settlement, sender_actor, &f.policy);
+    assert!(
+        f.policy
+            .grants
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .insert(accepted.sender.as_str().to_owned(), owner)
+            .is_none()
+    );
+    let before = storage_calls(&f);
+    CommandExecution::new(&f.store, &settlement)
+        .with_principal(sender_actor)
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await?;
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before.1 + 1);
+    let settled = history(&f, &accepted.sender).await?;
+    assert_eq!(settled.outbox.len(), 1);
+    assert_eq!(settled.outbox[0].settlement.as_option(), disposed.dispositions.first());
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_fixture_send_metadata_grant_rejects_collaboration_and_revoked_recipient_before_storage() -> TestResult {
+    let f = Fixture::new().await?;
+    let sender = PeerId::parse(f.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let recipient = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let scope = PeerAccess::new(f.alice.clone(), sender.clone(), PeerOperation::Send);
+    let sealed = f
+        .content
+        .seal(&scope, &MessageText::new("real fixture body".into())?)
+        .await?;
+    let actor = principal(&f.alice)?;
+    let denied = SendMessage::new(
+        f.alice.clone(),
+        reference(&f.a)?,
+        IdempotencyKey::new("base_metadata_grant")?,
+        MessageId::new("base_metadata_message")?,
+        recipient.clone(),
+        CollaborationRef::new("other")?,
+        sealed.content().clone(),
+        None,
+        f.clock.now(),
+    );
+    denied_before_storage!(&f, &denied, actor, &f.policy);
+    let allowed = SendMessage::new(
+        f.alice.clone(),
+        reference(&f.a)?,
+        IdempotencyKey::new("base_metadata_grant")?,
+        MessageId::new("base_metadata_message")?,
+        recipient.clone(),
+        CollaborationRef::new("shared")?,
+        sealed.content().clone(),
+        None,
+        f.clock.now(),
+    );
+    let owner = f
+        .policy
+        .grants
+        .lock()
+        .map_err(|_| PeerPortError::Unavailable)?
+        .remove(recipient.as_str())
+        .ok_or(PeerPortError::Integrity)?;
+    denied_before_storage!(&f, &allowed, actor, &f.policy);
+    assert!(
+        f.policy
+            .grants
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .insert(recipient.as_str().to_owned(), owner)
+            .is_none()
+    );
+    let before = storage_calls(&f);
+    CommandExecution::new(&f.store, &allowed)
+        .with_principal(actor)
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await?;
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before.1 + 1);
+    let persisted = history(&f, &sender).await?;
+    assert_eq!(persisted.outbox.len(), 1);
+    let metadata = persisted.outbox[0]
+        .message
+        .as_option()
+        .ok_or(PeerPortError::Integrity)?;
+    assert_eq!(metadata.message_id.as_deref(), Some("base_metadata_message"));
+    assert_eq!(metadata.recipient_peer_id.as_deref(), Some(recipient.as_str()));
+    assert_eq!(metadata.collaboration_ref.as_deref(), Some("shared"));
+    assert_eq!(
+        metadata.content_ref.as_option(),
+        Some(&sealed.content().reference().to_claim_check())
+    );
+    assert_eq!(metadata.content_size_bytes, Some(sealed.content().size()));
+    assert_eq!(
+        metadata.semantic_fingerprint.value.as_deref(),
+        Some(sealed.content().semantic_fingerprint())
+    );
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_fixture_batch_id_grants_reject_preparation_and_ack_before_storage() -> TestResult {
+    let f = Fixture::new().await?;
+    let accepted = accepted(&f, "base_batch_grants").await?;
+    let actor = principal(&f.bob)?;
+    CommandExecution::new(&f.store, &IntakeMessage::new(accepted.evidence.clone(), f.clock.now()))
+        .with_principal(actor.clone())
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await?;
+    let batch = BatchId::new("base_permitted_batch")?;
+    let draft = proto::PeerBatch {
+        batch_id: Some(batch.as_str().to_owned()),
+        message_ids: vec![accepted.message.as_str().to_owned()],
+        prepared_at: trogonai_proto::convert::timestamp_from_datetime(&f.clock.now()).into(),
+        ..Default::default()
+    };
+    let rendered = trogon_peer_context::PeerContext::render(
+        &draft,
+        &[proto::PreparedMessage {
+            metadata: accepted.evidence.metadata().clone().into(),
+            text: Some("payload".into()),
+        }],
+    )?;
+    let plan = TrustedBatchPlan::from_renderer(vec![accepted.message.clone()], rendered.as_str().len())?;
+    let denied = PrepareBatch::new(
+        f.bob.clone(),
+        reference(&f.b)?,
+        BatchId::new("denied")?,
+        plan.clone(),
+        f.clock.now(),
+    );
+    denied_before_storage!(&f, &denied, actor, &f.policy);
+    let allowed = PrepareBatch::new(f.bob.clone(), reference(&f.b)?, batch.clone(), plan, f.clock.now());
+    CommandExecution::new(&f.store, &allowed)
+        .with_principal(actor.clone())
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await?;
+    let prepared = history(&f, &accepted.recipient).await?;
+    assert_eq!(prepared.batches.len(), 1);
+    assert_eq!(prepared.batches[0].batch_id.as_deref(), Some(batch.as_str()));
+    assert_eq!(
+        prepared.batches[0].message_ids,
+        vec![accepted.message.as_str().to_owned()]
+    );
+    assert!(!prepared.batches[0].acknowledged_at.is_set());
+    let denied = AcknowledgeBatch::new(f.bob.clone(), reference(&f.b)?, BatchId::new("denied")?, f.clock.now());
+    denied_before_storage!(&f, &denied, actor, &f.policy);
+    let allowed = AcknowledgeBatch::new(f.bob.clone(), reference(&f.b)?, batch, f.clock.now());
+    let before = storage_calls(&f);
+    CommandExecution::new(&f.store, &allowed)
+        .with_principal(actor)
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await?;
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before.1 + 1);
+    let acknowledged = history(&f, &accepted.recipient).await?;
+    assert!(acknowledged.batches[0].acknowledged_at.is_set());
+    assert_eq!(acknowledged.batches[0].message_ids, prepared.batches[0].message_ids);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
     Ok(())
 }

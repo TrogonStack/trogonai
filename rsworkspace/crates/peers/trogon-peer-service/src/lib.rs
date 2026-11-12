@@ -57,3 +57,6 @@ mod reconciliation;
 pub use prompt_id::PromptId;
 mod acknowledgment;
 mod roster;
+
+#[cfg(feature = "test-support")]
+pub mod test_support;
