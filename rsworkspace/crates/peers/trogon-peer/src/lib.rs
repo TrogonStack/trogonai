@@ -29,3 +29,5 @@ pub use commands::{AcknowledgeBatch, SettleMessage};
 pub use commands::domain::ContentSemanticFingerprint;
 
 pub use commands::{EnrollmentFacts, PeerHistory};
+
+pub use commands::IntakenMessage;

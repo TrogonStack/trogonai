@@ -5,8 +5,12 @@ use trogonai_proto::peers::v1alpha1 as proto;
 pub(super) fn value<T>(result: Result<T, PeerValueError>, field: &'static str) -> Result<T, EvolveError> {
     result.map_err(|source| EvolveError::InvalidValue { field, source })
 }
+
 pub(super) struct ParsedMetadata<'a> {
     pub(super) message: &'a proto::MessageMetadata,
+    pub(super) message_id: MessageId,
+    pub(super) accepted_at: chrono::DateTime<chrono::Utc>,
+    pub(super) expires_at: chrono::DateTime<chrono::Utc>,
     pub(super) sender: PeerId,
     pub(super) recipient: PeerId,
     pub(super) collaboration: CollaborationRef,
@@ -19,7 +23,7 @@ pub(super) struct ParsedOutbox<'a> {
 }
 
 pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<ParsedMetadata<'_>, EvolveError> {
-    value(
+    let message_id = value(
         MessageId::new(state_values::required(&message.message_id, "message_id")?),
         "message_id",
     )?;
@@ -65,6 +69,9 @@ pub(super) fn metadata(message: &proto::MessageMetadata) -> Result<ParsedMetadat
     }
     Ok(ParsedMetadata {
         message,
+        message_id,
+        accepted_at: accepted,
+        expires_at: expires,
         sender,
         recipient,
         collaboration,
@@ -104,6 +111,7 @@ pub(super) fn semantic_digest(message: &proto::MessageMetadata) -> Result<Vec<u8
     }
     Ok(hash.finalize().to_vec())
 }
+
 pub(super) fn outbox_entry(entry: &proto::OutboxEntry) -> Result<ParsedOutbox<'_>, EvolveError> {
     let key = value(
         IdempotencyKey::new(state_values::required(&entry.idempotency_key, "idempotency_key")?),
@@ -122,6 +130,7 @@ pub(super) fn outbox_entry(entry: &proto::OutboxEntry) -> Result<ParsedOutbox<'_
     }
     Ok(ParsedOutbox { key, metadata })
 }
+
 pub(super) fn validate_receipt(receipt: &proto::RecipientReceipt) -> Result<proto::PreparationOutcome, EvolveError> {
     value(
         MessageId::new(state_values::required(&receipt.message_id, "receipt.message_id")?),
@@ -156,6 +165,7 @@ pub(super) fn validate_receipt(receipt: &proto::RecipientReceipt) -> Result<prot
     }
     Ok(outcome)
 }
+
 pub(super) fn receipt_matches_message(
     receipt: &proto::RecipientReceipt,
     message: &proto::MessageMetadata,

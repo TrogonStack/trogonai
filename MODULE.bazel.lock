@@ -761,7 +761,7 @@
           "FILE:@@//rsworkspace/crates/peers/trogon-peer/Cargo.toml 4ddabef3cf12967bb1eb87b88d3760687a4955e1bd84c51e0a6cb88ce9a0e1b5",
           "FILE:@@//rsworkspace/crates/peers/trogon-peer-context/Cargo.toml 356ea27de298d3c39bf82e4faa2461de47107807f0c50df5f23fe08d633b3b12",
           "FILE:@@//rsworkspace/crates/peers/trogon-peer-nats/Cargo.toml fe81e8473c06869f29c12e7ad980177b355e11523c8b2068b83d774e599c597c",
-          "FILE:@@//rsworkspace/crates/peers/trogon-peer-service/Cargo.toml 992cc549bf4922e7d22b22b2de56f3e8b71f8c2dddf7be8ac875218bfa81f4a7",
+          "FILE:@@//rsworkspace/crates/peers/trogon-peer-service/Cargo.toml 1c565b71cb8524dcc54c955d9ecca3d596d4a26d5b1efdf283eb6e0eab205ab8",
           "FILE:@@//rsworkspace/crates/platform/trogon-claude-agent-sdk/Cargo.toml 3273d842d78c7311ad332cb51e31c1aabbe5e3bbb07a18450f50a584dc7d372a",
           "FILE:@@//rsworkspace/crates/platform/trogon-config-value/Cargo.toml 9bde2dc8ab8786ab511791deed08f56c24f83a4069797eb765d43408f61d2289",
           "FILE:@@//rsworkspace/crates/platform/trogon-egress-proxy/Cargo.toml 3d0fb8bac50c62e443818c41b9e19de9c8ca6b6cd257720119ae4a3362ee2f41",

@@ -1,4 +1,7 @@
-use super::{AcceptedMessage, accepted_outbox::AcceptedOutbox, domain::*, evolve_error::EvolveError, state_values};
+use super::{
+    AcceptedMessage, IntakenMessage, accepted_outbox::AcceptedOutbox, domain::*, evolve_error::EvolveError,
+    inbox_replacement::InboxReplacement, state_values,
+};
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
 
 use super::message_values::value;
@@ -129,7 +132,11 @@ pub(super) fn make_receipt(
     validate_receipt(&receipt)?;
     Ok(receipt)
 }
-pub(super) fn fold_intake(state: &mut PeerState, event: &proto::PeerMessageIntakeRecorded) -> Result<(), EvolveError> {
+
+pub(super) fn fold_intake(
+    state: &mut PeerState,
+    event: &proto::PeerMessageIntakeRecorded,
+) -> Result<IntakenMessage, EvolveError> {
     let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
     state_values::parse_enrollment(enrollment)?;
     let entry = event
@@ -140,7 +147,7 @@ pub(super) fn fold_intake(state: &mut PeerState, event: &proto::PeerMessageIntak
         .message
         .as_option()
         .ok_or(EvolveError::MissingField { field: "inbox.message" })?;
-    metadata(message)?;
+    let parsed = metadata(message)?;
     if message.recipient_peer_id != enrollment.peer_id
         || message.collaboration_ref != enrollment.collaboration_ref
         || entry.disposition.is_set()
@@ -159,11 +166,22 @@ pub(super) fn fold_intake(state: &mut PeerState, event: &proto::PeerMessageIntak
         .intake_ordinal
         .and_then(|n| n.checked_add(1))
         .ok_or(EvolveError::InvalidMessageTransition)?;
+    let intaken = IntakenMessage {
+        entry: entry.clone(),
+        metadata: parsed.message.clone(),
+        message_id: parsed.message_id,
+        content: parsed.content,
+        accepted_at: parsed.accepted_at,
+        expires_at: parsed.expires_at,
+    };
     state.inbox.push(entry.clone());
     state.next_intake_ordinal = Some(next);
-    Ok(())
+    Ok(intaken)
 }
-pub(super) fn fold_receipt(state: &mut PeerState, receipt: &proto::RecipientReceipt) -> Result<(), EvolveError> {
+pub(super) fn fold_receipt(
+    state: &mut PeerState,
+    receipt: &proto::RecipientReceipt,
+) -> Result<Vec<InboxReplacement>, EvolveError> {
     let outcome = validate_receipt(receipt)?;
     let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
     state_values::parse_enrollment(enrollment)?;
@@ -176,10 +194,12 @@ pub(super) fn fold_receipt(state: &mut PeerState, receipt: &proto::RecipientRece
     {
         return Err(EvolveError::InvalidMessageTransition);
     }
-    if let Some(entry) = state
+    let mut replacements = Vec::new();
+    if let Some((slot, entry)) = state
         .inbox
         .iter_mut()
-        .find(|e| e.message.message_id == receipt.message_id)
+        .enumerate()
+        .find(|(_, e)| e.message.message_id == receipt.message_id)
     {
         if entry.disposition.is_set() {
             return Err(EvolveError::InvalidMessageTransition);
@@ -194,11 +214,18 @@ pub(super) fn fold_receipt(state: &mut PeerState, receipt: &proto::RecipientRece
             return Err(EvolveError::InvalidMessageTransition);
         }
         entry.disposition = buffa::MessageField::some(receipt.clone());
+        replacements.push(InboxReplacement {
+            slot,
+            entry: entry.clone(),
+        });
     }
     state.dispositions.push(receipt.clone());
-    Ok(())
+    Ok(replacements)
 }
-pub(super) fn fold_disposed(state: &mut PeerState, event: &proto::PeerMessageDisposed) -> Result<(), EvolveError> {
+pub(super) fn fold_disposed(
+    state: &mut PeerState,
+    event: &proto::PeerMessageDisposed,
+) -> Result<Vec<InboxReplacement>, EvolveError> {
     let receipt = event
         .receipt
         .as_option()
@@ -248,7 +275,10 @@ pub(super) fn valid_selection(eligible: &[&proto::InboxEntry], ids: &[String]) -
             .zip(eligible)
             .all(|(id, entry)| entry.message.message_id.as_ref() == Some(id))
 }
-pub(super) fn fold_prepared(state: &mut PeerState, event: &proto::PeerBatchPrepared) -> Result<(), EvolveError> {
+pub(super) fn fold_prepared(
+    state: &mut PeerState,
+    event: &proto::PeerBatchPrepared,
+) -> Result<Vec<InboxReplacement>, EvolveError> {
     let batch = event
         .batch
         .as_option()
@@ -280,6 +310,7 @@ pub(super) fn fold_prepared(state: &mut PeerState, event: &proto::PeerBatchPrepa
     if !valid_selection(&eligible_inbox(state, now)?, &batch.message_ids) {
         return Err(EvolveError::InvalidMessageTransition);
     }
+    let mut replacements = Vec::new();
     for (id, receipt) in batch.message_ids.iter().zip(&event.receipts) {
         if receipt.message_id.as_ref() != Some(id)
             || receipt.batch_id != batch.batch_id
@@ -288,10 +319,10 @@ pub(super) fn fold_prepared(state: &mut PeerState, event: &proto::PeerBatchPrepa
         {
             return Err(EvolveError::InvalidMessageTransition);
         }
-        fold_receipt(state, receipt)?;
+        replacements.extend(fold_receipt(state, receipt)?);
     }
     state.batches.push(batch.clone());
-    Ok(())
+    Ok(replacements)
 }
 
 pub(super) fn fold_acknowledged(

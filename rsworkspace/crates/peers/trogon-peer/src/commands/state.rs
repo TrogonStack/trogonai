@@ -25,6 +25,8 @@ pub(super) struct Transition {
 pub(super) enum ProjectionUpdate {
     Enrolled(super::EnrollmentFacts),
     Accepted(Box<super::accepted_outbox::AcceptedOutbox>),
+    Intaken(Box<super::IntakenMessage>),
+    InboxReplacements(Vec<super::inbox_replacement::InboxReplacement>),
 }
 
 pub(super) fn transition(mut state: PeerState, event: &proto::PeerEvent) -> Result<Transition, EvolveError> {
@@ -153,9 +155,21 @@ pub(super) fn transition(mut state: PeerState, event: &proto::PeerEvent) -> Resu
                 super::message_rules::fold_accepted(&mut state, event)?,
             )));
         }
-        PeerEventCase::PeerMessageIntakeRecorded(event) => super::message_rules::fold_intake(&mut state, event)?,
-        PeerEventCase::PeerMessageDisposed(event) => super::message_rules::fold_disposed(&mut state, event)?,
-        PeerEventCase::PeerBatchPrepared(event) => super::message_rules::fold_prepared(&mut state, event)?,
+        PeerEventCase::PeerMessageIntakeRecorded(event) => {
+            update = Some(ProjectionUpdate::Intaken(Box::new(super::message_rules::fold_intake(
+                &mut state, event,
+            )?)));
+        }
+        PeerEventCase::PeerMessageDisposed(event) => {
+            update = Some(ProjectionUpdate::InboxReplacements(
+                super::message_rules::fold_disposed(&mut state, event)?,
+            ));
+        }
+        PeerEventCase::PeerBatchPrepared(event) => {
+            update = Some(ProjectionUpdate::InboxReplacements(
+                super::message_rules::fold_prepared(&mut state, event)?,
+            ));
+        }
         PeerEventCase::PeerBatchAcknowledged(event) => super::message_rules::fold_acknowledged(&mut state, event)?,
         PeerEventCase::PeerMessageSettled(event) => super::message_rules::fold_settled(&mut state, event)?,
     }

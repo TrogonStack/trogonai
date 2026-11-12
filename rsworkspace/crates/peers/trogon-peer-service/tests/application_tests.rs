@@ -36,13 +36,12 @@ use trogon_peer_service::PeerApplication;
 use trogon_peer_service::PeerApplicationError;
 use trogon_peer_service::PeerClock;
 use trogon_peer_service::PeerOperation;
-use trogon_peer_service::PeerPortError;
 use trogon_peer_service::PeerService;
 use trogon_peer_service::PreparedPresentation;
 use trogon_peer_service::PresentationInsert;
 use trogon_peer_service::PresentationKey;
 use trogon_peer_service::PresentationRead;
-use trogon_peer_service::WorkLimit;
+use trogon_peer_service::{PeerPortError, WorkLimit};
 use trogonai_proto::peers::PeerEventCase;
 mod support;
 use support::*;
@@ -774,6 +773,79 @@ async fn explicit_reconciliation_intakes_from_trusted_history_without_settling_e
     Ok(())
 }
 
+#[tokio::test]
+async fn prepared_assignment_replays_cached_exact_payload_and_frame_over_reconstruction() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("key", "<untrusted> & \"quoted\"").await?;
+    let first = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert!(first.batch.is_set());
+    assert_eq!(first.messages[0].text.as_deref(), Some("<untrusted> & \"quoted\""));
+    let cached = f
+        .cache
+        .records
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .values()
+        .next()
+        .cloned()
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    assert!(cached.frame().contains("\\u003c"));
+    f.content
+        .bodies
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .clear();
+    let replay = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(first, replay);
+    Ok(())
+}
+
+#[tokio::test]
+async fn cache_failure_does_not_commit_preparation_and_frame_corruption_fails_closed() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("key", "payload").await?;
+    let before = f.store.appends.load(Ordering::SeqCst);
+    f.cache.fail_insert.store(true, Ordering::SeqCst);
+    assert!(f.app().prepare_batch(&f.bob, f.prepare()).await.is_err());
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before);
+    f.cache.fail_insert.store(false, Ordering::SeqCst);
+    let first = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    {
+        let mut records = f
+            .cache
+            .records
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
+        for record in records.values_mut() {
+            *record = trogon_peer_service::PreparedPresentation::from_port(
+                record.batch().clone(),
+                record.messages().to_vec(),
+                "incompatible frame".into(),
+            );
+        }
+    }
+    let unavailable = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(unavailable.batch, first.batch);
+    assert!(unavailable.messages.is_empty());
+    assert_eq!(
+        unavailable.content_availability.and_then(|v| v.as_known()),
+        Some(proto::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE)
+    );
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), before + 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn escaped_rendering_selects_fitting_oldest_prefix_before_preparation() -> TestResult {
+    let f = Fixture::new().await?;
+    let first = f.intake("first", &"<".repeat(900)).await?;
+    f.intake("second", &"<".repeat(900)).await?;
+    let prepared = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(prepared.messages.len(), 1);
+    assert_eq!(prepared.messages[0].metadata, first.message);
+    Ok(())
+}
+
 struct ExpireDuringContentOpen {
     inner: DisposableContentFixture,
     clock: ClockFixture,
@@ -1169,7 +1241,7 @@ async fn operations_without_required_fields_return_typed_errors_before_ports() -
     ));
     assert!(matches!(
         app.prepare_batch(&f.bob, Default::default()).await,
-        Err(PeerApplicationError::NotImplemented)
+        Err(PeerApplicationError::Input)
     ));
     assert!(matches!(
         app.acknowledge_batch(&f.bob, Default::default()).await,
@@ -1312,6 +1384,608 @@ async fn a_granted_recipient_in_another_collaboration_is_rejected_before_sealing
     ));
     assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    Ok(())
+}
+
+#[tokio::test]
+async fn preparation_accepts_absent_and_empty_optional_prompt_correlation() -> TestResult {
+    for prompt in [None, Some(String::new())] {
+        let f = Fixture::new().await?;
+        f.intake("optional-prompt", "retained context").await?;
+        let mut request = f.prepare();
+        request.prompt_id = prompt;
+        let prepared = f.app().prepare_batch(&f.bob, request.clone()).await?;
+        assert_eq!(prepared.messages.len(), 1);
+        assert_eq!(prepared.messages[0].text.as_deref(), Some("retained context"));
+        assert_eq!(f.app().prepare_batch(&f.bob, request).await?, prepared);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn malformed_prompt_correlation_uses_identity_errors_before_port_access() -> TestResult {
+    let f = Fixture::new().await?;
+    let mut request = f.prepare();
+    request.prompt_id = Some("prompt\ninvalid".into());
+    let reads = f.store.reads.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app().prepare_batch(&f.bob, request).await,
+        Err(trogon_peer_service::PeerApplicationError::Value(
+            trogon_peer::PeerValueError::InvalidCharacter
+        ))
+    ));
+    assert_eq!(f.store.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    assert!(matches!(
+        trogon_peer_service::PromptId::new(String::new()),
+        Err(trogon_peer::PeerValueError::Empty)
+    ));
+    assert!(matches!(
+        trogon_peer_service::PromptId::new("x".repeat(129)),
+        Err(trogon_peer::PeerValueError::TooLong { maximum: 128 })
+    ));
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum WinningPresentationKey {
+    Candidate,
+    Distinct,
+}
+
+struct ConcurrentPreparationCache {
+    inner: PresentationFixture,
+    store: StoreFixture,
+    policy: PolicyFixture,
+    owner: trogon_peer::TrustedPeerOwner,
+    attachment: trogon_peer::AttachmentRef,
+    mode: WinningPresentationKey,
+}
+
+impl trogon_peer_service::PresentationRead for ConcurrentPreparationCache {
+    async fn read(
+        &self,
+        key: &trogon_peer_service::PresentationKey,
+    ) -> Result<Option<trogon_peer_service::PreparedPresentation>, trogon_peer_service::PeerPortError> {
+        trogon_peer_service::PresentationRead::read(&self.inner, key).await
+    }
+}
+
+impl trogon_peer_service::PresentationOrphan for ConcurrentPreparationCache {
+    async fn orphan(
+        &self,
+        key: &trogon_peer_service::PresentationKey,
+    ) -> Result<(), trogon_peer_service::PeerPortError> {
+        trogon_peer_service::PresentationOrphan::orphan(&self.inner, key).await?;
+        self.inner
+            .records
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+            .remove(&PresentationFixture::key(key));
+        Ok(())
+    }
+}
+
+impl trogon_peer_service::PresentationInsert for ConcurrentPreparationCache {
+    async fn insert(
+        &self,
+        key: &trogon_peer_service::PresentationKey,
+        record: &trogon_peer_service::PreparedPresentation,
+    ) -> Result<(), trogon_peer_service::PeerPortError> {
+        self.inner.insert(key, record).await?;
+        let batch_id = match self.mode {
+            WinningPresentationKey::Candidate => key.batch().clone(),
+            WinningPresentationKey::Distinct => {
+                trogon_peer::BatchId::new("competing-winner").map_err(|_| PeerPortError::Integrity)?
+            }
+        };
+        let mut batch = record.batch().clone();
+        batch.batch_id = Some(batch_id.as_str().to_owned());
+        let frame = trogon_peer_context::PeerContext::render(&batch, record.messages())
+            .map_err(|_| PeerPortError::Integrity)?;
+        let winning_key =
+            trogon_peer_service::PresentationKey::new(key.tenant().clone(), key.peer().clone(), batch_id.clone());
+        let winning_record = trogon_peer_service::PreparedPresentation::from_port(
+            batch.clone(),
+            record.messages().to_vec(),
+            frame.as_str().to_owned(),
+        );
+        self.inner.insert(&winning_key, &winning_record).await?;
+        let plan = trogon_peer::TrustedBatchPlan::from_renderer(
+            batch
+                .message_ids
+                .iter()
+                .cloned()
+                .map(MessageId::new)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| PeerPortError::Integrity)?,
+            frame.as_str().len(),
+        )
+        .map_err(|_| PeerPortError::Integrity)?;
+        let now = trogonai_proto::convert::datetime_from_timestamp(
+            batch.prepared_at.as_option().ok_or(PeerPortError::Integrity)?,
+        )
+        .map_err(|_| PeerPortError::Integrity)?;
+        let command = trogon_peer::PrepareBatch::new(self.owner.clone(), self.attachment.clone(), batch_id, plan, now);
+        let principal = trogon_decider_runtime::CommandPrincipal::new(
+            trogon_decider_runtime::PrincipalKind::Agent,
+            trogon_decider_runtime::PrincipalId::new(self.owner.caller().as_str())
+                .map_err(|_| PeerPortError::Integrity)?,
+        );
+        trogon_decider_runtime::CommandExecution::new(&self.store, &command)
+            .with_principal(principal)
+            .with_authorizer(&self.policy)
+            .with_replay_limit(
+                trogon_decider_runtime::ReplayLimit::try_new(4096).map_err(|_| PeerPortError::Integrity)?,
+            )
+            .execute()
+            .await
+            .map_err(|_| PeerPortError::Integrity)?;
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn preparation_race_retains_the_durable_winning_presentation() -> TestResult {
+    for mode in [WinningPresentationKey::Candidate, WinningPresentationKey::Distinct] {
+        let f = Fixture::new().await?;
+        f.intake("cache-race", "winning context").await?;
+        let attachment = trogon_peer::AttachmentRef::new(
+            PeerId::parse(
+                f.b.peer_id
+                    .clone()
+                    .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+            )?,
+            trogon_peer::ConnectorId::new(
+                f.b.connector_id
+                    .clone()
+                    .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+            )?,
+            f.b.generation.ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+        )?;
+        let cache = ConcurrentPreparationCache {
+            inner: f.cache.clone(),
+            store: f.store.clone(),
+            policy: f.policy.clone(),
+            owner: f.bob.clone(),
+            attachment,
+            mode,
+        };
+        let app = trogon_peer_service::PeerApplication::new(
+            f.store.clone(),
+            f.policy.clone(),
+            f.clock.clone(),
+            f.content.clone(),
+            cache,
+            f.ids.clone(),
+            f.catalog.clone(),
+        );
+
+        let prepared = app.prepare_batch(&f.bob, f.prepare()).await?;
+        assert_eq!(
+            prepared.messages.len(),
+            1,
+            "the real winning command's cache must survive a competing preparation"
+        );
+        assert_eq!(prepared.messages[0].text.as_deref(), Some("winning context"));
+        let batch_id = prepared
+            .batch
+            .batch_id
+            .as_deref()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+        let key = format!(
+            "{}:{}:{}",
+            f.bob.tenant().as_str(),
+            f.b.peer_id
+                .as_deref()
+                .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+            batch_id
+        );
+        {
+            let orphans = f
+                .cache
+                .orphans
+                .lock()
+                .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
+            assert!(!orphans.contains(&key), "a durable winning key cannot be orphaned");
+            assert_eq!(
+                orphans.len(),
+                match mode {
+                    WinningPresentationKey::Candidate => 0,
+                    WinningPresentationKey::Distinct => 1,
+                }
+            );
+        }
+        assert_eq!(f.app().prepare_batch(&f.bob, f.prepare()).await?, prepared);
+    }
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+enum LostPreparationReplyError {
+    #[error("append committed but its response was lost")]
+    Committed,
+    #[error("fixture append failed")]
+    Inner(#[source] <StoreFixture as trogon_decider_runtime::StreamAppend<PeerId>>::Error),
+}
+
+struct CommitThenLoseReplyStore {
+    inner: StoreFixture,
+    lose_reply: std::sync::atomic::AtomicBool,
+}
+
+impl trogon_peer_service::ScopedPeerStore for CommitThenLoseReplyStore {
+    fn tenant(&self) -> &trogon_peer::TenantId {
+        &self.inner.tenant
+    }
+}
+
+impl trogon_decider_runtime::StreamRead<PeerId> for CommitThenLoseReplyStore {
+    type Error = <StoreFixture as trogon_decider_runtime::StreamRead<PeerId>>::Error;
+    async fn read_stream(
+        &self,
+        request: trogon_decider_runtime::ReadStreamRequest<'_, PeerId>,
+    ) -> Result<trogon_decider_runtime::ReadStreamResponse, Self::Error> {
+        trogon_decider_runtime::StreamRead::read_stream(&self.inner, request).await
+    }
+    async fn read_stream_bounded(
+        &self,
+        request: trogon_decider_runtime::ReadStreamRequest<'_, PeerId>,
+        maximum: u64,
+    ) -> Result<trogon_decider_runtime::ReadStreamResponse, Self::Error> {
+        trogon_decider_runtime::StreamRead::read_stream_bounded(&self.inner, request, maximum).await
+    }
+}
+
+impl trogon_decider_runtime::StreamAppend<PeerId> for CommitThenLoseReplyStore {
+    type Error = LostPreparationReplyError;
+    async fn append_stream(
+        &self,
+        request: trogon_decider_runtime::AppendStreamRequest<'_, PeerId>,
+    ) -> Result<trogon_decider_runtime::AppendStreamResponse, Self::Error> {
+        let result = trogon_decider_runtime::StreamAppend::append_stream(&self.inner, request)
+            .await
+            .map_err(LostPreparationReplyError::Inner)?;
+        if self.lose_reply.swap(false, Ordering::SeqCst) {
+            return Err(LostPreparationReplyError::Committed);
+        }
+        Ok(result)
+    }
+    fn classify_append_failure(&self, error: &Self::Error) -> trogon_decider_runtime::AppendFailure {
+        match error {
+            LostPreparationReplyError::Committed => trogon_decider_runtime::AppendFailure::Fatal,
+            LostPreparationReplyError::Inner(error) => {
+                trogon_decider_runtime::StreamAppend::classify_append_failure(&self.inner, error)
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn uncertain_preparation_append_retains_context_for_durable_retry() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("lost-prepare-reply", "durably prepared context").await?;
+    let app = trogon_peer_service::PeerApplication::new(
+        CommitThenLoseReplyStore {
+            inner: f.store.clone(),
+            lose_reply: std::sync::atomic::AtomicBool::new(true),
+        },
+        f.policy.clone(),
+        f.clock.clone(),
+        f.content.clone(),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    assert!(
+        app.prepare_batch(&f.bob, f.prepare()).await.is_err(),
+        "lost reply must remain an uncertain operation error"
+    );
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+            .is_empty(),
+        "an append error cannot establish that the durable candidate lost"
+    );
+    let replay = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(replay.messages.len(), 1);
+    assert_eq!(replay.messages[0].text.as_deref(), Some("durably prepared context"));
+    let before = f.store.appends.load(Ordering::SeqCst);
+    assert_eq!(f.app().prepare_batch(&f.bob, f.prepare()).await?, replay);
+    assert_eq!(
+        f.store.appends.load(Ordering::SeqCst),
+        before,
+        "read retry must not append a second preparation"
+    );
+    Ok(())
+}
+
+#[test]
+fn prompt_correlation_preserves_a_valid_128_byte_host_identity() -> TestResult {
+    let correlation = "é".repeat(64);
+    assert_eq!(
+        trogon_peer_service::PromptId::new(correlation.clone())?.as_str(),
+        correlation
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn missing_oldest_preparation_content_leaves_the_assignment_uncommitted() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("oldest", "first").await?;
+    f.intake("later", "second").await?;
+    f.content
+        .bodies
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .clear();
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let result = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert!(!result.batch.is_set());
+    assert!(result.messages.is_empty());
+    assert_eq!(
+        result.content_availability.and_then(|v| v.as_known()),
+        Some(proto::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE)
+    );
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn missing_later_content_commits_only_the_renderable_oldest_prefix() -> TestResult {
+    let f = Fixture::new().await?;
+    let first = f.intake("oldest", "first").await?;
+    let second = f.intake("later", "second").await?;
+    let reference = second
+        .message
+        .content_ref
+        .as_option()
+        .and_then(|claim| claim.storage_ref.as_option())
+        .and_then(|locator| locator.value.as_deref())
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    let saved = f
+        .content
+        .bodies
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .remove(reference)
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let prepared = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(prepared.messages.len(), 1);
+    assert_eq!(prepared.messages[0].metadata, first.message);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
+    f.content
+        .bodies
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .insert(reference.to_owned(), saved);
+    assert_eq!(
+        f.app().prepare_batch(&f.bob, f.prepare()).await?,
+        prepared,
+        "restored later content cannot rewrite the durable assignment"
+    );
+    Ok(())
+}
+
+struct ReturnedOpenText(trogon_peer_service::MessageText);
+
+impl trogon_peer_service::ContentOpen for ReturnedOpenText {
+    async fn open(
+        &self,
+        _scope: &trogon_peer_service::PeerAccess,
+        _binding: &trogon_peer_service::ContentBinding,
+    ) -> Result<Option<trogon_peer_service::MessageText>, trogon_peer_service::PeerPortError> {
+        Ok(Some(self.0.clone()))
+    }
+}
+
+#[tokio::test]
+async fn incorrect_or_unrenderable_opened_content_cannot_commit_a_preparation() -> TestResult {
+    for (accepted, returned, expect_context) in [
+        ("payload".to_owned(), "short".to_owned(), false),
+        ("a".repeat(2048), "<".repeat(2048), true),
+    ] {
+        let f = Fixture::new().await?;
+        f.intake("untrusted-open", &accepted).await?;
+        let app = trogon_peer_service::PeerApplication::new(
+            f.store.clone(),
+            f.policy.clone(),
+            f.clock.clone(),
+            ReturnedOpenText(trogon_peer_service::MessageText::new(returned)?),
+            f.cache.clone(),
+            f.ids.clone(),
+            f.catalog.clone(),
+        );
+        let appends = f.store.appends.load(Ordering::SeqCst);
+        let result = app.prepare_batch(&f.bob, f.prepare()).await;
+        if expect_context {
+            assert!(matches!(
+                result,
+                Err(trogon_peer_service::PeerApplicationError::Context(_))
+            ));
+        } else {
+            assert!(matches!(result, Err(trogon_peer_service::PeerApplicationError::Scope)));
+        }
+        assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+        assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum PresentationReadFailure {
+    Unavailable,
+    Integrity,
+}
+
+struct FailingPresentationRead {
+    inner: PresentationFixture,
+    failure: PresentationReadFailure,
+}
+
+impl trogon_peer_service::PresentationRead for FailingPresentationRead {
+    async fn read(
+        &self,
+        _key: &trogon_peer_service::PresentationKey,
+    ) -> Result<Option<trogon_peer_service::PreparedPresentation>, trogon_peer_service::PeerPortError> {
+        match self.failure {
+            PresentationReadFailure::Unavailable => Err(trogon_peer_service::PeerPortError::Unavailable),
+            PresentationReadFailure::Integrity => Err(trogon_peer_service::PeerPortError::Integrity),
+        }
+    }
+}
+
+impl trogon_peer_service::PresentationInsert for FailingPresentationRead {
+    async fn insert(
+        &self,
+        key: &trogon_peer_service::PresentationKey,
+        record: &trogon_peer_service::PreparedPresentation,
+    ) -> Result<(), trogon_peer_service::PeerPortError> {
+        trogon_peer_service::PresentationInsert::insert(&self.inner, key, record).await
+    }
+}
+
+impl trogon_peer_service::PresentationOrphan for FailingPresentationRead {
+    async fn orphan(
+        &self,
+        key: &trogon_peer_service::PresentationKey,
+    ) -> Result<(), trogon_peer_service::PeerPortError> {
+        trogon_peer_service::PresentationOrphan::orphan(&self.inner, key).await
+    }
+}
+
+#[tokio::test]
+async fn a_prepared_batch_retains_identity_when_cache_is_unavailable_and_surfaces_integrity_failure() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("cached", "exact context").await?;
+    let prepared = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    for failure in [PresentationReadFailure::Unavailable, PresentationReadFailure::Integrity] {
+        let app = trogon_peer_service::PeerApplication::new(
+            f.store.clone(),
+            f.policy.clone(),
+            f.clock.clone(),
+            f.content.clone(),
+            FailingPresentationRead {
+                inner: f.cache.clone(),
+                failure,
+            },
+            f.ids.clone(),
+            f.catalog.clone(),
+        );
+        let appends = f.store.appends.load(Ordering::SeqCst);
+        let result = app.prepare_batch(&f.bob, f.prepare()).await;
+        if matches!(failure, PresentationReadFailure::Integrity) {
+            assert!(matches!(
+                result,
+                Err(trogon_peer_service::PeerApplicationError::Port(
+                    trogon_peer_service::PeerPortError::Integrity
+                ))
+            ));
+        } else {
+            let unavailable = result?;
+            assert_eq!(unavailable.batch, prepared.batch);
+            assert!(unavailable.messages.is_empty());
+            assert_eq!(
+                unavailable.content_availability.and_then(|v| v.as_known()),
+                Some(proto::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE)
+            );
+        }
+        assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    }
+    assert_eq!(f.app().prepare_batch(&f.bob, f.prepare()).await?, prepared);
+    Ok(())
+}
+
+struct ReplaceAttachmentDuringOpen<'a>(&'a Fixture);
+
+impl trogon_peer_service::ContentOpen for ReplaceAttachmentDuringOpen<'_> {
+    async fn open(
+        &self,
+        scope: &trogon_peer_service::PeerAccess,
+        binding: &trogon_peer_service::ContentBinding,
+    ) -> Result<Option<trogon_peer_service::MessageText>, trogon_peer_service::PeerPortError> {
+        let f = self.0;
+        let service = trogon_peer_service::PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone());
+        service
+            .detach(
+                &f.bob,
+                proto::DetachRequest {
+                    attachment_ref: f.b.clone().into(),
+                },
+            )
+            .await
+            .map_err(|error| trogon_peer_service::PeerPortError::Backend(Box::new(error)))?;
+        service
+            .enroll(&f.bob, Fixture::enrollment("bob"))
+            .await
+            .map_err(|error| trogon_peer_service::PeerPortError::Backend(Box::new(error)))?;
+        trogon_peer_service::ContentOpen::open(&f.content, scope, binding).await
+    }
+}
+
+#[tokio::test]
+async fn preparation_fenced_during_content_open_orphans_only_its_rejected_candidate() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("replacement", "pending context").await?;
+    let app = trogon_peer_service::PeerApplication::new(
+        f.store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        ReplaceAttachmentDuringOpen(&f),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    assert!(matches!(
+        app.prepare_batch(&f.bob, f.prepare()).await,
+        Err(trogon_peer_service::PeerApplicationError::Message(
+            trogon_decider_runtime::CommandError::Decide(trogon_peer::MessageError::Guard(
+                trogon_peer::HeartbeatError::Fenced
+            ))
+        ))
+    ));
+    assert_eq!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+            .len(),
+        1
+    );
+    let service = trogon_peer_service::PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone());
+    let replacement = service.enroll(&f.bob, Fixture::enrollment("bob")).await?;
+    assert_eq!(replacement.attachment.attachment_ref.generation, Some(2));
+    let mut request = f.prepare();
+    request.attachment_ref = replacement.attachment.attachment_ref.clone();
+    let prepared = f.app().prepare_batch(&f.bob, request).await?;
+    assert_eq!(prepared.messages.len(), 1);
+    assert_eq!(prepared.messages[0].text.as_deref(), Some("pending context"));
+    let winning_id = prepared
+        .batch
+        .batch_id
+        .as_deref()
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    let winner_key = format!(
+        "{}:{}:{}",
+        f.bob.tenant().as_str(),
+        f.b.peer_id
+            .as_deref()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+        winning_id
+    );
+    assert!(
+        !f.cache
+            .orphans
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+            .contains(&winner_key)
+    );
     Ok(())
 }
 
@@ -2193,6 +2867,175 @@ async fn malformed_accepted_content_history_fails_before_status_or_reconciliatio
         );
         assert_eq!(f.catalog.calls.load(Ordering::SeqCst), 0);
     }
+    Ok(())
+}
+
+impl Fixture {
+    pub fn prepare(&self) -> proto::PrepareBatchRequest {
+        proto::PrepareBatchRequest {
+            attachment_ref: self.b.clone().into(),
+            prompt_id: Some("prompt".into()),
+        }
+    }
+    pub async fn intake(&self, key: &str, text: &str) -> TestResult<proto::SendResponse> {
+        let sent = self.app().send(&self.alice, self.send(key, text)).await?;
+        let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
+        let sender = PeerId::parse(self.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+        self.app()
+            .reconcile(&self.alice, &sender, &[id], WorkLimit::new(1)?)
+            .await?;
+        Ok(sent)
+    }
+}
+
+#[tokio::test]
+async fn an_empty_inbox_returns_available_without_allocating_or_persisting_a_presentation() -> TestResult {
+    let f = Fixture::new().await?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let identifiers = f.ids.0.load(Ordering::SeqCst);
+    for _ in 0..2 {
+        let response = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+        assert!(!response.batch.is_set());
+        assert!(response.messages.is_empty());
+        assert_eq!(
+            response.content_availability.and_then(|value| value.as_known()),
+            Some(proto::ContentAvailability::CONTENT_AVAILABILITY_AVAILABLE)
+        );
+        assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+        assert_eq!(f.ids.0.load(Ordering::SeqCst), identifiers);
+        assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_preparation_rejects_a_leap_clock_before_allocating_or_opening_content() -> TestResult {
+    let mut f = Fixture::new().await?;
+    let sent = f.intake("prepared_at_leap", "pending").await?;
+    let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let ordinary = f.clock.now() + Duration::seconds(58);
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = ordinary;
+    f.b = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone())
+        .enroll(&f.bob, Fixture::enrollment("bob"))
+        .await?
+        .attachment
+        .attachment_ref
+        .clone()
+        .into_option()
+        .ok_or(PeerPortError::Integrity)?;
+    let recipient = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let reference = AttachmentRef::new(
+        recipient.clone(),
+        ConnectorId::new(f.b.connector_id.clone().ok_or(PeerPortError::Integrity)?)?,
+        f.b.generation.ok_or(PeerPortError::Integrity)?,
+    )?;
+    let batch_id = BatchId::new("leap_domain_control")?;
+    let draft = proto::PeerBatch {
+        batch_id: Some(batch_id.as_str().to_owned()),
+        message_ids: vec![id.as_str().to_owned()],
+        prepared_at: trogonai_proto::convert::timestamp_from_datetime(&ordinary).into(),
+        ..Default::default()
+    };
+    let rendered = trogon_peer_context::PeerContext::render(
+        &draft,
+        &[proto::PreparedMessage {
+            metadata: sent.message.clone(),
+            text: Some("pending".into()),
+        }],
+    )?;
+    let plan = TrustedBatchPlan::from_renderer(vec![id.clone()], rendered.as_str().len())?;
+    let leap = chrono::Utc
+        .timestamp_opt((ordinary + Duration::seconds(1)).timestamp(), 1_500_000_000)
+        .single()
+        .ok_or(PeerPortError::Integrity)?;
+    assert_eq!(leap.timestamp_subsec_nanos(), 1_500_000_000);
+    let principal = CommandPrincipal::new(PrincipalKind::Agent, PrincipalId::new(f.bob.caller().as_str())?);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        CommandExecution::new(
+            &f.store,
+            &PrepareBatch::new(f.bob.clone(), reference, batch_id, plan, leap)
+        )
+        .with_principal(principal)
+        .with_authorizer(&f.policy)
+        .with_replay_limit(ReplayLimit::try_new(4096)?)
+        .execute()
+        .await,
+        Err(CommandError::Decide(MessageError::InvalidState(
+            EvolveError::TimestampRange {
+                field: "receipt.decided_at"
+            }
+        )))
+    ));
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = leap;
+    let ids = f.ids.0.load(Ordering::SeqCst);
+    let content_calls = f.content.calls.load(Ordering::SeqCst);
+    let cache_calls = f.cache.calls.load(Ordering::SeqCst);
+    let app = f.app();
+    let owner = f.bob.clone();
+    let request = f.prepare();
+    let joined = tokio::spawn(async move { app.prepare_batch(&owner, request).await }).await;
+    assert!(
+        joined.is_ok(),
+        "public preparation must reject an unrepresentable clock without panicking"
+    );
+    assert!(matches!(
+        joined?,
+        Err(PeerApplicationError::Evidence(MessageError::InvalidState(
+            EvolveError::TimestampRange {
+                field: "batch.prepared_at"
+            }
+        )))
+    ));
+    assert_eq!(f.ids.0.load(Ordering::SeqCst), ids);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), cache_calls);
+    assert!(
+        f.cache
+            .records
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    let target = service_coverage_public_history(&f, &recipient).await?;
+    assert_eq!(target.inbox.len(), 1);
+    assert!(!target.inbox[0].disposition.is_set());
+    assert!(target.dispositions.is_empty());
+    assert!(target.batches.is_empty());
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = ordinary;
+    let prepared = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(prepared.batch.message_ids, vec![id.as_str().to_owned()]);
+    assert_eq!(
+        prepared.batch.prepared_at,
+        buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&ordinary))
+    );
+    assert_eq!(prepared.messages.len(), 1);
+    assert_eq!(prepared.messages[0].metadata, sent.message);
+    assert_eq!(prepared.messages[0].text.as_deref(), Some("pending"));
+    assert_eq!(
+        prepared.content_availability.and_then(|value| value.as_known()),
+        Some(proto::ContentAvailability::CONTENT_AVAILABILITY_AVAILABLE)
+    );
+    assert_eq!(f.ids.0.load(Ordering::SeqCst), ids + 1);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls + 1);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 1);
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
     Ok(())
 }
 
