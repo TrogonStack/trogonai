@@ -239,6 +239,46 @@ test('selection starts with approved actions and the repo-owned CLI', () => {
   assert.equal(filter.env.GH_TOKEN, '${{ github.token }}');
 });
 
+test('Rust heavy jobs read their own entry of the selected runners', async () => {
+  const names = ['test', 'build', 'wasm-decider', 'lint'];
+  assert.equal(workflows.rust.jobs.changes.with['runner-jobs'], names.join(' '));
+  const labels = async (id, outputs) => {
+    const inner = workflows.rust.jobs[id]['runs-on'].replace(/^\$\{\{\s*/, '').replace(/\s*\}\}$/, '');
+    const context = { needs: { changes: { outputs } } };
+    return JSON.parse((await evaluate(`toJSON(${inner})`, context)).coerceString());
+  };
+  const hosted = Object.fromEntries(names.map((name) => [name, ['ubuntu-latest']]));
+  const mixed = { ...hosted, test: ['homelab'], build: ['homelab'] };
+  for (const name of names) {
+    assert.equal(workflows.rust.jobs[name].needs, 'changes');
+    assert.doesNotMatch(workflows.rust.jobs[name]['runs-on'], /\|\|/);
+    assert.deepEqual(await labels(name, { runners: JSON.stringify(hosted) }), ['ubuntu-latest'], name);
+    assert.deepEqual(await labels(name, { runners: JSON.stringify(mixed) }), mixed[name], name);
+  }
+  for (const [suite, workflow] of Object.entries(workflows)) {
+    if (suite === 'rust') continue;
+    for (const [id, job] of Object.entries(workflow.jobs)) if (id !== 'changes') assert.equal(job['runs-on'], 'ubuntu-latest', `${suite}/${id}`);
+  }
+});
+
+test('runner selection runs right after checkout and fails loudly', async () => {
+  const selection = load('.github/workflows/ci-selection.yml');
+  const job = selection.jobs.filter;
+  const step = job.steps.find((item) => item.id === 'runner');
+  assert.equal(step.uses, './.github/actions/runs-on-fallback');
+  assert.equal(step['continue-on-error'], undefined);
+  assert.ok(job.steps[0].uses.startsWith('actions/checkout@'));
+  assert.equal(job.steps[1], step);
+  assert.equal(step.with.scope, 'organization');
+  assert.equal(step.with.jobs, '${{ inputs.runner-jobs }}');
+  assert.equal(selection.on.workflow_call.secrets['runner-status-token'].required, false);
+  assert.equal(selection.on.workflow_call.inputs['runner-jobs'].default, 'default');
+  assert.equal(selection.on.workflow_call.inputs['runner-jobs'].required, false);
+  assert.equal(workflows.rust.jobs.changes.secrets['runner-status-token'], '${{ secrets.RUNNER_STATUS_TOKEN }}');
+  assert.equal(job.outputs.runners, '${{ steps.runner.outputs.runners }}');
+  assert.equal(job.steps.find((item) => item.id === 'hosted'), undefined);
+});
+
 test('actionlint installs through the supported mise backend', () => {
   const job = load('.github/workflows/ci-automation.yml').jobs.verify;
   const installer = job.steps.find((step) => step.uses?.startsWith('jdx/mise-action@'));
