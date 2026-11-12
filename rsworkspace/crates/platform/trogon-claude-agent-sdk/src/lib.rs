@@ -59,6 +59,6 @@ pub use builtin_tool_name::BuiltinToolName;
 
 pub use mcp_server_name::McpServerName;
 
-pub use dialog_kind::DialogKind;
-
 pub use mcp_tool_name::McpToolName;
+
+pub use dialog_kind::DialogKind;
