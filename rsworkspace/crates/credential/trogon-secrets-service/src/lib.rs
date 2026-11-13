@@ -15,6 +15,12 @@
 //! to the event it ended on when the read started, with no snapshot in
 //! between, so a revocation committed before the read is never missed.
 //!
+//! [`WriterReleaseAudit`] is the [`ReleaseAudit`] on the platform audit writer:
+//! a release is a must-audit `CredentialUse` of kind release, acknowledged only
+//! once stored, and a denial is a deny decision on the secrets release surface
+//! that stands whether or not its write is acknowledged. Both carry the
+//! request's correlation id, with the runtime service as the caller.
+//!
 //! Every denial answers [`CredentialReleaseError::Denied`] whatever the reason, so a
 //! requester cannot tell an unknown tenant from a refusing policy. The
 //! [`DenialReason`] goes to the audit record and the logs only.
@@ -44,6 +50,8 @@ mod recording_release_audit;
 mod refusal;
 mod release_audit;
 mod release_audit_error;
+mod release_audit_record_error;
+mod release_audit_records;
 mod release_destination;
 mod release_fault_error;
 mod release_policy_source;
@@ -58,6 +66,7 @@ mod static_release_policies;
 mod static_tenant_owners;
 mod tenant_account;
 mod tenant_owners;
+mod writer_release_audit;
 mod xkey_sealer;
 
 pub use constants::{RELEASE_TTL_BOUND, UNBUNDLED_GENERATION};
@@ -75,6 +84,7 @@ pub use owner_holding::OwnerHolding;
 pub use recording_release_audit::RecordingReleaseAudit;
 pub use release_audit::ReleaseAudit;
 pub use release_audit_error::ReleaseAuditError;
+pub use release_audit_record_error::ReleaseAuditRecordError;
 pub use release_destination::ReleaseDestination;
 pub use release_policy_source::ReleasePolicySource;
 pub use release_record::ReleaseRecord;
@@ -88,4 +98,5 @@ pub use static_release_policies::StaticReleasePolicies;
 pub use static_tenant_owners::StaticTenantOwners;
 pub use tenant_account::{TenantAccount, TenantAccountError};
 pub use tenant_owners::TenantOwners;
+pub use writer_release_audit::WriterReleaseAudit;
 pub use xkey_sealer::{XkeySealer, XkeySealerError};
