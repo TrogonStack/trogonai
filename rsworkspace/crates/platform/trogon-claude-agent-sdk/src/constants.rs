@@ -187,3 +187,5 @@ pub(crate) const TS_FORK_MESSAGE_KEYS: [&str; 3] = ["anchorUuid", "uuids", "allU
 pub(crate) const TS_FORK_SEGMENT_KEYS: [&str; 3] = ["headUuid", "anchorUuid", "tailUuid"];
 
 pub(crate) const TS_FORK_TITLE_FALLBACK: &str = "Forked session";
+
+pub(crate) const MAX_BUFFER_ERRNO: &str = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
