@@ -1,0 +1,22 @@
+{
+"queries": [
+{"name":"bare","urls":["ws://127.0.0.1:1/"],"frames":[{"request_id":"REQUEST","type":"control_request","request":{"subtype":"initialize"}}]},
+{"name":"prompt suggestions on","urls":["ws://127.0.0.1:1/"],"frames":[{"request_id":"REQUEST","type":"control_request","request":{"subtype":"initialize","promptSuggestions":true}}]},
+{"name":"prompt suggestions off","urls":["ws://127.0.0.1:1/"],"frames":[{"request_id":"REQUEST","type":"control_request","request":{"subtype":"initialize","promptSuggestions":false}}]},
+{"name":"dialog kinds","urls":["ws://127.0.0.1:1/"],"frames":[{"request_id":"REQUEST","type":"control_request","request":{"subtype":"initialize","supportedDialogKinds":["plan","ask"]}}]},
+{"name":"empty dialog kinds","urls":["ws://127.0.0.1:1/"],"frames":[{"request_id":"REQUEST","type":"control_request","request":{"subtype":"initialize","supportedDialogKinds":[]}}]},
+{"name":"dialog handler only","urls":["ws://127.0.0.1:1/"],"frames":[{"request_id":"REQUEST","type":"control_request","request":{"subtype":"initialize"}}]},
+{"name":"json schema","urls":["ws://127.0.0.1:1/"],"frames":[{"request_id":"REQUEST","type":"control_request","request":{"subtype":"initialize","jsonSchema":{"type":"object","properties":{"answer":{"type":"string"}}}}}]},
+{"name":"sdk servers","urls":["ws://127.0.0.1:1/"],"frames":[{"request_id":"REQUEST","type":"control_request","request":{"subtype":"initialize","sdkMcpServers":["calc","math"]}}]},
+{"name":"hooks","urls":["ws://127.0.0.1:1/"],"frames":[{"request_id":"REQUEST","type":"control_request","request":{"subtype":"initialize","hooks":{"PreToolUse":[{"matcher":"Bash","hookCallbackIds":["hook_0","hook_1"],"timeout":7},{"hookCallbackIds":["hook_2"]}],"Stop":[{"hookCallbackIds":["hook_3"]}]}}}]},
+{"name":"callbacks","urls":["ws://127.0.0.1:1/"],"frames":[{"request_id":"REQUEST","type":"control_request","request":{"subtype":"initialize"}}]},
+{"name":"everything","urls":["ws://127.0.0.1:1/"],"frames":[{"request_id":"REQUEST","type":"control_request","request":{"subtype":"initialize","hooks":{"Stop":[{"hookCallbackIds":["hook_0"]}]},"sdkMcpServers":["calc"],"jsonSchema":{"type":"object"},"promptSuggestions":true,"supportedDialogKinds":["plan"]}}]}
+],
+"errors": [
+{"name":"dialog kinds without a handler","error":"Error: supportedDialogKinds requires an onUserDialog callback -- declaring dialog kinds without a handler would park dialogs nothing can answer. Provide onUserDialog, or omit supportedDialogKinds.","websockets":0,"fetches":0},
+{"name":"a server the browser cannot host","error":"Error: Browser SDK only supports SDK MCP servers for now","websockets":0,"fetches":0},
+{"name":"an sdk type without an instance","error":"Error: Browser SDK only supports SDK MCP servers for now","websockets":0,"fetches":0},
+{"name":"neither transport","error":"TypeError: Cannot read properties of undefined (reading 'url')","websockets":0,"fetches":0},
+{"name":"both transports","error":null,"websockets":0,"fetches":1}
+]
+}

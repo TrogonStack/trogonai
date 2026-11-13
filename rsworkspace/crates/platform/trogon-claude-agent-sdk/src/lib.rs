@@ -11,6 +11,7 @@ mod agent_definition;
 mod agent_name;
 mod argv;
 mod auth_token;
+mod browser_query;
 mod builtin_tool_name;
 mod bundled_cli;
 mod channel;
@@ -190,6 +191,10 @@ pub use agent_name::AgentName;
 pub use auth_token::{
     HostAuthToken, HostAuthTokenFuture, HostAuthTokenHandler, HostAuthTokenRequest, OAuthDeclineReason,
     OAuthTokenFuture, OAuthTokenHandler, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
+};
+pub use browser_query::{
+    BrowserPrompt, BrowserQueryOptions, BrowserTransport, browser_query, get_ccr_event, get_sse_drop_counts,
+    get_sse_last_sequence_num, resume_sse_stream, suspend_sse_stream,
 };
 pub use builtin_tool_name::BuiltinToolName;
 pub use bundled_cli::{

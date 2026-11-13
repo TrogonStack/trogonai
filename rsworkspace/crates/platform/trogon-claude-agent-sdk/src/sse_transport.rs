@@ -736,6 +736,10 @@ impl Transport for SseTransport {
     async fn end_input(&mut self) -> Result<(), Error> {
         Ok(())
     }
+
+    fn expect_control_response(&mut self, request_id: &str) {
+        self.shared.expect_control_response(request_id);
+    }
 }
 
 /// The operations the TypeScript browser query forwards to its SSE transport.
