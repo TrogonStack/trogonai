@@ -17,7 +17,7 @@ use std::{
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    ResolveSettingsOptions, ResolverState,
+    PolicyRereads, ResolveSettingsOptions, ResolverState,
     adapters::{EnvironmentVariable, ExecuteFile, ExecuteFileRequest, NativeHost, OperatingSystem},
     filter_escalating_default_mode, js_stringify, resolve_settings_with_state,
 };
@@ -157,12 +157,23 @@ fn writable(spec: &Value, root: &str) -> BTreeMap<String, String> {
 }
 
 /// The calls a case makes: one without `steps`, otherwise one per step, each at its own time and after the
-/// step's file changes (`files`: path under the root to new text, or null to delete it).
+/// step's file changes (`files`: path under the root to new text, or null to delete it). A step's `durations` maps a
+/// command line, as the resolver writes it before any path moves under the root, to the milliseconds that command
+/// takes in the call; both sides count that time on a fake clock, so a slow read is the same on any machine.
 fn steps(spec: &Value) -> Vec<Value> {
     match spec["steps"].as_array() {
         Some(steps) => steps.clone(),
         None => vec![json!({})],
     }
+}
+
+fn durations(step: &Value) -> BTreeMap<String, u64> {
+    step["durations"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(line, milliseconds)| (line.clone(), milliseconds.as_u64().expect("milliseconds")))
+        .collect()
 }
 
 fn apply_files(step: &Value, root: &Path) {
@@ -183,7 +194,7 @@ fn apply_files(step: &Value, root: &Path) {
 /// What the Rust port prints for each call, in the oracle's shape, sharing one resolver state across the calls.
 fn rust_results(name: &str, spec: &Value, root: &Path) -> Vec<String> {
     let root_text = root.to_string_lossy().into_owned();
-    let state = ResolverState::new();
+    let state = ResolverState::with_rereads(PolicyRereads::Inline);
     let options: ResolveSettingsOptions =
         serde_json::from_value(substitute(&spec["options"], &root_text)).expect("options");
     let mut printed = Vec::new();
@@ -196,6 +207,7 @@ fn rust_results(name: &str, spec: &Value, root: &Path) -> Vec<String> {
             now_ms: step["at"].as_u64().unwrap_or(0),
             identity: identity(spec),
             writable: writable(spec, &root_text),
+            durations: durations(step),
         };
         let resolved = resolve_settings_with_state(&host, &options, &state).expect("resolve");
         let filtered = filter_escalating_default_mode(&resolved);
@@ -236,6 +248,7 @@ fn oracle_results(package: &str, cases: &[(String, PathBuf, Value, PathBuf)]) ->
                     "name": label,
                     "at": step["at"],
                     "files": step["files"],
+                    "durations": durations(step),
                     "options": substitute(&spec["options"], &root_text),
                 })
             }).collect::<Vec<_>>(),
@@ -273,6 +286,9 @@ fn fixtures_are_well_formed() {
     assert!(!cases.is_empty());
     for case in &cases {
         assert!(case.spec["options"]["cwd"].is_string(), "{} needs a cwd", case.name);
+        for step in steps(&case.spec) {
+            durations(&step);
+        }
     }
 }
 

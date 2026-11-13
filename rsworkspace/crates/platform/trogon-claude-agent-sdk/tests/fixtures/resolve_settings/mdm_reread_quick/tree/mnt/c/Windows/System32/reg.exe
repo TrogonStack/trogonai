@@ -1,0 +1,7 @@
+#!/bin/sh
+d=$(dirname "$0")
+case "$2" in
+HKLM*) if [ -f "$d/err.txt" ]; then cat "$d/err.txt" >&2; exit 1; fi
+  if [ -f "$d/hklm.txt" ]; then cat "$d/hklm.txt"; exit 0; else echo "ERROR: The system was unable to find the specified registry key or value." >&2; exit 1; fi;;
+*) echo "ERROR: The system was unable to find the specified registry key or value." >&2; exit 1;;
+esac

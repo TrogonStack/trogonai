@@ -26,6 +26,7 @@ const VIRTUAL: [&str; 6] = [
 ];
 
 /// The real host with machine-wide paths moved under `root`, the platform pinned and the environment overridden.
+#[derive(Clone)]
 pub struct RemapHost {
     pub root: PathBuf,
     pub system: OperatingSystem,
@@ -38,6 +39,9 @@ pub struct RemapHost {
     /// Write checks the case answers, by the path the resolver asks about (`*` answers every other path): `yes`
     /// succeeds and an errno name such as `EACCES` fails. Paths without an answer get the native check.
     pub writable: BTreeMap<String, String>,
+    /// Milliseconds each command line (before the paths move under `root`) reports having taken; any other line
+    /// reports none, so the outcome never depends on how fast the machine is.
+    pub durations: BTreeMap<String, u64>,
 }
 
 /// The ids a process reports; a `None` field is a call the platform lacks.
@@ -209,6 +213,11 @@ impl CurrentDirectory for RemapHost {
 
 impl ExecuteFile for RemapHost {
     fn execute_file(&self, request: &ExecuteFileRequest<'_>) -> ExecuteFileOutcome {
+        let mut line = request.program.to_string_lossy().into_owned();
+        for argument in request.args {
+            line.push(' ');
+            line.push_str(&argument.to_string_lossy());
+        }
         let program = self.remap(Path::new(request.program));
         let arguments: Vec<OsString> = request
             .args
@@ -216,12 +225,14 @@ impl ExecuteFile for RemapHost {
             .map(|argument| self.remap(Path::new(argument)).into_os_string())
             .collect();
         let borrowed: Vec<&OsStr> = arguments.iter().map(OsString::as_os_str).collect();
-        NativeHost.execute_file(&ExecuteFileRequest {
+        let mut outcome = NativeHost.execute_file(&ExecuteFileRequest {
             program: program.as_os_str(),
             args: &borrowed,
             timeout: request.timeout,
             max_buffer: request.max_buffer,
-        })
+        });
+        outcome.duration_ms = u128::from(self.durations.get(&line).copied().unwrap_or(0));
+        outcome
     }
 }
 

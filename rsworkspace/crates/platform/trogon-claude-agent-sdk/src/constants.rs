@@ -921,6 +921,10 @@ pub(crate) const MDM_REREAD_LOSS_MS: i128 = 30_000;
 /// Milliseconds a call waits for a re-read before it goes on with the reading in force (`oet` upstream).
 pub(crate) const MDM_REREAD_WAIT_MS: i128 = 1_000;
 
+/// The longest a call waits for a background re-read by the machine's own steady clock, whatever the host's clock
+/// shows, so a clock that stands still or goes back cannot hold the caller past the second upstream waits.
+pub(crate) const MDM_REREAD_WAIT: Duration = Duration::from_millis(1_000);
+
 /// Unanswered reads in a row after which the slow idle interval applies again.
 pub(crate) const MDM_UNANSWERED_RETRY_LIMIT: u32 = 4;
 
