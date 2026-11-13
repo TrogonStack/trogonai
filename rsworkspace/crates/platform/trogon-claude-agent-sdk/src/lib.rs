@@ -161,7 +161,7 @@ pub use session_files::{
 pub use session_id::SessionId;
 pub use session_info::SdkSessionInfo;
 pub use session_key::{SessionKey, SessionKeyError};
-pub use session_messages_ts::{ChainAlgorithm, MessageOptions};
+pub use session_messages_ts::{ChainAlgorithm, MessageOptions, MessagesError};
 pub use session_mutations::{
     ForkSessionResult, JsonEscaping, SessionMutationError, delete_session, fork_session, rename_session, tag_session,
 };

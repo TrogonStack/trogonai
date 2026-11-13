@@ -21,7 +21,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     JsonObject, SdkSessionInfo, SessionId, SummaryDialect,
-    session_messages_ts::{ChainAlgorithm, MessageOptions, session_messages, subagent_messages},
+    session_messages_ts::{ChainAlgorithm, MessageOptions, MessagesError, session_messages, subagent_messages},
     session_project_key::{canonicalize_lenient, sanitize_path},
     session_prompt::{entry_first_prompt, iso_to_epoch_ms},
     session_transcript::{
@@ -131,7 +131,8 @@ impl SessionFiles {
             .and_then(|lite| parse_session_info_from_lite(session_id, &lite, None))
     }
 
-    /// Reads a session's visible conversation under the TypeScript rules.
+    /// Reads a session's visible conversation under the TypeScript rules. A transcript the TypeScript pipeline would
+    /// throw on reads as empty here; [`SessionFiles::get_session_messages_with`] reports the error.
     pub fn get_session_messages(
         &self,
         session_id: &str,
@@ -146,6 +147,7 @@ impl SessionFiles {
                 ..MessageOptions::default()
             },
         )
+        .unwrap_or_default()
     }
 
     /// [`SessionFiles::get_session_messages`] under the selected upstream SDK's rules and options.
@@ -154,23 +156,26 @@ impl SessionFiles {
         session_id: &str,
         directory: Option<&Path>,
         options: MessageOptions,
-    ) -> Vec<SessionMessage> {
+    ) -> Result<Vec<SessionMessage>, MessagesError> {
         let Some(session_id) = valid_uuid(session_id) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         if options.algorithm == ChainAlgorithm::TypeScript {
             let Some((path, _)) = self.resolve_session_ts(session_id, directory) else {
-                return Vec::new();
+                return Ok(Vec::new());
             };
             let Some(content) = read_transcript_ts(&path) else {
-                return Vec::new();
+                return Ok(Vec::new());
             };
             return session_messages(&content, options.include_system_messages, options.page);
         }
         let Some(content) = self.read_session_file(session_id, directory) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        entries_to_session_messages(&parse_transcript_entries(&content), options.page)
+        Ok(entries_to_session_messages(
+            &parse_transcript_entries(&content),
+            options.page,
+        ))
     }
 
     /// Lists the ids of the subagents of a session, including nested `subagents/workflows/<run>/` transcripts.

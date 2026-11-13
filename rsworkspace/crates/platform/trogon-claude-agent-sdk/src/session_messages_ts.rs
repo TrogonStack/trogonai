@@ -373,7 +373,7 @@ struct Linked {
     leaf: String,
 }
 
-fn relink_compactions(entries: &[JsonObject]) -> Option<Entries> {
+fn relink_compactions(entries: &[JsonObject]) -> Result<Entries, MessagesError> {
     let mut map: Entries = IndexMap::new();
     for entry in entries {
         map.insert(uuid_of(entry).to_owned(), entry.clone());
@@ -388,8 +388,20 @@ fn relink_compactions(entries: &[JsonObject]) -> Option<Entries> {
         let preserved_messages = metadata.and_then(|metadata| metadata.get("preservedMessages"));
         let preserved_segment = metadata.and_then(|metadata| metadata.get("preservedSegment"));
         if truthy(preserved_messages) {
-            let object = preserved_messages.and_then(Value::as_object)?;
-            let uuids = object.get("uuids")?.as_array()?;
+            let uuids = match preserved_messages
+                .and_then(Value::as_object)
+                .and_then(|object| object.get("uuids"))
+            {
+                None => return Err(MessagesError::UuidsLength("undefined")),
+                Some(Value::Null) => return Err(MessagesError::UuidsLength("null")),
+                Some(Value::Array(uuids)) => uuids,
+                Some(Value::String(text)) if text.is_empty() => continue,
+                Some(Value::Object(object)) if object.get("length").and_then(Value::as_i64) == Some(0) => continue,
+                Some(_) => return Err(MessagesError::UuidsSome),
+            };
+            let object = preserved_messages
+                .and_then(Value::as_object)
+                .ok_or(MessagesError::UuidsSome)?;
             let names: Vec<Option<&str>> = uuids.iter().map(Value::as_str).collect();
             if names.is_empty() || names.iter().any(|name| name.is_none_or(|name| !map.contains_key(name))) {
                 continue;
@@ -414,13 +426,15 @@ fn relink_compactions(entries: &[JsonObject]) -> Option<Entries> {
                 }
             }
         } else if truthy(preserved_segment) {
-            let segment = preserved_segment.and_then(Value::as_object)?;
-            let head = segment.get("headUuid").and_then(Value::as_str);
-            let anchor = segment.get("anchorUuid");
+            let segment = preserved_segment.and_then(Value::as_object);
+            let head = segment
+                .and_then(|segment| segment.get("headUuid"))
+                .and_then(Value::as_str);
+            let anchor = segment.and_then(|segment| segment.get("anchorUuid"));
             if let Some(entry) = head.and_then(|head| map.get_mut(head)) {
                 set_parent(entry, anchor);
             }
-            let tail = segment.get("tailUuid");
+            let tail = segment.and_then(|segment| segment.get("tailUuid"));
             for other in &keys {
                 if Some(other.as_str()) == head {
                     continue;
@@ -432,11 +446,11 @@ fn relink_compactions(entries: &[JsonObject]) -> Option<Entries> {
             }
         }
     }
-    Some(map)
+    Ok(map)
 }
 
 /// `vp`: the linked chain of visible entries ending at the selected leaf.
-fn link(entries: &[JsonObject]) -> Option<Linked> {
+fn link(entries: &[JsonObject]) -> Result<Option<Linked>, MessagesError> {
     let map = relink_compactions(entries)?;
     let position: HashMap<&str, usize> = entries
         .iter()
@@ -512,7 +526,7 @@ fn link(entries: &[JsonObject]) -> Option<Linked> {
                 }
             }
             if found.is_empty() {
-                return None;
+                return Ok(None);
             }
             let plain: Vec<&JsonObject> = found
                 .iter()
@@ -542,11 +556,11 @@ fn link(entries: &[JsonObject]) -> Option<Linked> {
     chain.reverse();
     let leaf_uuid = uuid_of(leaf).to_owned();
     let chain = regroup(&map, chain, &mut in_chain);
-    Some(Linked {
+    Ok(Some(Linked {
         chain,
         relinked: map,
         leaf: leaf_uuid,
-    })
+    }))
 }
 
 fn same_agent(a: &JsonObject, b: &JsonObject) -> bool {
@@ -558,6 +572,21 @@ fn same_agent(a: &JsonObject, b: &JsonObject) -> bool {
             .unwrap_or(Value::Bool(false))
     };
     sidechain(a) == sidechain(b) && a.get("agentId") == b.get("agentId")
+}
+
+/// `String.prototype.localeCompare` with the default locale and options: root collation at tertiary strength.
+pub(crate) fn locale_compare(left: &str, right: &str) -> std::cmp::Ordering {
+    thread_local! {
+        static COLLATOR: Option<icu_collator::CollatorBorrowed<'static>> = icu_collator::Collator::try_new(
+            icu_collator::CollatorPreferences::default(),
+            icu_collator::options::CollatorOptions::default(),
+        )
+        .ok();
+    }
+    COLLATOR.with(|collator| match collator {
+        Some(collator) => collator.compare(left, right),
+        None => left.cmp(right),
+    })
 }
 
 fn timestamp_text(entry: &JsonObject) -> &str {
@@ -685,8 +714,8 @@ fn regroup(map: &Entries, chain: Vec<JsonObject>, in_chain: &mut HashSet<String>
         if fragments.is_empty() && with_parent.is_empty() {
             continue;
         }
-        fragments.sort_by(|a, b| timestamp_text(a).cmp(timestamp_text(b)));
-        with_parent.sort_by(|a, b| timestamp_text(a).cmp(timestamp_text(b)));
+        fragments.sort_by(|a, b| locale_compare(timestamp_text(a), timestamp_text(b)));
+        with_parent.sort_by(|a, b| locale_compare(timestamp_text(a), timestamp_text(b)));
         let mut added: Vec<JsonObject> = Vec::new();
         for entry in fragments.into_iter().chain(with_parent) {
             in_chain.insert(uuid_of(entry).to_owned());
@@ -776,7 +805,7 @@ fn extra_attachments(entries: &[JsonObject], linked: &Linked) -> Vec<JsonObject>
         }
         let mut next: Vec<&JsonObject> = children.get(uuid_of(entry)).cloned().unwrap_or_default();
         if next.len() > 1 {
-            next.sort_by(|a, b| timestamp_text(a).cmp(timestamp_text(b)));
+            next.sort_by(|a, b| locale_compare(timestamp_text(a), timestamp_text(b)));
         }
         for child in next.into_iter().rev() {
             if !seen.contains(uuid_of(child)) {
@@ -1096,30 +1125,46 @@ fn to_message(entry: &JsonObject, parent_tool_use_id: Option<&str>, parent_agent
     }
 }
 
+/// Where the TypeScript pipeline throws while rebuilding a conversation. The messages are the V8 `TypeError` texts of
+/// the minified upstream bundle.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum MessagesError {
+    /// `compactMetadata.preservedMessages` has no usable `uuids` list.
+    #[error("Cannot read properties of {0} (reading 'length')")]
+    UuidsLength(&'static str),
+    /// `compactMetadata.preservedMessages.uuids` is not an array.
+    #[error("E.uuids.some is not a function")]
+    UuidsSome,
+}
+
 /// `xz` without paging: the visible messages of a transcript.
 pub(crate) fn messages_from_entries(
     entries: &[JsonObject],
     delivered: &HashMap<String, usize>,
     include_system: bool,
-) -> Vec<SessionMessage> {
-    let Some(linked) = link(entries) else {
-        return Vec::new();
+) -> Result<Vec<SessionMessage>, MessagesError> {
+    let Some(linked) = link(entries)? else {
+        return Ok(Vec::new());
     };
     let extra = extra_attachments(entries, &linked);
     let trailing: HashSet<String> = extra.iter().map(|entry| uuid_of(entry).to_owned()).collect();
     let mut combined = linked.chain.clone();
     combined.extend(extra);
-    annotate(combined, &trailing, delivered, false)
+    Ok(annotate(combined, &trailing, delivered, false)
         .iter()
         .filter(|entry| is_visible(entry, include_system))
         .map(|entry| to_message(entry, None, None))
-        .collect()
+        .collect())
 }
 
 /// `kz` after the file is read: parse, rebuild the conversation and page it.
-pub(crate) fn session_messages(content: &[u8], include_system: bool, page: MessagePage) -> Vec<SessionMessage> {
+pub(crate) fn session_messages(
+    content: &[u8],
+    include_system: bool,
+    page: MessagePage,
+) -> Result<Vec<SessionMessage>, MessagesError> {
     let (entries, delivered) = parse_entries(content);
-    page.apply(messages_from_entries(&entries, &delivered, include_system))
+    Ok(page.apply(messages_from_entries(&entries, &delivered, include_system)?))
 }
 
 /// `Aw`: a subagent transcript, whose chain is the last user or assistant entry walked back through `parentUuid`.
@@ -1175,4 +1220,46 @@ pub(crate) fn subagent_messages(
         .map(|entry| to_message(entry, tool_use_id, parent_agent_id))
         .collect();
     page.apply(messages)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cmp::Ordering::{Greater, Less};
+
+    use super::locale_compare;
+
+    #[test]
+    fn collation_differs_from_code_point_order_for_case() {
+        assert_eq!(locale_compare("a", "B"), Less);
+        assert_eq!("a".cmp("B"), Greater);
+        assert_eq!(locale_compare("a", "A"), Less);
+        assert_eq!("a".cmp("A"), Greater);
+    }
+
+    #[test]
+    fn collation_ranks_accents_after_the_base_letters() {
+        assert_eq!(locale_compare("\u{e9}", "f"), Less);
+        assert_eq!("\u{e9}".cmp("f"), Greater);
+        assert_eq!(locale_compare("resume", "r\u{e9}sum\u{e9}"), Less);
+        assert_eq!(locale_compare("r\u{e9}sum\u{e9}", "resumf"), Less);
+    }
+
+    #[test]
+    fn collation_puts_punctuation_before_digits_before_letters() {
+        assert_eq!(locale_compare("_", "-"), Less);
+        assert_eq!(locale_compare("-", "1"), Less);
+        assert_eq!(locale_compare("1", "a"), Less);
+        assert_eq!(locale_compare("10", "9"), Less);
+        assert_eq!(locale_compare("Z", "a"), Greater);
+        assert_eq!("Z".cmp("a"), Less);
+    }
+
+    #[test]
+    fn iso_timestamps_still_sort_chronologically() {
+        assert_eq!(
+            locale_compare("2024-01-01T00:00:00.000Z", "2024-01-01T00:00:01.000Z"),
+            Less
+        );
+        assert_eq!(locale_compare("", "2024"), Less);
+    }
 }
