@@ -212,11 +212,12 @@ where
         if self.stopped.is_cancelled() {
             return Err(PeerMcpError::Detached);
         }
-        let attachment = match self.binding.get() {
-            Some(binding) => binding.lock().await.attachment(),
-            None => None,
-        }
-        .ok_or(PeerMcpError::Unbound)?;
+        let binding = self.binding.get().ok_or(PeerMcpError::Unbound)?;
+        let attachment = binding
+            .lock()
+            .await
+            .attachment()
+            .ok_or(PeerMcpError::EnrollmentUncertain)?;
         match operation {
             ModelOperation::Roster => model_tools::roster(&self.backend, request, &attachment).await,
             ModelOperation::Send => model_tools::send(&self.backend, request, &attachment, &self.config).await,
