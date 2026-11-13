@@ -64,7 +64,7 @@ impl SessionStore for AppendOnlyStore {
 }
 
 #[tokio::test]
-async fn append_deduplicates_stable_uuids_and_load_returns_none_for_unknown_keys() -> TestResult {
+async fn append_keeps_every_entry_like_upstream_and_load_returns_none_for_unknown_keys() -> TestResult {
     let store = InMemorySessionStore::new();
     let key = key("project", "session")?;
     assert_eq!(store.load(&key).await?, None);
@@ -74,7 +74,16 @@ async fn append_deduplicates_stable_uuids_and_load_returns_none_for_unknown_keys
         .append(&key, &[first.clone(), first.clone(), anonymous.clone()])
         .await?;
     store.append(&key, &[first.clone(), anonymous.clone()]).await?;
-    assert_eq!(store.load(&key).await?, Some(vec![first, anonymous.clone(), anonymous]));
+    assert_eq!(
+        store.load(&key).await?,
+        Some(vec![
+            first.clone(),
+            first.clone(),
+            anonymous.clone(),
+            first,
+            anonymous.clone()
+        ])
+    );
     assert_eq!(format!("{store:?}"), "InMemorySessionStore { .. }");
     Ok(())
 }

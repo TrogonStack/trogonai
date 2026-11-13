@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[tokio::test]
 async fn server_retains_initialize_and_runs_typed_tool() -> Result<(), Box<dyn std::error::Error>> {
     let schema_json = json!({"type":"object","required":["value"],"properties":{"value":{"type":"string"}}});
-    let schema = McpToolInputSchema::new(serde_json::from_value(schema_json.clone())?)?;
+    let schema = McpToolInputSchema::new(serde_json::from_value(schema_json.clone())?);
     let tool = SdkTool::from(SdkToolOptions {
         name: McpToolName::from("echo"),
         description: "Echo".into(),
@@ -95,7 +95,7 @@ async fn tool_listing_keeps_names_the_mcp_protocol_discourages() -> Result<(), B
         let tool = SdkTool::from(SdkToolOptions {
             name: McpToolName::from(name.clone()),
             description: "Echo".into(),
-            input_schema: McpToolInputSchema::new(serde_json::from_value(json!({"type":"object"}))?)?,
+            input_schema: McpToolInputSchema::new(serde_json::from_value(json!({"type":"object"}))?),
             handler: Arc::new(|_: McpToolRequest| async move { Ok(McpToolOutput::text("")) }),
         });
         let registry = LocalMcpServer::from(LocalMcpServerOptions {
@@ -115,6 +115,45 @@ async fn tool_listing_keeps_names_the_mcp_protocol_discourages() -> Result<(), B
         assert_eq!(listed["result"]["tools"][0]["name"], name.as_str());
     }
     assert_eq!(warnings.load(Ordering::SeqCst), 4);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_schema_that_does_not_compile_is_listed_verbatim_and_fails_each_call()
+-> Result<(), Box<dyn std::error::Error>> {
+    let schema_json = json!({"type":"object","properties":{"value":{"type":7}}});
+    let schema = McpToolInputSchema::new(serde_json::from_value(schema_json.clone())?);
+    let compile_error = schema.compile_error().ok_or("the schema compiled")?.to_owned();
+    let tool = SdkTool::from(SdkToolOptions {
+        name: McpToolName::from("echo"),
+        description: "Echo".into(),
+        input_schema: schema,
+        handler: Arc::new(|_: McpToolRequest| async move { Ok(McpToolOutput::text("ran")) }),
+    });
+    let registry = LocalMcpServer::from(LocalMcpServerOptions {
+        name: McpServerName::from("local"),
+        version: "1".into(),
+        tools: tool.into(),
+    });
+    let server = registry.open_session();
+    let request = |value| serde_json::from_value::<JsonObject>(value);
+    let listed = server
+        .request(
+            request(json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}))?,
+            CancellationToken::new(),
+        )
+        .await?
+        .ok_or("missing tool list response")?;
+    assert_eq!(listed["result"]["tools"][0]["inputSchema"], schema_json);
+    let response = server
+        .request(
+            request(json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{}}}))?,
+            CancellationToken::new(),
+        )
+        .await?
+        .ok_or("missing response")?;
+    assert_eq!(response["result"]["isError"], true);
+    assert_eq!(response["result"]["content"][0]["text"], compile_error.as_str());
     Ok(())
 }
 
@@ -143,7 +182,7 @@ async fn a_cancelled_tool_cancels_the_request_and_servers_have_an_opaque_debug_f
     let tool = SdkTool::from(SdkToolOptions {
         name: McpToolName::from("stop"),
         description: "Stop".into(),
-        input_schema: McpToolInputSchema::new(serde_json::from_value(json!({"type":"object"}))?)?,
+        input_schema: McpToolInputSchema::new(serde_json::from_value(json!({"type":"object"}))?),
         handler: Arc::new(|_: McpToolRequest| async move { Err(CallbackError::Cancelled) }),
     });
     let registry = LocalMcpServer::from(LocalMcpServerOptions {

@@ -38,7 +38,7 @@ fn connection_info_reads_known_fields_and_keeps_the_raw_snapshot() -> TestResult
         "claude_code_version": "1.2.3",
         "extension": 7
     }))?;
-    let info = ConnectionInfo::from_json(raw.clone())?;
+    let info = ConnectionInfo::from_json(raw.clone().into());
     assert_eq!(info.commands.len(), 1);
     assert_eq!(info.models.len(), 1);
     assert_eq!(info.agents.len(), 1);
@@ -47,17 +47,26 @@ fn connection_info_reads_known_fields_and_keeps_the_raw_snapshot() -> TestResult
     assert_eq!(info.hook_on_failure_supported, FeatureSupport::Unsupported);
     assert_eq!(info.claude_code_version.as_deref(), Some("1.2.3"));
     assert_eq!(info.additional_fields.get("extension"), Some(&json!(7)));
-    assert_eq!(info.as_json(), &raw);
+    assert_eq!(info.as_json(), &serde_json::Value::Object(raw));
     Ok(())
 }
 
 #[test]
-fn connection_info_defaults_omitted_fields_and_rejects_malformed_ones() -> TestResult {
-    let info = ConnectionInfo::from_json(JsonObject::new())?;
+fn connection_info_defaults_omitted_fields_and_reads_malformed_ones_as_absent() -> TestResult {
+    let info = ConnectionInfo::from_json(json!({}));
     assert!(info.commands.is_empty());
     assert_eq!(info.hooks_applied, FeatureSupport::NotReported);
-    assert!(info.as_json().is_empty());
-    assert!(ConnectionInfo::from_json(object(json!({"commands": "not-a-list"}))?).is_err());
+    assert_eq!(info.as_json(), &json!({}));
+    let malformed = json!({"commands": "not-a-list", "hooks_applied": "yes", "claude_code_version": 2});
+    let info = ConnectionInfo::from_json(malformed.clone());
+    assert!(info.commands.is_empty());
+    assert_eq!(info.hooks_applied, FeatureSupport::NotReported);
+    assert_eq!(info.claude_code_version, None);
+    assert!(info.additional_fields.is_empty());
+    assert_eq!(info.as_json(), &malformed);
+    let info = ConnectionInfo::from_json(json!(42));
+    assert!(info.commands.is_empty());
+    assert_eq!(info.as_json(), &json!(42));
     Ok(())
 }
 

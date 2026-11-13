@@ -1,0 +1,10 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [
+      "project"
+    ]
+  }
+}

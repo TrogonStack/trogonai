@@ -1,0 +1,975 @@
+{
+  "cases": [
+    {
+      "name": "assistant_every_block",
+      "message": {
+        "type": "assistant",
+        "message": {
+          "id": "msg_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-test",
+          "content": [
+            {
+              "type": "text",
+              "text": "hello"
+            },
+            {
+              "type": "thinking",
+              "thinking": "hmm",
+              "signature": "sig"
+            },
+            {
+              "type": "tool_use",
+              "id": "tool-1",
+              "name": "Read",
+              "input": {
+                "path": "a"
+              }
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "tool-1",
+              "content": "done",
+              "is_error": false
+            },
+            {
+              "type": "server_tool_use",
+              "id": "srv-1",
+              "name": "advisor",
+              "input": {
+                "q": 1
+              }
+            },
+            {
+              "type": "advisor_tool_result",
+              "tool_use_id": "srv-1",
+              "content": {
+                "type": "advisor_result",
+                "text": "ok"
+              }
+            },
+            {
+              "type": "image",
+              "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "AA=="
+              }
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-a"
+      }
+    },
+    {
+      "name": "assistant_error_field",
+      "message": {
+        "type": "assistant",
+        "message": {
+          "id": "msg_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-test",
+          "content": [
+            {
+              "type": "text",
+              "text": "x"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-a",
+        "error": "rate_limit"
+      }
+    },
+    {
+      "name": "assistant_missing_model",
+      "message": {
+        "type": "assistant",
+        "message": {
+          "id": "msg_1",
+          "type": "message",
+          "role": "assistant",
+          "content": [],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-a"
+      }
+    },
+    {
+      "name": "assistant_content_not_a_list",
+      "message": {
+        "type": "assistant",
+        "message": {
+          "id": "msg_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-test",
+          "content": "text",
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-a"
+      }
+    },
+    {
+      "name": "assistant_block_not_an_object",
+      "message": {
+        "type": "assistant",
+        "message": {
+          "id": "msg_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-test",
+          "content": [
+            1
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-a"
+      }
+    },
+    {
+      "name": "assistant_block_missing_type",
+      "message": {
+        "type": "assistant",
+        "message": {
+          "id": "msg_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-test",
+          "content": [
+            {
+              "text": "x"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-a"
+      }
+    },
+    {
+      "name": "assistant_thinking_missing_signature",
+      "message": {
+        "type": "assistant",
+        "message": {
+          "id": "msg_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-test",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "x"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-a"
+      }
+    },
+    {
+      "name": "assistant_tool_use_null_input",
+      "message": {
+        "type": "assistant",
+        "message": {
+          "id": "msg_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-test",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t",
+              "name": "Bash",
+              "input": null
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-a"
+      }
+    },
+    {
+      "name": "assistant_advisor_result_missing_content",
+      "message": {
+        "type": "assistant",
+        "message": {
+          "id": "msg_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-test",
+          "content": [
+            {
+              "type": "advisor_tool_result",
+              "tool_use_id": "srv-1"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-a"
+      }
+    },
+    {
+      "name": "assistant_missing_message",
+      "message": {
+        "type": "assistant",
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-a"
+      }
+    },
+    {
+      "name": "user_text_with_origin_and_tool_result",
+      "message": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "hi"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-u",
+        "origin": {
+          "kind": "peer",
+          "from": "agent"
+        },
+        "tool_use_result": {
+          "stdout": "x"
+        }
+      }
+    },
+    {
+      "name": "user_blocks",
+      "message": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "a"
+            },
+            {
+              "type": "thinking",
+              "thinking": "t",
+              "signature": "s"
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "tool-1",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "r"
+                }
+              ],
+              "is_error": true
+            },
+            {
+              "type": "image",
+              "source": {}
+            },
+            {
+              "type": "future_block",
+              "x": 1
+            }
+          ]
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-u"
+      }
+    },
+    {
+      "name": "user_origin_without_string_kind",
+      "message": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "hi"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-u",
+        "origin": {
+          "kind": 5
+        }
+      }
+    },
+    {
+      "name": "user_tool_use_result_list",
+      "message": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "hi"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-u",
+        "tool_use_result": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "user_tool_use_result_null",
+      "message": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "hi"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-u",
+        "tool_use_result": null
+      }
+    },
+    {
+      "name": "user_content_object",
+      "message": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": {
+            "text": "odd"
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-u"
+      }
+    },
+    {
+      "name": "user_missing_content",
+      "message": {
+        "type": "user",
+        "message": {
+          "role": "user"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-u"
+      }
+    },
+    {
+      "name": "user_block_missing_type",
+      "message": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "text": "a"
+            }
+          ]
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-u"
+      }
+    },
+    {
+      "name": "user_text_block_missing_text",
+      "message": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text"
+            }
+          ]
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-u"
+      }
+    },
+    {
+      "name": "user_replay",
+      "message": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "again"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "session-1",
+        "uuid": "uuid-u",
+        "isReplay": true,
+        "timestamp": "2026-01-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "system_init",
+      "message": {
+        "type": "system",
+        "subtype": "init",
+        "apiKeySource": "none",
+        "claude_code_version": "2.1.319",
+        "cwd": "/work",
+        "tools": [],
+        "mcp_servers": [],
+        "model": "claude-test",
+        "permissionMode": "default",
+        "slash_commands": [],
+        "output_style": "default",
+        "skills": [],
+        "plugins": [],
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_task_started",
+      "message": {
+        "type": "system",
+        "subtype": "task_started",
+        "task_id": "task-1",
+        "description": "Explore",
+        "tool_use_id": "tool-1",
+        "task_type": "local_agent",
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_task_started_missing_description",
+      "message": {
+        "type": "system",
+        "subtype": "task_started",
+        "task_id": "task-1",
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_task_progress",
+      "message": {
+        "type": "system",
+        "subtype": "task_progress",
+        "task_id": "task-1",
+        "description": "Explore",
+        "usage": {
+          "total_tokens": 10,
+          "tool_uses": 1,
+          "duration_ms": 5
+        },
+        "last_tool_name": "Read",
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_task_progress_missing_usage",
+      "message": {
+        "type": "system",
+        "subtype": "task_progress",
+        "task_id": "task-1",
+        "description": "Explore",
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_task_notification",
+      "message": {
+        "type": "system",
+        "subtype": "task_notification",
+        "task_id": "task-1",
+        "status": "completed",
+        "output_file": "/tmp/out",
+        "summary": "done",
+        "usage": {
+          "total_tokens": 10,
+          "tool_uses": 1,
+          "duration_ms": 5
+        },
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_task_notification_missing_output_file",
+      "message": {
+        "type": "system",
+        "subtype": "task_notification",
+        "task_id": "task-1",
+        "status": "completed",
+        "summary": "done",
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_task_updated",
+      "message": {
+        "type": "system",
+        "subtype": "task_updated",
+        "task_id": "task-1",
+        "patch": {
+          "status": "completed",
+          "end_time": 3
+        },
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_task_updated_lenient",
+      "message": {
+        "type": "system",
+        "subtype": "task_updated",
+        "patch": "oops"
+      }
+    },
+    {
+      "name": "system_mirror_error",
+      "message": {
+        "type": "system",
+        "subtype": "mirror_error",
+        "error": "store failed",
+        "key": {
+          "project_key": "p",
+          "session_id": "session-1"
+        },
+        "uuid": "uuid-m",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_hook_started_hook_name",
+      "message": {
+        "type": "system",
+        "subtype": "hook_started",
+        "hook_id": "h1",
+        "hook_name": "PreToolUse:Bash",
+        "hook_event": "PreToolUse",
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_hook_response_fallback",
+      "message": {
+        "type": "system",
+        "subtype": "hook_response",
+        "hook_id": "h1",
+        "hook_event": "",
+        "hook_name": "",
+        "hook_event_name": "PostToolUse",
+        "output": "",
+        "stdout": "",
+        "stderr": "",
+        "outcome": "success",
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_hook_started_no_name",
+      "message": {
+        "type": "system",
+        "subtype": "hook_started"
+      }
+    },
+    {
+      "name": "system_missing_subtype",
+      "message": {
+        "type": "system",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_session_state_changed",
+      "message": {
+        "type": "system",
+        "subtype": "session_state_changed",
+        "state": "running",
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_session_state_changed_host_only",
+      "message": {
+        "type": "system",
+        "subtype": "session_state_changed",
+        "state": "running",
+        "sdk_host_only": true,
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "system_future_subtype",
+      "message": {
+        "type": "system",
+        "subtype": "future_subtype",
+        "detail": {
+          "a": [
+            1,
+            null
+          ]
+        },
+        "uuid": "uuid-s",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "result_success",
+      "message": {
+        "type": "result",
+        "subtype": "success",
+        "duration_ms": 10,
+        "duration_api_ms": 8,
+        "is_error": false,
+        "num_turns": 1,
+        "result": "done",
+        "stop_reason": "end_turn",
+        "total_cost_usd": 0.5,
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 2
+        },
+        "modelUsage": {
+          "claude-test": {
+            "inputTokens": 1
+          }
+        },
+        "permission_denials": [],
+        "uuid": "uuid-r",
+        "session_id": "session-1",
+        "terminal_reason": "completed",
+        "origin": {
+          "kind": "peer"
+        },
+        "fast_mode_state": "off"
+      }
+    },
+    {
+      "name": "result_deferred_tool_use",
+      "message": {
+        "type": "result",
+        "subtype": "success",
+        "duration_ms": 10,
+        "duration_api_ms": 8,
+        "is_error": false,
+        "num_turns": 1,
+        "result": "done",
+        "stop_reason": "end_turn",
+        "total_cost_usd": 0.5,
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 2
+        },
+        "modelUsage": {
+          "claude-test": {
+            "inputTokens": 1
+          }
+        },
+        "permission_denials": [],
+        "uuid": "uuid-r",
+        "session_id": "session-1",
+        "deferred_tool_use": {
+          "id": "tool-9",
+          "name": "Bash",
+          "input": {
+            "command": "ls"
+          }
+        }
+      }
+    },
+    {
+      "name": "result_deferred_tool_use_missing_input",
+      "message": {
+        "type": "result",
+        "subtype": "success",
+        "duration_ms": 10,
+        "duration_api_ms": 8,
+        "is_error": false,
+        "num_turns": 1,
+        "result": "done",
+        "stop_reason": "end_turn",
+        "total_cost_usd": 0.5,
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 2
+        },
+        "modelUsage": {
+          "claude-test": {
+            "inputTokens": 1
+          }
+        },
+        "permission_denials": [],
+        "uuid": "uuid-r",
+        "session_id": "session-1",
+        "deferred_tool_use": {
+          "id": "tool-9",
+          "name": "Bash"
+        }
+      }
+    },
+    {
+      "name": "result_deferred_tool_use_empty",
+      "message": {
+        "type": "result",
+        "subtype": "success",
+        "duration_ms": 10,
+        "duration_api_ms": 8,
+        "is_error": false,
+        "num_turns": 1,
+        "result": "done",
+        "stop_reason": "end_turn",
+        "total_cost_usd": 0.5,
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 2
+        },
+        "modelUsage": {
+          "claude-test": {
+            "inputTokens": 1
+          }
+        },
+        "permission_denials": [],
+        "uuid": "uuid-r",
+        "session_id": "session-1",
+        "deferred_tool_use": {}
+      }
+    },
+    {
+      "name": "result_error",
+      "message": {
+        "type": "result",
+        "subtype": "error_during_execution",
+        "duration_ms": 1,
+        "duration_api_ms": 1,
+        "is_error": true,
+        "num_turns": 0,
+        "stop_reason": null,
+        "total_cost_usd": 0,
+        "usage": {},
+        "modelUsage": {},
+        "permission_denials": [],
+        "errors": [
+          "boom"
+        ],
+        "uuid": "uuid-r",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "result_missing_num_turns",
+      "message": {
+        "type": "result",
+        "subtype": "success",
+        "duration_ms": 10,
+        "duration_api_ms": 8,
+        "is_error": false,
+        "result": "done",
+        "stop_reason": "end_turn",
+        "total_cost_usd": 0.5,
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 2
+        },
+        "modelUsage": {
+          "claude-test": {
+            "inputTokens": 1
+          }
+        },
+        "permission_denials": [],
+        "uuid": "uuid-r",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "stream_event",
+      "message": {
+        "type": "stream_event",
+        "event": {
+          "type": "message_start",
+          "message": {}
+        },
+        "parent_tool_use_id": null,
+        "uuid": "uuid-e",
+        "session_id": "session-1",
+        "ttft_ms": 12,
+        "user_message_uuid": "uuid-u"
+      }
+    },
+    {
+      "name": "stream_event_missing_event",
+      "message": {
+        "type": "stream_event",
+        "parent_tool_use_id": null,
+        "uuid": "uuid-e",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "rate_limit_event",
+      "message": {
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+          "status": "allowed_warning",
+          "resetsAt": 1767225600,
+          "rateLimitType": "five_hour",
+          "utilization": 0.9,
+          "overageStatus": "rejected",
+          "overageResetsAt": 1767229200,
+          "overageDisabledReason": "org_level_disabled",
+          "isUsingOverage": false
+        },
+        "uuid": "uuid-l",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "rate_limit_event_missing_status",
+      "message": {
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+          "resetsAt": 1
+        },
+        "uuid": "uuid-l",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "conversation_reset",
+      "message": {
+        "type": "conversation_reset",
+        "new_conversation_id": "conv-2",
+        "uuid": "uuid-c",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "conversation_reset_missing_id",
+      "message": {
+        "type": "conversation_reset",
+        "uuid": "uuid-c",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "keep_alive",
+      "message": {
+        "type": "keep_alive"
+      }
+    },
+    {
+      "name": "tool_progress",
+      "message": {
+        "type": "tool_progress",
+        "tool_use_id": "tool-1",
+        "tool_name": "Bash",
+        "parent_tool_use_id": null,
+        "elapsed_time_seconds": 2,
+        "uuid": "uuid-p",
+        "session_id": "session-1"
+      }
+    },
+    {
+      "name": "future_type",
+      "message": {
+        "type": "future_event",
+        "field": {
+          "nested": [
+            1,
+            null
+          ]
+        }
+      }
+    },
+    {
+      "name": "missing_type",
+      "message": {
+        "field": 1
+      }
+    },
+    {
+      "name": "empty_type",
+      "message": {
+        "type": "",
+        "field": 1
+      }
+    },
+    {
+      "name": "number_type",
+      "message": {
+        "type": 5,
+        "field": 1
+      }
+    }
+  ]
+}

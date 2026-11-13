@@ -230,6 +230,9 @@ impl SdkMcpSession for LocalMcpSession {
                             tool_error(format!("Tool {} not found", call.name)),
                         )));
                     };
+                    if let Some(error) = tool.input_schema().compile_error() {
+                        return Ok(Some(rpc_result(id, tool_error(error.to_owned()))));
+                    }
                     if let Some(error) = tool
                         .input_schema()
                         .validation_error(&Value::Object(call.arguments.clone()))
