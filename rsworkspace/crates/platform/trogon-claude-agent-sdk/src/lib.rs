@@ -15,6 +15,8 @@ mod bridge_client;
 mod bridge_git;
 mod bridge_js;
 mod bridge_types;
+mod bridge_worker;
+mod bridge_worker_types;
 mod builtin_tool_name;
 mod bundled_cli;
 mod channel;
@@ -183,6 +185,15 @@ pub use bridge_types::{
     CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
     DeviceRefusal, FailureSource, FetchRemoteCredentialsOptions, RemoteCredentials, RemoteCredentialsOutcome,
     RemoteMcpConfig, SessionState,
+};
+pub use bridge_worker::{
+    AUTH_FAILURES_BEFORE_EXIT, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_CEILING_MS,
+    HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS, HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS,
+    InvalidSessionId, NOT_FOUND_BEFORE_EXIT, StatusClass, TokioPacing, WorkerClient, WorkerConfig, WorkerPacing,
+    classify_status, external_metadata_patch, heartbeat_timeout, retry_after_ms, session_url,
+};
+pub use bridge_worker_types::{
+    InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
 };
 pub use builtin_tool_name::BuiltinToolName;
 pub use bundled_cli::{

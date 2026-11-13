@@ -20,7 +20,7 @@ use crate::settings_numbers::js_value;
 use crate::settings_parse::parse_json;
 use crate::{BranchDropLogDedup, SensitiveString};
 
-const USER_AGENT: &str = "claude-code/0.3.323";
+pub(crate) const USER_AGENT: &str = "claude-code/0.3.323";
 const ENTRYPOINT_VARIABLE: &str = "CLAUDE_CODE_ENTRYPOINT";
 
 static REQUEST_ID: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"^req_[A-Za-z0-9_-]{1,36}$").ok());
@@ -205,7 +205,7 @@ fn valid_id_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
-fn client_platform(entrypoint: &str) -> &'static str {
+pub(crate) fn client_platform(entrypoint: &str) -> &'static str {
     match entrypoint {
         "claude-vscode" => "claude_code_vscode",
         "remote" | "remote_baku" | "remote_cowork" | "remote_desktop" | "remote_mobile" | "remote_projects"
@@ -220,7 +220,7 @@ fn client_platform(entrypoint: &str) -> &'static str {
     }
 }
 
-fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
+pub(crate) fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
     let name = HeaderName::from_bytes(name.as_bytes()).ok()?;
     let mut values = headers
         .get_all(&name)
