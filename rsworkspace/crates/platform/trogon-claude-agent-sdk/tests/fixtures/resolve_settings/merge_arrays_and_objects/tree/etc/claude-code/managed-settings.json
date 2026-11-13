@@ -1,0 +1,1 @@
+{"extraKnownMarketplaces":{"b":{"source":{"source":"github","repo":"x/b"}}},"fallbackModel":"file-fallback","allowedProviders":["vertex"],"modelPicker":{"options":[{"id":"f"}]},"hooks":{"PreToolUse":[{"matcher":"F","hooks":[{"type":"command","command":"f"}]}]},"availableModels":["opus"]}
