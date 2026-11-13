@@ -22,7 +22,7 @@ use crate::{
     argv,
     constants::{CLIENT_APP_ENV, DERIVED_CLIENT_APP_ENV, SCRIPT_EXTENSIONS},
     environment_plan::{self, Inherited},
-    framing::{FrameReader, drain_stderr_with},
+    framing::{FrameReader, SharedTail, drain_stderr_with},
     process_options::EnvironmentMode,
 };
 
@@ -131,12 +131,14 @@ pub(crate) struct ProcessSpawn<'a, P> {
 }
 
 pub(crate) struct ProcessTransport {
-    child: Child,
+    /// `None` once a TypeScript close handed the process to its delayed SIGKILL.
+    child: Option<Child>,
     stdin: Option<ChildStdin>,
     frames: FrameReader<ChildStdout>,
-    stderr: JoinHandle<Result<StderrTail, io::Error>>,
+    stderr: JoinHandle<Result<(), io::Error>>,
+    stderr_tail: SharedTail,
     argv_style: ArgvStyle,
-    shutdown_timeout: Duration,
+    shutdown: crate::Shutdown,
     closed: Closed,
     /// The process was stopped by the SDK (a kill request or an escalation), so its exit status is not an error.
     forced: bool,
@@ -175,21 +177,25 @@ impl ProcessTransport {
         let stdin = child.stdin.take().ok_or(Error::PipeUnavailable)?;
         let stdout = child.stdout.take().ok_or(Error::PipeUnavailable)?;
         let stderr = child.stderr.take().ok_or(Error::PipeUnavailable)?;
+        let stderr_tail = SharedTail::new(options.limits.stderr_tail);
         let stderr = tokio::spawn(drain_stderr_with(
             stderr,
-            options.limits.max_stderr_bytes.get(),
+            stderr_tail.clone(),
+            options
+                .limits
+                .max_buffer_size
+                .unwrap_or(crate::Limits::PYTHON_MAX_BUFFER_SIZE)
+                .get(),
             options.stderr_handler.clone(),
         ));
         Ok(Self {
-            child,
+            child: Some(child),
             stdin: Some(stdin),
-            frames: FrameReader::new(
-                stdout,
-                (options.argv_style == ArgvStyle::Python).then(|| options.limits.max_frame_bytes.get()),
-            ),
+            frames: FrameReader::new(stdout, options.limits.max_buffer_size.map(std::num::NonZeroUsize::get)),
             stderr,
+            stderr_tail,
             argv_style: options.argv_style,
-            shutdown_timeout: options.limits.shutdown_timeout.as_duration(),
+            shutdown: options.limits.shutdown,
             closed,
             forced: false,
             input_ended: false,
@@ -197,7 +203,7 @@ impl ProcessTransport {
     }
 
     pub(crate) fn process_id(&self) -> Option<u32> {
-        self.child.id()
+        self.child.as_ref().and_then(Child::id)
     }
 
     /// Why a write cannot go out, in upstream's order: not ready, then terminated. Python keeps `_ready` after the
@@ -209,7 +215,7 @@ impl ProcessTransport {
         if self.stdin.is_none() && !self.input_ended {
             return Some(Error::NotReadyForWriting);
         }
-        if let Ok(Some(status)) = self.child.try_wait() {
+        if let Some(Ok(Some(status))) = self.child.as_mut().map(Child::try_wait) {
             return Some(match self.argv_style {
                 ArgvStyle::Python => Error::WriteToTerminatedProcess {
                     exit_code: crate::error::exit_code(&status),
@@ -221,9 +227,9 @@ impl ProcessTransport {
     }
 
     /// SIGTERM on Unix, a hard kill where there is no such signal or it cannot be delivered.
-    async fn terminate(&mut self) -> Result<(), Error> {
+    async fn terminate(child: &mut Child) -> Result<(), Error> {
         #[cfg(unix)]
-        if let Some(pid) = self.child.id() {
+        if let Some(pid) = child.id() {
             let delivered = ProcessCommand::new("kill")
                 .args(["-TERM", &pid.to_string()])
                 .stdin(Stdio::null())
@@ -236,22 +242,77 @@ impl ProcessTransport {
                 return Ok(());
             }
         }
-        self.child.start_kill().map_err(Error::Io)
+        child.start_kill().map_err(Error::Io)
     }
 
-    /// Python's close sequence: stdin is already closed, wait, SIGTERM, wait, SIGKILL, wait.
-    async fn reap(&mut self) -> Result<(ExitStatus, StderrTail), Error> {
-        let wait = self.shutdown_timeout;
-        let status = match timeout(wait, self.child.wait()).await {
+    /// Stops the process once stdin is closed, by the configured [`crate::Shutdown`] policy. `None` means the
+    /// SDK stopped the process without waiting for its exit.
+    async fn reap(&mut self) -> Result<Option<(ExitStatus, StderrTail)>, Error> {
+        match self.shutdown {
+            crate::Shutdown::TypeScript => Ok(self.reap_typescript().await),
+            crate::Shutdown::Python => Ok(self.reap_python().await),
+            crate::Shutdown::Strict(wait) => self.reap_strict(wait.as_duration()).await.map(Some),
+        }
+    }
+
+    /// TypeScript's close: wait 2 seconds, then SIGTERM (none on Windows), and SIGKILL 5 seconds later without
+    /// waiting for it. Stderr gets 200 ms after the exit. Nothing here fails.
+    async fn reap_typescript(&mut self) -> Option<(ExitStatus, StderrTail)> {
+        let mut child = self.child.take()?;
+        if let Ok(Ok(status)) = timeout(TYPESCRIPT_CLOSE_GRACE, child.wait()).await {
+            return Some((status, self.stderr_tail().await));
+        }
+        self.forced = true;
+        #[cfg(unix)]
+        if let Err(error) = Self::terminate(&mut child).await {
+            tracing::debug!(%error, "could not send SIGTERM to Claude Code");
+        }
+        tokio::spawn(async move {
+            if timeout(TYPESCRIPT_KILL_DELAY, child.wait()).await.is_err() {
+                if let Err(error) = child.start_kill() {
+                    tracing::debug!(%error, "could not send SIGKILL to Claude Code");
+                }
+                let _ = child.wait().await;
+            }
+        });
+        None
+    }
+
+    /// Python's close: wait 5 seconds, SIGTERM, wait 5 seconds, SIGKILL, wait 5 seconds, with every failure
+    /// suppressed.
+    async fn reap_python(&mut self) -> Option<(ExitStatus, StderrTail)> {
+        let child = self.child.as_mut()?;
+        let mut status = timeout(PYTHON_CLOSE_WAIT, child.wait()).await.ok().and_then(Result::ok);
+        if status.is_none() {
+            self.forced = true;
+            if let Err(error) = Self::terminate(child).await {
+                tracing::debug!(%error, "could not terminate Claude Code");
+            }
+            status = timeout(PYTHON_CLOSE_WAIT, child.wait()).await.ok().and_then(Result::ok);
+        }
+        if status.is_none() {
+            if let Err(error) = child.start_kill() {
+                tracing::debug!(%error, "could not kill Claude Code");
+            }
+            status = timeout(PYTHON_CLOSE_WAIT, child.wait()).await.ok().and_then(Result::ok);
+        }
+        let status = status?;
+        Some((status, self.stderr_tail().await))
+    }
+
+    /// Python's ladder with `wait` at each step, failing when the process or its stderr outlives it.
+    async fn reap_strict(&mut self, wait: Duration) -> Result<(ExitStatus, StderrTail), Error> {
+        let child = self.child.as_mut().ok_or(Error::ShutdownTimeout)?;
+        let status = match timeout(wait, child.wait()).await {
             Ok(status) => status.map_err(Error::Io)?,
             Err(_) => {
                 self.forced = true;
-                self.terminate().await?;
-                match timeout(wait, self.child.wait()).await {
+                Self::terminate(child).await?;
+                match timeout(wait, child.wait()).await {
                     Ok(status) => status.map_err(Error::Io)?,
                     Err(_) => {
-                        self.child.start_kill().map_err(Error::Io)?;
-                        timeout(wait, self.child.wait())
+                        child.start_kill().map_err(Error::Io)?;
+                        timeout(wait, child.wait())
                             .await
                             .map_err(|_| Error::ShutdownTimeout)?
                             .map_err(Error::Io)?
@@ -259,16 +320,33 @@ impl ProcessTransport {
                 }
             }
         };
-        let stderr = match timeout(wait, &mut self.stderr).await {
+        match timeout(wait, &mut self.stderr).await {
             Ok(result) => result.map_err(Error::DriverTask)?.map_err(Error::Io)?,
             Err(_) => {
                 self.stderr.abort();
                 return Err(Error::StderrDrainTimeout);
             }
-        };
-        Ok((status, stderr))
+        }
+        Ok((status, self.stderr_tail.snapshot()))
+    }
+
+    /// TypeScript waits up to 200 ms after the exit for stderr to close, then uses what it has.
+    async fn stderr_tail(&mut self) -> StderrTail {
+        if let Ok(Ok(Err(error))) = timeout(STDERR_SETTLE, &mut self.stderr).await {
+            tracing::debug!(%error, "could not read Claude Code stderr");
+        }
+        self.stderr_tail.snapshot()
     }
 }
+
+/// TypeScript `qet`: the wait for the process to exit on its own after stdin closes.
+const TYPESCRIPT_CLOSE_GRACE: Duration = Duration::from_millis(2000);
+/// TypeScript: the wait between SIGTERM and SIGKILL.
+const TYPESCRIPT_KILL_DELAY: Duration = Duration::from_millis(5000);
+/// TypeScript `Yet`: how long stderr may stay open after the exit.
+const STDERR_SETTLE: Duration = Duration::from_millis(200);
+/// Python: each wait of its close sequence.
+const PYTHON_CLOSE_WAIT: Duration = Duration::from_secs(5);
 
 impl Transport for ProcessTransport {
     async fn connect(&mut self) -> Result<(), Error> {
@@ -321,7 +399,13 @@ impl Transport for ProcessTransport {
         self.input_ended = false;
         let reaped = self.reap().await;
         self.stderr.abort();
-        let (status, stderr) = reaped?;
+        let Some((status, stderr)) = reaped? else {
+            self.closed.record(match self.argv_style {
+                ArgvStyle::Python => ClosedReason::Terminated { exit_code: None },
+                _ => ClosedReason::NotReady,
+            });
+            return Ok(());
+        };
         let exit_code = crate::error::exit_code(&status);
         self.closed.record(match self.argv_style {
             ArgvStyle::Python => ClosedReason::Terminated { exit_code },
@@ -346,8 +430,10 @@ impl Transport for ProcessTransport {
 
     async fn kill(&mut self) -> Result<(), Error> {
         self.forced = true;
-        if self.child.try_wait().map_err(Error::Io)?.is_none() {
-            self.terminate().await?;
+        if let Some(child) = self.child.as_mut()
+            && child.try_wait().map_err(Error::Io)?.is_none()
+        {
+            Self::terminate(child).await?;
         }
         Ok(())
     }

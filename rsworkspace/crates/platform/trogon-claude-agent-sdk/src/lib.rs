@@ -12,6 +12,7 @@ mod agent_name;
 mod argv;
 mod builtin_tool_name;
 mod bundled_cli;
+mod channel;
 mod cli_discovery;
 mod cli_path;
 mod client;
@@ -164,8 +165,9 @@ pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use model_name::ModelName;
 pub use options::{
-    ClaudeAgentOptions, ContinueConversation, Customizations, FileCheckpointing, Limits, McpDiscovery, PartialMessages,
-    SessionFork, SessionPersistence, SystemPrompt, ToolSet,
+    ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, FileCheckpointing,
+    InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, MessageBuffer, PartialMessages, RequestIdExhaustion,
+    SessionFork, SessionPersistence, Shutdown, SystemPrompt, ToolSet,
 };
 pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{

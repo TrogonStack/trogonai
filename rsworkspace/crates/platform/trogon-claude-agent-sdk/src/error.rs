@@ -169,8 +169,22 @@ pub enum Error {
     McpUpdateInProgress,
     #[error("an MCP server name is configured as both external and embedded")]
     DuplicateMcpServer,
-    #[error("the {operation} control request timed out")]
+    /// Python's text for a control request that went unanswered for the configured wait.
+    #[error("Control request timeout: {operation}")]
     ControlTimeout { operation: ControlOperation },
+    /// TypeScript's text when initialize goes unanswered while a hook is set to block on failure.
+    #[error(
+        "Claude Code did not answer initialize, so a hook set to onFailure: \"block\" could not be confirmed and the prompt was not sent. Check the connection and start a new session."
+    )]
+    InitializeNotConfirmed,
+    /// TypeScript's text when initialize goes unanswered after carrying managed settings and no hook blocks.
+    #[error(
+        "Claude Code did not answer initialize, so the managed settings could not be confirmed and the prompt was not sent. Start a new session."
+    )]
+    ManagedSettingsNotConfirmed,
+    /// Python's `int()` error for a `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` that is not an integer.
+    #[error("invalid literal for int() with base 10: {literal}")]
+    InvalidStreamCloseTimeout { literal: String },
     #[error("the {operation} control request was rejected")]
     ControlRejected {
         operation: ControlOperation,

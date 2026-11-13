@@ -45,8 +45,8 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 fn options() -> Result<ClaudeAgentOptions, Box<dyn std::error::Error>> {
     let mut options = ClaudeAgentOptions::default();
-    options.limits.control_timeout = Timeout::new(Duration::from_secs(1))?;
-    options.limits.shutdown_timeout = Timeout::new(Duration::from_secs(5))?;
+    options.limits.control_timeout = Some(Timeout::new(Duration::from_secs(1)));
+    options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(Timeout::new(Duration::from_secs(5)));
     Ok(options)
 }
 
@@ -268,7 +268,7 @@ async fn s13_empty_hooks_are_ignored_and_hook_callback_count_is_unbounded() -> T
     let (client, cli) = connect(configured).await?;
     cli.disconnect(client).await?;
     let mut configured = options()?;
-    configured.limits.max_pending_controls = QueueCapacity::new(1)?;
+    configured.limits.max_incoming_callbacks = Some(QueueCapacity::new(1)?);
     let mut registration = registration;
     registration.callbacks = vec![
         Arc::new(|_: HookRequest| async { Err(CallbackError::Cancelled) }),
@@ -283,7 +283,9 @@ async fn s13_empty_hooks_are_ignored_and_hook_callback_count_is_unbounded() -> T
 #[tokio::test]
 /// Both upstream SDKs write input whenever it arrives, so a prompt sent mid-turn reaches the CLI.
 async fn s15_input_sent_during_a_turn_is_written_and_closed_input_stays_recoverable() -> TestResult {
-    let (mut client, mut cli) = connect(options()?).await?;
+    let mut configured = options()?;
+    configured.limits.input_after_finish = trogon_claude_agent_sdk::InputAfterFinish::Reject;
+    let (mut client, mut cli) = connect(configured).await?;
     client.query(Prompt::from("first")).await?;
     assert_eq!(cli.read().await?["message"]["content"], "first");
     client.send_prompt(Prompt::from("during the turn")).await?;
@@ -480,7 +482,7 @@ async fn callback_failures_return_bounded_protocol_fallbacks_without_stopping_co
 #[tokio::test]
 async fn pending_controls_and_mcp_replacements_reject_overlapping_admission() -> TestResult {
     let mut configured = options()?;
-    configured.limits.max_pending_controls = QueueCapacity::new(1)?;
+    configured.limits.max_pending_controls = Some(QueueCapacity::new(1)?);
     let (client, mut cli) = connect(configured).await?;
     let handle = client.handle();
     let pending = tokio::spawn(async move { handle.set_model(None).await });
@@ -561,6 +563,7 @@ async fn callback_timeout_cancels_signal_and_returns_deny() -> TestResult {
     let signal = Arc::new(std::sync::Mutex::new(None::<CancellationToken>));
     let observed = signal.clone();
     let mut configured = options()?;
+    configured.limits.callback_timeout = Some(Timeout::new(Duration::from_millis(200)));
     configured.permission_handler = Some(Arc::new(move |request: ToolPermissionRequest| {
         if let Ok(mut signal) = observed.lock() {
             *signal = Some(request.signal);
@@ -586,7 +589,7 @@ async fn callback_capacity_is_bounded_and_cancellation_preserves_control_progres
     let started = Arc::new(tokio::sync::Notify::new());
     let observed = started.clone();
     let mut configured = options()?;
-    configured.limits.max_pending_controls = QueueCapacity::new(1)?;
+    configured.limits.max_incoming_callbacks = Some(QueueCapacity::new(1)?);
     configured.permission_handler = Some(Arc::new(move |_: ToolPermissionRequest| {
         observed.notify_one();
         async { std::future::pending::<PermissionDecision>().await }
@@ -632,6 +635,7 @@ async fn duplicate_callback_request_id_is_a_terminal_protocol_error() -> TestRes
     let started = Arc::new(tokio::sync::Notify::new());
     let observed = started.clone();
     let mut configured = options()?;
+    configured.limits.duplicate_control_requests = trogon_claude_agent_sdk::DuplicateControlRequests::Fail;
     configured.permission_handler = Some(Arc::new(move |_: ToolPermissionRequest| {
         observed.notify_one();
         async { std::future::pending::<PermissionDecision>().await }
@@ -651,7 +655,9 @@ async fn duplicate_callback_request_id_is_a_terminal_protocol_error() -> TestRes
 
 #[tokio::test]
 async fn an_impossible_queued_turn_count_fails_through_a_typed_public_error() -> TestResult {
-    let (mut client, mut cli) = connect(options()?).await?;
+    let mut configured = options()?;
+    configured.limits.max_queued_inputs = Some(QueueCapacity::default());
+    let (mut client, mut cli) = connect(configured).await?;
     let mut frame = result();
     frame["queued_turn_count"] = u64::MAX.into();
     cli.send(frame).await?;
@@ -663,8 +669,8 @@ async fn an_impossible_queued_turn_count_fails_through_a_typed_public_error() ->
 #[tokio::test]
 async fn queued_turn_counts_are_bounded_by_the_command_queue_not_the_message_queue() -> TestResult {
     let mut configured = options()?;
-    configured.limits.message_queue_capacity = QueueCapacity::new(1)?;
-    configured.limits.command_queue_capacity = QueueCapacity::new(2)?;
+    configured.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(QueueCapacity::new(1)?);
+    configured.limits.max_queued_inputs = Some(QueueCapacity::new(2)?);
     let (mut client, mut cli) = connect(configured).await?;
     let mut accepted = result();
     accepted["queued_turn_count"] = 2.into();
@@ -788,7 +794,7 @@ async fn s03_s04_unknown_control_responses_and_session_states_do_not_end_the_ses
 #[tokio::test]
 async fn background_task_ledger_rejects_new_tasks_at_its_limit_but_accepts_duplicates() -> TestResult {
     let mut configured = options()?;
-    configured.limits.message_queue_capacity = QueueCapacity::new(2)?;
+    configured.limits.max_tracked_tasks = Some(QueueCapacity::new(2)?);
     let (mut client, mut cli) = connect(configured).await?;
     for (kind, id) in [
         ("local_agent", "first"),
@@ -906,8 +912,8 @@ fn configured_store(
     let mut store_options = SessionStoreOptions::from(store);
     store_options.config_directory = Some(directory.to_path_buf());
     store_options.project_key = Some(SessionProjectKey::new("project")?);
-    store_options.limits.append_timeout = Timeout::new(Duration::from_secs(10))?;
-    store_options.limits.flush_timeout = Timeout::new(Duration::from_millis(100))?;
+    store_options.limits.append_timeout = Timeout::new(Duration::from_secs(10));
+    store_options.limits.flush_timeout = Timeout::new(Duration::from_millis(100));
     configured.cwd = Some(directory.to_path_buf());
     configured.session_store = Some(store_options);
     Ok(configured)
@@ -1017,7 +1023,7 @@ async fn shutdown_collects_each_queued_mirror_fence_and_retains_append_failures(
         let mut configured = eager_store(store.clone(), directory.path())?;
         if let Some(store) = &mut configured.session_store {
             // A failing append is retried twice with backoff before it is reported.
-            store.limits.flush_timeout = Timeout::new(Duration::from_secs(5))?;
+            store.limits.flush_timeout = Timeout::new(Duration::from_secs(5));
         }
         let (client, mut cli) = connect(configured).await?;
         client.send_prompt(Prompt::from("mirror run")).await?;
@@ -1070,7 +1076,7 @@ async fn mirror_fence_does_not_make_the_deferred_message_queue_unbounded() -> Te
     let directory = tempfile::tempdir()?;
     let store = Arc::new(GatedAppend::new(false));
     let mut configured = eager_store(store.clone(), directory.path())?;
-    configured.limits.message_queue_capacity = QueueCapacity::new(1)?;
+    configured.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(QueueCapacity::new(1)?);
     let (mut client, mut cli) = connect(configured).await?;
     client.send_prompt(Prompt::from("bounded mirror run")).await?;
     cli.read().await?;
@@ -1088,7 +1094,7 @@ async fn mirror_fence_does_not_make_the_deferred_message_queue_unbounded() -> Te
 #[tokio::test]
 async fn owner_disposal_interrupts_a_backpressured_write() -> TestResult {
     let mut configured = options()?;
-    configured.limits.max_frame_bytes = NonZeroUsize::new(16 * 1024 * 1024).ok_or("invalid limit")?;
+    configured.limits.max_buffer_size = Some(NonZeroUsize::new(16 * 1024 * 1024).ok_or("invalid limit")?);
     let (client, cli) = connect(configured).await?;
     let ScriptedCli {
         lines,
@@ -1314,7 +1320,7 @@ impl tracing::Subscriber for CountingSubscriber {
 #[tokio::test]
 async fn a_second_input_beyond_the_queue_capacity_is_rejected_without_ending_the_session() -> TestResult {
     let mut configured = options()?;
-    configured.limits.command_queue_capacity = QueueCapacity::new(1)?;
+    configured.limits.max_queued_inputs = Some(QueueCapacity::new(1)?);
     let (client, mut cli) = connect(configured).await?;
     client.send_prompt(Prompt::from("first")).await?;
     assert_eq!(cli.read().await?["message"]["content"], "first");
@@ -1372,9 +1378,9 @@ async fn a_mirror_failure_that_cannot_be_published_is_logged_and_does_not_fail_s
     let directory = tempfile::tempdir()?;
     let store = Arc::new(GatedAppend::new(true));
     let mut configured = eager_store(store.clone(), directory.path())?;
-    configured.limits.message_queue_capacity = QueueCapacity::new(1)?;
+    configured.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(QueueCapacity::new(1)?);
     if let Some(store) = &mut configured.session_store {
-        store.limits.flush_timeout = Timeout::new(Duration::from_secs(5))?;
+        store.limits.flush_timeout = Timeout::new(Duration::from_secs(5));
     }
     let (client, mut cli) = connect(configured).await?;
     cli.send(json!({"type":"system","subtype":"fills_the_queue"})).await?;
@@ -1413,7 +1419,7 @@ async fn connect_holding_stderr() -> Result<(ClaudeSdkClient, ScriptedCli), Box<
     // Python style: TypeScript skips an undecodable line, so only Python ends the session on it.
     let mut configured = options()?;
     configured.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
-    configured.limits.shutdown_timeout = Timeout::new(Duration::from_millis(300))?;
+    configured.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(Timeout::new(Duration::from_millis(300)));
     let (process, harness) = ScriptedProcessSpawner::new();
     let mut cli = ScriptedCli::from(harness);
     let connecting = tokio::spawn(ClaudeSdkClient::connect_with_adapters(

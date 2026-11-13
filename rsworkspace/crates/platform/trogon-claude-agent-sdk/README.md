@@ -105,7 +105,8 @@ depend on installed CLI support.
 `ToolPermissionHandler` receives request/tool identities, suggestions, MCP
 provenance and prompt context, plus a cancellation signal. Typed allow decisions
 can replace input and update permission rules. Absent handlers deny host
-permission requests; timeout denies, and cancellation suppresses a late reply.
+permission requests; an opted-in `limits.callback_timeout` denies, and cancellation
+suppresses a late reply.
 The CLI can authorize tools through its own permission mode or rules before
 consulting the host.
 Suggestions keep unknown destinations, behaviors and update types verbatim, so
@@ -246,8 +247,10 @@ upstream SDKs).
   unsuccessfully after an `is_error` result, the error is `Error::Result`
   (`ResultError`): Python's text always, TypeScript's text when it is non-empty.
   `abort()` stops the process and ends the run with `Error::Aborted`
-  (`AbortError`). Closing escalates stdin close, SIGTERM, SIGKILL, each waiting
-  `limits.shutdown_timeout`.
+  (`AbortError`). Closing follows `limits.shutdown`: TypeScript's ladder by
+  default (stdin close, 2 seconds, SIGTERM, SIGKILL 5 seconds later without
+  waiting), Python's 5/5/5 second ladder, or `Shutdown::Strict`, which reports
+  `Error::ShutdownTimeout` and `Error::StderrDrainTimeout`.
 - Writes fail with distinct errors in upstream's order: `Error::NotReadyForWriting`
   after stdin is closed (and, in the TypeScript style, after the process exited,
   where the exit event clears `ready`), `Error::WriteToTerminatedProcess` after an
@@ -266,11 +269,11 @@ upstream SDKs).
   resolved with libc `getpwnam_r`, so NSS sources apply, an unknown name fails
   with `getpwnam(): name not found: '<name>'`, and only the uid changes, Unix
   only); `run_as_uid` is the numeric form.
-- The inbound line limit `max_frame_bytes` exists only in `ArgvStyle::Python`
-  (`max_buffer_size`): a longer line, counted in characters without its
+- The inbound line limit `limits.max_buffer_size` is unset by default, as
+  TypeScript keeps every line; `Limits::python()` sets Python's 1 MiB
+  (`max_buffer_size`). A longer line, counted in characters without its
   newline, is `Error::JsonDecode` with the line `JSON message exceeded maximum
   buffer size of N bytes` and `JsonDecodeSourceError::BufferExceeded`.
-  TypeScript keeps every line.
 - In `ArgvStyle::TypeScript`, `end_input` leaves the transport ready, so a later
   write is dropped without an error, as `endInput` does; `close` ends that.
 - `plugins` and `plugin_delivery` map `plugins` and `pluginDelivery`: TypeScript
@@ -320,11 +323,17 @@ caller order and duplicates. MCP discovery is disabled unless selected through
 `McpDiscovery::CliDefault`. `Customizations::Bare` disables further CLI
 customizations when supported.
 
-Frames, stderr, queues and outstanding controls have configurable bounds. A full
-message queue produces `Error::MessageQueueFull`; control handling progresses
-independently of message consumption. Stderr debug output omits its contents.
-`QueueCapacity` validates Tokio's range; positive `Timeout` values are bounded
-at 24 hours.
+`Limits::default()` matches the TypeScript SDK: no stdout line cap, the last
+2048 UTF-16 units of stderr kept for process errors, unbounded queues, no
+control, write or callback timeout, and an initialize deadline of 660 seconds
+only when a hook is set to block on failure. `Limits::python()` selects the
+Python SDK's values: a 1 MiB line cap, a 60 second control wait, a 100 message
+buffer that stops reading stdout while full, and its initialize wait and
+shutdown ladder. Every other bound (pending controls, inbound callbacks, tracked
+tasks, queued inputs, a failing message queue, command queue room) is opt-in and
+keeps its typed error. Stderr debug output omits its contents. `QueueCapacity`
+validates Tokio's range; `Timeout::checked` rejects zero and values past 24
+hours.
 
 ## Settings
 

@@ -354,7 +354,7 @@ impl SessionStore for PendingLoadStore {
 async fn resume_load_timeout_does_not_install_any_files() -> TestResult {
     let root = tempfile::tempdir()?;
     let mut options = options(Arc::new(PendingLoadStore), root.path())?;
-    options.limits.load_timeout = Timeout::new(Duration::from_millis(20))?;
+    options.limits.load_timeout = Timeout::new(Duration::from_millis(20));
     let outcome = SessionRuntime::prepare(
         &options,
         StoreResume::Session(SessionId::from(SESSION)),
@@ -408,8 +408,8 @@ async fn timed_out_mirror_append_is_reported_and_never_retried() -> TestResult {
     let root = memory_mirror_root();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut options = options(Arc::new(PendingStore { calls: calls.clone() }), &root)?;
-    options.limits.append_timeout = Timeout::new(Duration::from_millis(20))?;
-    options.limits.flush_timeout = Timeout::new(Duration::from_secs(1))?;
+    options.limits.append_timeout = Timeout::new(Duration::from_millis(20));
+    options.limits.flush_timeout = Timeout::new(Duration::from_secs(1));
     let mirror = TranscriptMirror::new(&options, root.join("projects"));
     mirror.enqueue(
         &root.join("projects/project").join(format!("{SESSION}.jsonl")),
@@ -491,7 +491,7 @@ async fn delayed_flush_wait_keeps_the_original_deadline() -> TestResult {
         }),
         &root,
     )?;
-    options.limits.flush_timeout = Timeout::new(Duration::from_millis(50))?;
+    options.limits.flush_timeout = Timeout::new(Duration::from_millis(50));
     let mirror = TranscriptMirror::new(&options, root.join("projects"));
     mirror.enqueue(
         &root.join("projects/project").join(format!("{SESSION}.jsonl")),

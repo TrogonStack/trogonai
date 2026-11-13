@@ -204,9 +204,13 @@ impl TranscriptMirror {
         self.commands
             .send(MirrorCommand::Flush(reply))
             .map_err(|_| crate::SessionError::MirrorStopped)?;
+        let now = tokio::time::Instant::now();
         Ok(MirrorFlush {
             receiver,
-            deadline: tokio::time::Instant::now() + self.flush_timeout,
+            // A timeout too long for an instant waits as long as tokio's own "never" (about 30 years).
+            deadline: now
+                .checked_add(self.flush_timeout)
+                .unwrap_or_else(|| now + std::time::Duration::from_secs(86_400 * 365 * 30)),
             owner: self.owner.clone(),
         })
     }

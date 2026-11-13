@@ -21,7 +21,7 @@ fn hook_output_uses_wire_names_and_typed_decisions() -> Result<(), serde_json::E
 
 #[test]
 fn matcher_seconds_and_async_milliseconds_are_distinct() -> Result<(), Box<dyn std::error::Error>> {
-    let timeout = Timeout::new(std::time::Duration::from_millis(1500))?;
+    let timeout = Timeout::new(std::time::Duration::from_millis(1500));
     let registration = HookRegistration {
         event: HookEvent::PreToolUse,
         matcher: None,

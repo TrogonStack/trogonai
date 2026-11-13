@@ -76,29 +76,176 @@ pub enum SystemPrompt {
     ClaudeCodeWithAppend(String),
 }
 
+/// How messages wait for the caller to read them.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MessageBuffer {
+    /// TypeScript: an unbounded queue; the CLI is read whether or not the caller keeps up.
+    #[default]
+    Unbounded,
+    /// Python: once this many messages wait, stdout is not read until the caller takes one, so control responses,
+    /// callbacks and mirror frames wait too.
+    Backpressure(QueueCapacity),
+    /// Opt-in: fail the run with [`crate::Error::MessageQueueFull`] when this many messages wait.
+    FailWhenFull(QueueCapacity),
+}
+
+impl MessageBuffer {
+    pub(crate) fn capacity(self) -> Option<QueueCapacity> {
+        match self {
+            Self::Unbounded => None,
+            Self::Backpressure(capacity) | Self::FailWhenFull(capacity) => Some(capacity),
+        }
+    }
+}
+
+/// How long the initialize request may go unanswered.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum InitializeTimeout {
+    /// TypeScript: 660 seconds, armed only when a hook is set to block on failure or managed settings are sent;
+    /// otherwise no limit. Expiry is [`crate::Error::InitializeNotConfirmed`], or
+    /// [`crate::Error::ManagedSettingsNotConfirmed`] when only managed settings armed it.
+    #[default]
+    TypeScript,
+    /// Python: `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` milliseconds from the parent environment, at least 60 seconds.
+    /// Expiry is [`crate::Error::ControlTimeout`] for the initialize operation.
+    Python,
+    /// Opt-in: this wait, whatever the hooks; expiry is [`crate::Error::ControlTimeout`].
+    Fixed(Timeout),
+}
+
+/// How the process is stopped once stdin is closed.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Shutdown {
+    /// TypeScript: wait 2 seconds, then SIGTERM, then SIGKILL 5 seconds later without waiting for it; stderr gets
+    /// 200 ms after the exit to close. Nothing here is an error.
+    #[default]
+    TypeScript,
+    /// Python: wait 5 seconds, SIGTERM, wait 5 seconds, SIGKILL, wait 5 seconds. Nothing here is an error.
+    Python,
+    /// Opt-in: Python's ladder with this wait at each step, failing with [`crate::Error::ShutdownTimeout`] when the
+    /// process outlives it and [`crate::Error::StderrDrainTimeout`] when stderr stays open as long.
+    Strict(Timeout),
+}
+
+/// What an inbound control request does while another with the same id is in flight.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DuplicateControlRequests {
+    /// TypeScript: the duplicate is skipped without a response.
+    #[default]
+    Skip,
+    /// Python: both run and both answer.
+    RunBoth,
+    /// Opt-in: the run fails with [`crate::ProtocolError::DuplicateControlRequest`].
+    Fail,
+}
+
+/// What happens when the control request counter runs out.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum RequestIdExhaustion {
+    /// The counter wraps, so ids never run out, like upstream's random ids.
+    #[default]
+    Wrap,
+    /// Opt-in: the run fails with [`crate::Error::RequestIdExhausted`].
+    Fail,
+}
+
+/// A prompt sent after [`crate::ClientHandle::finish_input`] while stdin is still open.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum InputAfterFinish {
+    /// Upstream: written like any other input, extending the run.
+    #[default]
+    Write,
+    /// Opt-in: refused with [`crate::Error::InputClosed`].
+    Reject,
+}
+
+/// Waits and bounds on the runtime. The default is TypeScript's: no control or write timeout and no bounded queue.
+/// [`Limits::python`] selects Python's values. Every other bound is opt-in.
 #[derive(Clone, Debug)]
 pub struct Limits {
-    pub max_frame_bytes: NonZeroUsize,
-    pub max_stderr_bytes: NonZeroUsize,
-    pub message_queue_capacity: QueueCapacity,
-    pub command_queue_capacity: QueueCapacity,
-    pub max_pending_controls: QueueCapacity,
-    pub control_timeout: Timeout,
-    pub shutdown_timeout: Timeout,
+    /// Python's `max_buffer_size`: the longest stdout line, in characters, before
+    /// [`crate::Error::JsonDecode`]. TypeScript has no cap.
+    pub max_buffer_size: Option<NonZeroUsize>,
+    /// UTF-16 code units of stderr kept for the process error. TypeScript keeps 2048; Python keeps none.
+    pub stderr_tail: usize,
+    pub message_buffer: MessageBuffer,
+    /// Opt-in: commands buffered ahead of the runtime. Neither upstream SDK queues them.
+    pub command_queue_capacity: Option<QueueCapacity>,
+    /// Opt-in: how long a command waits for room in a bounded command queue before
+    /// [`crate::Error::CommandQueueTimeout`].
+    pub command_queue_timeout: Option<Timeout>,
+    /// Opt-in: outstanding outbound control requests before [`crate::Error::TooManyControls`].
+    pub max_pending_controls: Option<QueueCapacity>,
+    /// Opt-in: inbound SDK callbacks running at once before the next one is refused with an error response.
+    pub max_incoming_callbacks: Option<QueueCapacity>,
+    /// Opt-in: background tasks tracked for run completion before [`crate::Error::TooManyTasks`].
+    pub max_tracked_tasks: Option<QueueCapacity>,
+    /// Opt-in: user inputs awaiting a result before [`crate::Error::TooManyInputs`].
+    pub max_queued_inputs: Option<QueueCapacity>,
+    /// The wait for a control response before [`crate::Error::ControlTimeout`]: none in TypeScript, 60 seconds in
+    /// Python.
+    pub control_timeout: Option<Timeout>,
+    pub initialize_timeout: InitializeTimeout,
+    /// Opt-in: how long an inbound SDK callback may run before its timeout answer is sent. Neither upstream SDK
+    /// times out callbacks; when set, a hook's own timeout applies to its callbacks instead.
+    pub callback_timeout: Option<Timeout>,
+    /// Opt-in: how long one stdin write may take before [`crate::Error::WriteTimeout`].
+    pub write_timeout: Option<Timeout>,
+    pub shutdown: Shutdown,
+    /// `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` in both upstream SDKs: with no idle state after the last result, the
+    /// run ends this long after it.
     pub run_end_timeout: Timeout,
+    pub duplicate_control_requests: DuplicateControlRequests,
+    pub request_id_exhaustion: RequestIdExhaustion,
+    pub input_after_finish: InputAfterFinish,
+}
+
+impl Limits {
+    /// TypeScript keeps the last 2048 UTF-16 code units of stderr.
+    pub const TYPESCRIPT_STDERR_TAIL: usize = 2048;
+    /// Python's `_DEFAULT_MAX_BUFFER_SIZE`.
+    pub const PYTHON_MAX_BUFFER_SIZE: NonZeroUsize = match NonZeroUsize::new(1024 * 1024) {
+        Some(size) => size,
+        None => NonZeroUsize::MIN,
+    };
+
+    /// Python's values: a 60-second control wait, a 1 MiB line cap, a 100-message buffer with backpressure, its
+    /// initialize wait and shutdown ladder, no stderr tail, and duplicate control requests that all run.
+    pub fn python() -> Self {
+        Self {
+            max_buffer_size: Some(Self::PYTHON_MAX_BUFFER_SIZE),
+            stderr_tail: 0,
+            message_buffer: MessageBuffer::Backpressure(QueueCapacity::PYTHON_MESSAGES),
+            control_timeout: Some(Timeout::default()),
+            initialize_timeout: InitializeTimeout::Python,
+            shutdown: Shutdown::Python,
+            duplicate_control_requests: DuplicateControlRequests::RunBoth,
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_frame_bytes: NonZeroUsize::new(1024 * 1024).unwrap_or(NonZeroUsize::MIN),
-            max_stderr_bytes: NonZeroUsize::new(64 * 1024).unwrap_or(NonZeroUsize::MIN),
-            message_queue_capacity: QueueCapacity::DEFAULT_MESSAGES,
-            command_queue_capacity: QueueCapacity::default(),
-            max_pending_controls: QueueCapacity::default(),
-            control_timeout: Timeout::default(),
-            shutdown_timeout: Timeout::SHUTDOWN_DEFAULT,
-            run_end_timeout: Timeout::new(std::time::Duration::from_secs(600)).unwrap_or_default(),
+            max_buffer_size: None,
+            stderr_tail: Self::TYPESCRIPT_STDERR_TAIL,
+            message_buffer: MessageBuffer::Unbounded,
+            command_queue_capacity: None,
+            command_queue_timeout: None,
+            max_pending_controls: None,
+            max_incoming_callbacks: None,
+            max_tracked_tasks: None,
+            max_queued_inputs: None,
+            control_timeout: None,
+            initialize_timeout: InitializeTimeout::TypeScript,
+            callback_timeout: None,
+            write_timeout: None,
+            shutdown: Shutdown::TypeScript,
+            run_end_timeout: Timeout::new(std::time::Duration::from_millis(600_000)),
+            duplicate_control_requests: DuplicateControlRequests::Skip,
+            request_id_exhaustion: RequestIdExhaustion::Wrap,
+            input_after_finish: InputAfterFinish::Write,
         }
     }
 }

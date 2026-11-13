@@ -16,8 +16,8 @@ fn options(mode: &str, style: ArgvStyle) -> Result<ClaudeAgentOptions, Box<dyn S
         argv_style: style,
         ..ClaudeAgentOptions::default()
     };
-    options.limits.control_timeout = Timeout::new(Duration::from_secs(2))?;
-    options.limits.shutdown_timeout = Timeout::new(Duration::from_millis(500))?;
+    options.limits.control_timeout = Some(Timeout::new(Duration::from_secs(2)));
+    options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(Timeout::new(Duration::from_millis(500)));
     options.env.insert("LLVM_PROFILE_FILE".into(), "/dev/null".into());
     Ok(options)
 }
