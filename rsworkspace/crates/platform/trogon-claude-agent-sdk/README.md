@@ -195,6 +195,17 @@ the stdin `initialize` bytes).
   with Python's hint text. `connect_with_adapters` never discovers, matching
   Python's custom transport and TypeScript's `spawnClaudeCodeProcess`: its
   spawner receives `claude` when `cli_path` is omitted.
+- `Transport` is Python's transport interface: `connect`, `write`, `read_message`
+  (one object per call, `None` at the end of the stream, in place of Python's
+  `read_messages` iterator), `close`, `is_ready` and `end_input`, plus a provided
+  `kill` that `abort()` calls before `close` (TypeScript's abort signal). It is a
+  generic bound, not a trait object. `ClaudeSdkClient::connect_with_transport`,
+  `connect_with_transport_and_adapters`, `query_with_transport` and
+  `query_turn_with_transport` inject one; the subprocess implementation is the
+  default and stays crate-private. A custom transport gets no CLI discovery, no
+  argument list and no store-backed resume materialization, while the session
+  store mirror still runs, as in Python. `read_message` must be cancel safe, and
+  an `Err` from any method ends the run as `Error::Transport` surfaces it.
 - Failures follow upstream. A missing executable is `Error::CliNotFoundAt`, a missing
   `cwd` is `Error::WorkingDirectoryMissing`, any other spawn failure is
   `Error::Spawn` ("Failed to start Claude Code: ..."). `Error::Process` displays

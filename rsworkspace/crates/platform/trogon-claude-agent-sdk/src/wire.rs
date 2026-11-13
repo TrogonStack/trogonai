@@ -381,8 +381,17 @@ fn permission_request(data: JsonObject, id: &ControlRequestId) -> Result<ToolPer
     })
 }
 
+#[cfg(test)]
 pub(crate) fn parse_frame(bytes: &[u8]) -> Result<Frame, ProtocolError> {
-    let envelope: EnvelopeWire = serde_json::from_slice(bytes)?;
+    frame_from_envelope(serde_json::from_slice(bytes)?)
+}
+
+/// Decodes a message a [`crate::Transport`] already parsed as JSON.
+pub(crate) fn parse_value(value: &serde_json::Value) -> Result<Frame, ProtocolError> {
+    frame_from_envelope(EnvelopeWire::deserialize(value)?)
+}
+
+fn frame_from_envelope(envelope: EnvelopeWire) -> Result<Frame, ProtocolError> {
     Ok(match envelope.kind.as_str() {
         "assistant" => {
             let wire: AssistantWire = decode(envelope.data)?;

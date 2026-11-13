@@ -83,6 +83,11 @@ integrity-verified published `0.3.319` declaration archive.
 | `Error::WriteFailed(io::Error)` | `CLIConnectionError` (write failed) | same text |
 | `Error::JsonDecode(JsonDecodeError)` | `CLIJSONDecodeError` (`line`, `original_error`) | not applicable (line skipped) |
 | `Error::MessageParse(MessageParseError)` | `MessageParseError` (`data`) | not applicable |
+| `Transport` | `Transport` | not applicable |
+| `Transport::read_message` | `Transport.read_messages` | not applicable |
+| `Transport::kill` | not applicable | abort signal |
+| `ClaudeSdkClient::connect_with_transport`, `query_with_transport` | `ClaudeSDKClient(transport=...)`, `query(transport=...)` | not applicable |
+| `Error::Transport(..)` | exception raised by the transport | not applicable |
 
 ## Settings
 

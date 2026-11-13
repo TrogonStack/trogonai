@@ -1,15 +1,11 @@
-use crate::constants::SCRIPT_EXTENSIONS;
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     future::{Future, pending},
-    process::Stdio,
     sync::Arc,
     time::Duration,
 };
 
 use tokio::{
-    io::{AsyncRead, AsyncWrite, AsyncWriteExt},
-    process::Command as ProcessCommand,
     sync::{mpsc, oneshot},
     task::{AbortHandle, JoinHandle, JoinSet},
     time::{Instant, sleep_until, timeout},
@@ -17,11 +13,7 @@ use tokio::{
 
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
-    PermissionDecision, ProtocolError, StderrTail, SystemPrompt, ToolPermissionHandler,
-    adapters::SpawnProcess,
-    argv,
-    environment_plan::{self, Inherited},
-    framing::{FrameReader, drain_stderr_with},
+    PermissionDecision, ProtocolError, StderrTail, SystemPrompt, ToolPermissionHandler, Transport,
     wire::{
         self, ControlResponse, Frame, IncomingControl,
         runtime_payload::{EmbeddedMcpPayload, HookMatcherPayload, McpResponsePayload, RequestPayload},
@@ -180,7 +172,7 @@ impl RunState {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 #[path = "driver_tests.rs"]
 mod tests;
 
@@ -227,16 +219,14 @@ enum State {
     Running,
 }
 
-struct Driver<I, O, F = crate::adapters::NativeFileSystem>
+struct Driver<T, F = crate::adapters::NativeFileSystem>
 where
-    I: AsyncWrite + Unpin + Send + 'static,
-    O: AsyncRead + Unpin + Send + 'static,
+    T: Transport,
     F: crate::adapters::SessionFileSystem,
 {
-    child: tokio::process::Child,
-    stdin: Option<I>,
-    frames: FrameReader<O>,
-    stderr: JoinHandle<Result<StderrTail, std::io::Error>>,
+    transport: T,
+    /// `end_input` has been called, so nothing more is written whatever `Transport::is_ready` says.
+    input_ended: bool,
     commands: mpsc::Receiver<Command>,
     messages: mpsc::Sender<Message>,
     shutdown: oneshot::Receiver<()>,
@@ -264,7 +254,6 @@ where
     /// The last `is_error` result, kept while nothing else has arrived since, to turn the exit error into a
     /// result error the way both upstream SDKs do.
     last_error_result: Option<JsonObject>,
-    closed: Closed,
     /// The CLI path until the first `system`/`init` message has been checked, then `None`.
     version_check: Option<String>,
 }
@@ -364,107 +353,42 @@ fn initialize_config(
     Ok((request, callbacks, blocking))
 }
 
-fn is_script(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(std::ffi::OsStr::to_str)
-        .is_some_and(|extension| SCRIPT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
-}
-
-/// Builds the child command. A script path runs under `script_runtime.executable` (default `node`), as the
-/// TypeScript SDK does; any other path is the program itself.
-fn command(
-    options: &ClaudeAgentOptions,
-    cli_path: &std::path::Path,
-    inherited: &Inherited,
-) -> Result<ProcessCommand, Error> {
-    let arguments = argv::build(options)?;
-    let mut command = if is_script(cli_path) {
-        let runtime = options
-            .script_runtime
-            .executable
-            .as_deref()
-            .unwrap_or_else(|| std::path::Path::new("node"));
-        let mut command = ProcessCommand::new(runtime);
-        command.args(&options.script_runtime.arguments);
-        command.arg(cli_path);
-        command
-    } else {
-        ProcessCommand::new(cli_path)
-    };
-    command.args(arguments);
-    if let Some(cwd) = &options.cwd {
-        command.current_dir(cwd);
-    }
-    let plan = environment_plan::plan(options, inherited);
-    if plan.clear {
-        command.env_clear();
-    }
-    for name in &plan.remove {
-        command.env_remove(name);
-    }
-    command.envs(&plan.set);
-    if options.file_checkpointing == crate::FileCheckpointing::Enabled && options.session_store.is_some() {
-        return Err(Error::FileCheckpointingWithSessionStore);
-    }
-    #[cfg(unix)]
-    if let Some(name) = &options.user {
-        command.uid(crate::run_as::lookup(name).map_err(Error::Io)?);
-    } else if let Some(uid) = options.run_as_uid {
-        command.uid(uid);
-    }
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    Ok(command)
-}
-
-pub(crate) struct SpawnOptions<'a, P, F: crate::adapters::SessionFileSystem> {
+pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
     pub options: ClaudeAgentOptions,
     pub session: Option<crate::SessionRuntime<F>>,
     pub commands: mpsc::Receiver<Command>,
     pub messages: mpsc::Sender<Message>,
     pub shutdown: oneshot::Receiver<()>,
     pub terminal: oneshot::Sender<Result<(), Error>>,
-    pub process: &'a P,
-    pub cli_path: std::path::PathBuf,
-    pub inherited: Inherited,
-    pub closed: Closed,
+    pub transport: T,
+    pub initialization: Initialization,
+    /// The CLI path to check against the minimum version, for a transport that runs the CLI itself.
+    pub version_check: Option<String>,
 }
 
-/// Why the process can no longer be written to, shared with every `ClientHandle` once the driver has stopped.
-#[derive(Clone, Default)]
-pub(crate) struct Closed(std::sync::Arc<std::sync::Mutex<Option<ClosedReason>>>);
-
-#[derive(Clone)]
-enum ClosedReason {
-    /// Python: `returncode` is set while `_ready` is still true.
-    Terminated { exit_code: Option<i32> },
-    /// TypeScript: the `exit` event sets `ready = false` before any later write.
-    NotReady,
+/// The initialize request and the callbacks it registers, built before any transport exists so that a bad
+/// configuration fails before a process is spawned.
+pub(crate) struct Initialization {
+    request: serde_json::Value,
+    hook_callbacks: HashMap<String, HookCallback>,
+    blocking_hooks: bool,
 }
 
-impl Closed {
-    fn record(&self, reason: ClosedReason) {
-        if let Ok(mut slot) = self.0.lock() {
-            *slot = Some(reason);
-        }
-    }
-
-    /// The write error for a stopped process, or `None` when the run did not record how it ended.
-    pub(crate) fn write_error(&self) -> Option<Error> {
-        let reason = self.0.lock().ok()?.clone()?;
-        Some(match reason {
-            ClosedReason::Terminated { exit_code } => Error::WriteToTerminatedProcess { exit_code },
-            ClosedReason::NotReady => Error::NotReadyForWriting,
+impl Initialization {
+    pub(crate) fn new(options: &ClaudeAgentOptions) -> Result<Self, Error> {
+        let (request, hook_callbacks, blocking_hooks) = initialize_config(options)?;
+        Ok(Self {
+            request,
+            hook_callbacks,
+            blocking_hooks,
         })
     }
 }
 
-pub(crate) fn spawn<P: SpawnProcess<Error = std::io::Error>, F: crate::adapters::SessionFileSystem>(
-    input: SpawnOptions<'_, P, F>,
-) -> Result<(Option<u32>, JoinHandle<()>), Error> {
+/// Connects the transport and starts the driver task.
+pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
+    input: SpawnOptions<T, F>,
+) -> Result<JoinHandle<()>, Error> {
     let SpawnOptions {
         options,
         session,
@@ -472,41 +396,14 @@ pub(crate) fn spawn<P: SpawnProcess<Error = std::io::Error>, F: crate::adapters:
         messages,
         shutdown,
         terminal,
-        process: process_provider,
-        cli_path,
-        inherited,
-        closed,
+        mut transport,
+        initialization,
+        version_check,
     } = input;
-    let (initialize_request, hook_callbacks, blocking_hooks) = initialize_config(&options)?;
-    let mut process = command(&options, &cli_path, &inherited)?;
-    if let Some(config_dir) = session.as_ref().and_then(|session| session.config_dir.as_ref()) {
-        process.env("CLAUDE_CONFIG_DIR", config_dir);
-    }
-    crate::cli_path::reject_windows_batch_cli(cli_path.as_os_str())?;
-    let mut child = process_provider.spawn(&mut process).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            match options.cwd.as_ref() {
-                Some(cwd) if !cwd.exists() => Error::WorkingDirectoryMissing(cwd.clone()),
-                _ => Error::CliNotFoundAt(cli_path.clone()),
-            }
-        } else {
-            Error::Spawn(error)
-        }
-    })?;
-    let process_id = child.id();
-    let stdin = child.stdin.take().ok_or(Error::PipeUnavailable)?;
-    let stdout = child.stdout.take().ok_or(Error::PipeUnavailable)?;
-    let stderr = child.stderr.take().ok_or(Error::PipeUnavailable)?;
-    let stderr = tokio::spawn(drain_stderr_with(
-        stderr,
-        options.limits.max_stderr_bytes.get(),
-        options.stderr_handler.clone(),
-    ));
+    transport.connect().await?;
     let driver = Driver {
-        child,
-        stdin: Some(stdin),
-        frames: FrameReader::new(stdout, options.limits.max_frame_bytes.get()),
-        stderr,
+        transport,
+        input_ended: false,
         commands,
         messages,
         shutdown,
@@ -516,15 +413,15 @@ pub(crate) fn spawn<P: SpawnProcess<Error = std::io::Error>, F: crate::adapters:
         callbacks: JoinSet::new(),
         callback_handles: HashMap::new(),
         callback_signals: HashMap::new(),
-        hook_callbacks,
+        hook_callbacks: initialization.hook_callbacks,
         sdk_mcp_servers: options
             .sdk_mcp_servers
             .iter()
             .map(|(name, server)| (name.clone(), server.open_session()))
             .collect(),
         pending_mcp: None,
-        initialize_request,
-        blocking_hooks,
+        initialize_request: initialization.request,
+        blocking_hooks: initialization.blocking_hooks,
         elicitation_handler: options.elicitation_handler,
         user_dialog_handler: options.user_dialog_handler,
         dialog_kinds: options
@@ -540,21 +437,14 @@ pub(crate) fn spawn<P: SpawnProcess<Error = std::io::Error>, F: crate::adapters:
         run_state: RunState::default(),
         argv_style: options.argv_style,
         last_error_result: None,
-        closed: closed.clone(),
-        version_check: (!crate::version_check::skip_requested(
-            inherited
-                .get(std::ffi::OsStr::new("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"))
-                .map(|v| v.as_os_str()),
-        ))
-        .then(|| cli_path.display().to_string()),
+        version_check,
     };
-    Ok((process_id, tokio::spawn(driver.run(terminal))))
+    Ok(tokio::spawn(driver.run(terminal)))
 }
 
-impl<I, O, F> Driver<I, O, F>
+impl<T, F> Driver<T, F>
 where
-    I: AsyncWrite + Unpin + Send + 'static,
-    O: AsyncRead + Unpin + Send + 'static,
+    T: Transport,
     F: crate::adapters::SessionFileSystem,
 {
     async fn run(mut self, terminal: oneshot::Sender<Result<(), Error>>) {
@@ -566,24 +456,25 @@ where
         for signal in self.callback_signals.values() {
             signal.cancel();
         }
-        self.stdin.take();
+        self.end_input().await;
         let immediate = primary.is_err() && !matches!(primary, Err(Error::UnexpectedEof));
-        let cleanup = self.reap(immediate).await;
-        let exited = cleanup
-            .as_ref()
-            .ok()
-            .map(|(status, _, _)| crate::error::exit_code(status));
+        let killed = if immediate { self.transport.kill().await } else { Ok(()) };
+        let closed = match killed {
+            Ok(()) => self.transport.close().await,
+            Err(error) => {
+                let _ = self.transport.close().await;
+                Err(error)
+            }
+        };
         let mirror_cleanup = self.finalize_mirror().await;
         if let Some(materialized) = self.session.as_mut().and_then(|session| session.materialized.take()) {
             materialized.cleanup().await;
         }
-        self.stderr.abort();
-        let outcome = match cleanup {
-            Ok((status, stderr, forced)) => match primary {
-                Err(Error::UnexpectedEof) if !status.success() => Err(self.exit_error(status, stderr)),
+        let outcome = match closed {
+            Ok(()) => primary,
+            Err(Error::Process { status, stderr }) => match primary {
+                Ok(()) | Err(Error::UnexpectedEof) => Err(self.exit_error(status, stderr)),
                 Err(error) => Err(error),
-                Ok(()) if !forced && !status.success() => Err(self.exit_error(status, stderr)),
-                Ok(()) => Ok(()),
             },
             Err(cleanup) => match primary {
                 Ok(()) => Err(cleanup),
@@ -593,12 +484,6 @@ where
                 }),
             },
         };
-        if let Some(exit_code) = exited {
-            self.closed.record(match self.argv_style {
-                crate::ArgvStyle::Python => ClosedReason::Terminated { exit_code },
-                _ => ClosedReason::NotReady,
-            });
-        }
         let outcome = combine_outcomes(outcome, mirror_cleanup);
         for (_, pending) in self.pending.drain() {
             pending.response.send_error(Error::DriverStopped);
@@ -608,34 +493,32 @@ where
         let _ = terminal.send(outcome);
     }
 
-    /// Decodes one stdout line. TypeScript skips every line that is not JSON; Python fails on a corrupt line with
-    /// `CLIJSONDecodeError` but drops a corrupt unterminated tail at end of file. A JSON line that is not a valid
-    /// message is a `MessageParseError` carrying the raw object in both.
-    fn decode_frame(&self, frame: &[u8]) -> Result<Option<Frame>, Error> {
-        let error = match wire::parse_frame(frame) {
-            Ok(parsed) => return Ok(Some(parsed)),
-            Err(error) => error,
-        };
-        if let ProtocolError::Json(json) = &error
-            && matches!(
-                json.classify(),
-                serde_json::error::Category::Syntax | serde_json::error::Category::Eof
-            )
-        {
-            if self.argv_style == crate::ArgvStyle::TypeScript || self.frames.last_was_tail() {
-                tracing::debug!("skipping undecodable line from CLI stdout");
-                return Ok(None);
+    /// Whether another document may be written: the transport is ready and input has not been ended.
+    fn input_open(&self) -> bool {
+        !self.input_ended && self.transport.is_ready()
+    }
+
+    /// Python `end_input`. A failure to end input is not an error of the run.
+    async fn end_input(&mut self) {
+        if !self.input_ended {
+            self.input_ended = true;
+            if let Err(error) = self.transport.end_input().await {
+                tracing::debug!(%error, "the transport could not end its input");
             }
-            let ProtocolError::Json(json) = error else {
-                return Err(error.into());
-            };
-            return Err(crate::JsonDecodeError::new(frame, json).into());
         }
-        let data = match serde_json::from_slice::<serde_json::Value>(frame) {
-            Ok(serde_json::Value::Object(object)) => Some(object),
-            _ => None,
-        };
-        Err(crate::MessageParseError::new(error, data).into())
+    }
+
+    /// Decodes one object the transport yielded. A JSON object that is not a valid message is a
+    /// `MessageParseError` carrying the raw object, in both upstream SDKs.
+    fn decode_message(object: JsonObject) -> Result<Frame, Error> {
+        let value = serde_json::Value::Object(object);
+        wire::parse_value(&value).map_err(|error| {
+            let data = match value {
+                serde_json::Value::Object(object) => Some(object),
+                _ => None,
+            };
+            crate::MessageParseError::new(error, data).into()
+        })
     }
 
     /// The error for an unsuccessful exit: the last error result when one is pending (Python always, TypeScript
@@ -664,7 +547,7 @@ where
                 return Err(Error::ControlTimeout { operation });
             }
             if self.run_state.settled(self.callback_handles.len()) && self.mirror_flush.is_none() {
-                self.stdin.take();
+                self.end_input().await;
             }
             let between_turns = self.run_state.input_done.is_some()
                 && self.run_state.result_received
@@ -672,7 +555,7 @@ where
                 && self.callback_handles.is_empty()
                 && self.run_state.tasks.is_empty()
                 && !matches!(self.run_state.session_state, Some(SessionState::RequiresAction));
-            if between_turns && self.stdin.is_some() {
+            if between_turns && self.input_open() {
                 self.run_state
                     .deadline
                     .get_or_insert_with(|| Instant::now() + self.limits.run_end_timeout.as_duration());
@@ -683,18 +566,12 @@ where
             let run_deadline = self.run_state.deadline;
             tokio::select! {
                 _ = &mut self.shutdown => return Ok(()),
-                frame = self.frames.next() => {
-                    let Some(frame) = frame? else {
+                message = self.transport.read_message() => {
+                    let Some(message) = message? else {
                         self.finish_mirror().await?;
                         return if matches!(self.state, State::Running | State::Initializing) || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
                     };
-                    if !frame.trim_ascii_start().starts_with(b"{") {
-                        if !frame.trim_ascii().is_empty() {
-                            tracing::debug!("skipping non-JSON line from CLI stdout");
-                        }
-                        continue;
-                    }
-                    let Some(parsed) = self.decode_frame(&frame)? else { continue; };
+                    let parsed = Self::decode_message(message)?;
                     self.frame(parsed).await?;
                 }
                 flushed = async { match self.mirror_flush.as_mut() { Some(flush) => flush.await, None => pending().await } }, if self.mirror_flush.is_some() => {
@@ -725,7 +602,7 @@ where
                 _ = async { match run_deadline { Some(deadline) => sleep_until(deadline).await, None => pending::<()>().await } } => {
                     tracing::debug!(timeout = ?self.limits.run_end_timeout.as_duration(), "no idle state after the last result; ending the run");
                     self.run_state.deadline = None;
-                    self.stdin.take();
+                    self.end_input().await;
                 }
             }
         }
@@ -766,7 +643,7 @@ where
                 embedded,
                 response,
             } => {
-                if self.stdin.is_none() {
+                if !self.input_open() {
                     let _ = response.send(Err(Error::NotReadyForWriting));
                     return Ok(());
                 }
@@ -819,7 +696,7 @@ where
                 );
             }
             Command::Prompt { input, response } => {
-                if self.stdin.is_none() {
+                if !self.input_open() {
                     let _ = response.send(Err(Error::NotReadyForWriting));
                     return Ok(());
                 }
@@ -864,7 +741,7 @@ where
     }
 
     async fn start_control(&mut self, response: ControlResponder, request: serde_json::Value) -> Result<(), Error> {
-        if self.stdin.is_none() {
+        if !self.input_open() {
             response.send_error(Error::NotReadyForWriting);
             return Ok(());
         }
@@ -1336,8 +1213,8 @@ where
 
     async fn write_response(&mut self, frame: Result<serde_json::Value, ProtocolError>) -> Result<(), Error> {
         let frame = frame?;
-        if self.stdin.is_none() {
-            // The run has settled and stdin is closed: a late callback answer has nowhere
+        if !self.input_open() {
+            // The run has settled and input is closed: a late callback answer has nowhere
             // to go, and that must not stop the driver.
             tracing::debug!("dropping a control response written after stdin closed");
             return Ok(());
@@ -1346,89 +1223,15 @@ where
     }
 
     async fn write(&mut self, frame: serde_json::Value) -> Result<(), Error> {
-        let mut bytes = serde_json::to_vec(&frame).map_err(ProtocolError::from)?;
-        bytes.push(b'\n');
-        if let Some(error) = self.write_unavailable() {
-            return Err(error);
+        let mut text = serde_json::to_string(&frame).map_err(ProtocolError::from)?;
+        text.push('\n');
+        if !self.input_open() {
+            return Err(Error::NotReadyForWriting);
         }
-        let stdin = self.stdin.as_mut().ok_or(Error::NotReadyForWriting)?;
         tokio::select! {
             _ = &mut self.shutdown => Err(Error::ShutdownRequested),
-            result = timeout(self.limits.control_timeout.as_duration(), stdin.write_all(&bytes)) => result.map_err(|_| Error::WriteTimeout)?.map_err(Error::WriteFailed),
+            result = timeout(self.limits.control_timeout.as_duration(), self.transport.write(&text)) => result.map_err(|_| Error::WriteTimeout)?,
         }
-    }
-
-    /// Why a write cannot go out, in upstream's order: not ready, then terminated. Python keeps `_ready` after the
-    /// process exits and reports the terminated process with its exit code. TypeScript's `exit` event clears
-    /// `ready`, so a write after an observed exit is "not ready"; its `exited with error` branch is only reachable
-    /// while the process is still running with an exit error recorded, a state neither SDK can enter (Python sets
-    /// `_exit_error` after `returncode`, TypeScript clears `ready` with the error).
-    fn write_unavailable(&mut self) -> Option<Error> {
-        if self.stdin.is_none() {
-            return Some(Error::NotReadyForWriting);
-        }
-        if let Ok(Some(status)) = self.child.try_wait() {
-            return Some(match self.argv_style {
-                crate::ArgvStyle::Python => Error::WriteToTerminatedProcess {
-                    exit_code: crate::error::exit_code(&status),
-                },
-                _ => Error::NotReadyForWriting,
-            });
-        }
-        None
-    }
-
-    /// SIGTERM on Unix, a hard kill where there is no such signal or it cannot be delivered.
-    async fn terminate(&mut self) -> Result<(), Error> {
-        #[cfg(unix)]
-        if let Some(pid) = self.child.id() {
-            let delivered = tokio::process::Command::new("kill")
-                .args(["-TERM", &pid.to_string()])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await
-                .is_ok_and(|status| status.success());
-            if delivered {
-                return Ok(());
-            }
-        }
-        self.child.start_kill().map_err(Error::Io)
-    }
-
-    async fn reap(&mut self, immediate: bool) -> Result<(std::process::ExitStatus, StderrTail, bool), Error> {
-        // Python's close sequence: stdin is already closed, wait, SIGTERM, wait, SIGKILL, wait.
-        let wait = self.limits.shutdown_timeout.as_duration();
-        let mut forced = immediate;
-        if immediate && self.child.try_wait().map_err(Error::Io)?.is_none() {
-            self.terminate().await?;
-        }
-        let status = match timeout(wait, self.child.wait()).await {
-            Ok(status) => status.map_err(Error::Io)?,
-            Err(_) => {
-                forced = true;
-                self.terminate().await?;
-                match timeout(wait, self.child.wait()).await {
-                    Ok(status) => status.map_err(Error::Io)?,
-                    Err(_) => {
-                        self.child.start_kill().map_err(Error::Io)?;
-                        timeout(wait, self.child.wait())
-                            .await
-                            .map_err(|_| Error::ShutdownTimeout)?
-                            .map_err(Error::Io)?
-                    }
-                }
-            }
-        };
-        let stderr = match timeout(self.limits.shutdown_timeout.as_duration(), &mut self.stderr).await {
-            Ok(result) => result.map_err(Error::DriverTask)?.map_err(Error::Io)?,
-            Err(_) => {
-                self.stderr.abort();
-                return Err(Error::StderrDrainTimeout);
-            }
-        };
-        Ok((status, stderr, forced))
     }
 }
 
