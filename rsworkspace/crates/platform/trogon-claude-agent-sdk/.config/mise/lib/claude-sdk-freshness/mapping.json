@@ -1780,7 +1780,15 @@
         "tag_session_via_store",
         "delete_session_via_store",
         "fork_session_via_store",
-        "import_session_to_store"
+        "import_session_to_store",
+        "get_session_info_from_store_with",
+        "get_session_messages_from_store_with",
+        "list_subagents_from_store_with",
+        "get_subagent_messages_from_store_with",
+        "rename_session_via_store_with",
+        "tag_session_via_store_with",
+        "delete_session_via_store_with",
+        "fork_session_via_store_with"
       ],
       "tests": [
         {
@@ -1814,10 +1822,38 @@
         {
           "path": "tests/session_mutations.rs",
           "name": "rename_appends_a_title_that_listing_reads_back"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "ts_import_keys_the_session_by_the_directory_and_lets_the_sidecar_type_win"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "ts_subagent_listing_names_the_missing_capability"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "ts_listing_pages_before_dropping_sidechains"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "ts_rename_trims_like_javascript_and_stamps_milliseconds"
+        },
+        {
+          "path": "tests/session_files_ts.rs",
+          "name": "ts_title_precedence_is_tail_custom_then_sidecar_then_head_then_ai"
+        },
+        {
+          "path": "src/session_store_oracle_tests.rs",
+          "name": "js_key_order_matches_json_stringify"
+        },
+        {
+          "path": "src/session_store_oracle_tests.rs",
+          "name": "project_name_with_matches_the_bundle"
         }
       ],
-      "status": "partial",
-      "rationale": "All eleven session functions are exposed in both forms: filesystem (SessionFiles methods and free functions, Python semantics plus the TypeScript newest-first tie-break by session id) and store-backed (the *_from_store readers, *_via_store mutations and import_session_to_store). Store listing uses summary sidecars with gap-fill and degrades to per-session loads, and project keys follow the TypeScript sanitization the mirror uses. Known differences: JSON key order of forked entries follows serde_json; Rust writes raw UTF-8 where Python json.dumps escapes non-ASCII; store keys use the TypeScript path sanitization (Python differs only for non-BMP paths over 200 characters); custom stores must override SessionStore::supports to opt in to optional operations. TypeScript-only behaviors are not replicated: includeSystemMessages, includeProgrammatic, continued-in sessions, custom-title sidecars, worktree ownership checks, the TypeScript chain and relink algorithm, and the TypeScript store-backed listSessions. Core storage operations are mapped separately."
+      "status": "supported",
+      "rationale": "All eleven session functions are exposed in both forms: filesystem (SessionFiles methods and free functions) and store-backed (the *_from_store readers, *_via_store mutations and import_session_to_store). Each takes the TypeScript or Python dialect, TypeScript by default: the *_with store helpers and the TypeScript filesystem readers reproduce includeSystemMessages, includeProgrammatic, continued-in sessions, custom-title sidecars, worktree ownership checks, the chain and relink algorithm and the store-backed listSessions, checked against fixtures generated from the pinned bundle. Forked entries keep JSON.stringify key order, the Python dialect escapes non-ASCII as json.dumps does, and custom stores declare optional operations through SessionStore::supports. Core storage operations are mapped separately."
     },
     {
       "id": "advanced-native-options",

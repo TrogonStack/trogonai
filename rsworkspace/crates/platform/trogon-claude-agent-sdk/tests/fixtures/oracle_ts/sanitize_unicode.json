@@ -1,0 +1,110 @@
+[
+  {
+    "input": "plain ascii",
+    "output": "plain ascii"
+  },
+  {
+    "input": "",
+    "output": ""
+  },
+  {
+    "input": "café",
+    "output": "café"
+  },
+  {
+    "input": "café",
+    "output": "café"
+  },
+  {
+    "input": "he​llo‌‍‎‏",
+    "output": "hello"
+  },
+  {
+    "input": "‪embedded‮",
+    "output": "embedded"
+  },
+  {
+    "input": "⁦isolate⁩",
+    "output": "isolate"
+  },
+  {
+    "input": "﻿bom",
+    "output": "bom"
+  },
+  {
+    "input": "private",
+    "output": "private"
+  },
+  {
+    "input": "plane15 󰀀",
+    "output": "plane15 "
+  },
+  {
+    "input": "soft­hyphen",
+    "output": "softhyphen"
+  },
+  {
+    "input": "tag󠀁󠁁",
+    "output": "tag"
+  },
+  {
+    "input": "unassigned͸͹",
+    "output": "unassigned"
+  },
+  {
+    "input": "noncharacter﷐￿",
+    "output": "noncharacter"
+  },
+  {
+    "input": "ﬁligature ① Ａｂ",
+    "output": "filigature 1 Ab"
+  },
+  {
+    "input": "각 jamo",
+    "output": "각 jamo"
+  },
+  {
+    "input": "emoji 👨‍👩‍👧",
+    "output": "emoji 👨👩👧"
+  },
+  {
+    "input": "flags 🇺🇸",
+    "output": "flags 🇺🇸"
+  },
+  {
+    "input": "variation ❤️",
+    "output": "variation ❤️"
+  },
+  {
+    "input": "Ź̧̧̧̧̧̧̧̧̖̖̖̖̖̖̖̖̀̈́̀̈́̀̈́̀̈́̀̈́̀̈́̀̈́̀̈a",
+    "output": "Ź̧̧̧̧̧̧̧̧̖̖̖̖̖̖̖̖̀̈́̀̈́̀̈́̀̈́̀̈́̀̈́̀̈́̀̈a"
+  },
+  {
+    "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx́̂̃yyyyyyyyyy",
+    "output": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx́̂̃yyyyyyyyyy"
+  },
+  {
+    "input": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+    "output": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+  },
+  {
+    "input": "ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇",
+    "output": "ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇ạ̇"
+  },
+  {
+    "input": "Ω ohm Å angstrom",
+    "output": "Ω ohm Å angstrom"
+  },
+  {
+    "input": "ΐ ẛ̣",
+    "output": "ΐ ṩ"
+  },
+  {
+    "input": "line para end",
+    "output": "line para end"
+  },
+  {
+    "input": "control\u0001",
+    "output": "control\u0001"
+  }
+]

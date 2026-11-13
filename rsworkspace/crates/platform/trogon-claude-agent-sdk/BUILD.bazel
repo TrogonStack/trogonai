@@ -27,6 +27,7 @@ workspace_crate(
         "src/upstream/settings_schema.json",
     ] + glob([
         "tests/fixtures/fork_ts/*.jsonl",
+        "tests/fixtures/oracle_ts/*.json",
         "tests/fixtures/probe_ts/*.jsonl",
     ]),
     crate_features = ["test-support"],
