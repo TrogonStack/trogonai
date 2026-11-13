@@ -8,7 +8,8 @@ on:
       - '.config/mise/tasks/**'
       - '.config/mise/lib/**'
       - 'tests/github_actions/**'
-      - 'mise.toml'
+      - '.config/mise/config.toml'
+      - '.config/mise/mise.lock'
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
@@ -16,7 +17,8 @@ on:
       - '.config/mise/tasks/**'
       - '.config/mise/lib/**'
       - 'tests/github_actions/**'
-      - 'mise.toml'
+      - '.config/mise/config.toml'
+      - '.config/mise/mise.lock'
 
 concurrency:
   group: ci-automation-${{ github.ref }}
@@ -37,7 +39,8 @@ jobs:
       - name: Install automation test tools
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
-          install_args: python@3.14.5 node@26.3.0 github:rhysd/actionlint@1.7.12
+          install_args: python node github:rhysd/actionlint
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Validate workflow selection and canary helpers
-        run: mise exec python@3.14.5 node@26.3.0 github:rhysd/actionlint@1.7.12 -- mise run --skip-tools github:workflows:ci-automation:verify
+        run: mise run --skip-tools github:workflows:ci-automation:verify

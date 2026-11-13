@@ -6,6 +6,12 @@ on:
       filters:
         required: true
         type: string
+      # Empty skips runner selection, and then nothing reads runners.
+      runner-jobs:
+        description: Job names to place on runners, in priority order.
+        required: false
+        type: string
+        default: ''
     outputs:
       rust:
         value: ${{ jobs.filter.outputs.rust }}
@@ -15,12 +21,81 @@ on:
         value: ${{ jobs.filter.outputs.proto }}
       changes:
         value: ${{ jobs.filter.outputs.changes }}
+      runners:
+        value: ${{ jobs.runner.outputs.runners }}
 
 permissions:
   contents: read
   pull-requests: read
 
 jobs:
+  # A job of its own so that the Google credentials and the Baton key never
+  # share a runner with the selector's dependency install.
+  runner:
+    if: ${{ inputs.runner-jobs != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Listing self-hosted runners needs the Baton app; GITHUB_TOKEN cannot.
+    # Its key is readable only from main, where github-app-baton may deploy.
+    # Every other run declares no environment, gets no token, and stays on
+    # hosted runners.
+    environment: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'github-app-baton' || '' }}
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      runners: ${{ steps.runner.outputs.runners }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The three Baton steps may fail without failing CI: the action then
+      # gets no token and keeps every job on hosted runners, as it does for
+      # an API error, and the step summary says so.
+      - name: Google Cloud auth
+        id: gcp
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        continue-on-error: true
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ vars.BATON_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.BATON_WORKLOAD_IDENTITY_PROVIDER }}
+
+      - name: Baton key
+        id: baton_key
+        if: ${{ steps.gcp.outcome == 'success' }}
+        continue-on-error: true
+        uses: google-github-actions/get-secretmanager-secrets@bc9c54b29fdffb8a47776820a7d26e77b379d262 # v3.0.0
+        with:
+          secrets: |-
+            private_key:${{ vars.BATON_PRIVATE_KEY_SECRET }}
+
+      # The installation holds no repository, so the token is the
+      # organization's: its only permission is reading self-hosted runners.
+      - name: Baton token
+        id: baton
+        if: ${{ steps.baton_key.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.BATON_APP_CLIENT_ID }}
+          private-key: ${{ steps.baton_key.outputs.private_key }}
+          owner: ${{ github.repository_owner }}
+          permission-organization-self-hosted-runners: read
+
+      # The action falls back on its own for API errors and a missing token,
+      # so a failure here is a bug or a bad input, and it fails the job
+      # instead of leaving runs-on unreadable.
+      - name: Choose runner
+        id: runner
+        uses: ./.github/actions/runs-on-fallback
+        with:
+          github-token: ${{ steps.baton.outputs.token }}
+          primary-labels: ${{ vars.SELF_HOSTED_RUNNER_LABELS }}
+          scope: organization
+          jobs: ${{ inputs.runner-jobs }}
+
   filter:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -39,6 +114,7 @@ jobs:
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install_args: node@26.3.0
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install selector dependencies
         run: mise exec node@26.3.0 -- mise run --skip-tools github:workflows:ci-selection:install

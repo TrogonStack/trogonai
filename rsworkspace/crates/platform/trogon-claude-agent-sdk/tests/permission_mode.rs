@@ -12,11 +12,11 @@ fn permission_modes_round_trip_upstream_literals() -> Result<(), serde_json::Err
         (PermissionMode::DontAsk, "dontAsk"),
         (PermissionMode::Auto, "auto"),
     ] {
-        assert_eq!(serde_json::to_value(mode)?, json!(literal));
+        assert_eq!(serde_json::to_value(&mode)?, json!(literal));
         assert_eq!(serde_json::from_value::<PermissionMode>(json!(literal))?, mode);
 
         let options = ClaudeAgentOptions {
-            permission_mode: Some(mode),
+            permission_mode: Some(mode.clone()),
             ..ClaudeAgentOptions::default()
         };
         assert_eq!(options.permission_mode, Some(mode));
@@ -35,10 +35,13 @@ fn permission_mode_remains_unset_until_explicitly_selected() {
     assert_eq!(options.permission_mode, Some(PermissionMode::Default));
 }
 
-/// Reject unknown names and local spellings outside the upstream literal union.
+/// Both upstream SDKs pass the mode string through unvalidated, so an unknown spelling round-trips unchanged.
 #[test]
-fn permission_modes_reject_unsupported_literals() {
+fn s17_unknown_permission_modes_round_trip_unchanged() -> Result<(), serde_json::Error> {
     for literal in ["", "unknown", "Default", "accept_edits", "bypasspermissions"] {
-        assert!(serde_json::from_value::<PermissionMode>(json!(literal)).is_err());
+        let mode = serde_json::from_value::<PermissionMode>(json!(literal))?;
+        assert_eq!(mode, PermissionMode::Unknown(literal.into()));
+        assert_eq!(serde_json::to_value(&mode)?, json!(literal));
     }
+    Ok(())
 }

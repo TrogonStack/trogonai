@@ -18,6 +18,10 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # tls_cert = "/run/secrets/nats/client.pem"
 # tls_key = "/run/secrets/nats/client-key.pem"
 #
+# subject_prefix may span several subject tokens, such as "github.primary".
+# Every source owns its own stream, so no prefix may equal or sit under
+# another one, and every stream_name must be unique.
+#
 # [sources.github.integrations.primary]
 # subject_prefix = "github-primary"
 # stream_name = "GITHUB_PRIMARY"

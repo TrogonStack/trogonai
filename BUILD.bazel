@@ -1,0 +1,1 @@
+# crate_universe resolves //:MODULE.bazel, which needs a root package.

@@ -1,4 +1,5 @@
 use super::*;
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore, StreamMaxAge,
@@ -16,7 +17,7 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 fn bridge() -> GatewayBridge<MockJetStreamPublisher, MockObjectStore> {
     GatewayBridge::new(
         wrap_publisher(MockJetStreamPublisher::new()),
-        NatsToken::new("discord").unwrap(),
+        DottedNatsToken::new("discord").unwrap(),
         Duration::from_secs(5),
     )
 }
@@ -25,7 +26,7 @@ fn discord_config() -> DiscordConfig {
     DiscordConfig {
         bot_token: Some(super::super::config::DiscordBotToken::new("Bot token").unwrap()),
         intents: twilight_model::gateway::Intents::GUILDS,
-        subject_prefix: NatsToken::new("discord").unwrap(),
+        subject_prefix: DottedNatsToken::new("discord").unwrap(),
         stream_name: NatsToken::new("DISCORD").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(5).unwrap(),
@@ -63,7 +64,7 @@ fn bridge_with_mock() -> (
     let mock = MockJetStreamPublisher::new();
     let b = GatewayBridge::new(
         wrap_publisher(mock.clone()),
-        NatsToken::new("discord").unwrap(),
+        DottedNatsToken::new("discord").unwrap(),
         Duration::from_secs(5),
     );
     (b, mock)
@@ -78,7 +79,7 @@ fn bridge_with_prefix(
     let mock = MockJetStreamPublisher::new();
     let b = GatewayBridge::new(
         wrap_publisher(mock.clone()),
-        NatsToken::new(prefix).unwrap(),
+        DottedNatsToken::new(prefix).unwrap(),
         Duration::from_secs(5),
     );
     (b, mock)

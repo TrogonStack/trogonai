@@ -1,0 +1,5 @@
+module(name = "trogonai")
+
+# Bazel requires this file at the repository root; the module configuration
+# lives with the rest of the Bazel setup.
+include("//.config/bazel:deps.MODULE.bazel")

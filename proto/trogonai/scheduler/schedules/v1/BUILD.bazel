@@ -1,0 +1,42 @@
+filegroup(
+    name = "schedule_fixture_sources",
+    srcs = [
+        "schedule_completed.proto",
+        "schedule_paused.proto",
+        "schedule_removed.proto",
+        "schedule_resumed.proto",
+        "schedule_status.proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Buf compiles an isolated copy of the schema, so the repository's buf.yaml and
+# its registry dependencies stay out of the action; this schema has no imports.
+_STAGE = " && ".join([
+    "work=$$(mktemp -d)",
+    "mkdir -p $$work/schema/trogonai/scheduler/schedules/v1",
+    "cp $(location schedule_status.proto) $$work/schema/trogonai/scheduler/schedules/v1/",
+    "export BUF_CACHE_DIR=$$work/cache",
+])
+
+genrule(
+    name = "schedule_status_descriptor",
+    srcs = ["schedule_status.proto"],
+    outs = ["schedule_status.binpb"],
+    cmd = _STAGE + " && $(execpath //.config/bazel:buf) build $$work/schema -o $@",
+    tools = ["//.config/bazel:buf"],
+    visibility = ["//visibility:public"],
+)
+
+genrule(
+    name = "schedule_status_wit",
+    srcs = ["schedule_status.proto"],
+    outs = ["wit/trogonai/scheduler-schedules-v1/messages.wit"],
+    cmd = _STAGE + " && $(execpath //.config/bazel:buf) generate $$work/schema --template " +
+          "'{\"version\":\"v2\",\"plugins\":[{\"local\":\"'$$PWD/$(execpath //goworkspace/cmd/protoc-gen-wit)'\",\"out\":\"'$$PWD/$(RULEDIR)/wit'\"}]}'",
+    tools = [
+        "//.config/bazel:buf",
+        "//goworkspace/cmd/protoc-gen-wit",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Build native Bazel artifacts using the GitHub Actions caches"
+set -euo pipefail
+
+exec bazel build \
+  --disk_cache="${RUNNER_TEMP:?}/bazel-disk-cache" \
+  --repository_cache="${RUNNER_TEMP:?}/bazel-repository-cache" \
+  //...

@@ -1,0 +1,21 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "managedSettings": {
+      "model": "ignored",
+      "allowManagedHooksOnly": true,
+      "permissions": {
+        "deny": [
+          "Bash(rm:*)",
+          "Read(!secret)"
+        ],
+        "allow": [
+          "Bash(ls)"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+load("@rules_go//go:def.bzl", "go_test")
+
+go_test(
+    name = "spirepolicy_test",
+    srcs = ["policy_test.go"],
+    data = ["testdata/deployment.json"],
+    deps = [
+        "@com_github_google_cel_go//cel:go_default_library",
+        "@com_github_google_cel_go//common/types:go_default_library",
+    ],
+)

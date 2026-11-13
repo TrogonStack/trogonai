@@ -1,7 +1,8 @@
 rust:
   - 'rsworkspace/**'
   - 'LICENSE'
-  - 'mise.toml'
+  - '.config/mise/config.toml'
+  - '.config/mise/mise.lock'
   - 'buf.yaml'
   - 'buf.lock'
   - 'proto/trogonai/scheduler/schedules/**'
@@ -21,7 +22,8 @@ rust:
 
 go:
   - 'goworkspace/**'
-  - 'mise.toml'
+  - '.config/mise/config.toml'
+  - '.config/mise/mise.lock'
   - 'buf.yaml'
   - 'buf.lock'
   - 'proto/trogonai/scheduler/schedules/v1/schedule_completed.proto'
@@ -39,7 +41,8 @@ proto:
   - 'buf.yaml'
   - 'buf.gen.yaml'
   - 'buf.lock'
-  - 'mise.toml'
+  - '.config/mise/config.toml'
+  - '.config/mise/mise.lock'
   - '.config/mise/lib/**'
   - '.config/mise/tasks/proto/**'
   - '.config/mise/tasks/github-actions/assert-proto-generated'

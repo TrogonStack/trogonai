@@ -1,0 +1,5 @@
+module(name = "mise-bazel")
+
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "rules_rust", version = "0.75.0")
+bazel_dep(name = "toml.bzl", version = "0.3.0")

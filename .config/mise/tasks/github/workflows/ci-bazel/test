@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Run native Bazel tests using the GitHub Actions caches"
+set -euo pipefail
+
+exec bazel test \
+  --disk_cache="${RUNNER_TEMP:?}/bazel-disk-cache" \
+  --repository_cache="${RUNNER_TEMP:?}/bazel-repository-cache" \
+  //...

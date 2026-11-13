@@ -1,0 +1,45 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+load(":bazel_test.bzl", "protowit_test")
+
+go_library(
+    name = "protowit",
+    srcs = [
+        "errors.go",
+        "generate.go",
+        "names.go",
+        "render.go",
+        "run.go",
+    ],
+    importpath = "github.com/TrogonStack/trogonai/goworkspace/internal/protowit",
+    visibility = ["//goworkspace:__subpackages__"],
+    deps = [
+        "@org_golang_google_protobuf//proto",
+        "@org_golang_google_protobuf//reflect/protodesc",
+        "@org_golang_google_protobuf//reflect/protoreflect",
+        "@org_golang_google_protobuf//types/descriptorpb",
+        "@org_golang_google_protobuf//types/pluginpb",
+    ],
+)
+
+go_test(
+    name = "protowit_test_binary",
+    srcs = ["generate_test.go"],
+    data = glob(["testdata/**"]),
+    embed = [":protowit"],
+    tags = ["manual"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@org_golang_google_protobuf//proto",
+        "@org_golang_google_protobuf//types/descriptorpb",
+        "@org_golang_google_protobuf//types/pluginpb",
+    ],
+)
+
+protowit_test(
+    name = "protowit_test",
+    test_binary = ":protowit_test_binary",
+    buf = "//.config/bazel:buf",
+    schemas = "//proto/trogonai/scheduler/schedules/v1:schedule_fixture_sources",
+    go_mod = "//goworkspace:go.mod",
+)

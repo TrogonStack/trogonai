@@ -1,0 +1,28 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "a2a-redaction",
+    compile_data = glob(["tests/fixtures/**"]),
+    data = glob(["tests/fixtures/**"]),
+    integration_tests = {"tier3_skill_catalog": {"compile_data": glob(["tests/fixtures/**"])}},
+)
+
+rust_binary(
+    name = "a2a-sign-bundle",
+    srcs = glob(["src/bin/**/*.rs"]),
+    crate_root = "src/bin/sign-bundle.rs",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_flags = ["-Dwarnings"],
+    visibility = ["//visibility:public"],
+    deps = [":a2a-redaction"] + all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "a2a-sign-bundle_test",
+    crate = ":a2a-sign-bundle",
+    rustc_flags = ["-Dwarnings"],
+    deps = all_crate_deps(normal_dev = True),
+)

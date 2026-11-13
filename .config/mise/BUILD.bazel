@@ -1,0 +1,4 @@
+exports_files([
+    "config.toml",
+    "mise.lock",
+])

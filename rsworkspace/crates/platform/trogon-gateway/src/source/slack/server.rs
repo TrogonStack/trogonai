@@ -42,7 +42,7 @@ use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, ProvisionedStreamField, PublishOutcome,
 };
-use trogon_nats::{NatsToken, SubjectTokenViolationError};
+use trogon_nats::{DottedNatsToken, SubjectTokenViolationError};
 use trogon_semconv::span::SLACK_WEBHOOK;
 
 use crate::credential::commands::domain::{CredentialKind, SourceKind};
@@ -103,7 +103,7 @@ fn form_field<'a>(fields: &'a [(String, String)], name: &str) -> Option<&'a str>
 pub struct SlackBridge<P: JetStreamPublisher, S: ObjectStorePut, R: RequestClient> {
     publisher: ClaimCheckPublisher<P, S>,
     requester: R,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     ack_budget: AckBudget,
     transport: SlackTransport,
 }

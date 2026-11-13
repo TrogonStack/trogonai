@@ -5,10 +5,13 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
+  # Rebuilds the shared Rust caches on main without waiting for a Rust change.
+  workflow_dispatch:
 
 concurrency:
   group: ci-rust-${{ github.ref }}
-  cancel-in-progress: true
+  # main runs are the only ones that save the shared caches every PR restores.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,6 +19,10 @@ env:
   # Source-built mise tools (dylint-link, cargo-component, ...) fetch crates from
   # crates.io during install; raise retry tolerance for spurious network errors.
   CARGO_NET_RETRY: '10'
+  # Debug info is most of the test target; without it the saved caches fit the
+  # repository cache quota instead of evicting each other.
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
 
 permissions:
   contents: read
@@ -27,12 +34,17 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # Only the runner selection job uses it, to read the Baton key on main.
+      id-token: write
     with:
       filters: .github/filters/ci.yml
+      # Idle runners go to the first names, so these follow job duration, longest
+      # first.
+      runner-jobs: test build wasm-decider lint
   lint:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners).lint }}
     permissions:
       actions: write
       contents: read
@@ -54,11 +66,17 @@ jobs:
         run: mise run --skip-tools rust:tls-policy
 
       - name: Cache dependencies
+        id: rust-cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v1-rust
           workspaces: rsworkspace -> target
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Summarize Rust cache
+        run: echo "rust-cache exact key match for lint (partial restore reports false) = ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -85,7 +103,7 @@ jobs:
   test:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners).test }}
     permissions:
       actions: write
       contents: write
@@ -104,11 +122,20 @@ jobs:
           install-args: rust python buf cargo:cargo-component cargo:wasm-tools
 
       - name: Cache dependencies
+        id: rust-cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          prefix-key: v1-rust
+          # Bumped with cache-workspace-crates: rust-cache leaves it out of the key
+          # and skips saving after an exact hit, so main would keep the old cache.
+          prefix-key: v2-rust
           workspaces: rsworkspace -> target
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Summarize Rust cache
+        run: echo "rust-cache exact key match for test (partial restore reports false) = ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
       - name: Install coverage tools
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
@@ -121,23 +148,16 @@ jobs:
       - name: Build decider components for sim fixtures
         run: mise run artifacts:wasm-components
 
-      - name: Run documentation tests
-        run: cargo test --doc
-        working-directory: rsworkspace
-
-      - name: Check stable compiler diagnostics
-        run: cargo nextest run -p trogon-decider-guest-macros --all-features --test compile_fail
-        working-directory: rsworkspace
-
-      - name: Test a2a-gateway (default features)
-        run: cargo test -p a2a-gateway
-        working-directory: rsworkspace
-
       - name: Test gateway bootstrap identity
         run: sh devops/docker/compose/services/nats/gateway-env.test.sh
 
       - name: Run tests with coverage
         run: mise run --skip-tools github-actions:rust-coverage
+        env:
+          NEXTEST_PROFILE: ci
+          # actions/checkout stamps every file with checkout time, so mtime
+          # freshness would rebuild the cached workspace crates every run.
+          CARGO_UNSTABLE_CHECKSUM_FRESHNESS: 'true'
 
       - name: Coverage report and gate
         # TODO: Add a fork-safe read-only coverage comparison path; this action writes to
@@ -152,9 +172,12 @@ jobs:
           diff: true
           diff-branch: main
           diff-storage: _xml_coverage_reports
-          uncovered-statements-increase-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
-          new-uncovered-statements-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
-          coverage-rate-reduction-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          # Pull requests are the gate. main only records its baseline, which the
+          # action stores only after the gate passes, so failing here once would
+          # keep main red until coverage returned to the stale baseline.
+          uncovered-statements-increase-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          new-uncovered-statements-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          coverage-rate-reduction-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
           togglable-report: true
           report-low-coverage-only: true
 
@@ -166,7 +189,7 @@ jobs:
   build:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners).build }}
     permissions:
       actions: write
       contents: read
@@ -179,11 +202,17 @@ jobs:
         uses: ./.github/actions/setup-rust
 
       - name: Cache dependencies
+        id: rust-cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v1-rust
           workspaces: rsworkspace -> target
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Summarize Rust cache
+        run: echo "rust-cache exact key match for build (partial restore reports false) = ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
       - name: Build release
         run: cargo build --release
@@ -192,7 +221,7 @@ jobs:
   wasm-decider:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.changes.outputs.runners).wasm-decider }}
     permissions:
       actions: write
       contents: read
@@ -207,11 +236,17 @@ jobs:
           install-args: rust python buf cargo:cargo-component cargo:wasm-tools
 
       - name: Cache dependencies
+        id: rust-cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v1-rust
           workspaces: rsworkspace -> target
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Summarize Rust cache
+        run: echo "rust-cache exact key match for wasm-decider (partial restore reports false) = ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
       - name: Build decider components
         run: mise run artifacts:wasm-components
@@ -221,6 +256,15 @@ jobs:
 
       - name: Run decider-test suites
         run: mise run github-actions:decider-test-suites
+
+      # decider-test-suites already runs the stable compile_fail check.
+      - name: Run documentation tests
+        run: cargo test --doc
+        working-directory: rsworkspace
+
+      - name: Test a2a-gateway (default features)
+        run: cargo test -p a2a-gateway
+        working-directory: rsworkspace
 
       - name: Run wasm decider runtime tests
         run: cargo test -p trogon-decider-wasm-runtime

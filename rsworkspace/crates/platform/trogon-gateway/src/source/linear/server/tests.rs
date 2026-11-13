@@ -40,7 +40,7 @@ fn compute_sig(secret: &str, body: &[u8]) -> String {
 fn test_config() -> LinearConfig {
     LinearConfig {
         webhook_secret: LinearWebhookSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("linear").expect("valid token"),
+        subject_prefix: DottedNatsToken::new("linear").expect("valid token"),
         stream_name: NatsToken::new("LINEAR").expect("valid token"),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         timestamp_tolerance: NonZeroDuration::from_secs(60).ok(),

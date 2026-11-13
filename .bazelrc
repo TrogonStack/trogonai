@@ -1,0 +1,10 @@
+common --enable_bzlmod
+common --enable_platform_specific_config
+
+# C toolchain detection must not pick up a mise shim that happens to come first
+# on PATH; the system compiler is the one Xcode provides.
+common:macos --repo_env=CC=/usr/bin/clang
+build --color=yes
+test --test_output=errors
+
+try-import %workspace%/.bazelrc.local

@@ -7,6 +7,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
@@ -38,7 +39,7 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 fn test_config() -> IncidentioConfig {
     IncidentioConfig {
         signing_secret: IncidentioSigningSecret::new(test_secret()).unwrap(),
-        subject_prefix: NatsToken::new("incidentio").unwrap(),
+        subject_prefix: DottedNatsToken::new("incidentio").unwrap(),
         stream_name: NatsToken::new("INCIDENTIO").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),

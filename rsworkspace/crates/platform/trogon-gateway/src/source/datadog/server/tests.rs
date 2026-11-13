@@ -3,6 +3,7 @@ use axum::body::Body;
 use axum::http::Request;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
@@ -27,7 +28,7 @@ fn test_config() -> DatadogConfig {
 fn config_with_tolerance(timestamp_tolerance: Option<NonZeroDuration>) -> DatadogConfig {
     DatadogConfig {
         webhook_token: DatadogWebhookToken::new(TEST_TOKEN).unwrap(),
-        subject_prefix: NatsToken::new("datadog").unwrap(),
+        subject_prefix: DottedNatsToken::new("datadog").unwrap(),
         stream_name: NatsToken::new("DATADOG").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),

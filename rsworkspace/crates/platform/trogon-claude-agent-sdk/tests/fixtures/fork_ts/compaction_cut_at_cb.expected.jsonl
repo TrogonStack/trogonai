@@ -1,0 +1,3 @@
+{"type":"user","uuid":"id-2","parentUuid":null,"sessionId":"id-4","timestamp":"t1","message":{"role":"user","content":"one"},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"u1"}}
+{"type":"assistant","uuid":"id-3","parentUuid":"id-2","sessionId":"id-4","timestamp":"2023-11-14T22:13:20.123Z","message":{"role":"assistant","content":"two"},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"a1"}}
+{"type":"custom-title","sessionId":"id-4","customTitle":"Derived (fork)","uuid":"id-5","timestamp":"2023-11-14T22:13:20.123Z"}

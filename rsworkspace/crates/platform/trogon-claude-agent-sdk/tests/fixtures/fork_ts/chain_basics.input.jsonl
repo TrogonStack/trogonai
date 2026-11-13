@@ -1,0 +1,10 @@
+{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"s0","timestamp":"t1","slug":"x","message":{"role":"user","content":"hi"}}
+{"type":"progress","uuid":"p1","parentUuid":"u1","sessionId":"s0"}
+{"type":"assistant","uuid":"a1","parentUuid":"p1","sessionId":"s0","timestamp":"t2","message":{"role":"assistant","content":"yo"}}
+{"type":"content-replacement","sessionId":"s0","replacements":[{"id":"r1"}]}
+{"type":"atis-latch","sessionId":"s0","atis":"abc"}
+{"type":"tools-used","sessionId":"s0","tools":["Bash","","Read"]}
+{"type":"data-flow-records","v":1,"sessionId":"s0","records":[{"tool_use_id":"tu1","tool_name":"Bash","server":{"type":"mystery"},"source":{"type":"file","id":null},"touched":{"kind":"memory","id":"m","action":"read"}},{"event_id":"e1","inner_call_index":2,"no_message":true},{"bogus":1}]}
+{"type":"derived-from","v":1,"sessionId":"s0","sessions":[{"type":"claude_code_session","id":"old","via":"fork"},{"type":"unknown","id":null,"via":"fork"},{"type":"bad"}]}
+{"type":"relocated","sessionId":"s0","relocatedCwd":"/new"}
+{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"s0","timestamp":"t3","forkedFrom":{"sessionId":"anc","messageUuid":"zz"},"logicalParentUuid":"a1","isSidechain":false,"message":{"role":"user","content":"again"}}

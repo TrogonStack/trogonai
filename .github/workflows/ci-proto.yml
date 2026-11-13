@@ -20,6 +20,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # GitHub checks every job of the called workflow against this, even the
+      # runner job this workflow skips, and refuses to start without it.
+      id-token: write
     with:
       filters: .github/filters/ci.yml
   format:
@@ -36,6 +39,7 @@ jobs:
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install_args: buf
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check buf format
         run: buf format --diff --exit-code proto
@@ -54,6 +58,7 @@ jobs:
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install_args: buf
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Lint proto sources
         run: buf lint
@@ -72,6 +77,7 @@ jobs:
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install_args: buf
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build proto module
         run: buf build
@@ -91,6 +97,7 @@ jobs:
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install_args: buf
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Read pinned buf version
         id: buf
@@ -121,6 +128,7 @@ jobs:
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install_args: buf python
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Validate protobuf contract fixtures
         run: mise run --skip-tools proto:validate
@@ -160,6 +168,7 @@ jobs:
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install_args: buf rust cargo:protoc-gen-buffa cargo:protoc-gen-buffa-packaging
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Regenerate protobuf bindings
         run: mise run --skip-tools proto:generate

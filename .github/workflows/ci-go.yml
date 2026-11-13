@@ -20,6 +20,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # GitHub checks every job of the called workflow against this, even the
+      # runner job this workflow skips, and refuses to start without it.
+      id-token: write
     with:
       filters: .github/filters/ci.yml
   verify:
@@ -36,6 +39,7 @@ jobs:
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install_args: go buf rust cargo:wasm-tools
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check Go workspace
         run: mise run --skip-tools check:go

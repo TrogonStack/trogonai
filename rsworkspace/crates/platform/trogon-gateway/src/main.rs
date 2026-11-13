@@ -106,11 +106,11 @@ async fn serve_with_env(
     // Size the claim bucket TTL from the longest stream it serves so a message
     // still on the stream can always resolve its claim. Empty-source mode uses
     // the normal seven-day stream default until a source supplies its own age.
-    let stream_max_age = match resolved.max_stream_max_age() {
+    let claim_stream_max_age = match resolved.max_stream_max_age() {
         Some(stream_max_age) => stream_max_age,
         None => StreamMaxAge::from_secs(DEFAULT_STREAM_MAX_AGE_SECS)?,
     };
-    let claim_retention = ClaimRetention::tracking(stream_max_age, CLAIM_CHECK_TTL_GRACE);
+    let claim_retention = ClaimRetention::tracking(claim_stream_max_age, CLAIM_CHECK_TTL_GRACE);
     let claim_binding =
         NatsObjectStore::provision_claim_bucket(&js_context, ClaimBucket::default(), claim_retention).await?;
     let client = NatsJetStreamClient::new(js_context);
