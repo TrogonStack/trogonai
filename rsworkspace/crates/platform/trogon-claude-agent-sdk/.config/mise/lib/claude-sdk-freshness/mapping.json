@@ -1235,7 +1235,17 @@
         "SessionRuntime::prepare_with_adapters",
         "SessionPreparationOptions",
         "adapters::SessionFileSystem",
-        "SessionProjectKey::for_directory_with_filesystem"
+        "SessionProjectKey::for_directory_with_filesystem",
+        "SessionStore::supports",
+        "SessionStore::list_session_summaries",
+        "SessionSummaryEntry",
+        "SummaryDialect",
+        "fold_session_summary",
+        "summary_entry_to_sdk_info",
+        "SdkSessionInfo",
+        "InMemorySessionStore::with_summary_dialect",
+        "testing::run_session_store_conformance",
+        "testing::ConformanceOptions"
       ],
       "tests": [
         {
@@ -1248,7 +1258,7 @@
         },
         {
           "path": "tests/session_store.rs",
-          "name": "stable_entry_uuids_make_retries_idempotent"
+          "name": "repeated_stable_uuids_are_stored_again_like_upstream_reference_stores"
         },
         {
           "path": "tests/session_clock.rs",
@@ -1273,10 +1283,34 @@
         {
           "path": "tests/session_project_key.rs",
           "name": "project_key_matches_upstream_utf16_replacement"
+        },
+        {
+          "path": "tests/session_store_conformance.rs",
+          "name": "in_memory_store_satisfies_every_contract_with_the_typescript_summary_layout"
+        },
+        {
+          "path": "tests/session_store_conformance.rs",
+          "name": "in_memory_store_satisfies_every_contract_with_the_python_summary_layout"
+        },
+        {
+          "path": "tests/session_store_conformance.rs",
+          "name": "a_required_only_store_passes_without_optional_operations"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "folding_latches_set_once_fields_and_overwrites_last_wins_fields"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "the_typescript_layout_uses_camel_case_keys_and_honors_relocated_entries"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "the_in_memory_store_keeps_summaries_in_step_with_listings"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust implements append/load/list_sessions/list_subkeys/delete and in-memory stable-UUID idempotence. Upstream list_session_summaries is not exposed by the Rust store trait; native transcript conformance remains separate. Wall time and transcript filesystem operations can be replaced through static adapters; memory fixtures cover resume materialization, cleanup of the temporary directory and removal of a partially written temporary directory on failure."
+      "status": "supported",
+      "rationale": "Rust implements append/load/list_sessions/list_session_summaries/list_subkeys/delete, an upstream-equivalent conformance suite, and summary folding in both the TypeScript (default) and Python layouts. Optional operations are declared through SessionStore::supports because Rust cannot detect trait method overrides. Wall time and transcript filesystem operations can be replaced through static adapters; memory fixtures cover resume materialization, cleanup of the temporary directory and removal of a partially written temporary directory on failure."
     },
     {
       "id": "store-resume",
@@ -1303,7 +1337,10 @@
         "StoreResume",
         "TranscriptMirror",
         "SessionPreparationOptions",
-        "adapters::SessionFileSystem"
+        "adapters::SessionFileSystem",
+        "SessionStoreFlush",
+        "MirrorSizeEstimate",
+        "Error::ContinueRequiresListSessions"
       ],
       "tests": [
         {
@@ -1325,6 +1362,18 @@
         {
           "path": "tests/session_store.rs",
           "name": "delayed_flush_wait_keeps_the_original_deadline"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "eager_flush_appends_every_frame_without_waiting_for_a_flush"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "the_python_size_estimate_counts_ascii_escapes_where_typescript_counts_code_units"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "st06_continue_conversation_requires_a_store_that_lists_sessions"
         }
       ],
       "status": "partial",

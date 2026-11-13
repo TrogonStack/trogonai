@@ -77,13 +77,13 @@ async fn empty_append_does_not_create_a_session() -> TestResult {
 }
 
 #[tokio::test]
-async fn stable_entry_uuids_make_retries_idempotent() -> TestResult {
+async fn repeated_stable_uuids_are_stored_again_like_upstream_reference_stores() -> TestResult {
     let store = InMemorySessionStore::new();
     let key = key("project", SESSION)?;
     let value = SessionEntry::try_from(json!({"type":"user","uuid":"stable","nested":{"items":[1,2]}}))?;
     store.append(&key, std::slice::from_ref(&value)).await?;
     store.append(&key, std::slice::from_ref(&value)).await?;
-    assert_eq!(store.load(&key).await?, Some(vec![value]));
+    assert_eq!(store.load(&key).await?, Some(vec![value.clone(), value]));
     Ok(())
 }
 

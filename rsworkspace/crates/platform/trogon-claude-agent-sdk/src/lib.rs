@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod adapters;
+pub mod testing;
 pub mod upstream;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -46,12 +47,15 @@ mod sensitive_string;
 mod session_entry;
 mod session_error;
 mod session_id;
+mod session_info;
 mod session_key;
 mod session_path_component;
 mod session_project_key;
+mod session_prompt;
 mod session_resume;
 mod session_store;
 mod session_subpath;
+mod session_summary;
 mod setting_source;
 mod stderr_tail;
 mod task_id;
@@ -125,14 +129,16 @@ pub use sensitive_string::SensitiveString;
 pub use session_entry::{SessionEntry, SessionEntryError};
 pub use session_error::SessionError;
 pub use session_id::SessionId;
+pub use session_info::SdkSessionInfo;
 pub use session_key::{SessionKey, SessionKeyError};
 pub use session_project_key::{SessionProjectKey, SessionProjectKeyError};
 pub use session_resume::{MaterializedSession, SessionPreparationOptions, SessionRuntime, StoreResume};
 pub use session_store::{
-    InMemorySessionStore, SessionListEntry, SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreLimits,
-    SessionStoreOperation, SessionStoreOptions,
+    InMemorySessionStore, MirrorSizeEstimate, SessionListEntry, SessionStore, SessionStoreError, SessionStoreFlush,
+    SessionStoreFuture, SessionStoreLimits, SessionStoreOperation, SessionStoreOptions,
 };
 pub use session_subpath::{SessionSubpath, SessionSubpathError};
+pub use session_summary::{SessionSummaryEntry, SummaryDialect, fold_session_summary, summary_entry_to_sdk_info};
 pub use setting_source::SettingSource;
 pub use stderr_tail::StderrTail;
 pub use task_id::TaskId;

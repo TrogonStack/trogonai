@@ -101,6 +101,8 @@ pub enum Error {
     InvalidConfiguration,
     #[error("file checkpointing is not yet supported with a session store")]
     FileCheckpointingWithSessionStore,
+    #[error("continue_conversation with a session store requires the store to support listing sessions")]
+    ContinueRequiresListSessions,
     #[error("an MCP server replacement is already in progress")]
     McpUpdateInProgress,
     #[error("an MCP server name is configured as both external and embedded")]

@@ -72,7 +72,12 @@ impl ClaudeSdkClient {
             }
             let resume = match &options.resume {
                 Some(session) => crate::StoreResume::Session(session.clone()),
-                None if options.continue_conversation == crate::ContinueConversation::Yes => crate::StoreResume::Latest,
+                None if options.continue_conversation == crate::ContinueConversation::Yes => {
+                    if !store_options.store.supports(crate::SessionStoreOperation::List) {
+                        return Err(Error::ContinueRequiresListSessions);
+                    }
+                    crate::StoreResume::Latest
+                }
                 None => crate::StoreResume::None,
             };
             let cwd = match options.cwd.clone() {

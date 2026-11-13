@@ -9,7 +9,10 @@ use std::{
 };
 
 use crate::adapters::{SystemClock, WallClock};
-use crate::{QueueCapacity, SessionEntry, SessionId, SessionKey, SessionProjectKey, Timeout};
+use crate::{
+    QueueCapacity, SessionEntry, SessionId, SessionKey, SessionProjectKey, SessionSummaryEntry, Timeout,
+    session_summary::{SummaryDialect, fold_session_summary},
+};
 
 pub type SessionStoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, SessionStoreError>> + Send + 'a>>;
 
@@ -18,6 +21,7 @@ pub enum SessionStoreOperation {
     Append,
     Load,
     List,
+    ListSummaries,
     Delete,
     ListSubkeys,
 }
@@ -28,6 +32,7 @@ impl std::fmt::Display for SessionStoreOperation {
             Self::Append => "append",
             Self::Load => "load",
             Self::List => "list",
+            Self::ListSummaries => "list summaries",
             Self::Delete => "delete",
             Self::ListSubkeys => "list subkeys",
         })
@@ -66,10 +71,26 @@ pub struct SessionListEntry {
 
 /// External transcript storage. `append` must preserve call order and should deduplicate stable entry UUIDs.
 pub trait SessionStore: Send + Sync {
+    /// Reports whether the store implements an operation. `append` and `load` are required; a store that overrides
+    /// an optional operation overrides this method to say so, which callers use instead of probing for
+    /// [`SessionStoreError::Unsupported`].
+    fn supports(&self, operation: SessionStoreOperation) -> bool {
+        matches!(operation, SessionStoreOperation::Append | SessionStoreOperation::Load)
+    }
     fn append<'a>(&'a self, key: &'a SessionKey, entries: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()>;
     fn load<'a>(&'a self, key: &'a SessionKey) -> SessionStoreFuture<'a, Option<Vec<SessionEntry>>>;
     fn list_sessions<'a>(&'a self, _project: &'a SessionProjectKey) -> SessionStoreFuture<'a, Vec<SessionListEntry>> {
         Box::pin(async { Err(SessionStoreError::Unsupported(SessionStoreOperation::List)) })
+    }
+    /// Returns incrementally maintained summaries for every session of a project in one call.
+    ///
+    /// Stores maintain these with [`fold_session_summary`](crate::fold_session_summary) inside `append`, skipping keys that
+    /// carry a subpath, and stamp `modified_at_ms` with the same clock as [`SessionStore::list_sessions`].
+    fn list_session_summaries<'a>(
+        &'a self,
+        _project: &'a SessionProjectKey,
+    ) -> SessionStoreFuture<'a, Vec<SessionSummaryEntry>> {
+        Box::pin(async { Err(SessionStoreError::Unsupported(SessionStoreOperation::ListSummaries)) })
     }
     fn delete<'a>(&'a self, _key: &'a SessionKey) -> SessionStoreFuture<'a, ()> {
         Box::pin(async { Err(SessionStoreError::Unsupported(SessionStoreOperation::Delete)) })
@@ -109,12 +130,37 @@ impl Default for SessionStoreLimits {
     }
 }
 
+/// When transcript mirror frames reach the store.
+///
+/// Upstream `sessionStoreFlush` / `session_store_flush`: `Batched` flushes on a result message or when the pending
+/// buffer overflows; `Eager` appends every frame as soon as it is read, without coalescing across frames.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SessionStoreFlush {
+    #[default]
+    Batched,
+    Eager,
+}
+
+/// How the mirror estimates the size of a pending frame against
+/// [`SessionStoreLimits::max_pending_bytes`].
+///
+/// The TypeScript SDK counts UTF-16 code units of the compact JSON of the frame's entries; the Python SDK counts
+/// characters of `json.dumps(entries)` with its default separators and ASCII escaping.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MirrorSizeEstimate {
+    #[default]
+    TypeScript,
+    Python,
+}
+
 #[derive(Clone)]
 pub struct SessionStoreOptions {
     pub store: Arc<dyn SessionStore>,
     pub config_directory: Option<PathBuf>,
     pub project_key: Option<SessionProjectKey>,
     pub limits: SessionStoreLimits,
+    pub flush: SessionStoreFlush,
+    pub size_estimate: MirrorSizeEstimate,
 }
 
 impl<S: SessionStore + 'static> From<Arc<S>> for SessionStoreOptions {
@@ -130,6 +176,8 @@ impl From<Arc<dyn SessionStore>> for SessionStoreOptions {
             config_directory: None,
             project_key: None,
             limits: SessionStoreLimits::default(),
+            flush: SessionStoreFlush::default(),
+            size_estimate: MirrorSizeEstimate::default(),
         }
     }
 }
@@ -146,13 +194,19 @@ impl std::fmt::Debug for SessionStoreOptions {
 struct MemoryState {
     entries: HashMap<SessionKey, Vec<SessionEntry>>,
     modified: HashMap<SessionKey, u64>,
+    summaries: HashMap<(SessionProjectKey, SessionId), SessionSummaryEntry>,
     last_modified: u64,
 }
 
+/// Reference [`SessionStore`] that keeps everything in memory, for tests and development.
+///
+/// Like both upstream reference stores it does not deduplicate entry uuids, folds a [`SessionSummaryEntry`] on every
+/// main-transcript append and stamps it with the write time that [`SessionStore::list_sessions`] reports.
 #[derive(Clone, Default)]
 pub struct InMemorySessionStore<C: WallClock<Time = SystemTime> = SystemClock> {
     state: Arc<Mutex<MemoryState>>,
     clock: C,
+    dialect: SummaryDialect,
 }
 
 impl<C: WallClock<Time = SystemTime>> std::fmt::Debug for InMemorySessionStore<C> {
@@ -170,41 +224,91 @@ impl InMemorySessionStore {
         InMemorySessionStore {
             state: Arc::default(),
             clock,
+            dialect: SummaryDialect::default(),
         }
     }
 }
 
+impl<C: WallClock<Time = SystemTime>> InMemorySessionStore<C> {
+    /// Chooses the summary `data` layout this store folds, TypeScript (camelCase) or Python (snake_case).
+    pub fn with_summary_dialect(mut self, dialect: SummaryDialect) -> Self {
+        self.dialect = dialect;
+        self
+    }
+
+    /// Test helper: every entry stored under a key, empty when the key was never written.
+    pub fn get_entries(&self, key: &SessionKey) -> Result<Vec<SessionEntry>, SessionStoreError> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| SessionStoreError::Poisoned)?
+            .entries
+            .get(key)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Test helper: number of stored main transcripts.
+    pub fn size(&self) -> Result<usize, SessionStoreError> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| SessionStoreError::Poisoned)?
+            .entries
+            .keys()
+            .filter(|key| key.subpath().is_none())
+            .count())
+    }
+
+    /// Test helper: removes every entry, summary and modification time.
+    pub fn clear(&self) -> Result<(), SessionStoreError> {
+        *self.state.lock().map_err(|_| SessionStoreError::Poisoned)? = MemoryState::default();
+        Ok(())
+    }
+
+    fn write_time(&self, state: &mut MemoryState) -> Result<u64, SessionStoreError> {
+        let clock = self
+            .clock
+            .now()
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+            .unwrap_or(0);
+        let modified = clock.max(
+            state
+                .last_modified
+                .checked_add(1)
+                .ok_or(SessionStoreError::ClockExhausted)?,
+        );
+        state.last_modified = modified;
+        Ok(modified)
+    }
+}
+
 impl<C: WallClock<Time = SystemTime> + Send + Sync> SessionStore for InMemorySessionStore<C> {
+    fn supports(&self, _operation: SessionStoreOperation) -> bool {
+        true
+    }
+
     fn append<'a>(&'a self, key: &'a SessionKey, entries: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
         Box::pin(async move {
             if entries.is_empty() {
                 return Ok(());
             }
             let mut state = self.state.lock().map_err(|_| SessionStoreError::Poisoned)?;
-            let existing = state.entries.entry(key.clone()).or_default();
-            for entry in entries {
-                if entry
-                    .uuid()
-                    .is_some_and(|uuid| existing.iter().any(|prior| prior.uuid() == Some(uuid)))
-                {
-                    continue;
-                }
-                existing.push(entry.clone());
+            state
+                .entries
+                .entry(key.clone())
+                .or_default()
+                .extend(entries.iter().cloned());
+            let modified = self.write_time(&mut state)?;
+            if key.subpath().is_none() {
+                let summary_key = (key.project_key().clone(), key.session_id().clone());
+                let mut folded =
+                    fold_session_summary(self.dialect, state.summaries.get(&summary_key), key, entries, None);
+                folded.modified_at_ms = modified;
+                state.summaries.insert(summary_key, folded);
             }
-            let clock = self
-                .clock
-                .now()
-                .duration_since(UNIX_EPOCH)
-                .ok()
-                .and_then(|duration| u64::try_from(duration.as_millis()).ok())
-                .unwrap_or(0);
-            let modified = clock.max(
-                state
-                    .last_modified
-                    .checked_add(1)
-                    .ok_or(SessionStoreError::ClockExhausted)?,
-            );
-            state.last_modified = modified;
             state.modified.insert(key.clone(), modified);
             Ok(())
         })
@@ -239,9 +343,31 @@ impl<C: WallClock<Time = SystemTime> + Send + Sync> SessionStore for InMemorySes
         })
     }
 
+    fn list_session_summaries<'a>(
+        &'a self,
+        project: &'a SessionProjectKey,
+    ) -> SessionStoreFuture<'a, Vec<SessionSummaryEntry>> {
+        Box::pin(async move {
+            let state = self.state.lock().map_err(|_| SessionStoreError::Poisoned)?;
+            let mut summaries: Vec<_> = state
+                .summaries
+                .iter()
+                .filter(|((summary_project, _), _)| summary_project == project)
+                .map(|(_, summary)| summary.clone())
+                .collect();
+            summaries.sort_by_key(|summary| std::cmp::Reverse(summary.modified_at_ms));
+            Ok(summaries)
+        })
+    }
+
     fn delete<'a>(&'a self, key: &'a SessionKey) -> SessionStoreFuture<'a, ()> {
         Box::pin(async move {
             let mut state = self.state.lock().map_err(|_| SessionStoreError::Poisoned)?;
+            if key.subpath().is_none() {
+                state
+                    .summaries
+                    .remove(&(key.project_key().clone(), key.session_id().clone()));
+            }
             let remove: Vec<_> = state
                 .entries
                 .keys()
