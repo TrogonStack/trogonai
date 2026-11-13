@@ -17,6 +17,19 @@ fn js_number(number: &Number) -> String {
     number.as_f64().map_or_else(|| "null".to_owned(), js_float)
 }
 
+/// The shortest digits that read back as a positive finite `value`, closest to it and even on a tie, with the
+/// position of the decimal point among them. `Number::toString` and `ryu`, which `serde_json` prints doubles
+/// with, break a tie to the even digit; Rust's `{:e}` rounds it up, so 2^-25 would end in 3 instead of 2.
+fn shortest_digits(value: f64) -> (String, i32) {
+    let printed = Value::from(value).to_string();
+    let (mantissa, exponent) = printed.split_once('e').unwrap_or((printed.as_str(), "0"));
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let digits = format!("{whole}{fraction}");
+    let leading = digits.len() - digits.trim_start_matches('0').len();
+    let point = whole.len() as i32 + exponent.parse::<i32>().unwrap_or(0) - leading as i32;
+    (digits.trim_matches('0').to_owned(), point)
+}
+
 /// `Number.prototype.toString` for a double: the shortest digits that read back as the same double, in fixed
 /// notation from 1e-6 up to 1e21 and in exponent form outside it. A non-finite double prints as `JSON.stringify`
 /// prints it, `null`.
@@ -28,10 +41,7 @@ pub(crate) fn js_float(value: f64) -> String {
         return "0".to_owned();
     }
     let sign = if value < 0.0 { "-" } else { "" };
-    let scientific = format!("{:e}", value.abs());
-    let (mantissa, exponent) = scientific.split_once('e').unwrap_or((scientific.as_str(), "0"));
-    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
-    let point: i32 = exponent.parse::<i32>().map_or(0, |exponent| exponent + 1);
+    let (digits, point) = shortest_digits(value.abs());
     let count = digits.len() as i32;
     let body = if count <= point && point <= 21 {
         format!("{digits}{}", "0".repeat((point - count) as usize))
