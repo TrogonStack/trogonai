@@ -47,6 +47,7 @@ mod sensitive_string;
 mod session_entry;
 mod session_error;
 mod session_files;
+mod session_files_ts;
 mod session_id;
 mod session_info;
 mod session_key;
@@ -140,9 +141,11 @@ pub use session_id::SessionId;
 pub use session_info::SdkSessionInfo;
 pub use session_key::{SessionKey, SessionKeyError};
 pub use session_mutations::{
-    ForkSessionResult, SessionMutationError, delete_session, fork_session, rename_session, tag_session,
+    ForkSessionResult, JsonEscaping, SessionMutationError, delete_session, fork_session, rename_session, tag_session,
 };
-pub use session_project_key::{SessionProjectKey, SessionProjectKeyError, project_key_for_directory};
+pub use session_project_key::{
+    SessionProjectKey, SessionProjectKeyError, project_key_for_directory, project_key_for_directory_in,
+};
 pub use session_resume::{MaterializedSession, SessionPreparationOptions, SessionRuntime, StoreResume};
 pub use session_store::{
     InMemorySessionStore, MirrorSizeEstimate, SessionListEntry, SessionStore, SessionStoreError, SessionStoreFlush,
