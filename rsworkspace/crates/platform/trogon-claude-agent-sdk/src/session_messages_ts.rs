@@ -461,16 +461,16 @@ fn link(entries: &[JsonObject]) -> Result<Option<Linked>, MessagesError> {
     let parents: HashSet<&str> = map.values().filter_map(parent_uuid).collect();
     let leaves: Vec<&JsonObject> = map.values().filter(|entry| !parents.contains(uuid_of(entry))).collect();
     let counts = |entry: &JsonObject| {
-        !flag(entry, "isSidechain")
-            && !flag(entry, "teamName")
-            && kind_of(entry) != Some("progress")
-            && !(kind_of(entry) == Some("attachment")
+        !(flag(entry, "isSidechain")
+            || flag(entry, "teamName")
+            || kind_of(entry) == Some("progress")
+            || (kind_of(entry) == Some("attachment")
                 && entry
                     .get("attachment")
                     .and_then(Value::as_object)
                     .and_then(|attachment| attachment.get("type"))
                     .and_then(Value::as_str)
-                    == Some("fork_briefing"))
+                    == Some("fork_briefing")))
     };
     let counted_parents: HashSet<&str> = map
         .values()
@@ -638,18 +638,16 @@ fn regroup(map: &Entries, chain: Vec<JsonObject>, in_chain: &mut HashSet<String>
         owners.push(parent_uuid(result).unwrap_or("").to_owned());
         if let Some(source) =
             str_field(result, "sourceToolAssistantUUID").filter(|source| Some(*source) != parent_uuid(result))
+            && let Some(found) = map.get(source)
+            && same_agent(result, found)
         {
-            if let Some(found) = map.get(source) {
-                if same_agent(result, found) {
-                    owners.push(uuid_of(found).to_owned());
-                }
-            }
+            owners.push(uuid_of(found).to_owned());
         }
         for call in tool_ids(result, "tool_result", "tool_use_id") {
-            if let Some(Some(found)) = call_owner.get(&call) {
-                if same_agent(result, found) {
-                    owners.push(uuid_of(found).to_owned());
-                }
+            if let Some(Some(found)) = call_owner.get(&call)
+                && same_agent(result, found)
+            {
+                owners.push(uuid_of(found).to_owned());
             }
         }
         for owner in owners {
