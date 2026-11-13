@@ -48,7 +48,7 @@ Current groups:
 | `aauth/` | Agent authentication crates. |
 | `scheduler/` | Scheduler domain and service. |
 | `policy/` | Policy evaluation: the pure bindings evaluator and the request-rule engines that narrow its decisions. |
-| `credential/` | Credential platform: the credential value objects that every credential consumer validates once, the read side of the credential aggregate (the event fold, its wire codec, the event subjects, and the releasability rule) that every reader of a credential stream applies, and the secret store ports with the OpenBao adapter that implements them. |
+| `credential/` | Credential platform: the credential value objects that every credential consumer validates once, the read side of the credential aggregate (the event fold, its wire codec, the event subjects, and the releasability rule) that every reader of a credential stream applies, the secret store ports with the OpenBao adapter that implements them, and the release core of the secrets service that decides and seals each credential release. |
 | `platform/` | Cross-cutting foundations and standalone services that are not part of a domain family (e.g. `trogon-std`, `trogon-nats`, `trogon-telemetry`, `trogonai-proto`, `trogon-gateway`). |
 
 ### Grouping rule
