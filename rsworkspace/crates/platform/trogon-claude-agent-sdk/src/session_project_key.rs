@@ -63,19 +63,7 @@ impl std::fmt::Display for SessionProjectKey {
 /// Upstream `sanitizePath` / `_sanitize_path`: every non-alphanumeric unit becomes a hyphen and a name longer than 200
 /// characters is cut and suffixed with a base36 hash. TypeScript counts and hashes UTF-16 units, Python code points.
 pub(crate) fn sanitize_path(name: &str, dialect: crate::SummaryDialect) -> String {
-    let sanitized: String = match dialect {
-        crate::SummaryDialect::TypeScript => name
-            .encode_utf16()
-            .map(|unit| match char::from_u32(u32::from(unit)) {
-                Some(ch) if ch.is_ascii_alphanumeric() => ch,
-                _ => '-',
-            })
-            .collect(),
-        crate::SummaryDialect::Python => name
-            .chars()
-            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
-            .collect(),
-    };
+    let sanitized = hyphenate(name, dialect);
     if sanitized.len() <= 200 {
         return sanitized;
     }
@@ -100,6 +88,24 @@ pub(crate) fn sanitize_path(name: &str, dialect: crate::SummaryDialect) -> Strin
     format!("{}-{suffix}", &sanitized[..200])
 }
 
+/// Every non-alphanumeric unit becomes a hyphen, without the length cut: TypeScript replaces each UTF-16 unit (a
+/// character outside the BMP becomes two hyphens), Python each code point.
+pub(crate) fn hyphenate(name: &str, dialect: crate::SummaryDialect) -> String {
+    match dialect {
+        crate::SummaryDialect::TypeScript => name
+            .encode_utf16()
+            .map(|unit| match char::from_u32(u32::from(unit)) {
+                Some(ch) if ch.is_ascii_alphanumeric() => ch,
+                _ => '-',
+            })
+            .collect(),
+        crate::SummaryDialect::Python => name
+            .chars()
+            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+            .collect(),
+    }
+}
+
 /// Upstream `canonicalizePath` / `_canonicalize_path`: realpath plus NFC, falling back to the input when the path
 /// cannot be resolved.
 pub(crate) fn canonicalize_lenient(directory: &Path) -> String {
@@ -113,9 +119,16 @@ pub(crate) fn canonicalize_lenient(directory: &Path) -> String {
 /// Derives the [`SessionStore`](crate::SessionStore) project key for a directory (the current directory when
 /// `None`), with upstream's realpath, NFC and hashed sanitization rules, so keys match local transcripts.
 pub fn project_key_for_directory(directory: Option<&Path>) -> Result<SessionProjectKey, SessionProjectKeyError> {
+    project_key_for_directory_in(directory, crate::SummaryDialect::TypeScript)
+}
+
+/// [`project_key_for_directory`] with a selectable upstream rule set. The two differ for a directory whose sanitized
+/// name exceeds 200 characters and contains characters outside the Basic Multilingual Plane: TypeScript counts and
+/// hashes UTF-16 units, Python code points.
+pub fn project_key_for_directory_in(
+    directory: Option<&Path>,
+    dialect: crate::SummaryDialect,
+) -> Result<SessionProjectKey, SessionProjectKeyError> {
     let directory = directory.unwrap_or_else(|| Path::new("."));
-    SessionProjectKey::new(sanitize_path(
-        &canonicalize_lenient(directory),
-        crate::SummaryDialect::TypeScript,
-    ))
+    SessionProjectKey::new(sanitize_path(&canonicalize_lenient(directory), dialect))
 }
