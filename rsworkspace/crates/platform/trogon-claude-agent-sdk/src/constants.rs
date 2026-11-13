@@ -62,6 +62,15 @@ pub(crate) const INHERITED_KEYS: &[&str] = &[
     "USERPROFILE",
 ];
 
+/// `cmd.exe` metacharacters Python refuses in resume and session values on Windows.
+pub(crate) const WINDOWS_CMD_METACHARACTERS: &str = "&|<>^%!\"";
+
+/// Python `--setting-sources` default when `skills` is set and no sources were given.
+pub(crate) const SKILLS_DEFAULT_SETTING_SOURCES: [&str; 2] = ["user", "project"];
+
+/// Environment variable that makes the TypeScript SDK log to a derived debug file.
+pub(crate) const SDK_DEBUG_ENV: &str = "DEBUG_CLAUDE_AGENT_SDK";
+
 /// Upstream `_STORE_LIST_LOAD_CONCURRENCY`.
 pub(crate) const LIST_LOAD_CONCURRENCY: usize = 16;
 

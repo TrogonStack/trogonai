@@ -22,6 +22,7 @@ mod config_value;
 mod constants;
 mod control;
 mod control_request_id;
+mod debug_file;
 mod dialog;
 mod dialog_kind;
 mod driver;
@@ -41,6 +42,7 @@ mod message_decode;
 mod message_id;
 mod message_origin;
 mod model_name;
+mod option_error;
 mod options;
 mod output_schema;
 mod permission;
@@ -54,6 +56,7 @@ mod python_json;
 mod queue_capacity;
 #[cfg(unix)]
 mod run_as;
+mod runtime_options;
 mod sdk_mcp_server;
 mod sdk_tool;
 mod sdk_tools;
@@ -99,6 +102,8 @@ mod settings_schema_paths;
 mod settings_schema_permission_rule;
 mod settings_schema_ports;
 mod settings_schema_regexp;
+mod shadow_warning;
+mod skills;
 mod stderr_tail;
 mod summary_dialect;
 mod task_id;
@@ -165,6 +170,7 @@ pub use message::{
 pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use model_name::ModelName;
+pub use option_error::OptionError;
 pub use options::{
     ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, FileCheckpointing,
     InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, MessageBuffer, PartialMessages, RequestIdExhaustion,
@@ -186,6 +192,10 @@ pub use process_options::{
 };
 pub use prompt::Prompt;
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
+pub use runtime_options::{
+    DangerousPermissionSkip, DebugOutput, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget, ThinkingConfig,
+    ThinkingDisplay,
+};
 pub use sdk_mcp_server::{
     LocalMcpServer, LocalMcpServerOptions, McpFuture, McpServerError, SdkMcpServer, SdkMcpSession,
 };

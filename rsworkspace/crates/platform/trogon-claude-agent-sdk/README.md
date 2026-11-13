@@ -293,8 +293,22 @@ upstream SDKs).
 - Not expressible: the `Cannot write to terminated process` and `exited with error` write
   branches are unreachable upstream because the `exit` event clears readiness
   first. `cli_path` or `PATH` discovery is the Rust equivalent.
-- Deferred to other tracks: remote `--sdk-url` transports and the thinking,
-  betas and task-budget options.
+- Runtime options map `thinking`, `maxThinkingTokens`, `taskBudget`, `betas`,
+  `fallbackModel`, `permissionPromptToolName`, `includeHookEvents`, `sessionId`,
+  `resumeSessionAt`, `resumeDropsTurn` and `skills` in both dialects with the
+  upstream flag order. `permission_prompts`, `channels`, `debug`, `debug_file`,
+  `allow_dangerously_skip_permissions` and `project_config_root` exist only in
+  TypeScript and are ignored by `ArgvStyle::Python`. In TypeScript `connect`
+  also adds the derived per-process `--debug-file` when none is set. `skills`
+  appends `Skill` or `Skill(name)` to the allowed tools, Python also defaults
+  `--setting-sources=user,project`, and an explicit list reaches the
+  `initialize` request. A callback together with `permission_prompt_tool_name`
+  is refused, TypeScript refuses a fallback model equal to the model, and
+  Python refuses an enabled thinking config without a budget. The shadow
+  advisory for `bypassPermissions` or allowed tools is reported through
+  `tracing`.
+- Deferred to other tracks: remote `--sdk-url` transports. Settings, managed
+  settings, sandbox, flag settings and `updateSettings` are not covered.
 
 Model strings and paths are stored without extra identifier restrictions.
 `env` values are `ConfigValue`s, which convert from strings as `Sensitive`;

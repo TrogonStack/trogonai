@@ -44,6 +44,24 @@ pub struct ClientHandle {
     closed: Closed,
 }
 
+/// The inherited variables plus the two the default debug file needs. They are read only here, and the
+/// configuration directory only when the debug variable is set, so an ordinary connection stays unobserved.
+fn debug_probe<E: crate::adapters::EnvironmentVariable>(
+    environment: &E,
+    inherited: &crate::environment_plan::Inherited,
+) -> crate::environment_plan::Inherited {
+    let mut probe = inherited.clone();
+    let debug = std::ffi::OsString::from(crate::constants::SDK_DEBUG_ENV);
+    if let Some(value) = environment.var_os(&debug) {
+        probe.insert(debug, value);
+        let config = std::ffi::OsString::from("CLAUDE_CONFIG_DIR");
+        if let Some(value) = environment.var_os(&config) {
+            probe.insert(config, value);
+        }
+    }
+    probe
+}
+
 fn capture_inherited<E: crate::adapters::EnvironmentVariable>(
     environment: &E,
     options: &ClaudeAgentOptions,
@@ -87,7 +105,7 @@ impl ClaudeSdkClient {
         } else {
             None
         };
-        Self::connect_resolved(options, adapters, discovered).await
+        Self::connect_resolved(options, adapters, discovered, true).await
     }
 
     /// Connects through caller-supplied adapters. The caller owns spawning, so no executable discovery runs and
@@ -103,13 +121,14 @@ impl ClaudeSdkClient {
         P: crate::adapters::SpawnProcess<Error = std::io::Error>,
         F: crate::adapters::SessionFileSystem,
     {
-        Self::connect_resolved(options, adapters, None).await
+        Self::connect_resolved(options, adapters, None, false).await
     }
 
     async fn connect_resolved<E, P, F>(
         mut options: ClaudeAgentOptions,
         adapters: crate::adapters::RuntimeAdapters<E, P, F>,
         discovered: Option<std::path::PathBuf>,
+        derive_debug_file: bool,
     ) -> Result<Self, Error>
     where
         E: crate::adapters::EnvironmentVariable
@@ -132,14 +151,25 @@ impl ClaudeSdkClient {
             true,
         )
         .await?;
+        crate::shadow_warning::emit(&options);
         let initialization = driver::Initialization::new(&options, &adapters.environment)?;
         let closed = Closed::default();
+        // TypeScript derives a default debug file only when the SDK spawns the CLI and none was given.
+        let derived_debug_file = (derive_debug_file
+            && options.argv_style == crate::ArgvStyle::TypeScript
+            && options
+                .debug_file
+                .as_ref()
+                .is_none_or(|file| file.as_os_str().is_empty()))
+        .then(|| debug_probe(&adapters.environment, &inherited))
+        .and_then(|probe| crate::debug_file::process_debug_file(&probe));
         let transport = ProcessTransport::spawn(ProcessSpawn {
             options: &options,
             cli_path: cli_path.clone(),
             inherited: &inherited,
             process: &adapters.process,
             config_dir: session.as_ref().and_then(|session| session.config_dir.as_deref()),
+            derived_debug_file: derived_debug_file.as_deref(),
             closed: closed.clone(),
         })?;
         let version_check = (!crate::version_check::skip_requested(
@@ -196,6 +226,7 @@ impl ClaudeSdkClient {
             false,
         )
         .await?;
+        crate::shadow_warning::emit(&options);
         let initialization = driver::Initialization::new(&options, &adapters.environment)?;
         Self::start(StartInput {
             options,
