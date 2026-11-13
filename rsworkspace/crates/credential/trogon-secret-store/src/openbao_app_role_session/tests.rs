@@ -88,6 +88,13 @@ async fn a_login_granting_less_than_the_expiry_margin_refuses_to_start() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "display redaction is the contract under test; typed variants separately prove error classification"
+    )
+)]
 async fn a_malformed_login_answer_never_quotes_the_body() {
     let openbao = ScriptedOpenBao::start([(
         StatusCode::OK,
