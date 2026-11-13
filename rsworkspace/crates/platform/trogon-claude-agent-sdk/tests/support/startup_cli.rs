@@ -44,7 +44,11 @@ pub struct Script {
     pub fail: Vec<&'static str>,
     pub claim_error: Option<&'static str>,
     pub init: Option<Value>,
+    /// Answers initialize with a success frame that has no `response`.
+    pub init_omitted: bool,
     pub claim_init: Option<Value>,
+    /// Answers the claim without an `initialize`.
+    pub claim_init_omitted: bool,
     /// Lines read after the initialize request before any of them is answered.
     pub hold: usize,
     /// Answers the initialize request with this frame and exits at once, as a CLI that refuses to start does.
@@ -90,6 +94,7 @@ pub async fn answer(stdout: &mut tokio::io::DuplexStream, script: &Script, line:
     let request: Value = serde_json::from_str(line)?;
     let id = request["request_id"].clone();
     let reply = |response: Value| json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":response}});
+    let omitted = json!({"type":"control_response","response":{"subtype":"success","request_id":id}});
     let refuse =
         |error: &str| json!({"type":"control_response","response":{"subtype":"error","request_id":id,"error":error}});
     let frame = if request["type"] == "user" {
@@ -97,7 +102,9 @@ pub async fn answer(stdout: &mut tokio::io::DuplexStream, script: &Script, line:
             "result":"ok","session_id":"s","total_cost_usd":0,"usage":{},"modelUsage":{},"permission_denials":[],"uuid":uuid(2)}))
     } else {
         let subtype = request["request"]["subtype"].as_str().unwrap_or_default();
-        if subtype == "initialize" {
+        if subtype == "initialize" && script.init_omitted {
+            omitted
+        } else if subtype == "initialize" {
             reply(
                 script
                     .init
@@ -105,12 +112,20 @@ pub async fn answer(stdout: &mut tokio::io::DuplexStream, script: &Script, line:
                     .unwrap_or_else(|| json!({"hook_on_failure_supported":true})),
             )
         } else if subtype == "claim_session" {
+            let mut answer =
+                json!({"cwd":request["request"]["cwd"],"session_id":"sess-1","parked_ms":12,"sdk_mcp_settled":true});
+            if let Some(answer) = answer.as_object_mut()
+                && !script.claim_init_omitted
+            {
+                let initialize = script.claim_init.clone();
+                answer.insert(
+                    "initialize".to_owned(),
+                    initialize.unwrap_or_else(|| json!({"commands":[],"agents":[]})),
+                );
+            }
             match script.claim_error {
                 Some(error) => refuse(error),
-                None => reply(
-                    json!({"cwd":request["request"]["cwd"],"session_id":"sess-1","parked_ms":12,"sdk_mcp_settled":true,
-                    "initialize":script.claim_init.clone().unwrap_or_else(|| json!({"commands":[],"agents":[]}))}),
-                ),
+                None => reply(answer),
             }
         } else if script.fail.contains(&subtype) {
             refuse(&format!("{subtype} failed"))

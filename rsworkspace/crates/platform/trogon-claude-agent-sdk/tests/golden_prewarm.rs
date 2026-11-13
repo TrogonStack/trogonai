@@ -13,16 +13,17 @@
 //! request shows which writes happen before an answer and which wait for one.
 
 use std::{
+    collections::BTreeMap,
     ffi::{OsStr, OsString},
     os::unix::fs::PermissionsExt,
     time::Duration,
 };
 
-use serde_json::json;
+use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    AgentDefinition, AgentName, ClaimError, ClaimInfo, ClaimOptions, ContinueConversation, Error, FeatureSupport,
-    PermissionMode, Prompt, SessionFork, SessionId, SpareProcess, StartupOptions, WorkspaceTrust,
-    prewarm_with_adapters, upstream::messages::SDKStartupFailureReason,
+    AgentDefinition, AgentName, ClaimError, ClaimInfo, ClaimOptions, ClaudeAgentOptions, ContinueConversation, Error,
+    FeatureSupport, JsRuntime, PermissionMode, Prompt, SessionFork, SessionId, SpareProcess, StartupOptions,
+    WorkspaceTrust, prewarm_with_adapters, upstream::messages::SDKStartupFailureReason,
 };
 
 #[path = "support/scripted_process.rs"]
@@ -35,9 +36,34 @@ use startup_cli::*;
 const SPARE: &str = "/spare";
 
 async fn spare(script: Script) -> Outcome<(SpareProcess, Run)> {
+    spare_under(script, JsRuntime::Node).await
+}
+
+async fn spare_under(script: Script, js_runtime: JsRuntime) -> Outcome<(SpareProcess, Run)> {
     let (adapters, run) = start(script, &[]);
-    let spare = prewarm_with_adapters(StartupOptions::new(options(SPARE)), adapters).await?;
+    let options = ClaudeAgentOptions {
+        js_runtime,
+        ..options(SPARE)
+    };
+    let spare = prewarm_with_adapters(StartupOptions::new(options), adapters).await?;
     Ok((spare, run))
+}
+
+/// Claims a spare, then returns the initialization result as JSON text or the error text, and the error text of
+/// `supported_models`, `None` when it succeeds.
+async fn claimed_initialization(script: Script, js_runtime: JsRuntime) -> Outcome<(String, Option<String>)> {
+    let (spare, run) = spare_under(script, js_runtime).await?;
+    let query = spare.claim(Prompt::from("hello"), ClaimOptions::new(SPARE)).await?;
+    spare.claimed().await?;
+    let handle = query.handle().ok_or("the query has no handle")?;
+    let result = match handle.initialization_result().await {
+        Ok(info) => serde_json::to_string(&info.as_json())?,
+        Err(error) => error.to_string(),
+    };
+    let models = handle.supported_models().await.err().map(|error| error.to_string());
+    query.close().await?;
+    run.lines().await?;
+    Ok((result, models))
 }
 
 struct Claimed {
@@ -463,6 +489,118 @@ async fn the_claim_answer_replaces_the_initialization_result_and_keeps_the_appli
     assert_eq!(info.managed_settings_applied, FeatureSupport::Supported);
     query.close().await?;
     run.lines().await?;
+    Ok(())
+}
+
+/// `claimSession` reads the applied flags off the earlier initialization result before it reads the claim's
+/// `initialize`. An initialize answered without a response or with `null`, or a claim `initialize` of `null`,
+/// rejects the initialization result with the engine's `TypeError` while `claimed` still resolves.
+#[tokio::test]
+async fn a_claim_over_a_missing_initialize_response_rejects_the_initialization_result() -> Outcome {
+    let cases: [(JsRuntime, Option<Value>, Value, &str); 6] = [
+        (
+            JsRuntime::Node,
+            None,
+            json!({"commands":[{"name":"b"}],"agents":[]}),
+            "Cannot read properties of undefined (reading 'hooks_applied')",
+        ),
+        (
+            JsRuntime::Node,
+            Some(Value::Null),
+            json!({"commands":[{"name":"b"}],"agents":[]}),
+            "Cannot read properties of null (reading 'hooks_applied')",
+        ),
+        (
+            JsRuntime::Node,
+            Some(json!({"commands":[{"name":"a"}],"hooks_applied":true,"plugins_applied":false})),
+            Value::Null,
+            "Cannot read properties of null (reading 'hooks_applied')",
+        ),
+        (
+            JsRuntime::Bun,
+            None,
+            json!({"commands":[{"name":"b"}]}),
+            "undefined is not an object (evaluating 'd.hooks_applied')",
+        ),
+        (
+            JsRuntime::Bun,
+            Some(Value::Null),
+            json!({"commands":[]}),
+            "null is not an object (evaluating 'd.hooks_applied')",
+        ),
+        (
+            JsRuntime::Bun,
+            Some(json!({"hooks_applied":true})),
+            Value::Null,
+            "null is not an object (evaluating 'o.hooks_applied')",
+        ),
+    ];
+    for (js_runtime, init, claim_init, expected) in cases {
+        let script = Script {
+            init_omitted: init.is_none(),
+            init,
+            claim_init: Some(claim_init),
+            ..Script::default()
+        };
+        let (result, models) = claimed_initialization(script, js_runtime).await?;
+        assert_eq!(result, expected);
+        assert_eq!(models.as_deref(), Some(expected));
+    }
+    Ok(())
+}
+
+/// The claim's `initialize` is spread the way JavaScript spreads any value, and each applied flag it omits or sends
+/// as `null` comes from the earlier result, a `null` there included.
+#[tokio::test]
+async fn a_claim_initialize_of_any_type_is_spread_and_keeps_the_earlier_flags() -> Outcome {
+    let init = json!({"commands":[{"name":"a"}],"hooks_applied":true,"plugins_applied":false});
+    let cases: [(Value, Option<Value>, &str); 7] = [
+        (
+            init.clone(),
+            Some(json!("ab")),
+            r#"{"0":"a","1":"b","hooks_applied":true,"plugins_applied":false}"#,
+        ),
+        (
+            init.clone(),
+            Some(json!(["x", "y"])),
+            r#"{"0":"x","1":"y","hooks_applied":true,"plugins_applied":false}"#,
+        ),
+        (
+            init.clone(),
+            Some(json!(7)),
+            r#"{"hooks_applied":true,"plugins_applied":false}"#,
+        ),
+        (
+            init.clone(),
+            Some(json!(true)),
+            r#"{"hooks_applied":true,"plugins_applied":false}"#,
+        ),
+        (
+            init.clone(),
+            None,
+            r#"{"commands":[{"name":"a"}],"hooks_applied":true,"plugins_applied":false}"#,
+        ),
+        (
+            init,
+            Some(json!({"hooks_applied":null,"plugins_applied":true,"managed_settings_applied":null})),
+            r#"{"hooks_applied":true,"plugins_applied":true,"managed_settings_applied":null}"#,
+        ),
+        (
+            json!({"hooks_applied":null}),
+            Some(json!({"commands":[]})),
+            r#"{"commands":[],"hooks_applied":null}"#,
+        ),
+    ];
+    for (init, claim_init, expected) in cases {
+        let script = Script {
+            init: Some(init),
+            claim_init_omitted: claim_init.is_none(),
+            claim_init,
+            ..Script::default()
+        };
+        let (result, _) = claimed_initialization(script, JsRuntime::Node).await?;
+        assert_eq!(result, expected);
+    }
     Ok(())
 }
 

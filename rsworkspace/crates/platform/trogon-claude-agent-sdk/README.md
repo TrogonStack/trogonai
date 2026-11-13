@@ -98,6 +98,9 @@ discard the spare. A claim fails with `ClaimError` carrying the upstream text: `
 process and sends no prompt, `option_not_applied` sends the prompt and says which options were skipped. A spare
 started without a directory parks under `spares/spare-XXXXXX` (mode 0700) in the config home until it is claimed.
 Settings that register hooks cannot be applied by a claim and are refused before anything is written.
+The claim answer's `initialize` replaces the initialization result as `sdk.mjs` merges it: the applied flags it
+omits or sends as `null` keep their first values, and a first result that was missing or `null`, or an `initialize`
+of `null`, fails the initialization result with `Error::TypeError` while `claimed()` still succeeds.
 
 ## Messages and controls
 
@@ -152,7 +155,11 @@ a shape check, or `None` when the reply has none, where TypeScript returns
 (`read_file` is `None` on any failure, `background_tasks` is `true` when the CLI
 omits `backgrounded`), and a rejected request keeps a well-formed TypeScript
 `error_code`.
-`supported_commands()` follows the latest `commands_changed` system message.
+`supported_commands()` follows the latest `commands_changed` system message,
+after reading the initialization result as `sdk.mjs` does. When initialize
+answered without a `response` or with `null`, `supported_commands`,
+`supported_models`, `supported_agents` and `account_info` fail with
+`Error::TypeError`, the engine text `ClaudeAgentOptions.js_runtime` selects.
 Legacy interrupt replies remain distinct from reported empty queues. Newer
 controls depend on installed CLI support.
 

@@ -280,6 +280,10 @@ pub enum Error {
     /// the run, so the text is the inner error's.
     #[error(transparent)]
     InitializationFailed(std::sync::Arc<Error>),
+    /// A `TypeError` the TypeScript SDK leaves to its JavaScript engine, worded as the engine chosen with
+    /// [`crate::JsRuntime`] words it.
+    #[error("{0}")]
+    TypeError(String),
     #[error("control request counter exhausted")]
     RequestIdExhausted,
     #[error("SDK driver task failed")]

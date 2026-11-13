@@ -19,9 +19,9 @@ use std::{
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
     ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, ContextUsageDetail, ControlOperation, Error, InterruptReceipt,
-    JsonObject, LocalPlugin, MaxThinkingTokensDisplay, McpPermissionModeOverride, McpServerName, McpServers, MessageId,
-    ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RemoteControlOptions, RewindMode, SdkMcpServers,
-    SettingsUpdateSource, TaskId, ToolUseId,
+    JsRuntime, JsonObject, LocalPlugin, MaxThinkingTokensDisplay, McpPermissionModeOverride, McpServerName, McpServers,
+    MessageId, ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RemoteControlOptions, RewindMode,
+    SdkMcpServers, SettingsUpdateSource, TaskId, ToolUseId,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -109,11 +109,26 @@ async fn connect(
     ),
     Error,
 > {
+    connect_under(style, JsRuntime::Node, script).await
+}
+
+async fn connect_under(
+    style: ArgvStyle,
+    js_runtime: JsRuntime,
+    script: Script,
+) -> Result<
+    (
+        ClaudeSdkClient,
+        tokio::task::JoinHandle<Result<Vec<String>, std::io::Error>>,
+    ),
+    Error,
+> {
     let (process, harness) = ScriptedProcessSpawner::new();
     let server = tokio::spawn(serve(harness, script));
     let options = ClaudeAgentOptions {
         cli_path: Some("claude".into()),
         argv_style: style,
+        js_runtime,
         ..ClaudeAgentOptions::default()
     };
     let client = ClaudeSdkClient::connect_with_adapters(
@@ -410,8 +425,8 @@ async fn an_absent_response_stays_undefined_and_a_null_one_stays_null_like_types
     .await?;
     let handle = client.handle();
     assert_eq!(handle.initialization_result().await?.as_json(), None);
-    assert!(matches!(handle.supported_models().await, Err(Error::Protocol(_))));
-    assert!(matches!(handle.supported_commands().await, Err(Error::Protocol(_))));
+    assert!(matches!(handle.supported_models().await, Err(Error::TypeError(_))));
+    assert!(matches!(handle.supported_commands().await, Err(Error::TypeError(_))));
     assert_eq!(handle.reload_skills().await?.as_json(), None);
     assert_eq!(handle.reload_skills().await?.as_json(), Some(&Value::Null));
     assert_eq!(handle.context_usage(None).await?.as_json(), None);
@@ -473,6 +488,80 @@ async fn mcp_replacement_replies_are_kept_like_each_sdk() -> TestResult {
             .map(trogon_claude_agent_sdk::ControlReply::into_json)
             .collect();
         assert_eq!(seen, expected);
+        client.disconnect().await?;
+        server.await??;
+    }
+    Ok(())
+}
+
+/// The getters read the initialization result, which throws the engine's `TypeError` when initialize answered
+/// without a response or with `null`, `supportedCommands()` included once `commands_changed` replaced the list.
+#[tokio::test]
+async fn the_getters_throw_the_engine_type_error_on_a_missing_or_null_initialize_response() -> TestResult {
+    let changed = json!({"type":"system","subtype":"commands_changed","commands":[{"name":"z"}]});
+    let cases: [(JsRuntime, Option<Value>, [&str; 4]); 4] = [
+        (
+            JsRuntime::Node,
+            None,
+            [
+                "Cannot destructure property 'commands' of '(intermediate value)' as it is undefined.",
+                "Cannot read properties of undefined (reading 'models')",
+                "Cannot read properties of undefined (reading 'agents')",
+                "Cannot read properties of undefined (reading 'account')",
+            ],
+        ),
+        (
+            JsRuntime::Node,
+            Some(Value::Null),
+            [
+                "Cannot destructure property 'commands' of '(intermediate value)' as it is null.",
+                "Cannot read properties of null (reading 'models')",
+                "Cannot read properties of null (reading 'agents')",
+                "Cannot read properties of null (reading 'account')",
+            ],
+        ),
+        (
+            JsRuntime::Bun,
+            None,
+            [
+                "Cannot destructure property 'commands' from null or undefined value",
+                "undefined is not an object (evaluating '(await this.initialization).models')",
+                "undefined is not an object (evaluating '(await this.initialization).agents')",
+                "undefined is not an object (evaluating '(await this.initialization).account')",
+            ],
+        ),
+        (
+            JsRuntime::Bun,
+            Some(Value::Null),
+            [
+                "Cannot destructure property 'commands' from null or undefined value",
+                "null is not an object (evaluating '(await this.initialization).models')",
+                "null is not an object (evaluating '(await this.initialization).agents')",
+                "null is not an object (evaluating '(await this.initialization).account')",
+            ],
+        ),
+    ];
+    for (js_runtime, response, expected) in cases {
+        let initialize = match response {
+            Some(response) => Reply::Success(response),
+            None => Reply::Omitted,
+        };
+        let reload = Reply::After(changed.clone(), Box::new(Reply::Success(json!({}))));
+        let (client, server) = connect_under(
+            ArgvStyle::TypeScript,
+            js_runtime,
+            script([("initialize", vec![initialize]), ("reload_skills", vec![reload])]),
+        )
+        .await?;
+        let handle = client.handle();
+        handle.reload_skills().await?;
+        let texts = [
+            handle.supported_commands().await.err().map(|error| error.to_string()),
+            handle.supported_models().await.err().map(|error| error.to_string()),
+            handle.supported_agents().await.err().map(|error| error.to_string()),
+            handle.account_info().await.err().map(|error| error.to_string()),
+        ];
+        assert_eq!(texts, expected.map(|text| Some(text.to_owned())));
         client.disconnect().await?;
         server.await??;
     }

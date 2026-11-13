@@ -161,7 +161,7 @@ TypeScript returns `undefined`, `decode()` reads the generated type).
 | Rust | Python | TypeScript |
 | --- | --- | --- |
 | `initialization_result`, `reinitialize` | `get_server_info` (cached result only) | `initializationResult`, `reinitialize` |
-| `supported_commands`, `supported_models`, `supported_agents`, `account_info` | not applicable | `supportedCommands` (latest `commands_changed` list first), `supportedModels`, `supportedAgents`, `accountInfo` |
+| `supported_commands`, `supported_models`, `supported_agents`, `account_info` | not applicable | `supportedCommands` (latest `commands_changed` list first, after the initialization result is read), `supportedModels`, `supportedAgents`, `accountInfo`; a missing or `null` initialize response fails each with the engine `TypeError` (`Error::TypeError`) |
 | `set_model(Option<String>)` | `set_model` (`model: null` when unset) | `setModel` (`model` omitted when unset) |
 | `set_mcp_permission_mode_override`, `McpPermissionModeOverride` | not applicable | `setMcpPermissionModeOverride` (`{}` for an absent response) |
 | `set_max_thinking_tokens`, `set_max_thinking_tokens_with_display`, `MaxThinkingTokensDisplay` | not applicable | `setMaxThinkingTokens` |

@@ -913,10 +913,14 @@
         {
           "path": "tests/golden_controls.rs",
           "name": "supported_commands_follow_commands_changed"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "the_getters_throw_the_engine_type_error_on_a_missing_or_null_initialize_response"
         }
       ],
       "status": "supported",
-      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning. initializationResult, supportedModels, supportedAgents and accountInfo read the cached response like sdk.mjs; supportedCommands prefers the latest commands_changed list; reinitialize sends a non-first initialize and replaces the cache. With the TypeScript dialect connect and query return once the initialize request is queued, as sdk.mjs does, and the metadata getters (initialization_result, supported_commands, supported_models, supported_agents, account_info) are async and wait for the response; a failed initialize is raised by them and by the message stream as InitializationFailed carrying the same error. Prompts, interrupts, and settings-bearing controls written before initialize resolves are held behind it when blocking hooks or managed settings are set, as sdk.mjs holds them, and are released in order on success or answered as closed on failure. The Python dialect waits for the initialize response inside connect, as claude_agent_sdk 0.2.181 does."
+      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning. initializationResult, supportedModels, supportedAgents and accountInfo read the cached response like sdk.mjs; supportedCommands reads the cached response first and then prefers the latest commands_changed list; when initialize answered without a response or with null the getters fail with Error::TypeError carrying the engine text JsRuntime selects; reinitialize sends a non-first initialize and replaces the cache. With the TypeScript dialect connect and query return once the initialize request is queued, as sdk.mjs does, and the metadata getters (initialization_result, supported_commands, supported_models, supported_agents, account_info) are async and wait for the response; a failed initialize is raised by them and by the message stream as InitializationFailed carrying the same error. Prompts, interrupts, and settings-bearing controls written before initialize resolves are held behind it when blocking hooks or managed settings are set, as sdk.mjs holds them, and are released in order on success or answered as closed on failure. The Python dialect waits for the initialize response inside connect, as claude_agent_sdk 0.2.181 does."
     },
     {
       "id": "budget",
@@ -5029,6 +5033,14 @@
         {
           "path": "tests/golden_prewarm.rs",
           "name": "the_claim_answer_replaces_the_initialization_result_and_keeps_the_applied_flags"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claim_over_a_missing_initialize_response_rejects_the_initialization_result"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claim_initialize_of_any_type_is_spread_and_keeps_the_earlier_flags"
         },
         {
           "path": "tests/golden_prewarm.rs",

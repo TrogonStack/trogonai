@@ -2848,7 +2848,7 @@
       "rust": [
         "src/system_prompt.rs",
         "src/driver.rs",
-        "src/initialize_order.rs",
+        "src/runtime_payload.rs",
         "src/argv.rs"
       ]
     },
@@ -3060,7 +3060,7 @@
     },
     {
       "id": "c10-supported-commands",
-      "concept": "Slash commands after commands_changed",
+      "concept": "Slash commands after commands_changed, and the getters over the initialization result",
       "python": {
         "status": "absent",
         "reason": "The pinned Python client has no supported commands accessor."
@@ -3071,23 +3071,25 @@
         "occurrence": 0,
         "occurrences": 1,
         "span_before": 0,
-        "span_after": 70,
-        "sha256": "b48e18460d09b93ba9f62da81bbf7416cd65b802fbcb8d63c12010ba1700e555"
+        "span_after": 202,
+        "sha256": "28d7cc7b2955c8d8a822605f75e96b616fdb77f01326013e3c35920a8df2e46a"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "supportedCommands returns the commands of the last system commands_changed message whose commands is an array, else the initialize commands."
+        "behavior": "supportedCommands destructures the initialization result first, then returns the commands of the last system commands_changed message whose commands is an array, else the initialize commands. supportedModels, supportedAgents and accountInfo read their field off the initialization result. When initialize answered without a response or with null, each getter rejects with the engine's TypeError, supportedCommands even after commands_changed. The expected texts were captured live from sdk.mjs 0.3.323 under Node and Bun driven by a scripted CLI."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
         "golden_controls::supported_commands_follow_commands_changed",
-        "golden_controls::typescript_controls_match_sdk_mjs_bytes_and_returns"
+        "golden_controls::typescript_controls_match_sdk_mjs_bytes_and_returns",
+        "golden_controls::the_getters_throw_the_engine_type_error_on_a_missing_or_null_initialize_response"
       ],
       "rust": [
         "src/client.rs",
-        "src/driver.rs"
+        "src/driver.rs",
+        "src/js_runtime.rs"
       ]
     },
     {
@@ -4250,22 +4252,25 @@
         "occurrence": 0,
         "occurrences": 1,
         "span_before": 0,
-        "span_after": 203,
-        "sha256": "ec12e0c3d2d91bdbc16fd083752b03c230db1761d5bbc29a3185b10eda3de047"
+        "span_after": 703,
+        "sha256": "d379d38d112ba7efeceeca535882414b166600f116835047101e3315347d9220"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "The initialize result in a claim answer replaces the initialization result, while the four applied flags (hooks, plugins, managed settings, code running MCP tools) keep the values of the first answer. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+        "behavior": "The initialize result in a claim answer replaces the initialization result, spread the way JavaScript spreads any value, while each of the four applied flags (hooks, plugins, managed settings, code running MCP tools) it omits or sends as null keeps the value of the first answer, a null one included. The flags are read off the first answer before the claim's, so a first answer that was missing or null, or a claim initialize of null, rejects the initialization result with the engine's TypeError while claimed still resolves. The expected texts were captured live from sdk.mjs 0.3.323 under Node and Bun driven by a scripted CLI."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
-        "golden_prewarm::the_claim_answer_replaces_the_initialization_result_and_keeps_the_applied_flags"
+        "golden_prewarm::the_claim_answer_replaces_the_initialization_result_and_keeps_the_applied_flags",
+        "golden_prewarm::a_claim_over_a_missing_initialize_response_rejects_the_initialization_result",
+        "golden_prewarm::a_claim_initialize_of_any_type_is_spread_and_keeps_the_earlier_flags"
       ],
       "rust": [
         "src/client.rs",
-        "src/prewarm.rs"
+        "src/prewarm.rs",
+        "src/js_runtime.rs"
       ]
     },
     {

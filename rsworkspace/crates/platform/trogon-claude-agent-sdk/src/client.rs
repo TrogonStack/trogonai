@@ -56,6 +56,8 @@ pub struct ClientHandle {
     latest_commands: driver::LatestCommands,
     host: crate::remote_control::HostState,
     style: crate::ArgvStyle,
+    /// Words the `TypeError`s the TypeScript getters throw on a missing initialization result.
+    js_runtime: crate::JsRuntime,
     /// `true` while a `claim_session` request of a spare is unanswered.
     claim_pending: std::sync::Arc<tokio::sync::watch::Sender<bool>>,
 }
@@ -482,6 +484,7 @@ impl ClaudeSdkClient {
             latest_commands: driver::LatestCommands::default(),
             host: crate::remote_control::HostState::default(),
             style: options.argv_style,
+            js_runtime: options.js_runtime,
             claim_pending: std::sync::Arc::new(tokio::sync::watch::channel(false).0),
         };
         let latest_commands = handle.latest_commands.clone();
@@ -714,29 +717,15 @@ impl ClientHandle {
     }
 
     /// TypeScript `claimSession`: the response's `initialize` replaces the initialization result, keeping the
-    /// applied flags it omits. A response without one leaves the result as it was.
+    /// applied flags it omits or sends as `null`. A response without one leaves the result as it was.
     pub(crate) fn merge_claim_initialization(&self, response: &serde_json::Value) {
-        let Some(serde_json::Value::Object(update)) = response.get("initialize") else {
+        let Some(update) = response.get("initialize") else {
             return;
         };
+        let runtime = self.js_runtime;
         self.initialization.send_modify(|slot| {
-            let previous = match &*slot {
-                Some(Ok(Some(serde_json::Value::Object(previous)))) => Some(previous),
-                _ => None,
-            };
-            let mut merged = update.clone();
-            for key in [
-                "hooks_applied",
-                "plugins_applied",
-                "managed_settings_applied",
-                "code_running_mcp_tools_applied",
-            ] {
-                let fresh = update.get(key).filter(|value| !value.is_null());
-                if let Some(value) = fresh.or_else(|| previous.and_then(|previous| previous.get(key))) {
-                    merged.insert(key.to_owned(), value.clone());
-                }
-            }
-            *slot = Some(Ok(Some(serde_json::Value::Object(merged))));
+            let merged = claim_initialization(slot.as_ref(), update, runtime);
+            *slot = Some(merged);
         });
     }
 
@@ -778,12 +767,17 @@ impl ClientHandle {
     }
 
     /// A field of the first initialize response, `None` when it is missing (TypeScript `undefined`). TypeScript
-    /// reads it off the response, which throws when the CLI sent none or `null`.
+    /// reads it with `(await this.initialization).models`, which throws the engine's `TypeError` when initialize
+    /// answered without a response or with `null`.
     async fn initialization_field<T>(&self, key: &str) -> Result<ControlReply<T>, Error> {
-        match self.initialization_value().await? {
-            None | Some(serde_json::Value::Null) => Err(missing_response(ControlOperation::Initialize)),
-            Some(value) => Ok(ControlReply::new(value.get(key).cloned())),
+        let value = self.initialization_value().await?;
+        if let Some(nothing) = crate::js_runtime::Nullish::of(value.as_ref()) {
+            let expression = format!("(await this.initialization).{key}");
+            return Err(self.js_runtime.read_error(nothing, key, &expression));
         }
+        Ok(ControlReply::new(
+            value.as_ref().and_then(|value| value.get(key)).cloned(),
+        ))
     }
 
     /// TypeScript `reinitialize()`: sends the connect-time initialize request again, without SDK MCP server
@@ -794,17 +788,21 @@ impl ClientHandle {
     }
 
     /// TypeScript `supportedCommands()`: the list from the last `commands_changed` message, else the initialize
-    /// one.
+    /// one. It destructures the initialization result first, so a failed one, or an initialize answered without
+    /// a response or with `null`, throws even after `commands_changed`.
     pub async fn supported_commands(&self) -> Result<ControlReply<Vec<wire_types::SlashCommand>>, Error> {
+        let value = self.initialization_value().await?;
+        if let Some(nothing) = crate::js_runtime::Nullish::of(value.as_ref()) {
+            return Err(self.js_runtime.destructure_error(nothing, "commands"));
+        }
         let latest = self
             .latest_commands
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        match latest {
-            Some(commands) => Ok(ControlReply::new(Some(commands))),
-            None => self.initialization_field("commands").await,
-        }
+        Ok(ControlReply::new(latest.or_else(|| {
+            value.as_ref().and_then(|value| value.get("commands")).cloned()
+        })))
     }
 
     /// TypeScript `supportedModels()`.
@@ -1406,6 +1404,83 @@ fn interrupt_receipt(response: Option<serde_json::Value>) -> crate::InterruptRec
     match response {
         Some(serde_json::Value::Object(object)) => crate::InterruptReceipt::from_json(object),
         _ => crate::InterruptReceipt::from_json(JsonObject::new()),
+    }
+}
+
+/// The applied flags `claimSession` carries over from the earlier initialization result.
+const CLAIM_FLAGS: [&str; 4] = [
+    "hooks_applied",
+    "plugins_applied",
+    "managed_settings_applied",
+    "code_running_mcp_tools_applied",
+];
+
+/// TypeScript `claimSession`'s merge. It reads the applied flags off the earlier result, none when that failed,
+/// which throws when the result is missing or `null`; then off the claim's `initialize`, which throws when that
+/// is `null`. It spreads the `initialize` into a new object and sets each flag, the claim's unless that is
+/// missing or `null`, that is not `undefined`.
+fn claim_initialization(
+    previous: Option<&InitializationOutcome>,
+    update: &serde_json::Value,
+    runtime: crate::JsRuntime,
+) -> InitializationOutcome {
+    use crate::js_runtime::Nullish;
+    let earlier = match previous {
+        Some(Ok(value)) => {
+            if let Some(nothing) = Nullish::of(value.as_ref()) {
+                return Err(std::sync::Arc::new(runtime.read_error(
+                    nothing,
+                    "hooks_applied",
+                    "d.hooks_applied",
+                )));
+            }
+            value.as_ref().and_then(serde_json::Value::as_object)
+        }
+        // A failed result keeps no flags. A spare is handed out only once its initialize settled, so an unsettled
+        // one never reaches here.
+        Some(Err(_)) | None => None,
+    };
+    if update.is_null() {
+        return Err(std::sync::Arc::new(runtime.read_error(
+            Nullish::Null,
+            "hooks_applied",
+            "o.hooks_applied",
+        )));
+    }
+    let mut merged = spread(update);
+    let fresh = update.as_object();
+    for key in CLAIM_FLAGS {
+        let value = fresh
+            .and_then(|fresh| fresh.get(key))
+            .filter(|value| !value.is_null())
+            .or_else(|| earlier.and_then(|earlier| earlier.get(key)));
+        if let Some(value) = value {
+            merged.insert(key.to_owned(), value.clone());
+        }
+    }
+    Ok(Some(serde_json::Value::Object(merged)))
+}
+
+/// JavaScript `{...value}` for a value other than `null`: an object copies its entries, an array its items and a
+/// string its UTF-16 code units under their indexes, and a number or boolean spreads nothing. Half of a surrogate
+/// pair cannot be held in UTF-8, so it reads as U+FFFD.
+fn spread(value: &serde_json::Value) -> JsonObject {
+    match value {
+        serde_json::Value::Object(object) => object.clone(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (index.to_string(), item.clone()))
+            .collect(),
+        serde_json::Value::String(text) => text
+            .encode_utf16()
+            .enumerate()
+            .map(|(index, unit)| {
+                let character = char::from_u32(u32::from(unit)).unwrap_or(char::REPLACEMENT_CHARACTER);
+                (index.to_string(), serde_json::Value::String(character.to_string()))
+            })
+            .collect(),
+        _ => JsonObject::new(),
     }
 }
 
