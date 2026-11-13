@@ -15,6 +15,11 @@ pub struct CredentialUseView<'a> {
     ///
     /// Field 2: `credential`
     pub credential: &'a str,
+    /// The binding the credential was used under. An injection names the
+    /// connection binding that placed it. A release serves no connection binding,
+    /// because the credential's own release policy binds it to a runtime service,
+    /// destination and location, so a release names the credential itself.
+    ///
     /// Field 3: `binding_id`
     pub binding_id: &'a str,
     /// Where the credential went, as a host or other registry-style name.
@@ -350,6 +355,11 @@ impl CredentialUseOwnedView {
     pub fn credential(&self) -> &'_ str {
         self.0.reborrow().credential
     }
+    /// The binding the credential was used under. An injection names the
+    /// connection binding that placed it. A release serves no connection binding,
+    /// because the credential's own release policy binds it to a runtime service,
+    /// destination and location, so a release names the credential itself.
+    ///
     /// Field 3: `binding_id`
     #[must_use]
     pub fn binding_id(&self) -> &'_ str {
