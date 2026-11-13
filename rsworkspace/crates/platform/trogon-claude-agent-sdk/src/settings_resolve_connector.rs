@@ -1,136 +1,212 @@
-use std::{io, path::Path, sync::LazyLock};
+//! Runs the connector folder check against a settings host.
+//!
+//! The ported check reads paths as the JS strings node hands the file system and reports failures by their node
+//! error code, so the host is seen through that lens here: paths cross as UTF-16 code units, and every `io::Error`
+//! becomes the `code` node would have put on it.
 
-use regex::Regex;
-
-use crate::{
-    adapters::{DirectoryEntryKind, ReadDirectory, ReadFile, ReadLink, ReadSymlinkMetadata},
-    constants::{
-        CONNECTOR_DOWNLOAD_TEMP_PATTERN, CONNECTOR_DOWNLOADS_NAME, CONNECTOR_DOWNLOADS_ROOT,
-        CONNECTOR_GITIGNORE_MARKERS, CONNECTOR_GITIGNORE_MAX_BYTES,
-    },
-    settings_resolve_state::ResolverState,
-    settings_resolve_vetting::{Vetting, is_invisible, vet},
+use std::{
+    ffi::{OsStr, OsString},
+    io,
+    path::{Path, PathBuf},
 };
 
-static DOWNLOAD_TEMP_NAME: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(CONNECTOR_DOWNLOAD_TEMP_PATTERN).ok());
+#[cfg(windows)]
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
-/// Everything the connector folder check asks of its host.
-pub(crate) trait ConnectorHost:
-    ReadFile<Error = io::Error>
-    + ReadDirectory<Error = io::Error>
-    + ReadSymlinkMetadata<Error = io::Error>
-    + ReadLink<Error = io::Error>
-{
+use crate::{
+    adapters::{DirectoryEntryKind, OperatingSystem, SettingsHost},
+    connector_folder::names_connector_folder,
+    connector_vetting::{Errno, LinkStat, Platform, Vetter, VettingHost},
+    constants::VETTING_AUTO_MASTER,
+    node_path::{JsString, NodeError, NodeProcess},
+    settings_resolve_state::ResolverState,
+};
+
+/// A settings host seen through the reads the connector folder check makes.
+struct Bridge<'a, H> {
+    host: &'a H,
 }
 
-impl<T> ConnectorHost for T where
-    T: ReadFile<Error = io::Error>
-        + ReadDirectory<Error = io::Error>
-        + ReadSymlinkMetadata<Error = io::Error>
-        + ReadLink<Error = io::Error>
-{
+/// The text node hands the file system for a JS string: UTF-16 as is on Windows, UTF-8 elsewhere, where a lone
+/// surrogate becomes U+FFFD.
+#[cfg(windows)]
+fn native(text: &[u16]) -> OsString {
+    OsString::from_wide(text)
 }
 
-/// `rXe(name, true)` upstream: the spelling a folder name is compared by, lower case, without invisible characters,
-/// an alternate data stream suffix, or trailing dots and spaces.
-fn normalized_name(name: &str) -> String {
-    let lowered = name.to_lowercase().replace('\u{131}', "i").replace('\u{17f}', "s");
-    let visible: String = lowered.chars().filter(|character| !is_invisible(*character)).collect();
-    let stream = visible
-        .char_indices()
-        .find(|(index, character)| {
-            *character == ':' && !visible[index + 1..].contains(['\n', '\r', '\u{2028}', '\u{2029}'])
+#[cfg(not(windows))]
+fn native(text: &[u16]) -> OsString {
+    OsString::from(String::from_utf16_lossy(text))
+}
+
+/// The JS string node makes of a name the file system returned (decoded as UTF-8 outside Windows).
+#[cfg(windows)]
+fn js_text(text: &OsStr) -> JsString {
+    text.encode_wide().collect()
+}
+
+#[cfg(not(windows))]
+fn js_text(text: &OsStr) -> JsString {
+    text.to_string_lossy().encode_utf16().collect()
+}
+
+fn native_path(path: &[u16]) -> PathBuf {
+    PathBuf::from(native(path))
+}
+
+/// The `code` libuv names a raw OS error by, for the codes the check tells apart.
+#[cfg(unix)]
+fn os_code(code: i32) -> Option<&'static str> {
+    Some(match code {
+        libc::ENOENT => "ENOENT",
+        libc::ENOTDIR => "ENOTDIR",
+        libc::EACCES => "EACCES",
+        libc::EPERM => "EPERM",
+        libc::ENAMETOOLONG => "ENAMETOOLONG",
+        libc::ELOOP => "ELOOP",
+        libc::EISDIR => "EISDIR",
+        libc::EINVAL => "EINVAL",
+        libc::EIO => "EIO",
+        libc::EBUSY => "EBUSY",
+        _ => return None,
+    })
+}
+
+#[cfg(not(unix))]
+fn os_code(_code: i32) -> Option<&'static str> {
+    None
+}
+
+/// The `code` of the error node would have thrown; an unsupported probe throws a plain `Error` without one.
+fn node_code(error: &io::Error) -> Errno {
+    if let Some(code) = error.raw_os_error().and_then(os_code) {
+        return Some(code.to_owned());
+    }
+    let code = match error.kind() {
+        io::ErrorKind::Unsupported => return None,
+        io::ErrorKind::NotFound => "ENOENT",
+        io::ErrorKind::PermissionDenied if cfg!(windows) => "EPERM",
+        io::ErrorKind::PermissionDenied => "EACCES",
+        io::ErrorKind::NotADirectory => "ENOTDIR",
+        io::ErrorKind::IsADirectory => "EISDIR",
+        io::ErrorKind::InvalidFilename => "ENAMETOOLONG",
+        io::ErrorKind::InvalidInput => "EINVAL",
+        _ => "UNKNOWN",
+    };
+    Some(code.to_owned())
+}
+
+fn errno(error: io::Error) -> Errno {
+    node_code(&error)
+}
+
+fn node_error(error: io::Error) -> NodeError {
+    NodeError {
+        code: node_code(&error),
+    }
+}
+
+impl<H: SettingsHost> NodeProcess for Bridge<'_, H> {
+    fn cwd(&self) -> Result<JsString, NodeError> {
+        self.host
+            .current_dir()
+            .map(|directory| js_text(directory.as_os_str()))
+            .map_err(node_error)
+    }
+
+    fn env(&self, key: &[u16]) -> Option<JsString> {
+        self.host.var_os(&native(key)).map(|value| js_text(&value))
+    }
+}
+
+impl<H: SettingsHost> VettingHost for Bridge<'_, H> {
+    fn lstat(&self, path: &[u16]) -> Result<LinkStat, Errno> {
+        let metadata = self.host.symlink_metadata(&native_path(path)).map_err(errno)?;
+        Ok(LinkStat {
+            symlink: metadata.kind == DirectoryEntryKind::Symlink,
+            file: metadata.kind == DirectoryEntryKind::File,
+            size: metadata.len,
         })
-        .map(|(index, _)| index);
-    let without_stream = match stream {
-        Some(index) => &visible[..index],
-        None => visible.as_str(),
-    };
-    let trimmed = without_stream.trim_end_matches(['.', ' ']);
-    if trimmed.is_empty() {
-        lowered
-    } else {
-        trimmed.to_owned()
+    }
+
+    fn open_dir_no_follow(&self, path: &[u16]) -> Result<(), Errno> {
+        self.host.open_directory_no_follow(&native_path(path)).map_err(errno)
+    }
+
+    fn read_link(&self, path: &[u16]) -> Result<JsString, Errno> {
+        self.host
+            .read_link(&native_path(path))
+            .map(|target| js_text(target.as_os_str()))
+            .map_err(errno)
+    }
+
+    fn read_dir_names(&self, path: &[u16]) -> Result<Vec<JsString>, Errno> {
+        let entries = self.host.read_directory(&native_path(path)).map_err(errno)?;
+        Ok(entries
+            .into_iter()
+            .map(|entry| entry.name.encode_utf16().collect())
+            .collect())
+    }
+
+    fn read_head(&self, path: &[u16], limit: usize) -> Result<Vec<u8>, Errno> {
+        self.host.read_file_head(&native_path(path), limit).map_err(errno)
+    }
+
+    fn read_auto_master(&self) -> Result<String, Errno> {
+        self.host
+            .read_file(Path::new(VETTING_AUTO_MASTER))
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .map_err(errno)
+    }
+
+    fn stat_device(&self, path: &str) -> Result<u64, Errno> {
+        self.host.device_id(Path::new(path)).map_err(errno)
+    }
+
+    fn home_directory(&self) -> Result<JsString, Errno> {
+        self.host
+            .home_directory()
+            .map(|home| js_text(home.as_os_str()))
+            .map_err(errno)
     }
 }
 
-/// `H5` upstream.
-fn is_connector_name(name: &str) -> bool {
-    normalized_name(name) == CONNECTOR_DOWNLOADS_NAME
-}
-
-fn components(path: &str) -> Vec<&str> {
-    path.split(['/', '\\']).collect()
-}
-
-/// `im` upstream: some component of the path names a connector download folder.
-fn names_connector_folder(path: &str) -> bool {
-    components(path).into_iter().any(is_connector_name)
-}
-
-/// `t7e` upstream, as a yes or no: the file is a regular file of at most three bytes that holds exactly `*`.
-fn holds_ignore_marker<H: ConnectorHost>(host: &H, path: &Path) -> Result<bool, io::Error> {
-    let metadata = host.symlink_metadata(path)?;
-    if metadata.kind != DirectoryEntryKind::File || metadata.len > CONNECTOR_GITIGNORE_MAX_BYTES {
-        return Ok(false);
+/// `process.platform`, as far as the check branches on it.
+fn platform(system: OperatingSystem) -> Platform {
+    match system {
+        OperatingSystem::Darwin => Platform::Darwin,
+        OperatingSystem::Win32 => Platform::Win32,
+        OperatingSystem::Linux | OperatingSystem::Other(_) => Platform::Other,
     }
-    let bytes = host.read_file(path)?;
-    let head = &bytes[..bytes.len().min(4)];
-    Ok(CONNECTOR_GITIGNORE_MARKERS.contains(&head))
 }
 
-/// `n7e` upstream: the `.gitignore` of a connector download folder ignores everything, a download left a temporary
-/// file there, or anything about the folder could not be examined.
-fn marks_folder_ignored<H: ConnectorHost>(host: &H, gitignore: &str) -> bool {
-    let path = Path::new(gitignore);
-    let Ok(vetting) = vet(host, path) else {
-        return true;
-    };
-    let directory = match gitignore.rfind(['/', '\\']) {
-        Some(index) => &gitignore[..index],
-        None => gitignore,
-    };
-    let Ok(entries) = host.read_directory(Path::new(directory)) else {
-        return true;
-    };
-    let download_temp = |name: &str| {
-        DOWNLOAD_TEMP_NAME
-            .as_ref()
-            .is_some_and(|pattern| pattern.is_match(name))
-    };
-    if entries.iter().any(|entry| download_temp(&entry.name)) {
-        return true;
-    }
-    if vetting == Vetting::Absent {
-        return false;
-    }
-    holds_ignore_marker(host, path).unwrap_or(true)
-}
-
-/// `nE` upstream, remembered in `state`: some folder on the path is a connector download folder that is marked
+/// Whether the project and local settings of `cwd` must not be read (`VP` and the check in `Hu` upstream): the
+/// working directory, resolved the way `path.resolve` does, sits inside a connector download folder that is marked
 /// ignored.
-fn is_ignored_connector_path<H: ConnectorHost>(host: &H, state: &ResolverState, directory: &Path) -> bool {
-    if let Some(known) = state.connector_folder(directory) {
-        return known;
-    }
-    let text = directory.to_string_lossy().into_owned();
-    let parts = components(&text);
-    let mut ignored = false;
-    for (index, part) in parts.iter().enumerate() {
-        if ignored {
-            break;
-        }
-        if is_connector_name(part) {
-            let folder = parts[..=index].join("/");
-            ignored = folder == CONNECTOR_DOWNLOADS_ROOT || marks_folder_ignored(host, &format!("{folder}/.gitignore"));
-        }
-    }
-    state.remember_connector_folder(directory, ignored);
-    ignored
+pub(crate) fn skips_repository_settings<H: SettingsHost>(host: &H, state: &ResolverState, cwd: &Path) -> bool {
+    let bridge = Bridge { host };
+    let launch = state
+        .launch_directory(host)
+        .map(|directory| js_text(directory.as_os_str()));
+    let vetter = Vetter::new(
+        &bridge,
+        platform(host.operating_system()),
+        state.node_path_dialect(),
+        launch.as_deref(),
+        state.vetting(),
+    );
+    // `path.resolve` reads the process only for a relative path, and the working directory is absolute by now, so
+    // resolving it cannot fail; one expression keeps that unreachable failure reading as an unmarked folder.
+    let cwd = js_text(cwd.as_os_str());
+    vetter.resolve(&[cwd.as_slice()]).is_ok_and(|directory| {
+        names_connector_folder(&directory)
+            && state
+                .connector_folders()
+                .is_ignored(&vetter, &directory)
+                .unwrap_or(false)
+    })
 }
 
-/// Whether the project and local settings of `cwd` must not be read: the working directory sits inside a
-/// connector download folder that is marked ignored (`VP` and the check in `Hu` upstream).
-pub(crate) fn skips_repository_settings<H: ConnectorHost>(host: &H, state: &ResolverState, cwd: &Path) -> bool {
-    names_connector_folder(&cwd.to_string_lossy()) && is_ignored_connector_path(host, state, cwd)
-}
+#[cfg(all(test, unix))]
+#[path = "settings_resolve_connector_tests.rs"]
+mod tests;

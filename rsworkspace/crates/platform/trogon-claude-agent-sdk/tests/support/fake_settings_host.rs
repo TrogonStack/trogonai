@@ -15,8 +15,9 @@ use std::{
 use trogon_claude_agent_sdk::adapters::{
     CheckReadable, CheckWritable, CurrentDirectory, DirectoryEntry, DirectoryEntryKind, EffectiveGroupId,
     EffectiveUserId, EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest, ExecuteFileStatus,
-    HostIdentity, LinkMetadata, OperatingSystem, ReadDirectory, ReadFile, ReadLink, ReadMetadata, ReadSymlinkMetadata,
-    RealGroupId, RealUserId, SupplementaryGroupIds, WallClock,
+    HomeDirectory, HostIdentity, LinkMetadata, OpenDirectoryNoFollow, OperatingSystem, ReadDeviceId, ReadDirectory,
+    ReadFile, ReadFileHead, ReadLink, ReadMetadata, ReadSymlinkMetadata, RealGroupId, RealUserId,
+    SupplementaryGroupIds, WallClock,
 };
 
 /// A host made of maps, so every platform branch runs on any machine.
@@ -306,6 +307,47 @@ impl SupplementaryGroupIds for FakeHost {
 
     fn supplementary_group_ids(&self) -> Option<Result<Vec<u32>, io::Error>> {
         None
+    }
+}
+
+impl OpenDirectoryNoFollow for FakeHost {
+    type Error = io::Error;
+
+    fn open_directory_no_follow(&self, path: &Path) -> Result<(), io::Error> {
+        match self.symlink_metadata(path)?.kind {
+            DirectoryEntryKind::Directory => Ok(()),
+            _ => Err(io::Error::from(io::ErrorKind::NotADirectory)),
+        }
+    }
+}
+
+impl ReadFileHead for FakeHost {
+    type Error = io::Error;
+
+    fn read_file_head(&self, path: &Path, limit: usize) -> Result<Vec<u8>, io::Error> {
+        if self.links.contains_key(path) {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+        let mut bytes = self.read_file(path)?;
+        bytes.truncate(limit);
+        Ok(bytes)
+    }
+}
+
+/// No folder of the fake host sits on a device of its own.
+impl ReadDeviceId for FakeHost {
+    type Error = io::Error;
+
+    fn device_id(&self, _path: &Path) -> Result<u64, io::Error> {
+        Err(not_found())
+    }
+}
+
+impl HomeDirectory for FakeHost {
+    type Error = io::Error;
+
+    fn home_directory(&self) -> Result<PathBuf, io::Error> {
+        self.env.get("HOME").map(PathBuf::from).ok_or_else(not_found)
     }
 }
 

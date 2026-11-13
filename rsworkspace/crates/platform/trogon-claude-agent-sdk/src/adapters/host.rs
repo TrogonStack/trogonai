@@ -2,6 +2,8 @@ use crate::constants::MAX_BUFFER_ERRNO;
 
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::{
     ffi::OsStr,
     io::{self, Read},
@@ -112,6 +114,35 @@ pub trait SupplementaryGroupIds {
     type Error;
 
     fn supplementary_group_ids(&self) -> Option<Result<Vec<u32>, Self::Error>>;
+}
+
+/// Opens a folder without following a final symbolic link and closes it again, the way
+/// `open(path, O_DIRECTORY | O_NOFOLLOW)` answers whether a path is a real folder.
+pub trait OpenDirectoryNoFollow {
+    type Error;
+
+    fn open_directory_no_follow(&self, path: &Path) -> Result<(), Self::Error>;
+}
+
+/// Reads at most `limit` bytes from the start of a file, opened without following a final symbolic link.
+pub trait ReadFileHead {
+    type Error;
+
+    fn read_file_head(&self, path: &Path, limit: usize) -> Result<Vec<u8>, Self::Error>;
+}
+
+/// The id of the device a path lives on, following symbolic links (`stat(path).st_dev`).
+pub trait ReadDeviceId {
+    type Error;
+
+    fn device_id(&self, path: &Path) -> Result<u64, Self::Error>;
+}
+
+/// The home folder of the account the process runs as, found the way `os.homedir()` finds it.
+pub trait HomeDirectory {
+    type Error;
+
+    fn home_directory(&self) -> Result<PathBuf, Self::Error>;
 }
 
 /// The operating system the process runs on, as `process.platform` names it.
@@ -241,6 +272,81 @@ impl ReadLink for NativeHost {
 
     fn read_link(&self, path: &Path) -> Result<PathBuf, Self::Error> {
         std::fs::read_link(path)
+    }
+}
+
+impl OpenDirectoryNoFollow for NativeHost {
+    type Error = io::Error;
+
+    #[cfg(unix)]
+    fn open_directory_no_follow(&self, path: &Path) -> Result<(), Self::Error> {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(path)
+            .map(drop)
+    }
+
+    #[cfg(not(unix))]
+    fn open_directory_no_follow(&self, _path: &Path) -> Result<(), Self::Error> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "opening a folder without following links is a POSIX-only probe",
+        ))
+    }
+}
+
+impl ReadFileHead for NativeHost {
+    type Error = io::Error;
+
+    fn read_file_head(&self, path: &Path, limit: usize) -> Result<Vec<u8>, Self::Error> {
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        let mut file = options.open(path)?;
+        let mut head = vec![0; limit];
+        let read = file.read(&mut head)?;
+        head.truncate(read);
+        Ok(head)
+    }
+}
+
+impl ReadDeviceId for NativeHost {
+    type Error = io::Error;
+
+    #[cfg(unix)]
+    fn device_id(&self, path: &Path) -> Result<u64, Self::Error> {
+        std::fs::metadata(path).map(|metadata| metadata.dev())
+    }
+
+    #[cfg(not(unix))]
+    fn device_id(&self, _path: &Path) -> Result<u64, Self::Error> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "device ids are only read on POSIX hosts",
+        ))
+    }
+}
+
+impl HomeDirectory for NativeHost {
+    type Error = io::Error;
+
+    /// `HOME` when it is set, even to nothing, then the password database entry of the effective user.
+    #[cfg(unix)]
+    fn home_directory(&self) -> Result<PathBuf, Self::Error> {
+        // One expression: a test process cannot drop `HOME` safely, so the password database fallback is only ever
+        // reached by the hosts that run without it.
+        super::EnvironmentVariable::var_os(&super::SystemEnvironment, OsStr::new("HOME"))
+            .map_or_else(crate::run_as::home_folder, |home| Ok(PathBuf::from(home)))
+    }
+
+    /// `USERPROFILE` when it is set.
+    #[cfg(not(unix))]
+    fn home_directory(&self) -> Result<PathBuf, Self::Error> {
+        super::EnvironmentVariable::var_os(&super::SystemEnvironment, OsStr::new("USERPROFILE"))
+            .map(PathBuf::from)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
     }
 }
 
@@ -549,6 +655,10 @@ pub trait SettingsHost:
     + EffectiveGroupId
     + RealGroupId
     + SupplementaryGroupIds<Error = io::Error>
+    + OpenDirectoryNoFollow<Error = io::Error>
+    + ReadFileHead<Error = io::Error>
+    + ReadDeviceId<Error = io::Error>
+    + HomeDirectory<Error = io::Error>
     + ExecuteFile
     + HostIdentity
     + super::EnvironmentVariable
@@ -574,6 +684,10 @@ impl<T> SettingsHost for T where
         + EffectiveGroupId
         + RealGroupId
         + SupplementaryGroupIds<Error = io::Error>
+        + OpenDirectoryNoFollow<Error = io::Error>
+        + ReadFileHead<Error = io::Error>
+        + ReadDeviceId<Error = io::Error>
+        + HomeDirectory<Error = io::Error>
         + ExecuteFile
         + HostIdentity
         + super::EnvironmentVariable

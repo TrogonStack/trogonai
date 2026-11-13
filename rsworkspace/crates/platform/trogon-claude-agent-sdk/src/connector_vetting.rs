@@ -71,6 +71,13 @@ pub(crate) enum RefusalReason {
     Network,
 }
 
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "the settings walk only asks whether the path was refused; the probe replays read why"
+    )
+)]
 impl RefusalReason {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -82,6 +89,13 @@ impl RefusalReason {
 
 /// What `bd` throws.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "the settings walk only asks whether the path was refused; the probe replays read why"
+    )
+)]
 pub(crate) enum VetError {
     /// The walk refused the path (code `ERR_SYMLINK_TO_NETWORK_PATH`).
     Refused(RefusalReason),
@@ -89,6 +103,13 @@ pub(crate) enum VetError {
     Thrown(NodeError),
 }
 
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "the settings walk only asks whether the path was refused; the probe replays read why"
+    )
+)]
 impl VetError {
     pub(crate) fn code(&self) -> Option<&str> {
         match self {
@@ -122,6 +143,13 @@ enum Walked {
 
 /// The first component the walk found missing (`absentAt` upstream).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "the settings walk only asks whether a component is missing; the probe replays read which one"
+    )
+)]
 pub(crate) struct Absent {
     pub(crate) at: JsString,
     pub(crate) remaining: Vec<JsString>,
@@ -140,6 +168,13 @@ enum Outcome {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Vetted {
     pub(crate) absent_at: Option<Absent>,
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "the settings walk does not use where the links led; the probe replays read it"
+        )
+    )]
     pub(crate) links_resolved_path: Option<JsString>,
 }
 
@@ -714,12 +749,6 @@ impl<'a> Vetter<'a> {
             return true;
         };
         complete.iter().any(|point| point != target) || partial.iter().any(|point| !target.starts_with(point))
-    }
-
-    /// `FQ` with its default arguments.
-    fn reaches_automount_now(&self, path: &[u16]) -> bool {
-        let home = self.darwin() && self.home_is_automounted();
-        self.reaches_automount(path, home)
     }
 
     /// `FQ`.

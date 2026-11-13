@@ -440,7 +440,7 @@ fn call(vetter: &Vetter<'_>, probe: &Value) -> Value {
         "BI" => value(vetter.home_is_automounted()),
         "MQ" => value(vetter.leaves_automount(&a, &b)),
         "Wb" => value(vetter.leaves_anchor(&a, &b)),
-        "FQ" => value(vetter.reaches_automount_now(&a)),
+        "FQ" => value(vetter.reaches_automount(&a, vetter.darwin() && vetter.home_is_automounted())),
         "HQ" => maybe_text(vetter.home_folder()),
         "sg" => value(vetter.stays_on_anchor(&a, anchors)),
         "rM" => value(vetter.holds_anchor(&a, anchors)),

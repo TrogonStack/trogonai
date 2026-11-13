@@ -4,9 +4,11 @@
 //! are not read when the folder is marked ignored. The expectations come from running the pinned TypeScript
 //! resolver on the same trees (see the `connector_*` fixtures of the differential test).
 
+use std::path::PathBuf;
+
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    ResolveSettingsOptions, ResolverState, resolve_settings_with, resolve_settings_with_state,
+    NodePathDialect, ResolveSettingsOptions, ResolverState, resolve_settings_with, resolve_settings_with_state,
 };
 
 #[path = "support/fake_settings_host.rs"]
@@ -124,13 +126,17 @@ fn a_working_directory_below_the_folder_is_covered_by_the_folder_gitignore() {
 
 #[test]
 fn the_sandbox_connector_folder_is_always_covered() {
-    for cwd in [
-        "/mnt/user-data/uploads/connector-downloads",
-        "/mnt/user-data/uploads/connector-downloads/work",
-    ] {
-        let host = FakeHost::linux().file(&format!("{cwd}/.claude/settings.json"), r#"{"model":"m"}"#);
+    let mount = "/mnt/user-data/connector-downloads";
+    for cwd in [mount, "/mnt/user-data/connector-downloads/work"] {
+        let host = host(cwd, mount, None, &[]);
         assert!(!is_loaded(&host, cwd), "{cwd}");
     }
+    let uploads = "/mnt/user-data/uploads/connector-downloads";
+    let host = host(uploads, uploads, None, &[]);
+    assert!(
+        is_loaded(&host, uploads),
+        "the mount sits next to the uploads folder, not inside it"
+    );
 }
 
 #[test]
@@ -198,4 +204,28 @@ fn the_answer_is_remembered_per_state_until_the_cache_overflows() {
         again(&open, &below);
     }
     assert!(again(&open, cwd), "the 65th entry empties the cache first");
+}
+
+#[test]
+fn the_launch_directory_and_node_dialect_can_be_given() {
+    let cwd = "/work/connector-downloads";
+    let ignored = host(cwd, cwd, Some("*"), &[]);
+    let open = host(cwd, cwd, Some("a"), &[]);
+    for dialect in [
+        NodePathDialect::Current,
+        NodePathDialect::Node20,
+        NodePathDialect::BeforeReservedNames,
+    ] {
+        for launch in [None, Some(PathBuf::from("/work"))] {
+            let run = |host: &FakeHost| {
+                let state = ResolverState::new()
+                    .with_launch_directory(launch.clone())
+                    .with_node_path_dialect(dialect);
+                let result = resolve_settings_with_state(host, &options(cwd), &state).expect("resolve");
+                effective(&result) == json!({"model": "m"})
+            };
+            assert!(!run(&ignored), "{dialect:?} {launch:?}");
+            assert!(run(&open), "{dialect:?} {launch:?}");
+        }
+    }
 }
