@@ -10,10 +10,11 @@ fn user_messages_keep_text_blocks_injected_origin_and_tool_metadata() -> Result<
         parent_tool_use_id: Some(ToolUseId::from("parent-one")),
         session_id: Some(SessionId::from("session-one")),
         uuid: Some(MessageId::from("user-one")),
-        origin: Some(MessageOrigin::new("channel", fields.clone())?),
+        origin: Some(MessageOrigin::new("channel", fields.clone())),
         tool_use_result: Some(serde_json::to_value(&fields)?),
         additional_fields: fields.clone(),
         message_fields: fields.clone(),
+        raw: JsonObject::new(),
     };
     assert!(matches!(&message.content, Content::Text(text) if text == "plain prompt"));
     assert_eq!(message.origin.as_ref().map(MessageOrigin::kind), Some("channel"));
@@ -39,6 +40,7 @@ fn user_tool_results_preserve_every_json_kind_and_omission() -> Result<(), Box<d
         tool_use_result: None,
         additional_fields: JsonObject::default(),
         message_fields: JsonObject::default(),
+        raw: JsonObject::new(),
     };
     assert!(message.tool_use_result.is_none());
     for value in [
