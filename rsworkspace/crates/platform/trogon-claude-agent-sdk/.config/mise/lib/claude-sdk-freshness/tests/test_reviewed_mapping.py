@@ -51,7 +51,10 @@ class ReviewedMappingTests(unittest.TestCase):
         report = check.comparison(baseline, baseline, features)
         self.assertFalse(report["upstream_drift"])
         self.assertTrue(report["needs_attention"])
-        self.assertIn("session-convenience", {item["id"] for item in report["declared_known_gaps"]})
+        self.assertEqual(
+            {item["id"] for item in report["declared_known_gaps"]},
+            {feature["id"] for feature in features if feature["status"] in {"partial", "deferred"}},
+        )
         self.assertIn("isolation-defaults", {item["id"] for item in report["intentional_differences"]})
         self.assertTrue(report["unreviewed_rust_mappings"]["python"]["observed"])
         self.assertTrue(report["unreviewed_rust_mappings"]["typescript"]["observed"])

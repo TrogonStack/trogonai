@@ -13,9 +13,10 @@ use trogon_claude_agent_sdk::{
     ImportOptions, InMemorySessionStore, MessagePage, SessionEntry, SessionFiles, SessionId, SessionKey,
     SessionListEntry, SessionMutationError, SessionProjectKey, SessionStore, SessionStoreFuture,
     SessionStoreHelperError, SessionStoreOperation, SessionSubpath, SessionSummaryEntry, StoreListOptions,
-    delete_session_via_store, fork_session_via_store, get_session_info_from_store, get_session_messages_from_store,
-    get_subagent_messages_from_store, import_session_to_store, list_sessions_from_store, list_subagents_from_store,
-    project_key_for_directory, rename_session_via_store, tag_session_via_store,
+    SummaryDialect, delete_session_via_store, fork_session_via_store, get_session_info_from_store,
+    get_session_messages_from_store, get_subagent_messages_from_store, import_session_to_store,
+    list_sessions_from_store, list_subagents_from_store, project_key_for_directory, rename_session_via_store,
+    tag_session_via_store,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -277,6 +278,14 @@ async fn list_requires_a_listing_capability() -> TestResult {
     };
     assert!(matches!(
         list_sessions_from_store(&store, &options).await,
+        Err(SessionStoreHelperError::ListNotImplemented)
+    ));
+    let python = StoreListOptions {
+        summary_dialect: SummaryDialect::Python,
+        ..options
+    };
+    assert!(matches!(
+        list_sessions_from_store(&store, &python).await,
         Err(SessionStoreHelperError::UnsupportedStore(_))
     ));
     Ok(())
@@ -333,6 +342,7 @@ async fn import_replays_the_transcript_subagents_and_sidecars() -> TestResult {
         &store,
         &ImportOptions {
             batch_size: 1,
+            dialect: SummaryDialect::Python,
             ..ImportOptions::default()
         },
     )
@@ -354,6 +364,7 @@ async fn import_replays_the_transcript_subagents_and_sidecars() -> TestResult {
         &skipped,
         &ImportOptions {
             include_subagents: false,
+            dialect: SummaryDialect::Python,
             ..ImportOptions::default()
         },
     )
@@ -370,5 +381,124 @@ async fn import_replays_the_transcript_subagents_and_sidecars() -> TestResult {
             SessionMutationError::InvalidSessionId(_)
         ))
     ));
+    Ok(())
+}
+
+#[tokio::test]
+async fn ts_import_keys_the_session_by_the_directory_and_lets_the_sidecar_type_win() -> TestResult {
+    let config = tempfile::tempdir()?;
+    let work = dir()?;
+    let key = project_key_for_directory(Some(work.path()))?;
+    let project = config.path().join("projects").join(key.as_str());
+    fs::create_dir_all(project.join(SESSION).join("subagents").join("deep"))?;
+    let mut body: String = transcript(SESSION).iter().map(|line| format!("{line}\n")).collect();
+    body.push_str("not json\n[1]\n");
+    fs::write(project.join(format!("{SESSION}.jsonl")), body)?;
+    let sub: String = transcript(SESSION).iter().map(|line| format!("{line}\n")).collect();
+    fs::write(
+        project
+            .join(SESSION)
+            .join("subagents")
+            .join("deep")
+            .join("agent-abc.jsonl"),
+        sub,
+    )?;
+    fs::write(
+        project
+            .join(SESSION)
+            .join("subagents")
+            .join("deep")
+            .join("agent-abc.meta.json"),
+        r#"{"agentType":"general","type":"stray"}"#,
+    )?;
+    let files = SessionFiles::with_config_dir(config.path());
+    let store = InMemorySessionStore::new();
+    let options = ImportOptions {
+        directory: Some(work.path().to_path_buf()),
+        ..ImportOptions::default()
+    };
+    import_session_to_store(&files, SESSION, &store, &options).await?;
+
+    let main = SessionKey::new(key, SessionId::from(SESSION))?;
+    assert_eq!(store.load(&main).await?.map_or(0, |entries| entries.len()), 2);
+    let sub_key = main.with_subpath(SessionSubpath::new("subagents/deep/agent-abc")?);
+    let loaded = store.load(&sub_key).await?.ok_or("no subagent")?;
+    let last = loaded.last().ok_or("empty")?;
+    assert_eq!(last.as_object().get("type"), Some(&json!("stray")));
+    assert_eq!(last.as_object().get("agentType"), Some(&json!("general")));
+    Ok(())
+}
+
+/// An in-memory store without `list_subkeys`.
+struct NoSubkeys(InMemorySessionStore);
+
+impl SessionStore for NoSubkeys {
+    fn supports(&self, operation: SessionStoreOperation) -> bool {
+        !matches!(operation, SessionStoreOperation::ListSubkeys)
+    }
+    fn append<'a>(&'a self, key: &'a SessionKey, entries: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
+        self.0.append(key, entries)
+    }
+    fn load<'a>(&'a self, key: &'a SessionKey) -> SessionStoreFuture<'a, Option<Vec<SessionEntry>>> {
+        self.0.load(key)
+    }
+}
+
+#[tokio::test]
+async fn ts_subagent_listing_names_the_missing_capability() -> TestResult {
+    let tmp = dir()?;
+    let store = NoSubkeys(InMemorySessionStore::new());
+    let error = list_subagents_from_store(&store, SESSION, Some(tmp.path()))
+        .await
+        .err()
+        .ok_or("expected an error")?;
+    assert_eq!(
+        error.to_string(),
+        "sessionStore.listSubkeys is not implemented -- cannot list subagents. Provide a store with a listSubkeys() method."
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn ts_listing_pages_before_dropping_sidechains() -> TestResult {
+    let tmp = dir()?;
+    let store = Limited {
+        inner: InMemorySessionStore::new(),
+        list: true,
+        summaries: false,
+        stale_summaries: false,
+    };
+    let mut sidechain = transcript(OTHER);
+    sidechain[0]["isSidechain"] = json!(true);
+    seed(&store, tmp.path(), SESSION, None, &transcript(SESSION)).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    seed(&store, tmp.path(), OTHER, None, &sidechain).await?;
+    let options = StoreListOptions {
+        directory: Some(tmp.path().to_path_buf()),
+        limit: Some(1),
+        ..StoreListOptions::default()
+    };
+    // The newest session is the sidechain: it takes the single slot and is then dropped.
+    assert!(list_sessions_from_store(&store, &options).await?.is_empty());
+    let python = StoreListOptions {
+        summary_dialect: SummaryDialect::Python,
+        ..options
+    };
+    assert_eq!(list_sessions_from_store(&store, &python).await?.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn ts_rename_trims_like_javascript_and_stamps_milliseconds() -> TestResult {
+    let tmp = dir()?;
+    let store = InMemorySessionStore::new();
+    let key = seed(&store, tmp.path(), SESSION, None, &transcript(SESSION)).await?;
+    rename_session_via_store(&store, SESSION, "\u{feff}\u{a0}Named\u{2003}", Some(tmp.path())).await?;
+    let loaded = store.load(&key).await?.ok_or("missing")?;
+    let last = loaded.last().ok_or("empty")?.as_object();
+    assert_eq!(last.get("customTitle"), Some(&json!("Named")));
+    let stamp = last.get("timestamp").and_then(Value::as_str).ok_or("no timestamp")?;
+    assert_eq!(stamp.len(), 24);
+    assert!(stamp.ends_with('Z'));
     Ok(())
 }

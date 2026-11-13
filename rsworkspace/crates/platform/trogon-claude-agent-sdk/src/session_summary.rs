@@ -191,11 +191,19 @@ pub fn summary_entry_to_sdk_info(
 ) -> Option<SdkSessionInfo> {
     let keys = dialect.keys();
     let data = &entry.data;
-    if data.get(keys.is_sidechain).is_some_and(truthy) {
+    // TypeScript `JB` compares with `=== true`; Python reads truthiness.
+    let flag = |name: &str| {
+        let value = data.get(name);
+        match dialect {
+            SummaryDialect::TypeScript => value == Some(&Value::Bool(true)),
+            SummaryDialect::Python => value.is_some_and(truthy),
+        }
+    };
+    if flag(keys.is_sidechain) {
         return None;
     }
     let text = |name: &str| data.get(name).and_then(Value::as_str).filter(|text| !text.is_empty());
-    let first_prompt = if data.get(keys.first_prompt_locked).is_some_and(truthy) {
+    let first_prompt = if flag(keys.first_prompt_locked) {
         text(keys.first_prompt)
     } else {
         text(keys.command_fallback)
