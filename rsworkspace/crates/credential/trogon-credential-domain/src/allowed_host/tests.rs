@@ -239,3 +239,8 @@ fn reports_whether_the_restriction_is_configured() {
     assert!(AllowedHosts::Unrestricted.is_unrestricted());
     assert!(!AllowedHosts::only(["api.example.com"]).unwrap().is_unrestricted());
 }
+
+#[test]
+fn a_lone_root_dot_is_empty() {
+    assert_eq!(AllowedHost::new("."), Err(AllowedHostError::Empty));
+}
