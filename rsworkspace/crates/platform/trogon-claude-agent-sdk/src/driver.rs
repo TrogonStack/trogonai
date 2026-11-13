@@ -421,6 +421,7 @@ fn initialize_config(
         supported_dialog_kinds,
         plugins: plugins_via_initialize(options)
             .then(|| options.plugins.iter().map(crate::plugin::PluginPayload::from).collect()),
+        managed_settings: crate::settings_option::initialize_managed_settings(options)?,
         ..InitializeRequest::default()
     };
     expectations.managed_settings = request.managed_settings.is_some();

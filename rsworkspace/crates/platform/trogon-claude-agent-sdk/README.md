@@ -307,8 +307,17 @@ upstream SDKs).
   Python refuses an enabled thinking config without a budget. The shadow
   advisory for `bypassPermissions` or allowed tools is reported through
   `tracing`.
-- Deferred to other tracks: remote `--sdk-url` transports. Settings, managed
-  settings, sandbox, flag settings and `updateSettings` are not covered.
+- `settings` (a path, JSON text or a `Settings` object), `sandbox`,
+  `managed_settings` and `managed_settings_delivery` follow both dialects.
+  TypeScript serializes objects with `JSON.stringify` bytes and merges the
+  sandbox into the settings document (a settings file path together with a
+  sandbox is refused); Python reads the settings file relative to the working
+  directory, replaces the `sandbox` key and writes `json.dumps` text. Managed
+  settings go by `--managed-settings` or, with
+  `ManagedSettingsDelivery::Initialize`, in the `initialize` request; the Python
+  dialect ignores them.
+- Deferred to other tracks: remote `--sdk-url` transports, flag settings and
+  `updateSettings`.
 
 Model strings and paths are stored without extra identifier restrictions.
 `env` values are `ConfigValue`s, which convert from strings as `Sensitive`;

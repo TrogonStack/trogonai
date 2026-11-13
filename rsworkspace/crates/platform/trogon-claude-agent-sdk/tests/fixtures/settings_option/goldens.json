@@ -1,0 +1,396 @@
+{
+ "typescript": {
+  "settings_path": {
+   "error": null,
+   "argv": [
+    "--settings",
+    "settings_file.json"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "settings_json_string": {
+   "error": null,
+   "argv": [
+    "--settings",
+    "{\"a\": 1, \"b\": [1, 2]}"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "settings_object": {
+   "error": null,
+   "argv": [
+    "--settings",
+    "{\"1\":2,\"permissions\":{\"allow\":[\"Bash(ls)\"]},\"model\":\"xé \\u0001\",\"a\":1}"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "sandbox_alone": {
+   "error": null,
+   "argv": [
+    "--settings",
+    "{\"sandbox\":{\"enabled\":true,\"network\":{\"allowedDomains\":[\"x.com\"],\"httpProxyPort\":1},\"filesystem\":{\"denyRead\":[\"/a\"]},\"foo\":\"bar\",\"failIfUnavailable\":true}}"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "sandbox_plus_object": {
+   "error": null,
+   "argv": [
+    "--settings",
+    "{\"sandbox\":{\"enabled\":false,\"network\":{\"deniedDomains\":[\"d\",\"e\"],\"allowedDomains\":[\"x.com\"]},\"filesystem\":{\"denyRead\":[\"/a\",\"/b\",\"/c\"]}},\"z\":1}"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "sandbox_plus_json_string": {
+   "error": null,
+   "argv": [
+    "--settings",
+    "{\"x\":1,\"sandbox\":{\"enabled\":true,\"failIfUnavailable\":true}}"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "sandbox_plus_path": {
+   "error": "Cannot use both a settings file path and the sandbox option. Include the sandbox configuration in your settings file instead.",
+   "argv": null,
+   "initialize": null
+  },
+  "sandbox_plus_bad_json": {
+   "error": null,
+   "argv": [
+    "--settings",
+    "{\"sandbox\":{\"enabled\":true,\"failIfUnavailable\":true}}"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "sandbox_enabled_fail": {
+   "error": null,
+   "argv": [
+    "--settings",
+    "{\"sandbox\":{\"enabled\":true,\"filesystem\":{\"allowWrite\":[\"/t\"]},\"ripgrep\":{\"command\":\"rg\"},\"failIfUnavailable\":true}}"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "sandbox_extra_args_settings": {
+   "error": null,
+   "argv": [
+    "--settings",
+    "{\"q\":1,\"sandbox\":{\"enabled\":true,\"failIfUnavailable\":true}}",
+    "--other"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "extra_args_settings_and_option": {
+   "error": null,
+   "argv": [
+    "--first",
+    "1",
+    "--settings",
+    "{\"r\":2}",
+    "--last=-x"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "settings_dash_value": {
+   "error": null,
+   "argv": [
+    "--settings=-weird"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "managed_argv": {
+   "error": null,
+   "argv": [
+    "--managed-settings",
+    "{\"permissions\":{\"allow\":[\"Bash\"]},\"n\":1}"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "managed_argv_dash": {
+   "error": null,
+   "argv": [
+    "--managed-settings",
+    "{}"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "managed_initialize": {
+   "error": null,
+   "argv": [
+    "--await-initialize",
+    "--managed-settings-in-initialize"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ],
+    "managedSettings": {
+     "permissions": {
+      "allow": [
+       "Bash"
+      ]
+     },
+     "n": 1
+    }
+   }
+  },
+  "managed_initialize_resume": {
+   "error": null,
+   "argv": [
+    "--resume=abc",
+    "--await-initialize",
+    "--managed-settings-in-initialize"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ],
+    "managedSettings": {
+     "n": 1
+    }
+   }
+  },
+  "managed_initialize_plugins": {
+   "error": null,
+   "argv": [
+    "--await-initialize",
+    "--managed-settings-in-initialize"
+   ],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ],
+    "plugins": [
+     {
+      "type": "local",
+      "path": "/p"
+     }
+    ],
+    "managedSettings": {
+     "n": 1
+    }
+   }
+  },
+  "managed_initialize_without_settings": {
+   "error": null,
+   "argv": [],
+   "initialize": {
+    "subtype": "initialize",
+    "systemPrompt": [
+     ""
+    ]
+   }
+  },
+  "managed_bad_delivery": {
+   "error": "Invalid managedSettingsDelivery. Expected 'argv' or 'initialize'.",
+   "argv": null,
+   "initialize": null
+  }
+ },
+ "python": {
+  "settings_path": {
+   "error": null,
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "settings_file.json",
+    "--input-format",
+    "stream-json"
+   ]
+  },
+  "settings_json_string": {
+   "error": null,
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "{\"a\": 1, \"b\": [1, 2]}",
+    "--input-format",
+    "stream-json"
+   ]
+  },
+  "settings_empty": {
+   "error": null,
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ]
+  },
+  "sandbox_alone": {
+   "error": null,
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "{\"sandbox\": {\"enabled\": true, \"network\": {\"allowedDomains\": [\"x.com\"], \"httpProxyPort\": 1}, \"filesystem\": {\"denyRead\": [\"/a\"]}, \"foo\": \"bar\", \"u\": \"\\u00e9\\u2028\"}}",
+    "--input-format",
+    "stream-json"
+   ]
+  },
+  "sandbox_plus_json": {
+   "error": null,
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "{\"x\": 1, \"sandbox\": {\"enabled\": true}, \"f\": 1.0}",
+    "--input-format",
+    "stream-json"
+   ]
+  },
+  "sandbox_plus_path": {
+   "error": null,
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "{\"permissions\": {\"allow\": [\"Bash(ls)\"]}, \"sandbox\": {\"enabled\": true}, \"\\u00e9x\": \"\\u00fc\"}",
+    "--input-format",
+    "stream-json"
+   ]
+  },
+  "sandbox_plus_path_missing": {
+   "error": "Failed to load settings: [Errno 2] No such file or directory: '<scratch>/nope.json'",
+   "argv": null
+  },
+  "sandbox_plus_bad_json": {
+   "error": "Failed to load settings: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)",
+   "argv": null
+  },
+  "sandbox_plus_array_like": {
+   "error": "Failed to load settings: [Errno 2] No such file or directory: '<scratch>/[1]'",
+   "argv": null
+  },
+  "sandbox_empty_dict": {
+   "error": null,
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "{\"sandbox\": {}}",
+    "--input-format",
+    "stream-json"
+   ]
+  },
+  "extra_args_settings": {
+   "error": null,
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "settings_file.json",
+    "--settings",
+    "{\"q\":1}",
+    "--input-format",
+    "stream-json"
+   ]
+  },
+  "dash_settings": {
+   "error": null,
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "-weird",
+    "--input-format",
+    "stream-json"
+   ]
+  }
+ }
+}

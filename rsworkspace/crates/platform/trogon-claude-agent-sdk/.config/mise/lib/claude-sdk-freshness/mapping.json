@@ -1898,15 +1898,72 @@
             "Options.settings",
             "Options.sandbox",
             "core.Options.settings",
-            "core.Options.sandbox"
+            "core.Options.sandbox",
+            "Options.managedSettings",
+            "core.Options.managedSettings"
           ],
           "prefixes": []
         }
       },
-      "rust_api": [],
-      "tests": [],
-      "status": "deferred",
-      "rationale": "Custom settings and sandbox conveniences, and the settings, managed settings, flag settings and updateSettings surfaces, require individual Rust design and behavioral evidence; they are not enabled by aggregate configuration support."
+      "rust_api": [
+        "ClaudeAgentOptions.settings",
+        "ClaudeAgentOptions.sandbox",
+        "ClaudeAgentOptions.managed_settings",
+        "ClaudeAgentOptions.managed_settings_delivery",
+        "ManagedSettingsDelivery"
+      ],
+      "tests": [
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "typescript_passes_a_settings_path_or_text_through_unchanged"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "typescript_writes_a_settings_object_with_json_stringify_bytes"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "typescript_merges_the_sandbox_into_the_settings_document"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "typescript_refuses_a_settings_file_path_with_a_sandbox"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "typescript_orders_the_settings_entry_among_the_extra_arguments"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "typescript_delivers_managed_settings_by_argv_or_initialize"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "python_passes_settings_text_through_and_skips_an_empty_value"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "python_replaces_the_sandbox_key_and_dumps_with_json_dumps_bytes"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "python_reads_a_settings_file_relative_to_the_working_directory"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "python_reports_a_settings_file_that_cannot_be_loaded"
+        },
+        {
+          "path": "src/driver_tests.rs",
+          "name": "the_initialize_request_carries_managed_settings_after_the_plugins"
+        },
+        {
+          "path": "src/settings_json/tests.rs",
+          "name": "javascript_orders_index_keys_first_and_prints_whole_floats_plainly"
+        }
+      ],
+      "status": "supported",
+      "rationale": "settings (path, JSON text or Settings object), sandbox, managedSettings and managedSettingsDelivery are wired for both dialects and checked against argv and initialize bytes captured from the real TypeScript bundle and Python package. TypeScript serializes objects with JSON.stringify semantics and merges the sandbox into the settings document (a settings file path together with a sandbox is refused, unparseable settings text is replaced); Python reads the settings file relative to the working directory, replaces the sandbox key and writes json.dumps text. Managed settings reach the CLI by argv or the initialize request and are ignored by the Python dialect. Known differences: Python JSON decode error wording follows serde_json, an invalid managedSettingsDelivery is unrepresentable, initialize managedSettings numbers at or above 2^63 or written in exponent form may differ from JavaScript, and the managed-settings confirmation hold and timeout framework belongs to the initialize control work. The settings resolution, flag settings and updateSettings surfaces are mapped separately."
     },
     {
       "id": "runtime-options",
