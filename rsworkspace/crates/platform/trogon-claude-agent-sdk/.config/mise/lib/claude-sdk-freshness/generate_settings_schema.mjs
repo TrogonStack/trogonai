@@ -38,7 +38,7 @@ const REFINE_ANCHOR = ',e(r.value,r)),t);return n}';
 // the schemas the in-place sanitizers validate entries with and the constants they consult.
 const READ_PATH_NAMES = [
   'lE', 'cm', 'Zk', 'Qk', 'Xk', 'Jk', 'yk', 'vS', 'zS', 'BS', 'K7e', 'Iu', 'GS', 'Es', 'Vf', 'b6', 'em', '$S',
-  'D7e', 'I7e', 'J5e', 'm7e', 'm3', 'qJe', 'W3e', 'On', 'ao',
+  'D7e', 'I7e', 'J5e', 'm7e', 'm3', 'qJe', 'W3e', 'On', 'ao', 'w6e', 'v6e', 'k6e',
 ];
 // The schemas the sanitizers validate single entries with, by the name the Rust side looks them up under.
 const READ_ROOTS = {
@@ -50,6 +50,10 @@ const READ_ROOTS = {
   hookEntry: 'vS',
   allowedMcpServer: 'zS',
   deniedMcpServer: 'BS',
+  // The `Sandbox*ConfigSchema()` factories the `sandbox` setting builds its parts with.
+  sandboxNetwork: 'w6e',
+  sandboxFilesystem: 'v6e',
+  sandboxCredentials: 'k6e',
 };
 const unique = (text, anchor, what) => {
   const first = text.indexOf(anchor);

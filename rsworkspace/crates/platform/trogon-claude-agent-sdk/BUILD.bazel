@@ -106,6 +106,8 @@ workspace_crate(
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
+        "core_types_module": {},
+        "create_sdk_mcp_server_options": {},
         "in_memory_session_store": {},
         "initialize_options": {
             "compile_data": glob([
@@ -198,6 +200,7 @@ workspace_crate(
             "data": [":claude_sdk_fixture"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},
         },
+        "sandbox_schemas": {"compile_data": ["tests/fixtures/sandbox_schemas/battery.json"]},
         "session_files": {},
         "session_files_ts": {},
         "session_messages_ts": {},
@@ -222,6 +225,7 @@ workspace_crate(
         "tool_use_id": {},
         "tool_use_id_storage": {},
         "transport": {},
+        "upstream_control": {"compile_data": ["tests/fixtures/upstream_control.json"]},
         "upstream_defaults": {
             "data": [":claude_sdk_fixture"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},

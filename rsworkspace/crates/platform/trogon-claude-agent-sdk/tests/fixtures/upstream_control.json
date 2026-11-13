@@ -1,0 +1,1297 @@
+{
+  "SDKControlRequest": [
+    {
+      "type": "control_request",
+      "request_id": "text",
+      "request": {
+        "subtype": "interrupt",
+        "cancel_queued": true
+      }
+    }
+  ],
+  "SDKControlResponse": [
+    {
+      "type": "control_response",
+      "response": {
+        "subtype": "success",
+        "request_id": "text",
+        "response": {
+          "key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        },
+        "pending_permission_requests": [
+          {
+            "type": "control_request",
+            "request_id": "text",
+            "request": {
+              "subtype": "interrupt",
+              "cancel_queued": true
+            }
+          }
+        ],
+        "pending_user_dialog_requests": [
+          {
+            "type": "control_request",
+            "request_id": "text",
+            "request": {
+              "subtype": "interrupt",
+              "cancel_queued": true
+            }
+          }
+        ],
+        "pending_elicitation_requests": [
+          {
+            "type": "control_request",
+            "request_id": "text",
+            "request": {
+              "subtype": "interrupt",
+              "cancel_queued": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "control_response",
+      "response": {
+        "subtype": "error",
+        "request_id": "text",
+        "error": "text",
+        "pending_permission_requests": [
+          {
+            "type": "control_request",
+            "request_id": "text",
+            "request": {
+              "subtype": "can_use_tool",
+              "tool_name": "text",
+              "mcp_server": {
+                "name": "text",
+                "source": "text"
+              },
+              "input": {
+                "key": {
+                  "any": [
+                    "thing",
+                    null
+                  ]
+                }
+              },
+              "permission_suggestions": [
+                {
+                  "type": "replaceRules",
+                  "rules": [
+                    {
+                      "toolName": "text",
+                      "ruleContent": "text"
+                    }
+                  ],
+                  "behavior": "deny",
+                  "destination": "projectSettings"
+                }
+              ],
+              "blocked_path": "text",
+              "decision_reason": "text",
+              "decision_reason_type": "mode",
+              "classifier_approvable": false,
+              "suppress_always_allow_rule": false,
+              "default_to_no": false,
+              "matched_ask_rule": {
+                "source": "text",
+                "tool_name": "text",
+                "rule_content": "text"
+              },
+              "title": "text",
+              "display_name": "text",
+              "tool_use_id": "text",
+              "agent_id": "text",
+              "description": "text",
+              "requires_user_interaction": false
+            }
+          }
+        ],
+        "pending_user_dialog_requests": [
+          {
+            "type": "control_request",
+            "request_id": "text",
+            "request": {
+              "subtype": "can_use_tool",
+              "tool_name": "text",
+              "mcp_server": {
+                "name": "text",
+                "source": "text"
+              },
+              "input": {
+                "key": {
+                  "any": [
+                    "thing",
+                    null
+                  ]
+                }
+              },
+              "permission_suggestions": [
+                {
+                  "type": "replaceRules",
+                  "rules": [
+                    {
+                      "toolName": "text",
+                      "ruleContent": "text"
+                    }
+                  ],
+                  "behavior": "deny",
+                  "destination": "projectSettings"
+                }
+              ],
+              "blocked_path": "text",
+              "decision_reason": "text",
+              "decision_reason_type": "mode",
+              "classifier_approvable": false,
+              "suppress_always_allow_rule": false,
+              "default_to_no": false,
+              "matched_ask_rule": {
+                "source": "text",
+                "tool_name": "text",
+                "rule_content": "text"
+              },
+              "title": "text",
+              "display_name": "text",
+              "tool_use_id": "text",
+              "agent_id": "text",
+              "description": "text",
+              "requires_user_interaction": false
+            }
+          }
+        ],
+        "pending_elicitation_requests": [
+          {
+            "type": "control_request",
+            "request_id": "text",
+            "request": {
+              "subtype": "can_use_tool",
+              "tool_name": "text",
+              "mcp_server": {
+                "name": "text",
+                "source": "text"
+              },
+              "input": {
+                "key": {
+                  "any": [
+                    "thing",
+                    null
+                  ]
+                }
+              },
+              "permission_suggestions": [
+                {
+                  "type": "replaceRules",
+                  "rules": [
+                    {
+                      "toolName": "text",
+                      "ruleContent": "text"
+                    }
+                  ],
+                  "behavior": "deny",
+                  "destination": "projectSettings"
+                }
+              ],
+              "blocked_path": "text",
+              "decision_reason": "text",
+              "decision_reason_type": "mode",
+              "classifier_approvable": false,
+              "suppress_always_allow_rule": false,
+              "default_to_no": false,
+              "matched_ask_rule": {
+                "source": "text",
+                "tool_name": "text",
+                "rule_content": "text"
+              },
+              "title": "text",
+              "display_name": "text",
+              "tool_use_id": "text",
+              "agent_id": "text",
+              "description": "text",
+              "requires_user_interaction": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "ControlResponse": [
+    {
+      "subtype": "success",
+      "request_id": "text",
+      "response": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "pending_permission_requests": [
+        {
+          "type": "control_request",
+          "request_id": "text",
+          "request": {
+            "subtype": "interrupt",
+            "cancel_queued": true
+          }
+        }
+      ],
+      "pending_user_dialog_requests": [
+        {
+          "type": "control_request",
+          "request_id": "text",
+          "request": {
+            "subtype": "interrupt",
+            "cancel_queued": true
+          }
+        }
+      ],
+      "pending_elicitation_requests": [
+        {
+          "type": "control_request",
+          "request_id": "text",
+          "request": {
+            "subtype": "interrupt",
+            "cancel_queued": true
+          }
+        }
+      ]
+    }
+  ],
+  "ControlErrorResponse": [
+    {
+      "subtype": "error",
+      "request_id": "text",
+      "error": "text",
+      "pending_permission_requests": [
+        {
+          "type": "control_request",
+          "request_id": "text",
+          "request": {
+            "subtype": "interrupt",
+            "cancel_queued": true
+          }
+        }
+      ],
+      "pending_user_dialog_requests": [
+        {
+          "type": "control_request",
+          "request_id": "text",
+          "request": {
+            "subtype": "interrupt",
+            "cancel_queued": true
+          }
+        }
+      ],
+      "pending_elicitation_requests": [
+        {
+          "type": "control_request",
+          "request_id": "text",
+          "request": {
+            "subtype": "interrupt",
+            "cancel_queued": true
+          }
+        }
+      ]
+    }
+  ],
+  "SDKControlApplyFlagSettingsRequest": [
+    {
+      "subtype": "apply_flag_settings",
+      "settings": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    }
+  ],
+  "SDKControlBackgroundTasksRequest": [
+    {
+      "subtype": "background_tasks",
+      "tool_use_id": "text"
+    }
+  ],
+  "SDKControlCancelAsyncMessageRequest": [
+    {
+      "subtype": "cancel_async_message",
+      "message_uuid": "text"
+    }
+  ],
+  "SDKControlCancelRequest": [
+    {
+      "type": "control_cancel_request",
+      "request_id": "text"
+    }
+  ],
+  "SDKControlElicitationRequest": [
+    {
+      "subtype": "elicitation",
+      "mcp_server_name": "text",
+      "message": "text",
+      "mode": "form",
+      "url": "text",
+      "elicitation_id": "text",
+      "requested_schema": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "property_order": [
+        "text"
+      ],
+      "title": "text",
+      "display_name": "text",
+      "description": "text"
+    },
+    {
+      "subtype": "elicitation",
+      "mcp_server_name": "text",
+      "message": "text",
+      "mode": "url",
+      "url": "text",
+      "elicitation_id": "text",
+      "requested_schema": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "property_order": [
+        "text"
+      ],
+      "title": "text",
+      "display_name": "text",
+      "description": "text"
+    }
+  ],
+  "SDKControlFileSuggestionsRequest": [
+    {
+      "subtype": "file_suggestions",
+      "query": "text"
+    }
+  ],
+  "SDKControlGetBinaryVersionRequest": [
+    {
+      "subtype": "get_binary_version"
+    }
+  ],
+  "SDKControlGetContextUsageRequest": [
+    {
+      "subtype": "get_context_usage",
+      "detail": "summary"
+    },
+    {
+      "subtype": "get_context_usage",
+      "detail": "full"
+    }
+  ],
+  "SDKControlGetHooksListingRequest": [
+    {
+      "subtype": "get_hooks_listing"
+    }
+  ],
+  "SDKControlGetSessionCostRequest": [
+    {
+      "subtype": "get_session_cost"
+    }
+  ],
+  "SDKControlGetSettingsRequest": [
+    {
+      "subtype": "get_settings"
+    }
+  ],
+  "SDKControlGetTaskOutputRequest": [
+    {
+      "subtype": "get_task_output",
+      "task_id": "text"
+    }
+  ],
+  "SDKControlGetUsageRequest": [
+    {
+      "subtype": "get_usage",
+      "skip_behaviors": true
+    }
+  ],
+  "SDKControlInitializeRequest": [
+    {
+      "subtype": "initialize",
+      "hooks": {
+        "key": [
+          {
+            "matcher": "text",
+            "hookCallbackIds": [
+              "text"
+            ],
+            "timeout": 3,
+            "onFailure": "continue"
+          }
+        ]
+      },
+      "sdkMcpServers": [
+        "text"
+      ],
+      "sdkMcpServerConfigs": {
+        "key": {
+          "timeout": 3,
+          "tools": [
+            {
+              "name": "text",
+              "permission_policy": "always_allow",
+              "org_max_permission": "allow"
+            }
+          ]
+        }
+      },
+      "sdkMcpServerManifests": {
+        "key": {
+          "initializeResult": {
+            "key": {
+              "any": [
+                "thing",
+                null
+              ]
+            }
+          },
+          "toolsListResult": {
+            "key": {
+              "any": [
+                "thing",
+                null
+              ]
+            }
+          }
+        }
+      },
+      "sdkMcpServerManifestsOrigin": "host_per_send",
+      "jsonSchema": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "systemPrompt": [
+        "text"
+      ],
+      "appendSystemPrompt": "text",
+      "systemPromptSnapshot": true,
+      "planModeInstructions": "text",
+      "toolAliases": {
+        "key": "text"
+      },
+      "excludeDynamicSections": true,
+      "agents": {
+        "key": {
+          "description": "text",
+          "tools": [
+            "text"
+          ],
+          "disallowedTools": [
+            "text"
+          ],
+          "prompt": "text",
+          "model": "text",
+          "mcpServers": [
+            "text"
+          ],
+          "criticalSystemReminder_EXPERIMENTAL": "text",
+          "skills": [
+            "text"
+          ],
+          "initialPrompt": "text",
+          "maxTurns": 3,
+          "autoCompactWindow": 3,
+          "background": true,
+          "omitClaudeMd": true,
+          "memory": "user",
+          "effort": "low",
+          "permissionMode": "default",
+          "observer": "text",
+          "observerMessage": "text"
+        }
+      },
+      "title": "text",
+      "skills": [
+        "text"
+      ],
+      "promptSuggestions": true,
+      "agentProgressSummaries": true,
+      "forwardSubagentText": true,
+      "supportedDialogKinds": [
+        "text"
+      ],
+      "perTaskStopAffordance": true,
+      "plugins": [
+        {
+          "type": "local",
+          "path": "text",
+          "skipMcpDiscovery": true
+        }
+      ]
+    }
+  ],
+  "SDKControlInterruptRequest": [
+    {
+      "subtype": "interrupt",
+      "cancel_queued": true
+    }
+  ],
+  "SDKControlListModelsRequest": [
+    {
+      "subtype": "list_models"
+    }
+  ],
+  "SDKControlListPermissionRulesRequest": [
+    {
+      "subtype": "list_permission_rules"
+    }
+  ],
+  "SDKControlMcpCallRequest": [
+    {
+      "subtype": "mcp_call",
+      "tool": "text",
+      "arguments": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "expires_at": "text",
+      "timeout_ms": 3,
+      "result_not_for_model": true,
+      "check_permissions": true,
+      "input_files": [
+        {
+          "name": "text",
+          "lane_path": "text"
+        }
+      ],
+      "output_files": [
+        {
+          "name": "text",
+          "lane_path": "text",
+          "if_match": "text"
+        }
+      ]
+    }
+  ],
+  "SDKControlMcpMessageRequest": [
+    {
+      "subtype": "mcp_message",
+      "server_name": "text",
+      "message": {}
+    }
+  ],
+  "SDKControlMcpReadResourceRequest": [
+    {
+      "subtype": "mcp_read_resource",
+      "serverName": "text",
+      "uri": "text"
+    }
+  ],
+  "SDKControlMcpReconnectRequest": [
+    {
+      "subtype": "mcp_reconnect",
+      "serverName": "text"
+    }
+  ],
+  "SDKControlMcpSetServersRequest": [
+    {
+      "subtype": "mcp_set_servers",
+      "servers": {
+        "key": {
+          "type": "stdio",
+          "command": "text",
+          "args": [
+            "text"
+          ],
+          "env": {
+            "key": "text"
+          },
+          "timeout": 3,
+          "alwaysLoad": true
+        }
+      }
+    }
+  ],
+  "SDKControlMcpStatusRequest": [
+    {
+      "subtype": "mcp_status",
+      "liveReply": true
+    }
+  ],
+  "SDKControlMcpToggleRequest": [
+    {
+      "subtype": "mcp_toggle",
+      "serverName": "text",
+      "enabled": true
+    }
+  ],
+  "SDKControlPermissionRequest": [
+    {
+      "subtype": "can_use_tool",
+      "tool_name": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      },
+      "input": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "permission_suggestions": [
+        {
+          "type": "addRules",
+          "rules": [
+            {
+              "toolName": "text",
+              "ruleContent": "text"
+            }
+          ],
+          "behavior": "allow",
+          "destination": "userSettings"
+        }
+      ],
+      "blocked_path": "text",
+      "decision_reason": "text",
+      "decision_reason_type": "rule",
+      "classifier_approvable": true,
+      "suppress_always_allow_rule": true,
+      "default_to_no": true,
+      "matched_ask_rule": {
+        "source": "text",
+        "tool_name": "text",
+        "rule_content": "text"
+      },
+      "title": "text",
+      "display_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "description": "text",
+      "requires_user_interaction": true
+    },
+    {
+      "subtype": "can_use_tool",
+      "tool_name": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      },
+      "input": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "permission_suggestions": [
+        {
+          "type": "replaceRules",
+          "rules": [
+            {
+              "toolName": "text",
+              "ruleContent": "text"
+            }
+          ],
+          "behavior": "deny",
+          "destination": "projectSettings"
+        }
+      ],
+      "blocked_path": "text",
+      "decision_reason": "text",
+      "decision_reason_type": "mode",
+      "classifier_approvable": false,
+      "suppress_always_allow_rule": false,
+      "default_to_no": false,
+      "matched_ask_rule": {
+        "source": "text",
+        "tool_name": "text",
+        "rule_content": "text"
+      },
+      "title": "text",
+      "display_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "description": "text",
+      "requires_user_interaction": false
+    },
+    {
+      "subtype": "can_use_tool",
+      "tool_name": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      },
+      "input": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "permission_suggestions": [
+        {
+          "type": "removeRules",
+          "rules": [
+            {
+              "toolName": "text",
+              "ruleContent": "text"
+            }
+          ],
+          "behavior": "ask",
+          "destination": "localSettings"
+        }
+      ],
+      "blocked_path": "text",
+      "decision_reason": "text",
+      "decision_reason_type": "subcommandResults",
+      "classifier_approvable": true,
+      "suppress_always_allow_rule": true,
+      "default_to_no": true,
+      "matched_ask_rule": {
+        "source": "text",
+        "tool_name": "text",
+        "rule_content": "text"
+      },
+      "title": "text",
+      "display_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "description": "text",
+      "requires_user_interaction": true
+    },
+    {
+      "subtype": "can_use_tool",
+      "tool_name": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      },
+      "input": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "permission_suggestions": [
+        {
+          "type": "setMode",
+          "mode": "plan",
+          "destination": "session"
+        }
+      ],
+      "blocked_path": "text",
+      "decision_reason": "text",
+      "decision_reason_type": "permissionPromptTool",
+      "classifier_approvable": false,
+      "suppress_always_allow_rule": false,
+      "default_to_no": false,
+      "matched_ask_rule": {
+        "source": "text",
+        "tool_name": "text",
+        "rule_content": "text"
+      },
+      "title": "text",
+      "display_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "description": "text",
+      "requires_user_interaction": false
+    },
+    {
+      "subtype": "can_use_tool",
+      "tool_name": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      },
+      "input": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "permission_suggestions": [
+        {
+          "type": "addDirectories",
+          "directories": [
+            "text"
+          ],
+          "destination": "cliArg"
+        }
+      ],
+      "blocked_path": "text",
+      "decision_reason": "text",
+      "decision_reason_type": "hook",
+      "classifier_approvable": true,
+      "suppress_always_allow_rule": true,
+      "default_to_no": true,
+      "matched_ask_rule": {
+        "source": "text",
+        "tool_name": "text",
+        "rule_content": "text"
+      },
+      "title": "text",
+      "display_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "description": "text",
+      "requires_user_interaction": true
+    },
+    {
+      "subtype": "can_use_tool",
+      "tool_name": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      },
+      "input": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "permission_suggestions": [
+        {
+          "type": "removeDirectories",
+          "directories": [
+            "text"
+          ],
+          "destination": "userSettings"
+        }
+      ],
+      "blocked_path": "text",
+      "decision_reason": "text",
+      "decision_reason_type": "asyncAgent",
+      "classifier_approvable": false,
+      "suppress_always_allow_rule": false,
+      "default_to_no": false,
+      "matched_ask_rule": {
+        "source": "text",
+        "tool_name": "text",
+        "rule_content": "text"
+      },
+      "title": "text",
+      "display_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "description": "text",
+      "requires_user_interaction": false
+    },
+    {
+      "subtype": "can_use_tool",
+      "tool_name": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      },
+      "input": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "permission_suggestions": [
+        {
+          "type": "addRules",
+          "rules": [
+            {
+              "toolName": "text",
+              "ruleContent": "text"
+            }
+          ],
+          "behavior": "allow",
+          "destination": "projectSettings"
+        }
+      ],
+      "blocked_path": "text",
+      "decision_reason": "text",
+      "decision_reason_type": "sandboxOverride",
+      "classifier_approvable": true,
+      "suppress_always_allow_rule": true,
+      "default_to_no": true,
+      "matched_ask_rule": {
+        "source": "text",
+        "tool_name": "text",
+        "rule_content": "text"
+      },
+      "title": "text",
+      "display_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "description": "text",
+      "requires_user_interaction": true
+    },
+    {
+      "subtype": "can_use_tool",
+      "tool_name": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      },
+      "input": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "permission_suggestions": [
+        {
+          "type": "replaceRules",
+          "rules": [
+            {
+              "toolName": "text",
+              "ruleContent": "text"
+            }
+          ],
+          "behavior": "deny",
+          "destination": "localSettings"
+        }
+      ],
+      "blocked_path": "text",
+      "decision_reason": "text",
+      "decision_reason_type": "workingDir",
+      "classifier_approvable": false,
+      "suppress_always_allow_rule": false,
+      "default_to_no": false,
+      "matched_ask_rule": {
+        "source": "text",
+        "tool_name": "text",
+        "rule_content": "text"
+      },
+      "title": "text",
+      "display_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "description": "text",
+      "requires_user_interaction": false
+    },
+    {
+      "subtype": "can_use_tool",
+      "tool_name": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      },
+      "input": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "permission_suggestions": [
+        {
+          "type": "removeRules",
+          "rules": [
+            {
+              "toolName": "text",
+              "ruleContent": "text"
+            }
+          ],
+          "behavior": "ask",
+          "destination": "session"
+        }
+      ],
+      "blocked_path": "text",
+      "decision_reason": "text",
+      "decision_reason_type": "safetyCheck",
+      "classifier_approvable": true,
+      "suppress_always_allow_rule": true,
+      "default_to_no": true,
+      "matched_ask_rule": {
+        "source": "text",
+        "tool_name": "text",
+        "rule_content": "text"
+      },
+      "title": "text",
+      "display_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "description": "text",
+      "requires_user_interaction": true
+    },
+    {
+      "subtype": "can_use_tool",
+      "tool_name": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      },
+      "input": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "permission_suggestions": [
+        {
+          "type": "setMode",
+          "mode": "plan",
+          "destination": "cliArg"
+        }
+      ],
+      "blocked_path": "text",
+      "decision_reason": "text",
+      "decision_reason_type": "classifier",
+      "classifier_approvable": false,
+      "suppress_always_allow_rule": false,
+      "default_to_no": false,
+      "matched_ask_rule": {
+        "source": "text",
+        "tool_name": "text",
+        "rule_content": "text"
+      },
+      "title": "text",
+      "display_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "description": "text",
+      "requires_user_interaction": false
+    },
+    {
+      "subtype": "can_use_tool",
+      "tool_name": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      },
+      "input": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "permission_suggestions": [
+        {
+          "type": "addDirectories",
+          "directories": [
+            "text"
+          ],
+          "destination": "userSettings"
+        }
+      ],
+      "blocked_path": "text",
+      "decision_reason": "text",
+      "decision_reason_type": "other",
+      "classifier_approvable": true,
+      "suppress_always_allow_rule": true,
+      "default_to_no": true,
+      "matched_ask_rule": {
+        "source": "text",
+        "tool_name": "text",
+        "rule_content": "text"
+      },
+      "title": "text",
+      "display_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "description": "text",
+      "requires_user_interaction": true
+    }
+  ],
+  "SDKControlReadFileRequest": [
+    {
+      "subtype": "read_file",
+      "path": "text",
+      "max_bytes": 3,
+      "encoding": "utf-8"
+    },
+    {
+      "subtype": "read_file",
+      "path": "text",
+      "max_bytes": 2.5,
+      "encoding": "base64"
+    }
+  ],
+  "SDKControlRegisterRepoRootRequest": [
+    {
+      "subtype": "register_repo_root",
+      "directory": "text",
+      "reload_claude_md": true,
+      "reload_plugins": true,
+      "reload_skills": true
+    }
+  ],
+  "SDKControlReloadOutputStylesRequest": [
+    {
+      "subtype": "reload_output_styles"
+    }
+  ],
+  "SDKControlReloadPluginsRequest": [
+    {
+      "subtype": "reload_plugins",
+      "hold_on_cache_impact": true,
+      "add_plugins": [
+        {
+          "type": "local",
+          "path": "text",
+          "skipMcpDiscovery": true
+        }
+      ]
+    }
+  ],
+  "SDKControlReloadSkillsRequest": [
+    {
+      "subtype": "reload_skills"
+    }
+  ],
+  "SDKControlRenameSessionRequest": [
+    {
+      "subtype": "rename_session",
+      "title": "text",
+      "source": "remote",
+      "session_id": "text"
+    },
+    {
+      "subtype": "rename_session",
+      "title": "text",
+      "source": "host",
+      "session_id": "text"
+    }
+  ],
+  "SDKControlRequestUserDialogRequest": [
+    {
+      "subtype": "request_user_dialog",
+      "dialog_kind": "text",
+      "payload": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "tool_use_id": "text"
+    }
+  ],
+  "SDKControlRewindFilesRequest": [
+    {
+      "subtype": "rewind_files",
+      "user_message_id": "text",
+      "dry_run": true
+    }
+  ],
+  "SDKControlSeedReadStateRequest": [
+    {
+      "subtype": "seed_read_state",
+      "path": "text",
+      "mtime": 3
+    }
+  ],
+  "SDKControlSetColorRequest": [
+    {
+      "subtype": "set_color",
+      "color": "text"
+    }
+  ],
+  "SDKControlSetHasSubscribersRequest": [
+    {
+      "subtype": "set_has_subscribers",
+      "has_subscribers": true
+    },
+    {
+      "subtype": "set_has_subscribers",
+      "has_subscribers": false
+    }
+  ],
+  "SDKControlSetMaxThinkingTokensRequest": [
+    {
+      "subtype": "set_max_thinking_tokens",
+      "max_thinking_tokens": 3,
+      "thinking_display": "summarized"
+    },
+    {
+      "subtype": "set_max_thinking_tokens",
+      "max_thinking_tokens": 2.5,
+      "thinking_display": "omitted"
+    },
+    {
+      "subtype": "set_max_thinking_tokens",
+      "max_thinking_tokens": 3,
+      "thinking_display": "highlights"
+    }
+  ],
+  "SDKControlSetModelRequest": [
+    {
+      "subtype": "set_model",
+      "model": "text"
+    }
+  ],
+  "SDKControlSetPermissionModeRequest": [
+    {
+      "subtype": "set_permission_mode",
+      "mode": "default"
+    }
+  ],
+  "SDKControlStopTaskRequest": [
+    {
+      "subtype": "stop_task",
+      "task_id": "text"
+    }
+  ],
+  "SDKControlUpdateSettingsRequest": [
+    {
+      "subtype": "update_settings",
+      "source": "localSettings",
+      "settings": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "subtype": "update_settings",
+      "source": "userSettings",
+      "settings": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -224,6 +224,15 @@
       },
       "deniedMcpServer": {
         "ref": "n20"
+      },
+      "sandboxNetwork": {
+        "ref": "n46"
+      },
+      "sandboxFilesystem": {
+        "ref": "n47"
+      },
+      "sandboxCredentials": {
+        "ref": "n48"
       }
     },
     "managedOnlyKeys": [
@@ -7625,494 +7634,13 @@
             }
           },
           "network": {
-            "type": "optional",
-            "inner": {
-              "type": "object",
-              "mode": "strip",
-              "shape": {
-                "allowedDomains": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "array",
-                    "element": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "deniedDomains": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "array",
-                    "element": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "strictAllowlist": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "boolean"
-                  }
-                },
-                "allowManagedDomainsOnly": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "boolean"
-                  }
-                },
-                "allowUnixSockets": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "array",
-                    "element": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "allowAllUnixSockets": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "boolean"
-                  }
-                },
-                "allowLocalBinding": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "boolean"
-                  }
-                },
-                "allowMachLookup": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "array",
-                    "element": {
-                      "type": "string",
-                      "checks": [
-                        {
-                          "check": "custom",
-                          "type": "custom",
-                          "fn": {
-                            "source": "(e)=>!(e.endsWith(\"*\")?e.slice(0,-1):e).includes(\"*\")",
-                            "battery": "string",
-                            "probes": ["true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true"]
-                          }
-                        }
-                      ]
-                    }
-                  }
-                },
-                "httpProxyPort": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "number"
-                  }
-                },
-                "socksProxyPort": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "number"
-                  }
-                },
-                "tlsTerminate": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "object",
-                    "mode": "strip",
-                    "shape": {
-                      "caCertPath": {
-                        "type": "optional",
-                        "inner": {
-                          "type": "string",
-                          "checks": [
-                            {
-                              "check": "min_length",
-                              "minimum": 1
-                            }
-                          ]
-                        }
-                      },
-                      "caKeyPath": {
-                        "type": "optional",
-                        "inner": {
-                          "type": "string",
-                          "checks": [
-                            {
-                              "check": "min_length",
-                              "minimum": 1
-                            }
-                          ]
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
+            "ref": "n46"
           },
           "filesystem": {
-            "type": "optional",
-            "inner": {
-              "type": "object",
-              "mode": "strip",
-              "shape": {
-                "allowWrite": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "array",
-                    "element": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "denyWrite": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "array",
-                    "element": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "denyRead": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "array",
-                    "element": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "allowRead": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "array",
-                    "element": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "allowManagedReadPathsOnly": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "boolean"
-                  }
-                },
-                "disabled": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "boolean"
-                  }
-                }
-              }
-            }
+            "ref": "n47"
           },
           "credentials": {
-            "type": "optional",
-            "inner": {
-              "type": "object",
-              "mode": "strip",
-              "shape": {
-                "files": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "array",
-                    "element": {
-                      "type": "pipe",
-                      "in": {
-                        "type": "transform",
-                        "source": "function I9(e){if(typeof e!==\"object\"||e===null)return e;let t=e;if(t.mode!==\"deny\")return e;let n={...t};if(\"extract\"in n&&typeof n.extract!==\"string\")delete n.extract;if(\"onExtractNoMatch\"in n&&n.onExtractNoMatch!==\"warn\"&&n.onExtractNoMatch!==\"deny\"&&n.onExtractNoMatch!==\"error\")delete n.onExtractNoMatch;if(\"decode\"in n&&n.decode!==\"jwt\")delete n.decode;if(\"maskClaims\"in n&&!(Array.isArray(n.maskClaims)&&n.maskClaims.every((r)=>typeof r===\"string\")))delete n.maskClaims;if(\"maskDuplicates\"in n&&typeof n.maskDuplicates!==\"boolean\")delete n.maskDuplicates;if(\"injectHosts\"in n&&!(Array.isArray(n.injectHosts)&&n.injectHosts.every((r)=>typeof r===\"string\")))delete n.injectHosts;return n}",
-                        "battery": "value",
-                        "probes": ["null","1","\"x\"","true","false","[]","[\"a\",null,1]","{}","{\"path\":null}","{\"path\":null,\"script\":null,\"defaultSettings\":null}","{\"a\":1}","[\"skills\",\"bogus\"]","[\"Bash\"]","[\"/a/\"]","9999999999","0","5","6","300000","300001","65536","2147483647","2147483648","-1","1.5","\"/abs/x\"","\"rel\"","\"\"","{\"mode\":\"deny\"}","{\"mode\":\"deny\"}","{\"mode\":\"deny\",\"extract\":\"a\",\"onExtractNoMatch\":\"warn\",\"decode\":\"jwt\",\"maskClaims\":[\"a\"],\"maskDuplicates\":true,\"injectHosts\":[\"h\"]}","{\"mode\":\"deny\",\"onExtractNoMatch\":\"deny\"}","{\"mode\":\"deny\",\"onExtractNoMatch\":\"error\",\"maskClaims\":[]}","{\"mode\":\"allow\",\"extract\":1}","{\"mode\":1}","{\"extract\":1}","{\"constructor\":1,\"a\":1}","{\"toString\":1,\"valueOf\":2,\"hasOwnProperty\":3,\"x\":4}","{\"__proto__x\":1,\"isPrototypeOf\":1,\"propertyIsEnumerable\":1,\"toLocaleString\":1}","{\"timeout\":1,\"request_timeout_ms\":400000,\"x\":1}","{\"request_timeout_ms\":400000}","{\"request_timeout_ms\":5}","{\"request_timeout_ms\":5,\"timeout\":9}","{\"request_timeout_ms\":\"x\"}","{\"request_timeout_ms\":null}","{\"timeout\":null,\"request_timeout_ms\":7}","{\"path\":null,\"script\":null}","{\"path\":null,\"script\":null,\"defaultSettings\":null,\"extra\":1}","{\"path\":\"/a\",\"script\":null}","{\"path\":null,\"script\":\"s\",\"defaultSettings\":null}","{\"script\":null}","{\"defaultSettings\":null}","[\"anthropic\",\"bedrock\",\"bogus\",3,null]","[\"customEndpoint\",\"vertex\",\"foundry\",\"anthropicAws\",\"mantle\",\"gateway\"]","[\"Anthropic\"]","[\"skills\",\"agents\",\"hooks\",\"mcp\",\"other\",1]","[\"a\",{},[],1,null,{\"b\":1}]","{\"engines\":{\"vscode\":\"1\"}}"]
-                      },
-                      "out": {
-                        "type": "object",
-                        "mode": "strip",
-                        "shape": {
-                          "path": {
-                            "type": "string",
-                            "checks": [
-                              {
-                                "check": "min_length",
-                                "minimum": 1
-                              }
-                            ]
-                          },
-                          "mode": {
-                            "type": "enum",
-                            "values": [
-                              "deny",
-                              "mask"
-                            ]
-                          },
-                          "extract": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "string"
-                            }
-                          },
-                          "onExtractNoMatch": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "enum",
-                              "values": [
-                                "warn",
-                                "deny",
-                                "error"
-                              ]
-                            }
-                          },
-                          "decode": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "enum",
-                              "values": [
-                                "jwt"
-                              ]
-                            }
-                          },
-                          "maskClaims": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "array",
-                              "element": {
-                                "type": "string"
-                              }
-                            }
-                          },
-                          "maskDuplicates": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "boolean"
-                            }
-                          },
-                          "injectHosts": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "array",
-                              "element": {
-                                "type": "string"
-                              }
-                            }
-                          }
-                        },
-                        "checks": [
-                          {
-                            "check": "custom",
-                            "payloadCheck": {
-                              "source": "(e,t)=>{if(e.mode===\"mask\"&&e.path.endsWith(\"/\"))t.addIssue({code:vr.custom,path:[\"path\"],message:'Credential mode \"mask\" applies to a single file, not a directory. List the specific credential file(s), or use \"deny\" for the directory.'});if(e.mode===\"mask\"&&e.extract!==void 0)D9(e.extract,t);if(e.mode===\"mask\"&&e.maskClaims!==void 0)P9(e.maskClaims,e.decode,t)}",
-                              "battery": "object",
-                              "probes": ["error: Cannot read properties of null (reading 'mode')","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[{\"message\":\"Credential mode \\\"mask\\\" applies to a single file, not a directory. List the specific credential file(s), or use \\\"deny\\\" for the directory.\",\"path\":[\"path\"]}]","[]","[]","[{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /(/: Unterminated group\",\"path\":[\"extract\"]}]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","[]","[{\"message\":\"Credential mode \\\"mask\\\" applies to a single file, not a directory. List the specific credential file(s), or use \\\"deny\\\" for the directory.\",\"path\":[\"path\"]},{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /[/: Unterminated character class\",\"path\":[\"extract\"]},{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","[]","[]","[{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /(?<n>a)(?<n>b)/: Duplicate capture group name\",\"path\":[\"extract\"]}]","[]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]"]
-                            }
-                          }
-                        ]
-                      }
-                    }
-                  }
-                },
-                "envVars": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "array",
-                    "element": {
-                      "type": "pipe",
-                      "in": {
-                        "type": "transform",
-                        "source": "function I9(e){if(typeof e!==\"object\"||e===null)return e;let t=e;if(t.mode!==\"deny\")return e;let n={...t};if(\"extract\"in n&&typeof n.extract!==\"string\")delete n.extract;if(\"onExtractNoMatch\"in n&&n.onExtractNoMatch!==\"warn\"&&n.onExtractNoMatch!==\"deny\"&&n.onExtractNoMatch!==\"error\")delete n.onExtractNoMatch;if(\"decode\"in n&&n.decode!==\"jwt\")delete n.decode;if(\"maskClaims\"in n&&!(Array.isArray(n.maskClaims)&&n.maskClaims.every((r)=>typeof r===\"string\")))delete n.maskClaims;if(\"maskDuplicates\"in n&&typeof n.maskDuplicates!==\"boolean\")delete n.maskDuplicates;if(\"injectHosts\"in n&&!(Array.isArray(n.injectHosts)&&n.injectHosts.every((r)=>typeof r===\"string\")))delete n.injectHosts;return n}",
-                        "battery": "value",
-                        "probes": ["null","1","\"x\"","true","false","[]","[\"a\",null,1]","{}","{\"path\":null}","{\"path\":null,\"script\":null,\"defaultSettings\":null}","{\"a\":1}","[\"skills\",\"bogus\"]","[\"Bash\"]","[\"/a/\"]","9999999999","0","5","6","300000","300001","65536","2147483647","2147483648","-1","1.5","\"/abs/x\"","\"rel\"","\"\"","{\"mode\":\"deny\"}","{\"mode\":\"deny\"}","{\"mode\":\"deny\",\"extract\":\"a\",\"onExtractNoMatch\":\"warn\",\"decode\":\"jwt\",\"maskClaims\":[\"a\"],\"maskDuplicates\":true,\"injectHosts\":[\"h\"]}","{\"mode\":\"deny\",\"onExtractNoMatch\":\"deny\"}","{\"mode\":\"deny\",\"onExtractNoMatch\":\"error\",\"maskClaims\":[]}","{\"mode\":\"allow\",\"extract\":1}","{\"mode\":1}","{\"extract\":1}","{\"constructor\":1,\"a\":1}","{\"toString\":1,\"valueOf\":2,\"hasOwnProperty\":3,\"x\":4}","{\"__proto__x\":1,\"isPrototypeOf\":1,\"propertyIsEnumerable\":1,\"toLocaleString\":1}","{\"timeout\":1,\"request_timeout_ms\":400000,\"x\":1}","{\"request_timeout_ms\":400000}","{\"request_timeout_ms\":5}","{\"request_timeout_ms\":5,\"timeout\":9}","{\"request_timeout_ms\":\"x\"}","{\"request_timeout_ms\":null}","{\"timeout\":null,\"request_timeout_ms\":7}","{\"path\":null,\"script\":null}","{\"path\":null,\"script\":null,\"defaultSettings\":null,\"extra\":1}","{\"path\":\"/a\",\"script\":null}","{\"path\":null,\"script\":\"s\",\"defaultSettings\":null}","{\"script\":null}","{\"defaultSettings\":null}","[\"anthropic\",\"bedrock\",\"bogus\",3,null]","[\"customEndpoint\",\"vertex\",\"foundry\",\"anthropicAws\",\"mantle\",\"gateway\"]","[\"Anthropic\"]","[\"skills\",\"agents\",\"hooks\",\"mcp\",\"other\",1]","[\"a\",{},[],1,null,{\"b\":1}]","{\"engines\":{\"vscode\":\"1\"}}"]
-                      },
-                      "out": {
-                        "type": "object",
-                        "mode": "strip",
-                        "shape": {
-                          "name": {
-                            "type": "string",
-                            "checks": [
-                              {
-                                "check": "string_format",
-                                "format": "regex",
-                                "pattern": {
-                                  "regex": "^[A-Za-z_][A-Za-z0-9_]*$",
-                                  "flags": ""
-                                }
-                              }
-                            ]
-                          },
-                          "mode": {
-                            "type": "enum",
-                            "values": [
-                              "deny",
-                              "mask"
-                            ]
-                          },
-                          "extract": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "string"
-                            }
-                          },
-                          "onExtractNoMatch": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "enum",
-                              "values": [
-                                "warn",
-                                "deny",
-                                "error"
-                              ]
-                            }
-                          },
-                          "decode": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "enum",
-                              "values": [
-                                "jwt"
-                              ]
-                            }
-                          },
-                          "maskClaims": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "array",
-                              "element": {
-                                "type": "string"
-                              }
-                            }
-                          },
-                          "injectHosts": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "array",
-                              "element": {
-                                "type": "string"
-                              }
-                            }
-                          }
-                        },
-                        "checks": [
-                          {
-                            "check": "custom",
-                            "payloadCheck": {
-                              "source": "(e,t)=>{if(e.mode===\"mask\"&&e.extract!==void 0)D9(e.extract,t);if(e.mode===\"mask\"&&e.maskClaims!==void 0)P9(e.maskClaims,e.decode,t);if(e.mode===\"mask\"&&e.decode!==void 0&&e.extract!==void 0)t.addIssue({code:vr.custom,path:[\"extract\"],message:\"extract cannot be combined with decode on an env entry — the runtime takes the decode path (whole-value JWT verification) and never consults extract, silently disabling the structured masking. Remove one of the two.\"});if(e.mode===\"mask\"&&e.decode!==void 0&&(e.onExtractNoMatch===\"deny\"||e.onExtractNoMatch===\"error\"))t.addIssue({code:vr.custom,path:[\"onExtractNoMatch\"],message:\"onExtractNoMatch cannot be honored on an env entry with decode — the runtime takes the decode path (which is unconditionally fail-open on verify failure) and never consults extract or onExtractNoMatch. Remove onExtractNoMatch, or drop decode to use extract-based masking (whose no-match handling does honor it).\"})}",
-                              "battery": "object",
-                              "probes": ["error: Cannot read properties of null (reading 'mode')","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /(/: Unterminated group\",\"path\":[\"extract\"]}]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","[]","[{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /[/: Unterminated character class\",\"path\":[\"extract\"]},{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","[]","[]","[{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /(?<n>a)(?<n>b)/: Duplicate capture group name\",\"path\":[\"extract\"]}]","[]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","[{\"message\":\"extract cannot be combined with decode on an env entry — the runtime takes the decode path (whole-value JWT verification) and never consults extract, silently disabling the structured masking. Remove one of the two.\",\"path\":[\"extract\"]}]","[{\"message\":\"onExtractNoMatch cannot be honored on an env entry with decode — the runtime takes the decode path (which is unconditionally fail-open on verify failure) and never consults extract or onExtractNoMatch. Remove onExtractNoMatch, or drop decode to use extract-based masking (whose no-match handling does honor it).\",\"path\":[\"onExtractNoMatch\"]}]","[{\"message\":\"onExtractNoMatch cannot be honored on an env entry with decode — the runtime takes the decode path (which is unconditionally fail-open on verify failure) and never consults extract or onExtractNoMatch. Remove onExtractNoMatch, or drop decode to use extract-based masking (whose no-match handling does honor it).\",\"path\":[\"onExtractNoMatch\"]}]","[]","[{\"message\":\"extract cannot be combined with decode on an env entry — the runtime takes the decode path (whole-value JWT verification) and never consults extract, silently disabling the structured masking. Remove one of the two.\",\"path\":[\"extract\"]},{\"message\":\"onExtractNoMatch cannot be honored on an env entry with decode — the runtime takes the decode path (which is unconditionally fail-open on verify failure) and never consults extract or onExtractNoMatch. Remove onExtractNoMatch, or drop decode to use extract-based masking (whose no-match handling does honor it).\",\"path\":[\"onExtractNoMatch\"]}]","[]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"extract cannot be combined with decode on an env entry — the runtime takes the decode path (whole-value JWT verification) and never consults extract, silently disabling the structured masking. Remove one of the two.\",\"path\":[\"extract\"]},{\"message\":\"onExtractNoMatch cannot be honored on an env entry with decode — the runtime takes the decode path (which is unconditionally fail-open on verify failure) and never consults extract or onExtractNoMatch. Remove onExtractNoMatch, or drop decode to use extract-based masking (whose no-match handling does honor it).\",\"path\":[\"onExtractNoMatch\"]}]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]"]
-                            }
-                          }
-                        ]
-                      }
-                    }
-                  }
-                },
-                "allowPlaintextInject": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "boolean"
-                  }
-                },
-                "awsPairs": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "array",
-                    "element": {
-                      "type": "object",
-                      "mode": "strip",
-                      "shape": {
-                        "accessKeyIdVar": {
-                          "type": "string",
-                          "checks": [
-                            {
-                              "check": "string_format",
-                              "format": "regex",
-                              "pattern": {
-                                "regex": "^[A-Za-z_][A-Za-z0-9_]*$",
-                                "flags": ""
-                              }
-                            }
-                          ]
-                        },
-                        "secretAccessKeyVar": {
-                          "type": "string",
-                          "checks": [
-                            {
-                              "check": "string_format",
-                              "format": "regex",
-                              "pattern": {
-                                "regex": "^[A-Za-z_][A-Za-z0-9_]*$",
-                                "flags": ""
-                              }
-                            }
-                          ]
-                        },
-                        "sessionTokenVar": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "string",
-                            "checks": [
-                              {
-                                "check": "string_format",
-                                "format": "regex",
-                                "pattern": {
-                                  "regex": "^[A-Za-z_][A-Za-z0-9_]*$",
-                                  "flags": ""
-                                }
-                              }
-                            ]
-                          }
-                        }
-                      },
-                      "checks": [
-                        {
-                          "check": "custom",
-                          "payloadCheck": {
-                            "source": "(e,t)=>{let n=new Map;for(let[r,o]of[[\"accessKeyIdVar\",e.accessKeyIdVar],[\"secretAccessKeyVar\",e.secretAccessKeyVar],[\"sessionTokenVar\",e.sessionTokenVar]]){if(o===void 0)continue;let s=n.get(o);if(s!==void 0)t.addIssue({code:vr.custom,path:[r],message:`${r} names the same env var ('${o}') as ${s} — each pair member must be a distinct variable.`});else n.set(o,r)}}",
-                            "battery": "object",
-                            "probes": ["error: Cannot read properties of null (reading 'accessKeyIdVar')","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[{\"message\":\"secretAccessKeyVar names the same env var ('A') as accessKeyIdVar — each pair member must be a distinct variable.\",\"path\":[\"secretAccessKeyVar\"]}]","[{\"message\":\"sessionTokenVar names the same env var ('A') as accessKeyIdVar — each pair member must be a distinct variable.\",\"path\":[\"sessionTokenVar\"]}]","[{\"message\":\"secretAccessKeyVar names the same env var ('A') as accessKeyIdVar — each pair member must be a distinct variable.\",\"path\":[\"secretAccessKeyVar\"]},{\"message\":\"sessionTokenVar names the same env var ('A') as accessKeyIdVar — each pair member must be a distinct variable.\",\"path\":[\"sessionTokenVar\"]}]","[{\"message\":\"secretAccessKeyVar names the same env var ('null') as accessKeyIdVar — each pair member must be a distinct variable.\",\"path\":[\"secretAccessKeyVar\"]}]","[]","[]","[]","[]","[]","[]","[]","[]","[]"]
-                          }
-                        }
-                      ]
-                    }
-                  }
-                },
-                "sigv4": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "object",
-                    "mode": "strip",
-                    "shape": {
-                      "streaming": {
-                        "type": "optional",
-                        "inner": {
-                          "ref": "n46"
-                        }
-                      },
-                      "presigned": {
-                        "type": "optional",
-                        "inner": {
-                          "ref": "n46"
-                        }
-                      },
-                      "sigv4a": {
-                        "type": "optional",
-                        "inner": {
-                          "ref": "n46"
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              "checks": [
-                {
-                  "check": "custom",
-                  "payloadCheck": {
-                    "source": "(e,t)=>{let n=new Set;for(let[r,o]of(e?.awsPairs??[]).entries()){let s=[[\"accessKeyIdVar\",o.accessKeyIdVar],[\"secretAccessKeyVar\",o.secretAccessKeyVar],[\"sessionTokenVar\",o.sessionTokenVar]],i=new Set;for(let[a,l]of s){if(l===void 0)continue;if(n.has(l))t.addIssue({code:vr.custom,path:[\"awsPairs\",r,a],message:`\"${l}\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.`});i.add(l)}for(let a of i)n.add(a)}}",
-                    "battery": "object",
-                    "probes": ["[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[{\"message\":\"\\\"A\\\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.\",\"path\":[\"awsPairs\",1,\"accessKeyIdVar\"]}]","[]","[{\"message\":\"\\\"A\\\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.\",\"path\":[\"awsPairs\",1,\"sessionTokenVar\"]}]","[{\"message\":\"\\\"C\\\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.\",\"path\":[\"awsPairs\",1,\"accessKeyIdVar\"]},{\"message\":\"\\\"B\\\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.\",\"path\":[\"awsPairs\",1,\"secretAccessKeyVar\"]}]","[{\"message\":\"\\\"null\\\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.\",\"path\":[\"awsPairs\",3,\"secretAccessKeyVar\"]}]"]
-                  }
-                }
-              ]
-            }
+            "ref": "n48"
           },
           "ignoreViolations": {
             "type": "optional",
@@ -8229,6 +7757,496 @@
       }
     },
     "n46": {
+      "type": "optional",
+      "inner": {
+        "type": "object",
+        "mode": "strip",
+        "shape": {
+          "allowedDomains": {
+            "type": "optional",
+            "inner": {
+              "type": "array",
+              "element": {
+                "type": "string"
+              }
+            }
+          },
+          "deniedDomains": {
+            "type": "optional",
+            "inner": {
+              "type": "array",
+              "element": {
+                "type": "string"
+              }
+            }
+          },
+          "strictAllowlist": {
+            "type": "optional",
+            "inner": {
+              "type": "boolean"
+            }
+          },
+          "allowManagedDomainsOnly": {
+            "type": "optional",
+            "inner": {
+              "type": "boolean"
+            }
+          },
+          "allowUnixSockets": {
+            "type": "optional",
+            "inner": {
+              "type": "array",
+              "element": {
+                "type": "string"
+              }
+            }
+          },
+          "allowAllUnixSockets": {
+            "type": "optional",
+            "inner": {
+              "type": "boolean"
+            }
+          },
+          "allowLocalBinding": {
+            "type": "optional",
+            "inner": {
+              "type": "boolean"
+            }
+          },
+          "allowMachLookup": {
+            "type": "optional",
+            "inner": {
+              "type": "array",
+              "element": {
+                "type": "string",
+                "checks": [
+                  {
+                    "check": "custom",
+                    "type": "custom",
+                    "fn": {
+                      "source": "(e)=>!(e.endsWith(\"*\")?e.slice(0,-1):e).includes(\"*\")",
+                      "battery": "string",
+                      "probes": ["true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true"]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "httpProxyPort": {
+            "type": "optional",
+            "inner": {
+              "type": "number"
+            }
+          },
+          "socksProxyPort": {
+            "type": "optional",
+            "inner": {
+              "type": "number"
+            }
+          },
+          "tlsTerminate": {
+            "type": "optional",
+            "inner": {
+              "type": "object",
+              "mode": "strip",
+              "shape": {
+                "caCertPath": {
+                  "type": "optional",
+                  "inner": {
+                    "type": "string",
+                    "checks": [
+                      {
+                        "check": "min_length",
+                        "minimum": 1
+                      }
+                    ]
+                  }
+                },
+                "caKeyPath": {
+                  "type": "optional",
+                  "inner": {
+                    "type": "string",
+                    "checks": [
+                      {
+                        "check": "min_length",
+                        "minimum": 1
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "n47": {
+      "type": "optional",
+      "inner": {
+        "type": "object",
+        "mode": "strip",
+        "shape": {
+          "allowWrite": {
+            "type": "optional",
+            "inner": {
+              "type": "array",
+              "element": {
+                "type": "string"
+              }
+            }
+          },
+          "denyWrite": {
+            "type": "optional",
+            "inner": {
+              "type": "array",
+              "element": {
+                "type": "string"
+              }
+            }
+          },
+          "denyRead": {
+            "type": "optional",
+            "inner": {
+              "type": "array",
+              "element": {
+                "type": "string"
+              }
+            }
+          },
+          "allowRead": {
+            "type": "optional",
+            "inner": {
+              "type": "array",
+              "element": {
+                "type": "string"
+              }
+            }
+          },
+          "allowManagedReadPathsOnly": {
+            "type": "optional",
+            "inner": {
+              "type": "boolean"
+            }
+          },
+          "disabled": {
+            "type": "optional",
+            "inner": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "n48": {
+      "type": "optional",
+      "inner": {
+        "type": "object",
+        "mode": "strip",
+        "shape": {
+          "files": {
+            "type": "optional",
+            "inner": {
+              "type": "array",
+              "element": {
+                "type": "pipe",
+                "in": {
+                  "type": "transform",
+                  "source": "function I9(e){if(typeof e!==\"object\"||e===null)return e;let t=e;if(t.mode!==\"deny\")return e;let n={...t};if(\"extract\"in n&&typeof n.extract!==\"string\")delete n.extract;if(\"onExtractNoMatch\"in n&&n.onExtractNoMatch!==\"warn\"&&n.onExtractNoMatch!==\"deny\"&&n.onExtractNoMatch!==\"error\")delete n.onExtractNoMatch;if(\"decode\"in n&&n.decode!==\"jwt\")delete n.decode;if(\"maskClaims\"in n&&!(Array.isArray(n.maskClaims)&&n.maskClaims.every((r)=>typeof r===\"string\")))delete n.maskClaims;if(\"maskDuplicates\"in n&&typeof n.maskDuplicates!==\"boolean\")delete n.maskDuplicates;if(\"injectHosts\"in n&&!(Array.isArray(n.injectHosts)&&n.injectHosts.every((r)=>typeof r===\"string\")))delete n.injectHosts;return n}",
+                  "battery": "value",
+                  "probes": ["null","1","\"x\"","true","false","[]","[\"a\",null,1]","{}","{\"path\":null}","{\"path\":null,\"script\":null,\"defaultSettings\":null}","{\"a\":1}","[\"skills\",\"bogus\"]","[\"Bash\"]","[\"/a/\"]","9999999999","0","5","6","300000","300001","65536","2147483647","2147483648","-1","1.5","\"/abs/x\"","\"rel\"","\"\"","{\"mode\":\"deny\"}","{\"mode\":\"deny\"}","{\"mode\":\"deny\",\"extract\":\"a\",\"onExtractNoMatch\":\"warn\",\"decode\":\"jwt\",\"maskClaims\":[\"a\"],\"maskDuplicates\":true,\"injectHosts\":[\"h\"]}","{\"mode\":\"deny\",\"onExtractNoMatch\":\"deny\"}","{\"mode\":\"deny\",\"onExtractNoMatch\":\"error\",\"maskClaims\":[]}","{\"mode\":\"allow\",\"extract\":1}","{\"mode\":1}","{\"extract\":1}","{\"constructor\":1,\"a\":1}","{\"toString\":1,\"valueOf\":2,\"hasOwnProperty\":3,\"x\":4}","{\"__proto__x\":1,\"isPrototypeOf\":1,\"propertyIsEnumerable\":1,\"toLocaleString\":1}","{\"timeout\":1,\"request_timeout_ms\":400000,\"x\":1}","{\"request_timeout_ms\":400000}","{\"request_timeout_ms\":5}","{\"request_timeout_ms\":5,\"timeout\":9}","{\"request_timeout_ms\":\"x\"}","{\"request_timeout_ms\":null}","{\"timeout\":null,\"request_timeout_ms\":7}","{\"path\":null,\"script\":null}","{\"path\":null,\"script\":null,\"defaultSettings\":null,\"extra\":1}","{\"path\":\"/a\",\"script\":null}","{\"path\":null,\"script\":\"s\",\"defaultSettings\":null}","{\"script\":null}","{\"defaultSettings\":null}","[\"anthropic\",\"bedrock\",\"bogus\",3,null]","[\"customEndpoint\",\"vertex\",\"foundry\",\"anthropicAws\",\"mantle\",\"gateway\"]","[\"Anthropic\"]","[\"skills\",\"agents\",\"hooks\",\"mcp\",\"other\",1]","[\"a\",{},[],1,null,{\"b\":1}]","{\"engines\":{\"vscode\":\"1\"}}"]
+                },
+                "out": {
+                  "type": "object",
+                  "mode": "strip",
+                  "shape": {
+                    "path": {
+                      "type": "string",
+                      "checks": [
+                        {
+                          "check": "min_length",
+                          "minimum": 1
+                        }
+                      ]
+                    },
+                    "mode": {
+                      "type": "enum",
+                      "values": [
+                        "deny",
+                        "mask"
+                      ]
+                    },
+                    "extract": {
+                      "type": "optional",
+                      "inner": {
+                        "type": "string"
+                      }
+                    },
+                    "onExtractNoMatch": {
+                      "type": "optional",
+                      "inner": {
+                        "type": "enum",
+                        "values": [
+                          "warn",
+                          "deny",
+                          "error"
+                        ]
+                      }
+                    },
+                    "decode": {
+                      "type": "optional",
+                      "inner": {
+                        "type": "enum",
+                        "values": [
+                          "jwt"
+                        ]
+                      }
+                    },
+                    "maskClaims": {
+                      "type": "optional",
+                      "inner": {
+                        "type": "array",
+                        "element": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "maskDuplicates": {
+                      "type": "optional",
+                      "inner": {
+                        "type": "boolean"
+                      }
+                    },
+                    "injectHosts": {
+                      "type": "optional",
+                      "inner": {
+                        "type": "array",
+                        "element": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "checks": [
+                    {
+                      "check": "custom",
+                      "payloadCheck": {
+                        "source": "(e,t)=>{if(e.mode===\"mask\"&&e.path.endsWith(\"/\"))t.addIssue({code:vr.custom,path:[\"path\"],message:'Credential mode \"mask\" applies to a single file, not a directory. List the specific credential file(s), or use \"deny\" for the directory.'});if(e.mode===\"mask\"&&e.extract!==void 0)D9(e.extract,t);if(e.mode===\"mask\"&&e.maskClaims!==void 0)P9(e.maskClaims,e.decode,t)}",
+                        "battery": "object",
+                        "probes": ["error: Cannot read properties of null (reading 'mode')","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[{\"message\":\"Credential mode \\\"mask\\\" applies to a single file, not a directory. List the specific credential file(s), or use \\\"deny\\\" for the directory.\",\"path\":[\"path\"]}]","[]","[]","[{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /(/: Unterminated group\",\"path\":[\"extract\"]}]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","[]","[{\"message\":\"Credential mode \\\"mask\\\" applies to a single file, not a directory. List the specific credential file(s), or use \\\"deny\\\" for the directory.\",\"path\":[\"path\"]},{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /[/: Unterminated character class\",\"path\":[\"extract\"]},{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","[]","[]","[{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /(?<n>a)(?<n>b)/: Duplicate capture group name\",\"path\":[\"extract\"]}]","[]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","error: Cannot read properties of undefined (reading 'endsWith')","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]"]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "envVars": {
+            "type": "optional",
+            "inner": {
+              "type": "array",
+              "element": {
+                "type": "pipe",
+                "in": {
+                  "type": "transform",
+                  "source": "function I9(e){if(typeof e!==\"object\"||e===null)return e;let t=e;if(t.mode!==\"deny\")return e;let n={...t};if(\"extract\"in n&&typeof n.extract!==\"string\")delete n.extract;if(\"onExtractNoMatch\"in n&&n.onExtractNoMatch!==\"warn\"&&n.onExtractNoMatch!==\"deny\"&&n.onExtractNoMatch!==\"error\")delete n.onExtractNoMatch;if(\"decode\"in n&&n.decode!==\"jwt\")delete n.decode;if(\"maskClaims\"in n&&!(Array.isArray(n.maskClaims)&&n.maskClaims.every((r)=>typeof r===\"string\")))delete n.maskClaims;if(\"maskDuplicates\"in n&&typeof n.maskDuplicates!==\"boolean\")delete n.maskDuplicates;if(\"injectHosts\"in n&&!(Array.isArray(n.injectHosts)&&n.injectHosts.every((r)=>typeof r===\"string\")))delete n.injectHosts;return n}",
+                  "battery": "value",
+                  "probes": ["null","1","\"x\"","true","false","[]","[\"a\",null,1]","{}","{\"path\":null}","{\"path\":null,\"script\":null,\"defaultSettings\":null}","{\"a\":1}","[\"skills\",\"bogus\"]","[\"Bash\"]","[\"/a/\"]","9999999999","0","5","6","300000","300001","65536","2147483647","2147483648","-1","1.5","\"/abs/x\"","\"rel\"","\"\"","{\"mode\":\"deny\"}","{\"mode\":\"deny\"}","{\"mode\":\"deny\",\"extract\":\"a\",\"onExtractNoMatch\":\"warn\",\"decode\":\"jwt\",\"maskClaims\":[\"a\"],\"maskDuplicates\":true,\"injectHosts\":[\"h\"]}","{\"mode\":\"deny\",\"onExtractNoMatch\":\"deny\"}","{\"mode\":\"deny\",\"onExtractNoMatch\":\"error\",\"maskClaims\":[]}","{\"mode\":\"allow\",\"extract\":1}","{\"mode\":1}","{\"extract\":1}","{\"constructor\":1,\"a\":1}","{\"toString\":1,\"valueOf\":2,\"hasOwnProperty\":3,\"x\":4}","{\"__proto__x\":1,\"isPrototypeOf\":1,\"propertyIsEnumerable\":1,\"toLocaleString\":1}","{\"timeout\":1,\"request_timeout_ms\":400000,\"x\":1}","{\"request_timeout_ms\":400000}","{\"request_timeout_ms\":5}","{\"request_timeout_ms\":5,\"timeout\":9}","{\"request_timeout_ms\":\"x\"}","{\"request_timeout_ms\":null}","{\"timeout\":null,\"request_timeout_ms\":7}","{\"path\":null,\"script\":null}","{\"path\":null,\"script\":null,\"defaultSettings\":null,\"extra\":1}","{\"path\":\"/a\",\"script\":null}","{\"path\":null,\"script\":\"s\",\"defaultSettings\":null}","{\"script\":null}","{\"defaultSettings\":null}","[\"anthropic\",\"bedrock\",\"bogus\",3,null]","[\"customEndpoint\",\"vertex\",\"foundry\",\"anthropicAws\",\"mantle\",\"gateway\"]","[\"Anthropic\"]","[\"skills\",\"agents\",\"hooks\",\"mcp\",\"other\",1]","[\"a\",{},[],1,null,{\"b\":1}]","{\"engines\":{\"vscode\":\"1\"}}"]
+                },
+                "out": {
+                  "type": "object",
+                  "mode": "strip",
+                  "shape": {
+                    "name": {
+                      "type": "string",
+                      "checks": [
+                        {
+                          "check": "string_format",
+                          "format": "regex",
+                          "pattern": {
+                            "regex": "^[A-Za-z_][A-Za-z0-9_]*$",
+                            "flags": ""
+                          }
+                        }
+                      ]
+                    },
+                    "mode": {
+                      "type": "enum",
+                      "values": [
+                        "deny",
+                        "mask"
+                      ]
+                    },
+                    "extract": {
+                      "type": "optional",
+                      "inner": {
+                        "type": "string"
+                      }
+                    },
+                    "onExtractNoMatch": {
+                      "type": "optional",
+                      "inner": {
+                        "type": "enum",
+                        "values": [
+                          "warn",
+                          "deny",
+                          "error"
+                        ]
+                      }
+                    },
+                    "decode": {
+                      "type": "optional",
+                      "inner": {
+                        "type": "enum",
+                        "values": [
+                          "jwt"
+                        ]
+                      }
+                    },
+                    "maskClaims": {
+                      "type": "optional",
+                      "inner": {
+                        "type": "array",
+                        "element": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "injectHosts": {
+                      "type": "optional",
+                      "inner": {
+                        "type": "array",
+                        "element": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "checks": [
+                    {
+                      "check": "custom",
+                      "payloadCheck": {
+                        "source": "(e,t)=>{if(e.mode===\"mask\"&&e.extract!==void 0)D9(e.extract,t);if(e.mode===\"mask\"&&e.maskClaims!==void 0)P9(e.maskClaims,e.decode,t);if(e.mode===\"mask\"&&e.decode!==void 0&&e.extract!==void 0)t.addIssue({code:vr.custom,path:[\"extract\"],message:\"extract cannot be combined with decode on an env entry — the runtime takes the decode path (whole-value JWT verification) and never consults extract, silently disabling the structured masking. Remove one of the two.\"});if(e.mode===\"mask\"&&e.decode!==void 0&&(e.onExtractNoMatch===\"deny\"||e.onExtractNoMatch===\"error\"))t.addIssue({code:vr.custom,path:[\"onExtractNoMatch\"],message:\"onExtractNoMatch cannot be honored on an env entry with decode — the runtime takes the decode path (which is unconditionally fail-open on verify failure) and never consults extract or onExtractNoMatch. Remove onExtractNoMatch, or drop decode to use extract-based masking (whose no-match handling does honor it).\"})}",
+                        "battery": "object",
+                        "probes": ["error: Cannot read properties of null (reading 'mode')","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /(/: Unterminated group\",\"path\":[\"extract\"]}]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","[]","[{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /[/: Unterminated character class\",\"path\":[\"extract\"]},{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"maskClaims requires decode — without a decode format there is no token to read claims from. Set decode, or omit maskClaims.\",\"path\":[\"maskClaims\"]}]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","[]","[]","[{\"message\":\"extract is not a valid regular expression: Invalid regular expression: /(?<n>a)(?<n>b)/: Duplicate capture group name\",\"path\":[\"extract\"]}]","[]","[{\"message\":\"extract must contain at least one capturing group — group 1 is the credential value to mask (e.g. \\\"token:\\\\s*(\\\\S+)\\\").\",\"path\":[\"extract\"]}]","[{\"message\":\"extract cannot be combined with decode on an env entry — the runtime takes the decode path (whole-value JWT verification) and never consults extract, silently disabling the structured masking. Remove one of the two.\",\"path\":[\"extract\"]}]","[{\"message\":\"onExtractNoMatch cannot be honored on an env entry with decode — the runtime takes the decode path (which is unconditionally fail-open on verify failure) and never consults extract or onExtractNoMatch. Remove onExtractNoMatch, or drop decode to use extract-based masking (whose no-match handling does honor it).\",\"path\":[\"onExtractNoMatch\"]}]","[{\"message\":\"onExtractNoMatch cannot be honored on an env entry with decode — the runtime takes the decode path (which is unconditionally fail-open on verify failure) and never consults extract or onExtractNoMatch. Remove onExtractNoMatch, or drop decode to use extract-based masking (whose no-match handling does honor it).\",\"path\":[\"onExtractNoMatch\"]}]","[]","[{\"message\":\"extract cannot be combined with decode on an env entry — the runtime takes the decode path (whole-value JWT verification) and never consults extract, silently disabling the structured masking. Remove one of the two.\",\"path\":[\"extract\"]},{\"message\":\"onExtractNoMatch cannot be honored on an env entry with decode — the runtime takes the decode path (which is unconditionally fail-open on verify failure) and never consults extract or onExtractNoMatch. Remove onExtractNoMatch, or drop decode to use extract-based masking (whose no-match handling does honor it).\",\"path\":[\"onExtractNoMatch\"]}]","[]","[{\"message\":\"maskClaims must name at least one non-empty claim — omit maskClaims for whole-token masking.\",\"path\":[\"maskClaims\"]},{\"message\":\"extract cannot be combined with decode on an env entry — the runtime takes the decode path (whole-value JWT verification) and never consults extract, silently disabling the structured masking. Remove one of the two.\",\"path\":[\"extract\"]},{\"message\":\"onExtractNoMatch cannot be honored on an env entry with decode — the runtime takes the decode path (which is unconditionally fail-open on verify failure) and never consults extract or onExtractNoMatch. Remove onExtractNoMatch, or drop decode to use extract-based masking (whose no-match handling does honor it).\",\"path\":[\"onExtractNoMatch\"]}]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]"]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "allowPlaintextInject": {
+            "type": "optional",
+            "inner": {
+              "type": "boolean"
+            }
+          },
+          "awsPairs": {
+            "type": "optional",
+            "inner": {
+              "type": "array",
+              "element": {
+                "type": "object",
+                "mode": "strip",
+                "shape": {
+                  "accessKeyIdVar": {
+                    "type": "string",
+                    "checks": [
+                      {
+                        "check": "string_format",
+                        "format": "regex",
+                        "pattern": {
+                          "regex": "^[A-Za-z_][A-Za-z0-9_]*$",
+                          "flags": ""
+                        }
+                      }
+                    ]
+                  },
+                  "secretAccessKeyVar": {
+                    "type": "string",
+                    "checks": [
+                      {
+                        "check": "string_format",
+                        "format": "regex",
+                        "pattern": {
+                          "regex": "^[A-Za-z_][A-Za-z0-9_]*$",
+                          "flags": ""
+                        }
+                      }
+                    ]
+                  },
+                  "sessionTokenVar": {
+                    "type": "optional",
+                    "inner": {
+                      "type": "string",
+                      "checks": [
+                        {
+                          "check": "string_format",
+                          "format": "regex",
+                          "pattern": {
+                            "regex": "^[A-Za-z_][A-Za-z0-9_]*$",
+                            "flags": ""
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                "checks": [
+                  {
+                    "check": "custom",
+                    "payloadCheck": {
+                      "source": "(e,t)=>{let n=new Map;for(let[r,o]of[[\"accessKeyIdVar\",e.accessKeyIdVar],[\"secretAccessKeyVar\",e.secretAccessKeyVar],[\"sessionTokenVar\",e.sessionTokenVar]]){if(o===void 0)continue;let s=n.get(o);if(s!==void 0)t.addIssue({code:vr.custom,path:[r],message:`${r} names the same env var ('${o}') as ${s} — each pair member must be a distinct variable.`});else n.set(o,r)}}",
+                      "battery": "object",
+                      "probes": ["error: Cannot read properties of null (reading 'accessKeyIdVar')","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[{\"message\":\"secretAccessKeyVar names the same env var ('A') as accessKeyIdVar — each pair member must be a distinct variable.\",\"path\":[\"secretAccessKeyVar\"]}]","[{\"message\":\"sessionTokenVar names the same env var ('A') as accessKeyIdVar — each pair member must be a distinct variable.\",\"path\":[\"sessionTokenVar\"]}]","[{\"message\":\"secretAccessKeyVar names the same env var ('A') as accessKeyIdVar — each pair member must be a distinct variable.\",\"path\":[\"secretAccessKeyVar\"]},{\"message\":\"sessionTokenVar names the same env var ('A') as accessKeyIdVar — each pair member must be a distinct variable.\",\"path\":[\"sessionTokenVar\"]}]","[{\"message\":\"secretAccessKeyVar names the same env var ('null') as accessKeyIdVar — each pair member must be a distinct variable.\",\"path\":[\"secretAccessKeyVar\"]}]","[]","[]","[]","[]","[]","[]","[]","[]","[]"]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "sigv4": {
+            "type": "optional",
+            "inner": {
+              "type": "object",
+              "mode": "strip",
+              "shape": {
+                "streaming": {
+                  "type": "optional",
+                  "inner": {
+                    "ref": "n49"
+                  }
+                },
+                "presigned": {
+                  "type": "optional",
+                  "inner": {
+                    "ref": "n49"
+                  }
+                },
+                "sigv4a": {
+                  "type": "optional",
+                  "inner": {
+                    "ref": "n49"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "checks": [
+          {
+            "check": "custom",
+            "payloadCheck": {
+              "source": "(e,t)=>{let n=new Set;for(let[r,o]of(e?.awsPairs??[]).entries()){let s=[[\"accessKeyIdVar\",o.accessKeyIdVar],[\"secretAccessKeyVar\",o.secretAccessKeyVar],[\"sessionTokenVar\",o.sessionTokenVar]],i=new Set;for(let[a,l]of s){if(l===void 0)continue;if(n.has(l))t.addIssue({code:vr.custom,path:[\"awsPairs\",r,a],message:`\"${l}\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.`});i.add(l)}for(let a of i)n.add(a)}}",
+              "battery": "object",
+              "probes": ["[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[]","[{\"message\":\"\\\"A\\\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.\",\"path\":[\"awsPairs\",1,\"accessKeyIdVar\"]}]","[]","[{\"message\":\"\\\"A\\\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.\",\"path\":[\"awsPairs\",1,\"sessionTokenVar\"]}]","[{\"message\":\"\\\"C\\\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.\",\"path\":[\"awsPairs\",1,\"accessKeyIdVar\"]},{\"message\":\"\\\"B\\\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.\",\"path\":[\"awsPairs\",1,\"secretAccessKeyVar\"]}]","[{\"message\":\"\\\"null\\\" appears in more than one awsPairs slot (within or across pairs) — each variable can fill exactly one slot.\",\"path\":[\"awsPairs\",3,\"secretAccessKeyVar\"]}]"]
+            }
+          }
+        ]
+      }
+    },
+    "n49": {
       "type": "enum",
       "values": [
         "deny",
