@@ -932,14 +932,8 @@ where
                     self.publish_deferred()?;
                 }
                 outbound = self.mcp.inbound.recv() => {
-                    match outbound {
-                        Some(McpTransportEvent::Message { server, message }) => self.route_mcp_message(server, message).await?,
-                        Some(McpTransportEvent::Failed { key }) => {
-                            if let Some(waiter) = self.mcp.waiters.remove(&key) {
-                                let _ = waiter.send(Err(()));
-                            }
-                        }
-                        None => {}
+                    if let Some(event) = outbound {
+                        self.mcp_transport_event(event).await?;
                     }
                 }
                 _ = self.mcp.tasks.join_next(), if !self.mcp.tasks.is_empty() => {}
@@ -1883,15 +1877,11 @@ where
                     }
                     Some(_) => {}
                 },
-                event = self.mcp.inbound.recv() => match event {
-                    Some(McpTransportEvent::Message { server, message }) => self.route_mcp_message(server, message).await?,
-                    Some(McpTransportEvent::Failed { key }) => {
-                        if let Some(waiter) = self.mcp.waiters.remove(&key) {
-                            let _ = waiter.send(Err(()));
-                        }
+                event = self.mcp.inbound.recv() => {
+                    if let Some(event) = event {
+                        self.mcp_transport_event(event).await?;
                     }
-                    None => {}
-                },
+                }
                 () = &mut deadline => {
                     settled = false;
                     break;
@@ -1899,6 +1889,18 @@ where
                 _ = &mut self.shutdown => {
                     self.shutdown_seen = true;
                     return Err(Error::ShutdownRequested);
+                }
+            }
+        }
+        if !settled {
+            // `sdk.mjs` routes each transport message and records each finished handshake the moment it happens, so
+            // whatever is already queued when the deadline fires still counts.
+            while let Ok(event) = self.mcp.inbound.try_recv() {
+                self.mcp_transport_event(event).await?;
+            }
+            while let Some(joined) = tasks.try_join_next() {
+                if let Ok(Some((name, manifest))) = joined {
+                    captured.insert(name, manifest);
                 }
             }
         }
@@ -1933,6 +1935,19 @@ where
     /// `${server_name}:${id}`; with no waiter, a late `sdk-manifest-capture:` reply is dropped and anything else
     /// (a notification, a server request, an unmatched or repeated response) goes to the CLI as an `mcp_message`
     /// control request under a random UUID.
+    /// What an in-process server's transport sent: a message to route, or a failed send that fails its waiter.
+    async fn mcp_transport_event(&mut self, event: McpTransportEvent) -> Result<(), Error> {
+        match event {
+            McpTransportEvent::Message { server, message } => self.route_mcp_message(server, message).await,
+            McpTransportEvent::Failed { key } => {
+                if let Some(waiter) = self.mcp.waiters.remove(&key) {
+                    let _ = waiter.send(Err(()));
+                }
+                Ok(())
+            }
+        }
+    }
+
     async fn route_mcp_message(&mut self, server: String, message: JsonObject) -> Result<(), Error> {
         if let Some(id) = message.get("id").filter(|id| !id.is_null()) {
             let key = format!("{server}:{}", crate::mcp_routing::js_string(Some(id)));
