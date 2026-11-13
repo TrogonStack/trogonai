@@ -42,6 +42,24 @@ fn rejects_names_that_would_need_escaping() {
 }
 
 #[test]
+fn header_names_refuse_the_token_characters_an_audit_record_name_does_not_hold() {
+    for ch in ['!', '#', '$', '%', '&', '\'', '*', '^', '`', '|'] {
+        assert_eq!(
+            InjectionLocation::header(format!("x-api{ch}key")),
+            Err(InjectionLocationError::InvalidHeaderCharacter(ch)),
+            "{ch:?}"
+        );
+    }
+}
+
+#[test]
+fn header_names_accept_every_token_character_an_audit_record_name_holds() {
+    let location = InjectionLocation::header("X-Api+Key.v1_~").unwrap();
+
+    assert_eq!(location.to_string(), "header:x-api+key.v1_~");
+}
+
+#[test]
 fn body_field_paths_are_dotted_segments() {
     let location = InjectionLocation::body_field("auth.api_key").unwrap();
 
