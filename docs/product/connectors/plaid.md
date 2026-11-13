@@ -4,7 +4,7 @@ connector:
   name: Plaid
   summary: React to account, transaction and item updates
   category: Finance
-  color: "#111111"
+  icon: plaid
   capabilities:
     events: available
 ---

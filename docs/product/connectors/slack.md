@@ -4,7 +4,7 @@ connector:
   name: Slack
   summary: Receive messages, interactions and slash commands
   category: Communication
-  color: "#4A154B"
+  icon: slack
   capabilities:
     events: available
     channel: planned

@@ -203,7 +203,7 @@ const steps = [
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 0 6px;
+  padding: 0 6px 0 14px;
   align-self: start;
   margin-top: 14px;
 }
@@ -212,7 +212,9 @@ const steps = [
   color: var(--vp-c-text-3);
   font-size: 11px;
   font-weight: 500;
-  white-space: nowrap;
+  line-height: 1.3;
+  text-align: center;
+  text-wrap: balance;
 }
 
 .secret-flow__line {

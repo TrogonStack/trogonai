@@ -93,7 +93,7 @@ function tile(slug: string) {
       <section v-for="item in spotlight" :key="item.slug" class="connector-verify__hero">
         <header>
           <BrandTile v-bind="tile(item.slug)" :size="44" />
-          <span>
+          <span class="connector-verify__title">
             <strong>{{ tile(item.slug).name }}</strong>
             <em :style="{ '--chip': tones[item.how] }">{{ item.how }}</em>
           </span>
@@ -174,7 +174,7 @@ function tile(slug: string) {
   gap: 12px;
 }
 
-.connector-verify__hero header > span {
+.connector-verify__title {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

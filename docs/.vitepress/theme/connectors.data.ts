@@ -1,6 +1,7 @@
 import * as simpleIcons from "simple-icons";
 import { createContentLoader } from "vitepress";
 import { z } from "zod";
+import { EXTRA_BRAND_ICONS } from "./extraBrandIcons";
 
 const CapabilityStatus = z.enum(["available", "preview", "planned"]);
 
@@ -84,7 +85,7 @@ export function toConnector(url: string, raw: unknown): Connector {
 
 function findIcon(url: string, slug: string) {
   const key = `si${slug.charAt(0).toUpperCase()}${slug.slice(1)}`;
-  const icon = (simpleIcons as Record<string, { hex: string; path: string } | undefined>)[key];
+  const icon = (simpleIcons as Record<string, { hex: string; path: string } | undefined>)[key] ?? EXTRA_BRAND_ICONS[slug];
 
   if (!icon) {
     throw new Error(`${url}\n\nUnknown simple-icons slug: ${slug}. Use a slug from https://simpleicons.org or set \`color\` instead.`);

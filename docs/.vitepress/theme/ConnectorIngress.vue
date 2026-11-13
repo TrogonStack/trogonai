@@ -34,7 +34,7 @@ const accounts = [
       <section class="ingress__providers">
         <p class="ingress__label">Providers call one URL</p>
         <ul class="ingress__tiles">
-          <li v-for="(provider, index) in providers" :key="provider.name" :style="{ '--i': index }">
+          <li v-for="provider in providers" :key="provider.name">
             <BrandTile :name="provider.name" :color="provider.color" :icon-path="provider.iconPath" :size="44" />
             <span>{{ provider.name }}</span>
           </li>
@@ -207,8 +207,6 @@ const accounts = [
   margin: 0;
   color: var(--vp-c-text-2);
   font-size: 11.5px;
-  animation: ingress-bob 4.8s ease-in-out infinite;
-  animation-delay: calc(var(--i) * -0.8s);
 }
 
 .ingress__nowrap {
@@ -669,16 +667,6 @@ const accounts = [
   }
 }
 
-@keyframes ingress-bob {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-3px);
-  }
-}
-
 @keyframes ingress-glow {
   0%,
   70%,
@@ -746,7 +734,6 @@ const accounts = [
     display: none;
   }
 
-  .ingress__tiles li,
   .ingress__steps li {
     animation: none;
   }
