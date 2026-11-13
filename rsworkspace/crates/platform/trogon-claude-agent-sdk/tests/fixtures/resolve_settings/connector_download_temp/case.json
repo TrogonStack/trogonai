@@ -1,0 +1,7 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work/connector-downloads"
+  }
+}

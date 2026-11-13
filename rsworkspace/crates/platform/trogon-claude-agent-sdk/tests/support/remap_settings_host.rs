@@ -9,7 +9,8 @@ use std::{
 
 use trogon_claude_agent_sdk::adapters::{
     CheckReadable, CurrentDirectory, DirectoryEntry, EnvironmentVariable, ExecuteFile, ExecuteFileOutcome,
-    ExecuteFileRequest, HostIdentity, NativeHost, OperatingSystem, ReadDirectory, ReadFile,
+    ExecuteFileRequest, HostIdentity, LinkMetadata, NativeHost, OperatingSystem, ReadDirectory, ReadFile, ReadLink,
+    ReadSymlinkMetadata,
 };
 
 /// Machine-wide locations the resolver reads, which the host moves under a sandbox root.
@@ -62,6 +63,22 @@ impl ReadDirectory for RemapHost {
 
     fn read_directory(&self, path: &Path) -> Result<Vec<DirectoryEntry>, io::Error> {
         NativeHost.read_directory(&self.remap(path))
+    }
+}
+
+impl ReadSymlinkMetadata for RemapHost {
+    type Error = io::Error;
+
+    fn symlink_metadata(&self, path: &Path) -> Result<LinkMetadata, io::Error> {
+        NativeHost.symlink_metadata(&self.remap(path))
+    }
+}
+
+impl ReadLink for RemapHost {
+    type Error = io::Error;
+
+    fn read_link(&self, path: &Path) -> Result<PathBuf, io::Error> {
+        NativeHost.read_link(&self.remap(path))
     }
 }
 
