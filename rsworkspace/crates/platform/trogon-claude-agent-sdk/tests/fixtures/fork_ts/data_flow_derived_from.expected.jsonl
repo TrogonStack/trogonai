@@ -1,0 +1,11 @@
+{"type":"history-suppression","sessionId":"id-5","cause":"fork_inherit","ts":"2023-11-14T22:13:20.123Z"}
+{"type":"user","uuid":"id-1","parentUuid":null,"sessionId":"id-5","timestamp":"t1","message":{"role":"user","content":"one"},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"u1"}}
+{"type":"system","subtype":"compact_boundary","uuid":"id-2","parentUuid":"id-1","sessionId":"id-5","timestamp":"t2","compactMetadata":{"durationMs":3},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"cb"}}
+{"type":"user","uuid":"id-3","parentUuid":"id-2","sessionId":"id-5","timestamp":"t3","forkedFrom":{"sessionId":"s0","messageUuid":"u2"},"message":{"role":"user","content":"two"},"isSidechain":false}
+{"type":"user","uuid":"id-4","parentUuid":"id-3","sessionId":"id-5","timestamp":"2023-11-14T22:13:20.123Z","forkedFrom":{"sessionId":"s0","messageUuid":"u3"},"message":{"role":"user","content":"three"},"isSidechain":false}
+{"type":"content-replacement","sessionId":"id-5","replacements":[{"a":1},{"b":2.5,"c":1e+21,"d":0}],"uuid":"id-6","timestamp":"2023-11-14T22:13:20.123Z"}
+{"type":"data-flow-records","v":1,"sessionId":"id-5","records":[{"tool_name":"Bash","tool_use_id":"tu1","inner_call_index":0,"no_message":true},{"tool_use_id":"tu2","tool_name":"","server":{"type":"claude_ai_connector","id":"mcp_01111111111111111111111","directory_id":null},"mcp_tool_name":"t"},{"event_id":"ev3","server":{"type":"anthropic","id":"x"},"touched":{"kind":"session","id":"i","action":"copy","to":"t"}},{"tool_use_id":"tu9","tool_name":"","implicit":true,"source":{"type":"hook","id":"h1"}}],"snapshot":true}
+{"type":"data-flow-incomplete","v":1,"sessionId":"id-5"}
+{"type":"derived-from","v":1,"sessionId":"id-5","sessions":[{"type":"claude_code_session","id":"a","via":"fork"},{"type":"claude_code_session","id":"c","via":"fork"},{"type":"claude_code_session","id":"s0","via":"fork"}]}
+{"type":"relocated","sessionId":"id-5","relocatedCwd":"/two"}
+{"type":"custom-title","sessionId":"id-5","customTitle":"Derived (fork)","uuid":"id-7","timestamp":"2023-11-14T22:13:20.123Z"}

@@ -225,7 +225,8 @@ struct HookRegistrationWire<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     matcher: Option<&'a str>,
     hook_callback_ids: &'a [String],
-    on_failure: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    on_failure: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     timeout: Option<f64>,
 }
@@ -337,7 +338,8 @@ pub struct HookRegistration {
     pub matcher: Option<String>,
     pub callbacks: Vec<Arc<dyn HookHandler>>,
     pub timeout: Option<Timeout>,
-    pub on_failure: HookFailureMode,
+    /// `None` omits `onFailure` from the wire, as both upstream SDKs do when it is unset.
+    pub on_failure: Option<HookFailureMode>,
 }
 
 impl HookRegistration {
@@ -345,7 +347,7 @@ impl HookRegistration {
         serde_json::to_value(HookRegistrationWire {
             matcher: self.matcher.as_deref(),
             hook_callback_ids: callback_ids,
-            on_failure: self.on_failure.as_str(),
+            on_failure: self.on_failure.map(HookFailureMode::as_str),
             timeout: self.timeout.map(|timeout| timeout.as_duration().as_secs_f64()),
         })
     }
