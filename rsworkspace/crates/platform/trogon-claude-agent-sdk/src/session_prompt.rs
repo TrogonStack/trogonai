@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use crate::{JsonObject, session_summary::SummaryDialect};
+use crate::{JsonObject, SummaryDialect};
 
 /// Extracts the first meaningful user prompt from one transcript entry.
 ///

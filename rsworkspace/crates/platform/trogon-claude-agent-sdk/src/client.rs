@@ -35,7 +35,7 @@ pub struct ClientHandle {
 }
 
 fn capture_inherited<E: crate::adapters::EnvironmentVariable>(environment: &E) -> crate::environment_plan::Inherited {
-    let mut inherited: crate::environment_plan::Inherited = crate::environment_plan::INHERITED_KEYS
+    let mut inherited: crate::environment_plan::Inherited = crate::constants::INHERITED_KEYS
         .iter()
         .filter_map(|key| {
             let key = std::ffi::OsString::from(*key);

@@ -5,6 +5,7 @@
 //! `import_session_to_store`. Project keys use the TypeScript sanitization the transcript mirror uses, so they match
 //! what a mirrored or imported session was stored under.
 
+use crate::constants::{DEFAULT_IMPORT_BATCH, LIST_LOAD_CONCURRENCY, LITE_READ_BUF_SIZE, MAX_IMPORT_BYTES};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -20,8 +21,8 @@ use crate::{
     SessionMessage, SessionMutationError, SessionProjectKey, SessionProjectKeyError, SessionStore, SessionStoreError,
     SessionStoreOperation, SessionSubpath, SummaryDialect, project_key_for_directory,
     session_files::{
-        LITE_READ_BUF_SIZE, LiteSessionFile, extract_first_prompt_from_head, parse_session_info_from_lite,
-        read_agent_metadata_sidecar, sort_page, valid_uuid,
+        LiteSessionFile, extract_first_prompt_from_head, parse_session_info_from_lite, read_agent_metadata_sidecar,
+        sort_page, valid_uuid,
     },
     session_mutations::{build_fork_lines, iso_now, partition_fork_entry, py_strip, sanitize_unicode},
     session_project_key::canonicalize_lenient,
@@ -31,12 +32,6 @@ use crate::{
         entries_to_session_messages, entries_to_subagent_messages, is_transcript_entry, parent_ids_from_agent_metadata,
     },
 };
-
-/// Upstream `_STORE_LIST_LOAD_CONCURRENCY`.
-const LIST_LOAD_CONCURRENCY: usize = 16;
-/// Upstream `MAX_PENDING_ENTRIES` and `MAX_PENDING_BYTES`, the import batch defaults.
-const DEFAULT_IMPORT_BATCH: usize = 500;
-const MAX_IMPORT_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionStoreHelperError {

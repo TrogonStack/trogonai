@@ -1,3 +1,4 @@
+use crate::constants::SCRIPT_EXTENSIONS;
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     future::{Future, pending},
@@ -355,8 +356,6 @@ fn initialize_config(
     .to_value()?;
     Ok((request, callbacks, blocking))
 }
-
-const SCRIPT_EXTENSIONS: [&str; 5] = ["js", "mjs", "ts", "tsx", "jsx"];
 
 fn is_script(path: &std::path::Path) -> bool {
     path.extension()
@@ -795,7 +794,7 @@ where
                         &cli_path,
                     )
                 {
-                    tracing::warn!("{warning}");
+                    tracing::warn!(%warning, "Claude Code version warning");
                 }
                 self.run_state.observe(&message, queued_limit, task_limit)?;
                 if matches!(message, Message::Result(_)) {
