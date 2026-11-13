@@ -1,12 +1,9 @@
 use super::*;
 use async_nats::jetstream::context::{CreateKeyValueErrorKind, KeyValueErrorKind};
+use trogon_credential_domain::{CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use trogon_decider_nats::snapshot_key;
 use trogon_nats::jetstream::{MockJetStreamKvClient, MockJetStreamKvStore};
 use trogonai_proto::gateway::credentials::state_v1;
-
-use crate::credential::commands::domain::{
-    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind,
-};
 
 fn stream_id(owner_id: &str) -> CredentialKey {
     let owner = CredentialOwnerId::new(owner_id).unwrap();

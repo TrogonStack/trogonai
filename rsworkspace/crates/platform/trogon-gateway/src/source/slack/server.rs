@@ -38,17 +38,16 @@ use serde_json::value::RawValue;
 use std::future::Future;
 use std::pin::Pin;
 use tracing::{info, instrument, warn};
+use trogon_credential_domain::{CredentialKind, SourceIntegrationId, SourceKind};
 use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, ProvisionedStreamField, PublishOutcome,
 };
 use trogon_nats::{DottedNatsToken, SubjectTokenViolationError};
+use trogon_secret_store::{SecretStoreError, SecretStoreGet};
 use trogon_semconv::span::SLACK_WEBHOOK;
 
-use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{SecretStoreError, SecretStoreGet};
-use crate::source_integration_id::SourceIntegrationId;
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
     if outcome.is_ok() {

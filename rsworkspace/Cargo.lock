@@ -7370,6 +7370,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-credential-domain"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "trogon-nats",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-decider"
 version = "0.1.0"
 dependencies = [
@@ -7642,10 +7651,12 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-config-value",
+ "trogon-credential-domain",
  "trogon-decider",
  "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-nats",
+ "trogon-secret-store",
  "trogon-semconv",
  "trogon-service-config",
  "trogon-std",
@@ -7835,6 +7846,26 @@ dependencies = [
  "trogon-scheduler-domain",
  "trogonai-proto",
  "wit-bindgen 0.63.0",
+]
+
+[[package]]
+name = "trogon-secret-store"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "hex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "testcontainers-modules",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "trogon-credential-domain",
+ "trogon-std",
+ "url",
 ]
 
 [[package]]

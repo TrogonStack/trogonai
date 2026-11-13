@@ -365,7 +365,7 @@ concerns live one layer down, in CredentialStatus.
 
 ### Layer 2: CredentialStatus (per-version, implemented, not the decider)
 
-Source: `credential/commands/domain/credential_status.rs` and every
+Source: `trogon-credential-domain/src/credential_status.rs` and every
 SecretStore adapter (`openbao_secret_store.rs`, `in_memory_secret_store.rs`,
 `static_config_secret_store.rs`, `mock_openbao_secret_store.rs`).
 

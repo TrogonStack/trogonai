@@ -1,10 +1,10 @@
 use buffa::MessageField;
-
-use super::*;
-use crate::credential::commands::domain::{
+use trogon_credential_domain::{
     CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialIdentityVersion, CredentialKind,
     CredentialOwnerId, CredentialScope, SourceKind,
 };
+
+use super::*;
 use crate::credential::commands::proto::{
     activated_to_proto, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto,
     rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,

@@ -13,11 +13,16 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+use trogon_credential_domain::{
+    CredentialId, CredentialKey, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope,
+    RuntimeReleaseDeniedError, RuntimeReleasePolicy, RuntimeReleaseRequest, SourceIntegrationId, SourceKind,
+};
 use trogon_decider_runtime::{
     EventDecodeOutcome, InvalidStreamPositionError, ReadFrom, ReadStreamRequest, StreamEvent, StreamPosition,
     StreamRead,
 };
 use trogon_nats::jetstream::{JetStreamGetRawMessage, JetStreamGetStreamInfo};
+use trogon_secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
 use trogon_semconv::{attribute, metric};
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{
@@ -25,10 +30,6 @@ use trogonai_proto::gateway::credentials::{
 };
 
 use crate::constants::METER_NAME;
-use crate::credential::commands::domain::{
-    CredentialId, CredentialKey, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope,
-    RuntimeReleaseDeniedError, RuntimeReleasePolicy, RuntimeReleaseRequest, SourceKind,
-};
 use crate::credential::commands::proto::{
     CredentialProtoDecodeError, active_credential_ref, decode_cleanup_failed_state, decode_destroy_requested_state,
     decode_destroyed_state, decode_message_field, decode_pending_write_state, decode_revoked_state,
@@ -38,8 +39,6 @@ use crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX;
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::stream::credential_event_subject;
 use crate::credential::{CredentialEvolveError, evolve_stream, initial_state};
-use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
-use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Debug)]
 struct RuntimeProjectionMetrics {

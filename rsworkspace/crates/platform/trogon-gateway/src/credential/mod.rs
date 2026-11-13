@@ -9,7 +9,6 @@ mod event_stream_mismatch_error;
 pub(crate) mod store;
 pub(crate) mod stream;
 
-pub use commands::domain::CredentialFailureReason;
 pub use commands::{
     ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, RecordCredentialDestroyFailure,
     RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,
