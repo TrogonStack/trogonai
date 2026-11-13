@@ -1606,7 +1606,7 @@
       "rust_api": [],
       "tests": [],
       "status": "deferred",
-      "rationale": "Session listing/history/import/mutation convenience functions are not exposed as matching Rust helpers. Core storage operations are mapped separately."
+      "rationale": "Filesystem listing, info, message and subagent readers are exposed as SessionFiles methods and free functions with Python semantics plus the TypeScript ordering tie-break. Mutation helpers, store-backed variants and import are not yet exposed. TypeScript-only reader options (includeSystemMessages, includeProgrammatic, continued-in sessions, custom-title sidecars, worktree ownership checks) are not replicated. Core storage operations are mapped separately."
     },
     {
       "id": "advanced-native-options",
