@@ -55,8 +55,8 @@ information.
 For interactive use, create a `ClaudeSdkClient`, send a prompt and receive
 through `Message::Result`. The next prompt reuses the process.
 `send_input(UserInput)` accepts structured content and message identity.
-`InputBlock` validates supported text, image, document and tool-result shapes;
-an explicit extension constructor handles future types.
+`InputBlock` is a transparent JSON-object wrapper forwarded verbatim, with a
+`text` convenience constructor; the CLI and the Messages API validate block shapes.
 
 Ordinary sends reject overlapping turns. Use the cloneable `ClientHandle` for
 queued input or `stream_input`, and receive on the owner concurrently. Call
@@ -117,9 +117,9 @@ check a separate CLI installation.
 Build a `LocalMcpServer` with named `LocalMcpServerOptions` fields. Define each
 schema-validated tool through `SdkTool::from(SdkToolOptions { ... })`, naming its
 metadata, input schema and async handler. Construct its `McpToolName` and
-`McpToolInputSchema` first. `McpToolName` stores any text; the built-in server
-refuses to list a name outside the MCP protocol limits (one to 128 ASCII letters,
-digits, underscores, hyphens or periods) with a JSON-RPC internal error.
+`McpToolInputSchema` first. `McpToolName` stores any text; `LocalMcpServer::from`
+logs a warning for a name outside the MCP protocol limits (one to 128 ASCII
+letters, digits, underscores, hyphens or periods), and `tools/list` still lists it.
 `McpToolInputSchema` enforces a valid object input schema. `SdkTool::from` then
 assembles its inputs without returning an error.
 `LocalMcpServerOptions.tools` requires an immutable `SdkTools` collection.

@@ -48,7 +48,7 @@ client ownership, startup, query completion, hooks or shutdown.
   otherwise delegate to the native call. See [runtime adapters](docs/explanation/runtime-adapters.md).
 
 - Preserve the approved Python-aligned configuration: `cli_path: Option<PathBuf>`,
-  unrestricted `model: Option<String>`, optional `permission_mode` and
+  unrestricted `model: Option<ModelName>`, optional `permission_mode` and
   `setting_sources`. Omission differs from explicit default or an empty list.
   Refuse Windows batch CLI paths at process start, before the spawn adapter.
 - Follow Python lifecycle names with Rust casing: `ClaudeSdkClient` and consuming
