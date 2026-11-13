@@ -140,13 +140,12 @@ impl InFlight {
             PolicyRereads::Background => {
                 let (sender, receiver) = mpsc::sync_channel(1);
                 let reader = host.clone();
-                let spawned = thread::Builder::new().spawn(move || {
+                // A thread that cannot start drops the sender with it, so the read ends without an answer, the way a
+                // read that threw does upstream.
+                let _ = thread::Builder::new().spawn(move || {
                     let _ = sender.send(read_host(&reader, started));
                 });
-                match spawned {
-                    Ok(_) => Outcome::Running(receiver),
-                    Err(_) => Outcome::Ended(Some(Box::new(read_host(host, started)))),
-                }
+                Outcome::Running(receiver)
             }
         };
         Self {

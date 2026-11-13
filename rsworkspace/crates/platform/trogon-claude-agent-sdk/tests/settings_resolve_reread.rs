@@ -4,7 +4,10 @@
 //! the interval for the last reads has passed, and a read upstream leaves running in the background counts from the
 //! instant it ends. The expectations come from running the pinned TypeScript resolver on the same sequences with a
 //! fake clock (see the `mdm_reread_*` fixtures of the differential test). The clock is the host's and a command
-//! takes the `duration_ms` it reports, so no test waits.
+//! takes the `duration_ms` it reports, so only a test of a read held on its own thread waits, for at most a second
+//! of steady time per call.
+
+use std::{thread, time::Duration};
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{PolicyRereads, ResolveSettingsOptions, ResolverState, resolve_settings_with_state};
@@ -228,4 +231,41 @@ fn a_fresh_state_reads_the_host_on_every_call() {
     assert_eq!(model(&resolve(&host, &ResolverState::new(), 0)), Some("A"));
     answers(&mut host, "B");
     assert_eq!(model(&resolve(&host, &ResolverState::new(), 1)), Some("B"));
+}
+
+#[test]
+fn a_read_still_running_on_its_own_thread_leaves_the_reading_in_force_until_it_ends() {
+    let mut host = host();
+    let state = ResolverState::new();
+    answers(&mut host, "A");
+    assert_eq!(model(&resolve(&host, &state, 0)), Some("A"));
+    answers(&mut host, "B");
+    host.hold_commands();
+    assert_eq!(model(&resolve(&host, &state, HALF_HOUR)), Some("A"));
+    assert_eq!(model(&resolve(&host, &state, HALF_HOUR + 2_000)), Some("A"));
+    host.release_commands();
+    let mut seen = None;
+    for _ in 0..500 {
+        seen = model(&resolve(&host, &state, HALF_HOUR + 3_000)).map(str::to_owned);
+        if seen.as_deref() == Some("B") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(seen.as_deref(), Some("B"));
+    assert_eq!(machine_reads(&host), 2);
+}
+
+#[test]
+fn a_read_whose_thread_goes_away_counts_as_unanswered_and_is_retried_at_once() {
+    let mut host = host();
+    let state = ResolverState::new();
+    answers(&mut host, "A");
+    assert_eq!(model(&resolve(&host, &state, 0)), Some("A"));
+    host.throws = true;
+    assert_eq!(model(&resolve(&host, &state, HALF_HOUR)), Some("A"));
+    host.throws = false;
+    answers(&mut host, "B");
+    assert_eq!(model(&resolve(&host, &state, HALF_HOUR + 1)), Some("B"));
+    assert_eq!(machine_reads(&host), 3);
 }

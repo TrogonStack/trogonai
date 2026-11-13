@@ -264,10 +264,9 @@ fn read_registry<H: SettingsHost>(host: &H, tool: &OsStr) -> MdmRead {
         ];
         run(host, tool, &args, Some(POLICY_READ_MAX_BUFFER))
     };
-    let mut runs = together(&[REGISTRY_MACHINE_KEY, REGISTRY_USER_KEY], query).into_iter();
-    let (Some(machine), Some(user)) = (runs.next(), runs.next()) else {
-        return MdmRead::default();
-    };
+    let mut runs = together(&[REGISTRY_MACHINE_KEY, REGISTRY_USER_KEY], &query).into_iter();
+    let machine = runs.next().unwrap_or_else(|| query(&REGISTRY_MACHINE_KEY));
+    let user = runs.next().unwrap_or_else(|| query(&REGISTRY_USER_KEY));
     MdmRead {
         plists: None,
         hklm_stdout: (machine.status == ExecuteFileStatus::Ok).then(|| machine.stdout.clone()),

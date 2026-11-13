@@ -6,7 +6,7 @@ use std::{
     io,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -35,6 +35,10 @@ pub struct FakeHost {
     /// Milliseconds since the epoch the host's clock shows. Commands leave it alone: the resolver counts the
     /// `duration_ms` they report, the way the oracle's fake clock counts a fixture's `durations`.
     pub clock_ms: AtomicU64,
+    /// While set, every command waits before it answers, shared with the copies a background read takes.
+    pub held: Arc<(Mutex<bool>, Condvar)>,
+    /// Whether running a command fails the read the way a host that throws does.
+    pub throws: bool,
 }
 
 /// A copy sees the files and commands as they are now and the clock where it stands now, and records its runs
@@ -53,6 +57,8 @@ impl Clone for FakeHost {
             commands: self.commands.clone(),
             runs: Arc::clone(&self.runs),
             clock_ms: AtomicU64::new(self.clock_ms.load(Ordering::SeqCst)),
+            held: Arc::clone(&self.held),
+            throws: self.throws,
         }
     }
 }
@@ -71,7 +77,19 @@ impl FakeHost {
             commands: BTreeMap::new(),
             runs: Arc::new(Mutex::new(Vec::new())),
             clock_ms: AtomicU64::new(0),
+            held: Arc::new((Mutex::new(false), Condvar::new())),
+            throws: false,
         }
+    }
+
+    /// Makes every command wait until [`FakeHost::release_commands`].
+    pub fn hold_commands(&self) {
+        *self.held.0.lock().expect("held") = true;
+    }
+
+    pub fn release_commands(&self) {
+        *self.held.0.lock().expect("held") = false;
+        self.held.1.notify_all();
     }
 
     /// Sets the clock, in milliseconds since the epoch.
@@ -323,6 +341,13 @@ impl ExecuteFile for FakeHost {
             line.push_str(&argument.to_string_lossy());
         }
         self.runs.lock().expect("runs").push(line.clone());
+        assert!(!self.throws, "the host throws while running {line}");
+        let (held, released) = &*self.held;
+        drop(
+            released
+                .wait_while(held.lock().expect("held"), |holding| *holding)
+                .expect("held"),
+        );
         self.commands
             .get(&line)
             .cloned()
