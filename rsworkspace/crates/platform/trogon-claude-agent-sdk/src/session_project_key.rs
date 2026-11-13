@@ -229,9 +229,16 @@ pub fn project_key_for_directory_in(
     dialect: crate::SummaryDialect,
 ) -> Result<SessionProjectKey, SessionProjectKeyError> {
     let directory = directory.unwrap_or_else(|| Path::new("."));
+    if dialect == crate::SummaryDialect::TypeScript {
+        let config_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
+        let name_override = std::env::var("CLAUDE_CODE_PROJECT_DIR_NAME").ok();
+        return SessionProjectKey::for_directory_ts_with_filesystem(
+            directory,
+            &crate::adapters::NativeFileSystem,
+            config_dir.as_deref(),
+            name_override.as_deref(),
+        );
+    }
     let canonical = canonicalize_lenient_in(directory, dialect);
-    SessionProjectKey::new(match dialect {
-        crate::SummaryDialect::TypeScript => project_name_ts(&canonical),
-        crate::SummaryDialect::Python => sanitize_path(&canonical, dialect),
-    })
+    SessionProjectKey::new(sanitize_path(&canonical, dialect))
 }

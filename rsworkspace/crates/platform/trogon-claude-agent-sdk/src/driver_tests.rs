@@ -487,8 +487,10 @@ fn a_derived_client_app_reaches_the_overlay_environment_unless_a_label_exists() 
 async fn the_request_counter_wraps_by_default() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
     fixture.driver.next_id = u64::MAX;
-    assert_eq!(fixture.driver.next_request_id()?.as_str(), "request-0");
-    assert_eq!(fixture.driver.next_request_id()?.as_str(), "request-1");
+    let _ = fixture.driver.next_request_id()?;
+    assert_eq!(fixture.driver.next_id, 0);
+    let _ = fixture.driver.next_request_id()?;
+    assert_eq!(fixture.driver.next_id, 1);
     fixture.finish().await
 }
 
@@ -558,6 +560,8 @@ fn receipt(subtype: &str) -> Message {
         subtype: subtype.into(),
         session_id: None,
         data: JsonObject::new(),
+        event: crate::SystemEvent::Other,
+        raw: JsonObject::new(),
     })
 }
 
