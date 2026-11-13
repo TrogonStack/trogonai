@@ -231,7 +231,15 @@ id, and acknowledges anything else with an id 0 result. The error for a
 message that is not an object is the `TypeError` the JavaScript engine raises,
 so `ClaudeAgentOptions.js_runtime` picks its words: `JsRuntime::Node` (the
 default) names the value as V8 does, and `JsRuntime::Bun` gives the fixed
-JavaScriptCore text. Python fails the
+JavaScriptCore text. TypeScript keys the
+waiting request by the JavaScript text `${server_name}:${id}`, so ids `1` and
+`"1"` collide: the later request replaces the earlier waiter, and the earlier
+control request is never answered. It has no timeout on that wait. A message a
+server sends with no waiter for its id (a notification, a request to the client,
+a repeated or unmatched response; see `SdkMcpSession::take_outbound`) goes to
+the CLI as an `mcp_message` control request under a random UUID, except a late
+`sdk-manifest-capture:` reply, which is dropped. Closing writes nothing for the
+requests still waiting. Python fails the
 request when the server name or message is missing, and answers an unknown
 server or an undeliverable message with a JSON-RPC error under the message's
 id.

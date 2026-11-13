@@ -14,7 +14,7 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -719,6 +719,129 @@ async fn mcp_message_reports_a_non_object_message_like_bun() -> TestResult {
     let missing = mcp_message(&mut cli, "missing", json!({"server_name":"missing","message":ping})).await?;
     assert_eq!(missing["error"], "SDK MCP server not found: missing");
     cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// An in-process server whose transport sends what each message it receives asks for: `params.send` lists
+/// replies, each after its `delay_ms` or, with none, as the answer to the call itself.
+struct ScriptedMcpServer {
+    received: Arc<Mutex<Vec<Value>>>,
+}
+
+struct ScriptedMcpSession {
+    received: Arc<Mutex<Vec<Value>>>,
+    outbound: tokio::sync::mpsc::UnboundedSender<JsonObject>,
+    inbound: Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<JsonObject>>>,
+}
+
+impl SdkMcpServer for ScriptedMcpServer {
+    fn open_session(&self) -> Arc<dyn SdkMcpSession> {
+        let (outbound, inbound) = tokio::sync::mpsc::unbounded_channel();
+        Arc::new(ScriptedMcpSession {
+            received: self.received.clone(),
+            outbound,
+            inbound: Mutex::new(Some(inbound)),
+        })
+    }
+}
+
+impl SdkMcpSession for ScriptedMcpSession {
+    fn request(&self, message: JsonObject, _signal: CancellationToken) -> McpFuture<'_> {
+        Box::pin(async move {
+            let entries = message
+                .get("params")
+                .and_then(|params| params.get("send"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            self.received
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(Value::Object(message));
+            let mut immediate = None;
+            for entry in entries {
+                let Some(Value::Object(reply)) = entry.get("message").cloned() else {
+                    continue;
+                };
+                match entry.get("delay_ms").and_then(Value::as_u64) {
+                    Some(delay) => {
+                        let outbound = self.outbound.clone();
+                        drop(tokio::spawn(async move {
+                            tokio::time::sleep(Duration::from_millis(delay)).await;
+                            let _ = outbound.send(reply);
+                        }));
+                    }
+                    None if immediate.is_none() => immediate = Some(reply),
+                    None => {
+                        let _ = self.outbound.send(reply);
+                    }
+                }
+            }
+            Ok(immediate)
+        })
+    }
+
+    fn take_outbound(&self) -> Option<tokio::sync::mpsc::UnboundedReceiver<JsonObject>> {
+        self.inbound.lock().unwrap_or_else(PoisonError::into_inner).take()
+    }
+}
+
+fn is_uuid(text: &str) -> bool {
+    text.len() == 36
+        && text.char_indices().all(|(index, character)| match index {
+            8 | 13 | 18 | 23 => character == '-',
+            _ => character.is_ascii_hexdigit(),
+        })
+}
+
+/// Replays `tests/fixtures/sdk_mcp/mcp_message_routing.json`, which `sdk.mjs` 0.3.323 `query()` produced when a
+/// fake CLI sent each case's frames: a waiter is keyed by the JavaScript text `${server_name}:${id}`, so ids
+/// `1` and `"1"` collide and the replaced waiter's request is never answered; a message from a server with no
+/// waiter goes to the CLI as an `mcp_message` control request under a random UUID, except a late
+/// `sdk-manifest-capture:` reply, which is dropped; nothing times out; and closing writes nothing.
+#[tokio::test]
+async fn mcp_message_routing_replays_the_typescript_golden() -> TestResult {
+    let golden: Value = serde_json::from_str(include_str!("fixtures/sdk_mcp/mcp_message_routing.json"))?;
+    let cases = golden["cases"]
+        .as_array()
+        .ok_or_else(|| io::Error::other("golden cases"))?;
+    for case in cases {
+        let name = case["name"].as_str().unwrap_or("unnamed");
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let mut configured = options()?;
+        let servers = case["servers"].as_array().cloned().unwrap_or_else(|| vec![json!("s")]);
+        for server in &servers {
+            configured.sdk_mcp_servers.insert(
+                McpServerName::from(server.as_str().unwrap_or("s")),
+                Arc::new(ScriptedMcpServer {
+                    received: received.clone(),
+                }),
+            );
+        }
+        let (client, mut cli) = connect(configured).await?;
+        for step in case["steps"].as_array().cloned().unwrap_or_default() {
+            tokio::time::sleep(Duration::from_millis(step["wait_ms"].as_u64().unwrap_or(0))).await;
+            cli.send(step["frame"].clone()).await?;
+        }
+        for expected in case["expect"].as_array().cloned().unwrap_or_default() {
+            let mut frame = cli.read().await?;
+            if frame["type"] == "control_request" {
+                let id = frame["request_id"].as_str().unwrap_or_default();
+                assert!(is_uuid(id), "{name}: {id}");
+                frame["request_id"] = json!("<uuid>");
+            }
+            assert_eq!(frame, expected, "{name}");
+        }
+        let quiet = case["quiet_ms"].as_u64().unwrap_or(300);
+        assert!(
+            timeout(Duration::from_millis(quiet), cli.read()).await.is_err(),
+            "{name}: the CLI received a frame the upstream SDK does not send"
+        );
+        let seen = received.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        assert_eq!(Value::Array(seen), case["server_received"], "{name}");
+        // Closing with requests still waiting writes nothing, as the upstream transport is already closed.
+        cli.disconnect(client).await?;
+    }
     Ok(())
 }
 

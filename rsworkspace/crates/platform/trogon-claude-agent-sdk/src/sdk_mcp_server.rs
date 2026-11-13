@@ -37,6 +37,14 @@ pub trait SdkMcpServer: Send + Sync {
 
 pub trait SdkMcpSession: Send + Sync {
     fn request(&self, message: JsonObject, signal: CancellationToken) -> McpFuture<'_>;
+
+    /// What the server's transport sends without being asked, such as notifications, requests to the client
+    /// and replies that arrive after their request was answered. The TypeScript `Query` sends each one to the
+    /// CLI as an `mcp_message` control request, unless a waiting request takes it as its response. The driver
+    /// takes the receiver once, when it opens the session. A server that never sends on its own returns `None`.
+    fn take_outbound(&self) -> Option<tokio::sync::mpsc::UnboundedReceiver<JsonObject>> {
+        None
+    }
 }
 
 /// An in-process MCP server like the TypeScript `createSdkMcpServer` and the Python `create_sdk_mcp_server`.

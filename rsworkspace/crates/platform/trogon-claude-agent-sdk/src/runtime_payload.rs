@@ -211,6 +211,10 @@ pub(crate) enum RequestPayload<'a> {
     McpSetServers {
         servers: JsonObject,
     },
+    McpMessage {
+        server_name: &'a str,
+        message: &'a JsonObject,
+    },
 }
 
 impl RequestPayload<'_> {
