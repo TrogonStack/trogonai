@@ -79,6 +79,7 @@ impl DriverFixture {
             shutdown: shutdown_rx,
             limits: Limits::default(),
             handler,
+            message_decoding: crate::MessageDecoding::TypeScript,
             pending: HashMap::new(),
             callbacks: JoinSet::new(),
             callback_handles: HashMap::new(),
@@ -282,6 +283,8 @@ async fn an_abandoned_message_consumer_stops_publication() -> Result<(), Box<dyn
         subtype: "receipt".into(),
         session_id: None,
         data: JsonObject::new(),
+        event: crate::SystemEvent::Other,
+        raw: JsonObject::new(),
     });
     assert!(matches!(fixture.driver.publish(message), Err(Error::DriverStopped)));
     fixture.finish().await
@@ -356,6 +359,8 @@ async fn eof_mirror_drain_publishes_failures_before_deferred_messages() -> Resul
             subtype: "after_fence".into(),
             session_id: None,
             data: JsonObject::new(),
+            event: crate::SystemEvent::Other,
+            raw: JsonObject::new(),
         }),
         None,
     ));

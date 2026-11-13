@@ -47,6 +47,9 @@ pub enum ProtocolError {
     PermissionUpdate(#[from] crate::PermissionUpdateError),
     #[error("duplicate incoming control request ID")]
     DuplicateControlRequest,
+    /// A message Python `parse_message` rejects, with its error text.
+    #[error("{0}")]
+    InvalidMessage(String),
 }
 
 #[derive(thiserror::Error)]

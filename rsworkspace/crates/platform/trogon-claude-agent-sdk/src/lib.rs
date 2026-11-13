@@ -36,6 +36,7 @@ mod mcp_tool_input_schema;
 mod mcp_tool_name;
 mod mcp_url;
 mod message;
+mod message_decode;
 mod message_id;
 mod message_origin;
 mod model_name;
@@ -154,7 +155,9 @@ pub use mcp_tool_input_schema::{McpToolInputSchema, McpToolInputSchemaError};
 pub use mcp_tool_name::McpToolName;
 pub use mcp_url::{McpUrl, McpUrlError};
 pub use message::{
-    AssistantMessage, Content, ContentBlock, Message, ResultMessage, ResultStatus, StreamEvent, SystemMessage,
+    AssistantMessage, Content, ContentBlock, ConversationResetMessage, DeferredToolUse, HookEventMessage, Message,
+    MessageDecoding, MirrorErrorMessage, RateLimitEvent, RateLimitInfo, ResultMessage, ResultStatus, StreamEvent,
+    SystemEvent, SystemMessage, TaskNotificationMessage, TaskProgressMessage, TaskStartedMessage, TaskUpdatedMessage,
     ToolResultStatus, UserMessage,
 };
 pub use message_id::MessageId;

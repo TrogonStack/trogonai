@@ -253,6 +253,7 @@ where
     state: State,
     run_state: RunState,
     argv_style: crate::ArgvStyle,
+    message_decoding: crate::MessageDecoding,
     /// The last `is_error` result, kept while nothing else has arrived since, to turn the exit error into a
     /// result error the way both upstream SDKs do.
     last_error_result: Option<JsonObject>,
@@ -492,6 +493,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         state: State::Initializing,
         run_state: RunState::default(),
         argv_style: options.argv_style,
+        message_decoding: options.message_decoding,
         last_error_result: None,
         version_check,
     };
@@ -564,17 +566,11 @@ where
         }
     }
 
-    /// Decodes one object the transport yielded. A JSON object that is not a valid message is a
-    /// `MessageParseError` carrying the raw object, in both upstream SDKs.
-    fn decode_message(object: JsonObject) -> Result<Frame, Error> {
-        let value = serde_json::Value::Object(object);
-        wire::parse_value(&value).map_err(|error| {
-            let data = match value {
-                serde_json::Value::Object(object) => Some(object),
-                _ => None,
-            };
-            crate::MessageParseError::new(error, data).into()
-        })
+    /// Decodes one object the transport yielded. A frame or message that cannot be decoded is a
+    /// `MessageParseError` carrying the raw object.
+    fn decode_message(&self, object: JsonObject) -> Result<Frame, Error> {
+        wire::parse_value(&object, self.message_decoding)
+            .map_err(|error| crate::MessageParseError::new(error, Some(object)).into())
     }
 
     /// The error for an unsuccessful exit: the last error result when one is pending (Python always, TypeScript
@@ -627,7 +623,7 @@ where
                         self.finish_mirror().await?;
                         return if matches!(self.state, State::Running | State::Initializing) || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
                     };
-                    let parsed = Self::decode_message(message)?;
+                    let parsed = self.decode_message(message)?;
                     self.frame(parsed).await?;
                 }
                 flushed = async { match self.mirror_flush.as_mut() { Some(flush) => flush.await, None => pending().await } }, if self.mirror_flush.is_some() => {
@@ -875,6 +871,9 @@ where
 
     async fn frame(&mut self, frame: Frame) -> Result<(), Error> {
         match frame {
+            Frame::KeepAlive => {}
+            // Python clears the pending error result for every message it does not parse.
+            Frame::Unparsed => self.last_error_result = None,
             Frame::Message(message) => {
                 let (queued_limit, task_limit) = (
                     self.limits.command_queue_capacity.get(),
@@ -901,6 +900,13 @@ where
                     _ => self.last_error_result = None,
                 }
                 self.run_state.observe(&message, queued_limit, task_limit)?;
+                // Both SDKs drop the state changes the CLI sent only because the SDK asked for them.
+                if let Message::System(system) = &message
+                    && system.subtype == "session_state_changed"
+                    && system.raw.get("sdk_host_only") == Some(&serde_json::Value::Bool(true))
+                {
+                    return Ok(());
+                }
                 if matches!(message, Message::Result(_)) {
                     self.state = State::Idle;
                 }

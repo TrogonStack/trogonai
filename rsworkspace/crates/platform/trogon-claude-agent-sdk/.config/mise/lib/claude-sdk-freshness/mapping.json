@@ -1626,11 +1626,15 @@
       "tests": [
         {
           "path": "src/wire_tests.rs",
-          "name": "future_informational_messages_are_preserved"
+          "name": "future_informational_messages_are_yielded_by_typescript_and_skipped_by_python"
         },
         {
           "path": "src/wire_tests.rs",
-          "name": "malformed_known_content_does_not_become_unknown"
+          "name": "a_known_message_missing_a_required_key_is_yielded_by_typescript_and_rejected_by_python"
+        },
+        {
+          "path": "src/wire_tests.rs",
+          "name": "a_block_rust_cannot_type_stays_in_the_message"
         }
       ],
       "status": "rust_difference",

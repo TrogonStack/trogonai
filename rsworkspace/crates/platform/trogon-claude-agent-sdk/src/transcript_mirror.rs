@@ -91,10 +91,19 @@ impl MirrorFailureError {
         if let Self::Suppressed { count } = self {
             data.insert("suppressed_count".into(), count.into());
         }
+        let mut raw = JsonObject::new();
+        raw.insert("type".into(), "system".into());
+        raw.insert("subtype".into(), "mirror_error".into());
+        raw.extend(data.clone());
         Ok(Message::System(SystemMessage {
             subtype: "mirror_error".into(),
             session_id,
             data,
+            event: crate::SystemEvent::MirrorError(crate::MirrorErrorMessage {
+                key: raw.get("key").cloned(),
+                error: self.error_text(),
+            }),
+            raw,
         }))
     }
 }

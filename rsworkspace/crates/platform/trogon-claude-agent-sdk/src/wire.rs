@@ -5,13 +5,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    AssistantMessage, Content, ContentBlock, ControlRequestId, DenialDisposition, JsonObject, Message, MessageId,
-    MessageOrigin, PermissionDecision, ProtocolError, ResultMessage, ResultStatus, SessionId, StreamEvent,
-    SystemMessage, ToolName, ToolPermissionRequest, ToolResultStatus, ToolUseId, UserMessage,
+    ControlRequestId, DenialDisposition, JsonObject, Message, MessageDecoding, PermissionDecision, ProtocolError,
+    ToolName, ToolPermissionRequest, ToolUseId, message_decode::Decoded,
 };
 
 pub(crate) enum Frame {
     Message(Message),
+    /// TypeScript consumes `keep_alive` before anything else sees it.
+    KeepAlive,
+    /// Python `parse_message` skipped the message: the run counts it, the caller never sees it.
+    Unparsed,
     ControlRequest {
         id: ControlRequestId,
         request: IncomingControl,
@@ -53,133 +56,6 @@ pub(crate) enum IncomingControl {
 pub(crate) enum ControlResponse {
     Success(Value),
     Error(String),
-}
-
-#[derive(Deserialize)]
-struct EnvelopeWire {
-    #[serde(rename = "type")]
-    kind: String,
-    #[serde(flatten)]
-    data: JsonObject,
-}
-
-#[derive(Deserialize)]
-struct AssistantWire {
-    message: AssistantBodyWire,
-    parent_tool_use_id: Option<String>,
-    session_id: Option<String>,
-    error: Option<String>,
-    uuid: Option<String>,
-    #[serde(flatten)]
-    additional_fields: JsonObject,
-}
-
-#[derive(Deserialize)]
-struct AssistantBodyWire {
-    content: Vec<Value>,
-    model: String,
-    usage: Option<JsonObject>,
-    id: Option<String>,
-    stop_reason: Option<String>,
-    #[serde(flatten)]
-    additional_fields: JsonObject,
-}
-
-#[derive(Deserialize)]
-struct UserWire {
-    message: UserBodyWire,
-    parent_tool_use_id: Option<String>,
-    session_id: Option<String>,
-    uuid: Option<String>,
-    origin: Option<MessageOrigin>,
-    #[serde(default, deserialize_with = "deserialize_present_json")]
-    tool_use_result: Option<Value>,
-    #[serde(flatten)]
-    additional_fields: JsonObject,
-}
-
-#[derive(Deserialize)]
-struct UserBodyWire {
-    content: ContentWire,
-    #[serde(flatten)]
-    additional_fields: JsonObject,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum ContentWire {
-    Text(String),
-    Blocks(Vec<Value>),
-}
-
-#[derive(Deserialize)]
-struct SystemWire {
-    subtype: String,
-    session_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ResultWire {
-    subtype: String,
-    is_error: bool,
-    duration_ms: u64,
-    duration_api_ms: u64,
-    num_turns: u64,
-    session_id: String,
-    total_cost_usd: Option<f64>,
-    result: Option<String>,
-    structured_output: Option<Value>,
-    usage: Option<JsonObject>,
-    errors: Option<Vec<String>>,
-    uuid: Option<String>,
-    stop_reason: Option<String>,
-    terminal_reason: Option<String>,
-    origin: Option<MessageOrigin>,
-    #[serde(rename = "modelUsage")]
-    model_usage: Option<JsonObject>,
-    permission_denials: Option<Vec<Value>>,
-    deferred_tool_use: Option<JsonObject>,
-    api_error_status: Option<u16>,
-    result_index: Option<u64>,
-    queued_turn_count: Option<u64>,
-    #[serde(flatten)]
-    additional_fields: JsonObject,
-}
-
-#[derive(Deserialize)]
-struct StreamEventWire {
-    uuid: String,
-    session_id: String,
-    event: JsonObject,
-    parent_tool_use_id: Option<String>,
-    #[serde(flatten)]
-    additional_fields: JsonObject,
-}
-
-#[derive(Deserialize)]
-struct TextWire {
-    text: String,
-}
-
-#[derive(Deserialize)]
-struct ThinkingWire {
-    thinking: String,
-    signature: String,
-}
-
-#[derive(Deserialize)]
-struct ToolUseWire {
-    id: String,
-    name: String,
-    input: JsonObject,
-}
-
-#[derive(Deserialize)]
-struct ToolResultWire {
-    tool_use_id: String,
-    #[serde(default)]
-    content: Value,
-    is_error: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -285,69 +161,12 @@ struct CancelWire {
     request_id: String,
 }
 
-fn deserialize_present_json<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Value::deserialize(deserializer).map(Some)
-}
-
 fn decode<T: serde::de::DeserializeOwned>(data: JsonObject) -> Result<T, ProtocolError> {
     Ok(serde_json::from_value(Value::Object(data))?)
 }
 
 fn optional_tool_id(value: Option<String>) -> Result<Option<ToolUseId>, ProtocolError> {
     Ok(value.map(ToolUseId::from))
-}
-
-fn optional_session(value: Option<String>) -> Result<Option<SessionId>, ProtocolError> {
-    Ok(value.map(SessionId::from))
-}
-
-fn content_blocks(values: Vec<Value>) -> Result<Vec<ContentBlock>, ProtocolError> {
-    values
-        .into_iter()
-        .map(|value| {
-            let envelope: EnvelopeWire = serde_json::from_value(value)?;
-            Ok(match envelope.kind.as_str() {
-                "text" => {
-                    let wire: TextWire = decode(envelope.data)?;
-                    ContentBlock::Text { text: wire.text }
-                }
-                "thinking" => {
-                    let wire: ThinkingWire = decode(envelope.data)?;
-                    ContentBlock::Thinking {
-                        thinking: wire.thinking,
-                        signature: wire.signature,
-                    }
-                }
-                "tool_use" => {
-                    let wire: ToolUseWire = decode(envelope.data)?;
-                    ContentBlock::ToolUse {
-                        id: ToolUseId::from(wire.id),
-                        name: ToolName::from(wire.name),
-                        input: wire.input,
-                    }
-                }
-                "tool_result" => {
-                    let wire: ToolResultWire = decode(envelope.data)?;
-                    ContentBlock::ToolResult {
-                        tool_use_id: ToolUseId::from(wire.tool_use_id),
-                        content: wire.content,
-                        status: match wire.is_error {
-                            Some(true) => ToolResultStatus::Error,
-                            Some(false) => ToolResultStatus::Success,
-                            None => ToolResultStatus::NotReported,
-                        },
-                    }
-                }
-                _ => ContentBlock::Unknown {
-                    kind: envelope.kind,
-                    data: envelope.data,
-                },
-            })
-        })
-        .collect()
 }
 
 fn permission_request(data: JsonObject, id: &ControlRequestId) -> Result<ToolPermissionRequest, ProtocolError> {
@@ -383,99 +202,15 @@ fn permission_request(data: JsonObject, id: &ControlRequestId) -> Result<ToolPer
 
 #[cfg(test)]
 pub(crate) fn parse_frame(bytes: &[u8]) -> Result<Frame, ProtocolError> {
-    frame_from_envelope(serde_json::from_slice(bytes)?)
+    parse_value(&serde_json::from_slice(bytes)?, MessageDecoding::TypeScript)
 }
 
-/// Decodes a message a [`crate::Transport`] already parsed as JSON.
-pub(crate) fn parse_value(value: &serde_json::Value) -> Result<Frame, ProtocolError> {
-    frame_from_envelope(EnvelopeWire::deserialize(value)?)
-}
-
-fn frame_from_envelope(envelope: EnvelopeWire) -> Result<Frame, ProtocolError> {
-    Ok(match envelope.kind.as_str() {
-        "assistant" => {
-            let wire: AssistantWire = decode(envelope.data)?;
-            Frame::Message(Message::Assistant(AssistantMessage {
-                content: content_blocks(wire.message.content)?,
-                model: wire.message.model,
-                parent_tool_use_id: optional_tool_id(wire.parent_tool_use_id)?,
-                session_id: optional_session(wire.session_id)?,
-                error: wire.error,
-                usage: wire.message.usage,
-                uuid: wire.uuid.map(MessageId::from),
-                message_id: wire.message.id.map(MessageId::from),
-                stop_reason: wire.message.stop_reason,
-                additional_fields: wire.additional_fields,
-                message_fields: wire.message.additional_fields,
-            }))
-        }
-        "user" => {
-            let wire: UserWire = decode(envelope.data)?;
-            Frame::Message(Message::User(UserMessage {
-                content: match wire.message.content {
-                    ContentWire::Text(text) => Content::Text(text),
-                    ContentWire::Blocks(blocks) => Content::Blocks(content_blocks(blocks)?),
-                },
-                parent_tool_use_id: optional_tool_id(wire.parent_tool_use_id)?,
-                session_id: optional_session(wire.session_id)?,
-                uuid: wire.uuid.map(MessageId::from),
-                origin: wire.origin,
-                tool_use_result: wire.tool_use_result,
-                additional_fields: wire.additional_fields,
-                message_fields: wire.message.additional_fields,
-            }))
-        }
-        "system" => {
-            let wire: SystemWire = decode(envelope.data.clone())?;
-            Frame::Message(Message::System(SystemMessage {
-                subtype: wire.subtype,
-                session_id: optional_session(wire.session_id)?,
-                data: envelope.data,
-            }))
-        }
-        "result" => {
-            let wire: ResultWire = decode(envelope.data)?;
-            Frame::Message(Message::Result(Box::new(ResultMessage {
-                subtype: wire.subtype,
-                status: if wire.is_error {
-                    ResultStatus::Error
-                } else {
-                    ResultStatus::Success
-                },
-                duration_ms: wire.duration_ms,
-                duration_api_ms: wire.duration_api_ms,
-                num_turns: wire.num_turns,
-                session_id: SessionId::from(wire.session_id),
-                total_cost_usd: wire.total_cost_usd,
-                result: wire.result,
-                structured_output: wire.structured_output,
-                usage: wire.usage,
-                errors: wire.errors,
-                uuid: wire.uuid.map(MessageId::from),
-                stop_reason: wire.stop_reason,
-                terminal_reason: wire.terminal_reason,
-                origin: wire.origin,
-                model_usage: wire.model_usage,
-                permission_denials: wire.permission_denials,
-                deferred_tool_use: wire.deferred_tool_use,
-                api_error_status: wire.api_error_status,
-                result_index: wire.result_index,
-                queued_turn_count: wire.queued_turn_count,
-                additional_fields: wire.additional_fields,
-            })))
-        }
-        "stream_event" => {
-            let wire: StreamEventWire = decode(envelope.data)?;
-            Frame::Message(Message::StreamEvent(StreamEvent {
-                uuid: wire.uuid,
-                session_id: SessionId::from(wire.session_id),
-                event: wire.event,
-                additional_fields: wire.additional_fields,
-                parent_tool_use_id: optional_tool_id(wire.parent_tool_use_id)?,
-            }))
-        }
-        "control_request" => {
-            let wire: IncomingControlWire = decode(envelope.data)?;
+/// Decodes an object a [`crate::Transport`] already parsed as JSON.
+pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<Frame, ProtocolError> {
+    let data = || object.clone();
+    Ok(match object.get("type").and_then(Value::as_str) {
+        Some("control_request") => {
+            let wire: IncomingControlWire = decode(data())?;
             let id = ControlRequestId::from(wire.request_id);
             let request = if wire.request.subtype == "can_use_tool" {
                 match permission_request(wire.request.data, &id) {
@@ -509,8 +244,8 @@ fn frame_from_envelope(envelope: EnvelopeWire) -> Result<Frame, ProtocolError> {
             };
             Frame::ControlRequest { id, request }
         }
-        "control_response" => {
-            let wire: ControlResponseFrameWire = decode(envelope.data)?;
+        Some("control_response") => {
+            let wire: ControlResponseFrameWire = decode(data())?;
             match wire.response {
                 ControlResponseWire::Success { request_id, response } => Frame::ControlResponse {
                     id: ControlRequestId::from(request_id),
@@ -522,23 +257,24 @@ fn frame_from_envelope(envelope: EnvelopeWire) -> Result<Frame, ProtocolError> {
                 },
             }
         }
-        "control_cancel_request" => {
-            let wire: CancelWire = decode(envelope.data)?;
+        Some("control_cancel_request") => {
+            let wire: CancelWire = decode(data())?;
             Frame::Cancel {
                 id: ControlRequestId::from(wire.request_id),
             }
         }
-        "transcript_mirror" => {
-            let wire: TranscriptMirrorWire = decode(envelope.data)?;
+        Some("transcript_mirror") => {
+            let wire: TranscriptMirrorWire = decode(data())?;
             Frame::TranscriptMirror {
                 file_path: wire.file_path,
                 entries: wire.entries.into_iter().map(crate::SessionEntry::new).collect(),
             }
         }
-        _ => Frame::Message(Message::Unknown {
-            kind: envelope.kind,
-            data: envelope.data,
-        }),
+        _ => match crate::message_decode::decode(object, mode)? {
+            Decoded::Message(message) => Frame::Message(message),
+            Decoded::KeepAlive => Frame::KeepAlive,
+            Decoded::Unparsed => Frame::Unparsed,
+        },
     })
 }
 
