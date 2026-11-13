@@ -99,7 +99,7 @@ fn preserved_messages_are_chained_after_the_anchor_and_later_children_move_to_th
         summary,
         user("u3", Some("s"), "after"),
     ])?;
-    let messages = files.get_session_messages(SESSION, None, MessagePage::default());
+    let messages = files.get_session_messages(SESSION, None, MessagePage::default())?;
     assert_eq!(uuids(&messages), ["s", "u2", "a2", "u3"]);
     Ok(())
 }
@@ -118,7 +118,7 @@ fn a_sidechain_tip_never_becomes_the_leaf() -> TestResult {
     let mut side = assistant("side", Some("a1"), "m9");
     side["isSidechain"] = json!(true);
     let (_config, files) = setup(&[user("u1", None, "q"), assistant("a1", Some("u1"), "m1"), side])?;
-    let messages = files.get_session_messages(SESSION, None, MessagePage::default());
+    let messages = files.get_session_messages(SESSION, None, MessagePage::default())?;
     assert_eq!(uuids(&messages), ["u1", "a1"]);
     Ok(())
 }
@@ -133,7 +133,7 @@ fn a_delivered_queued_command_becomes_the_user_message_it_carried() -> TestResul
                "attachment":{"type":"queued_command","prompt":"later","source_uuid":"src1"}}),
         assistant("a2", Some("q1"), "m2"),
     ])?;
-    let messages = files.get_session_messages(SESSION, None, MessagePage::default());
+    let messages = files.get_session_messages(SESSION, None, MessagePage::default())?;
     assert_eq!(uuids(&messages), ["u1", "a1", "src1", "a2"]);
     assert_eq!(messages[2].kind, SessionMessageKind::User);
     assert_eq!(messages[2].message, json!({"role":"user","content":"later"}));
@@ -149,7 +149,7 @@ fn a_trailing_queued_command_without_a_reply_is_kept_as_an_attachment_unless_it_
         json!({"type":"attachment","uuid":"q1","parentUuid":"a1","sessionId":SESSION,
                "attachment":{"type":"queued_command","prompt":"pending"}}),
     ])?;
-    let messages = files.get_session_messages(SESSION, None, MessagePage::default());
+    let messages = files.get_session_messages(SESSION, None, MessagePage::default())?;
     assert_eq!(uuids(&messages), ["u1", "a1", "q1"]);
     assert_eq!(messages[2].message["content"], "pending");
     Ok(())
@@ -170,7 +170,7 @@ fn local_command_records_and_outputs_are_marked_completed_and_the_caveat_is_hidd
         user("c2", Some("c1"), "<command-name>/status</command-name>"),
         user("c3", Some("c2"), "<local-command-stdout>ready</local-command-stdout>"),
     ])?;
-    let messages = files.get_session_messages(SESSION, None, MessagePage::default());
+    let messages = files.get_session_messages(SESSION, None, MessagePage::default())?;
     assert_eq!(uuids(&messages), ["u1", "a1", "c2", "c3"]);
     assert!(messages[2].extras.is_completed_local_command);
     assert!(messages[3].extras.is_completed_local_command);
@@ -185,7 +185,7 @@ fn a_voice_call_system_line_is_read_as_a_user_message() -> TestResult {
         json!({"type":"system","subtype":"voice_call_talk","uuid":"v1","parentUuid":"a1","sessionId":SESSION,
                "content":"hello there","origin":{"kind":"voice-call"}}),
     ])?;
-    let messages = files.get_session_messages(SESSION, None, MessagePage::default());
+    let messages = files.get_session_messages(SESSION, None, MessagePage::default())?;
     assert_eq!(uuids(&messages), ["u1", "a1", "v1"]);
     assert_eq!(messages[2].message, json!({"role":"user","content":"hello there"}));
     assert_eq!(messages[2].extras.origin, Some(json!({"kind":"voice-call"})));
@@ -218,7 +218,7 @@ fn timestamps_and_denial_metadata_are_passed_through() -> TestResult {
         "message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call1","content":"no","is_error":true}]}});
     result["interruptedByShutdown"] = json!(true);
     let (_config, files) = setup(&[user("u1", None, "q"), assistant("a1", Some("u1"), "m1"), result])?;
-    let messages = files.get_session_messages(SESSION, None, MessagePage::default());
+    let messages = files.get_session_messages(SESSION, None, MessagePage::default())?;
     let last = &messages[2];
     assert_eq!(last.extras.timestamp, Some(json!("2024-01-01T00:00:05.000Z")));
     assert_eq!(last.extras.tool_denial_unanswered.as_deref(), Some("stream-closed"));
@@ -269,11 +269,13 @@ fn preserved_messages_without_a_uuids_list_fail_with_the_typescript_type_error()
             .err()
             .ok_or("the pipeline should have thrown")?;
         assert_eq!(error.to_string(), message);
-        assert!(
-            files
-                .get_session_messages(SESSION, None, MessagePage::default())
-                .is_empty()
-        );
+        let default_error = files
+            .get_session_messages(SESSION, None, MessagePage::default())
+            .err()
+            .ok_or("the default getter must surface the throw")?;
+        assert_eq!(default_error.to_string(), message);
+        let python = files.get_session_messages_with(SESSION, None, options(false, ChainAlgorithm::Python))?;
+        assert_eq!(uuids(&python), ["u1"], "the Python reader never fails");
     }
     Ok(())
 }

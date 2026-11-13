@@ -131,14 +131,15 @@ impl SessionFiles {
             .and_then(|lite| parse_session_info_from_lite(session_id, &lite, None))
     }
 
-    /// Reads a session's visible conversation under the TypeScript rules. A transcript the TypeScript pipeline would
-    /// throw on reads as empty here; [`SessionFiles::get_session_messages_with`] reports the error.
+    /// Reads a session's visible conversation under the TypeScript rules, failing exactly where the TypeScript
+    /// pipeline throws. Select [`ChainAlgorithm::Python`] through [`SessionFiles::get_session_messages_with`] for the
+    /// Python reader, which never fails.
     pub fn get_session_messages(
         &self,
         session_id: &str,
         directory: Option<&Path>,
         page: MessagePage,
-    ) -> Vec<SessionMessage> {
+    ) -> Result<Vec<SessionMessage>, MessagesError> {
         self.get_session_messages_with(
             session_id,
             directory,
@@ -147,7 +148,6 @@ impl SessionFiles {
                 ..MessageOptions::default()
             },
         )
-        .unwrap_or_default()
     }
 
     /// [`SessionFiles::get_session_messages`] under the selected upstream SDK's rules and options.
@@ -784,10 +784,15 @@ fn collect_agent_files(base: &Path) -> Vec<(String, PathBuf)> {
 }
 
 /// [`SessionFiles::get_session_messages`] over the environment's config directory.
-pub fn get_session_messages(session_id: &str, directory: Option<&Path>, page: MessagePage) -> Vec<SessionMessage> {
-    SessionFiles::from_environment()
-        .map(|files| files.get_session_messages(session_id, directory, page))
-        .unwrap_or_default()
+pub fn get_session_messages(
+    session_id: &str,
+    directory: Option<&Path>,
+    page: MessagePage,
+) -> Result<Vec<SessionMessage>, MessagesError> {
+    match SessionFiles::from_environment() {
+        Some(files) => files.get_session_messages(session_id, directory, page),
+        None => Ok(Vec::new()),
+    }
 }
 
 /// [`SessionFiles::list_subagents`] over the environment's config directory.
