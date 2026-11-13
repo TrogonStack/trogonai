@@ -441,8 +441,18 @@ upstream SDKs).
   the browser class it ignores `headers`; `HeaderDelivery::Handshake` sends them
   on the upgrade request instead. Cancelling the token given to `with_abort`
   closes the socket and fails the read with `WebSocketError::Aborted`.
-- Deferred to other tracks: the remote SSE transport, flag settings and
-  `updateSettings`.
+- `SseTransport` is the browser SDK's SSE transport as a `Transport`, for
+  `connect_with_transport`: `SseOptions::new(stream_url, send_url, session_id)`
+  plus `headers`, `from_sequence_num`, `on_catch_up_truncated` and
+  `on_delivery_update`. It streams with `Last-Event-ID`, treats 401, 403 and 404
+  as permanent, reconnects other failures with a doubling backoff for five
+  attempts in a row, gives the stream 15000 ms to answer and 45000 ms of
+  silence, and POSTs writes in order with a 30000 ms timeout, honouring
+  `Retry-After` and dropping a line after three failures. `SseTransport::handle`
+  returns an `SseHandle` with `suspend`, `resume`, `expect_control_response`,
+  `drop_counts`, `last_sequence_num` and `last_ccr_event`. Cancelling the token
+  given to `with_abort` fails the read with `SseError::Aborted`.
+- Deferred to other tracks: flag settings and `updateSettings`.
 
 Model strings and paths are stored without extra identifier restrictions.
 `env` values are `ConfigValue`s, which convert from strings as `Sensitive`;

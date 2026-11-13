@@ -3395,6 +3395,106 @@
       "rationale": "WebSocketTransport is the browser SDK's WebSocket transport as a Transport implementation, replayed against goldens recorded by running the real class in node (websocket_transport_goldens.mjs): the auth line is sent first, a keep_alive line every 50000ms while the driver reads, inbound text frames are split on newlines with partial lines kept, bad JSON dropped and ccr_event removed, writes go out verbatim, close sends 1000 Normal closure, close codes other than 1000 and 1001 fail with the upstream text, the connect timeout is 15000ms, abort and a not-ready write carry the upstream messages. headers is accepted and ignored by default like the browser class; HeaderDelivery::Handshake opts into sending them on the upgrade request. JSON values that are not objects are dropped because Transport yields objects. The query-level browser options (websocket, sse), SSE and the rest of the browser entrypoint stay out of scope."
     },
     {
+      "id": "browser-sse-transport",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "browser.SSEOptions",
+            "browser.SSEOptions.streamUrl",
+            "browser.SSEOptions.sendUrl",
+            "browser.SSEOptions.sessionId",
+            "browser.SSEOptions.headers",
+            "browser.SSEOptions.fromSequenceNum",
+            "browser.SSEOptions.onCatchUpTruncated",
+            "browser.SSEOptions.onDeliveryUpdate",
+            "browser.G4_TEXT_ENVELOPE_ARM_PORTED"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SseTransport",
+        "SseHandle",
+        "SseOptions",
+        "SseError",
+        "CatchUpTruncatedHandler",
+        "DeliveryUpdateHandler",
+        "G4_TEXT_ENVELOPE_ARM_PORTED"
+      ],
+      "tests": [
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_session_matches_the_recorded_transport"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "handlers_that_throw_do_not_stop_the_stream"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_401_on_the_stream_is_permanent"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "the_reconnect_budget_runs_out"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_reset_stream_reconnects_from_the_cursor"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_silent_stream_is_reconnected"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_stream_that_never_answers_is_reconnected"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "suspending_and_resuming_the_stream"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_failed_write_waits_for_retry_after"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_write_is_dropped_after_three_failures"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_permanent_write_failure_fails_the_transport"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "the_queue_holds_a_thousand_lines"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "aborting_while_running"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "every_recorded_case_is_replayed"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "the_text_envelope_arm_is_ported"
+        },
+        {
+          "path": "src/sse_options_tests.rs",
+          "name": "debug_hides_urls_and_header_values"
+        }
+      ],
+      "status": "supported",
+      "rationale": "SseTransport is the browser SDK's SSE transport as a Transport implementation, replayed against goldens recorded by running the real class against a local HTTP server (sse_transport_goldens.mjs): the stream is requested with Accept text/event-stream and Last-Event-ID resumes from the cursor, 401, 403 and 404 are permanent while other failures reconnect with a 1000ms doubling backoff capped at 30000ms for five attempts in a row, the connect timeout is 15000ms and a silent stream is reconnected after 45000ms, writes are POSTed in order with a 30000ms timeout, retried with the Retry-After header clamped to 1000..30000ms plus jitter and dropped after three failures in a row, a permanent write failure fails the transport, the queue holds 1000 lines, and abort and close carry the upstream messages. A handler that panics is contained like a handler that throws upstream. The handle methods back the transport accessors, but the query-level browser options (websocket, sse) and the accessors on the query object stay out of scope."
+    },
+    {
       "id": "browser-entrypoint",
       "upstream": {
         "python": {

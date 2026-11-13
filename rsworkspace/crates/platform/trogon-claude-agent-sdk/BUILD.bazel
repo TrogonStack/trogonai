@@ -38,6 +38,7 @@ workspace_crate(
         "tests/fixtures/sse_frames/helpers.json",
         "tests/fixtures/sse_frames/message_filters.json",
         "tests/fixtures/websocket_transport/*.json",
+        "tests/fixtures/sse_transport/*.jsonl",
     ]),
     crate_features = ["test-support"],
     examples = {
