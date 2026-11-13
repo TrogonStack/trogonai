@@ -1,7 +1,8 @@
 # Declaration readers
 
 These SDK maintenance modules read compiler declarations for compatibility work.
-They do not enforce CI, provide a mapping, or establish runtime parity.
+They do not enforce CI or establish runtime parity. `behaviors.json` maps runtime
+behavior against both upstream SDKs.
 
 Run the Python foundation tests from this directory:
 
@@ -45,10 +46,58 @@ function pointer types, trait object types, and other unimplemented type forms.
 Public glob and external reexports without local nodes are rejected. Extending
 these formats requires deliberate source changes and regression coverage.
 
-Reviewed source retrieval, complete API mappings, stale-reference and contract
-source validation, actual Rust contract execution, a CLI, mise tasks, and CI
+Reviewed source retrieval, complete API mappings, actual Rust contract execution, a CLI, mise tasks, and CI
 integration remain separate work. A weekly upstream report is separate from
 deterministic enforcement. Declaration shapes alone establish no runtime parity.
+
+## Runtime behavior mapping
+
+Declaration shapes say nothing about what the SDK does at runtime. Each
+`behaviors.json` row describes one runtime behavior, cites the Python and
+TypeScript code that implements it, and records which behavior Rust follows.
+The rows let a reviewer see where both SDKs agree, where they differ, and where
+Rust deliberately does something else.
+
+`behavior-pins.json` pins the reviewed upstream bytes. Python files are pinned
+by repository revision and per-file SHA256. The TypeScript package is pinned by
+npm tarball integrity and by the SHA256 of each cited member. Pin URLs are
+derived from the pinned fields, so a pin cannot silently point somewhere else.
+
+Evidence fails closed when upstream changes:
+
+- Python evidence names a line range and the SHA256 of those exact bytes.
+- TypeScript evidence names an anchor string, its occurrence, the total count
+  of that anchor, and the SHA256 of a byte span around it. The published
+  bundle is minified, so lines and identifiers are not stable references.
+- A missing anchor, a changed anchor count, or a range outside the file is a
+  `stale-reference`. A changed span is `shape-changed`. Unreviewed bytes are
+  `source-pin-mismatch`.
+- A side that has no such behavior says so with `status: "absent"` and a
+  reason, never by omission.
+
+Each row carries an upstream verdict and a decision:
+
+- `agree` rows use `upstream`, or `rust-adaptation` with a reason when Rust
+  adds a safety bound neither SDK has.
+- `disagree` rows must choose `follow-python` or `follow-typescript` with a
+  reason. Rust cannot pick a third behavior without first recording which SDK
+  it diverges from.
+
+`validate(behaviors, pins, sources)` does not fetch anything. The caller
+supplies the reviewed bytes, so validation stays deterministic and never runs
+upstream code. Every pinned file must be cited by some row, so stale pins are
+rejected too.
+
+`contracts` names the Rust tests that pin each behavior, as nextest
+`binary::test` selectors. `contracts_check` requires each entry to be a
+selector from `compiled_tests`, and the mapping test checks them against the
+crate's top-level integration tests. `validate(..., require_contracts=True)`
+rejects any row without one; rows for behaviors that kept their earlier tests
+have not been linked yet. The mapping alone does not establish runtime parity.
+
+The reviewed-bytes test reads `upstream/typescript/<tarball>` and
+`upstream/python/<path>` in this directory and is skipped when they are
+absent.
 
 Automation belongs beside the SDK under `.config/mise/`, following shared
 [ADR 6647967335](https://github.com/straw-hat-team/adr/blob/main/src/adrs/6647967335/README.md)
