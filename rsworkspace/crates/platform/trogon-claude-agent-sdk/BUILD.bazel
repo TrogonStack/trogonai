@@ -22,7 +22,10 @@ rust_binary(
 
 workspace_crate(
     name = "trogon-claude-agent-sdk",
-    compile_data = ["README.md"] + glob([
+    compile_data = [
+        "README.md",
+        "src/upstream/settings_schema.json",
+    ] + glob([
         "tests/fixtures/fork_ts/*.jsonl",
         "tests/fixtures/probe_ts/*.jsonl",
     ]),

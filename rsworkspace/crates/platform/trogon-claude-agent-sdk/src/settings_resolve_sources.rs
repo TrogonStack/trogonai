@@ -10,6 +10,7 @@ use crate::{
     adapters::{CurrentDirectory, EnvironmentVariable, ReadFile},
     constants::{LOCAL_SETTINGS_FILE, PROJECT_SETTINGS_FILE, USER_SETTINGS_FILE},
     settings_resolve_values::SettingsMap,
+    settings_schema::schema,
 };
 
 /// `path.resolve` for one segment: absolute as is, relative against `base`, then lexically normalized.
@@ -90,7 +91,7 @@ pub(crate) fn read_settings_file<H: ReadFile<Error = io::Error>>(host: &H, path:
         return Some(SettingsMap::new());
     }
     match serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(&text)).ok()? {
-        Value::Object(map) => Some(map),
+        Value::Object(map) => schema()?.parse_document(&map),
         _ => None,
     }
 }

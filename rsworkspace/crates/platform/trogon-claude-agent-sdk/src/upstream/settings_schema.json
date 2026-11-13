@@ -199,6 +199,98 @@
     "defaultView"
   ],
   "active": [],
+  "batteries": {
+    "value": [
+      null,
+      1,
+      "x",
+      true,
+      false,
+      [],
+      [
+        "a",
+        null,
+        1
+      ],
+      {},
+      {
+        "path": null
+      },
+      {
+        "path": null,
+        "script": null,
+        "defaultSettings": null
+      },
+      {
+        "a": 1
+      },
+      [
+        "skills",
+        "bogus"
+      ],
+      [
+        "Bash"
+      ],
+      [
+        "/a/"
+      ],
+      9999999999
+    ],
+    "string": [
+      "",
+      " ",
+      "x",
+      "a b",
+      " padded ",
+      "a/b",
+      "a\\b",
+      "..",
+      ".",
+      "a/../b",
+      "a//b",
+      "/abs/path",
+      "C:\\win\\path",
+      "\\\\server\\share",
+      "rel/path",
+      "./rel",
+      "a\u0000b",
+      "café",
+      "https://example.com/x",
+      "http://example.com/x",
+      "https://localhost/x",
+      "https://127.0.0.1/x",
+      "ftp://example.com",
+      "git+ssh://host/repo",
+      "file:///a/../b",
+      "github:owner/repo",
+      "constructor",
+      "prototype",
+      "__proto__",
+      "Name_1-x",
+      "with.dot",
+      "$VAR",
+      "a*b",
+      "prefix*",
+      "*",
+      "Bash(ls)",
+      "ALLCAPS",
+      "tool.exe",
+      {
+        "repeat": [
+          "x",
+          70000
+        ]
+      },
+      {
+        "repeat": [
+          "a",
+          501
+        ]
+      },
+      "00:00",
+      "9:30"
+    ]
+  },
   "fields": {
     "$schema": {
       "type": "optional",

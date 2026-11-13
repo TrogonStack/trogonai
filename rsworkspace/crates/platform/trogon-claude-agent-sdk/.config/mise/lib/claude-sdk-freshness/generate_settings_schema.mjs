@@ -184,7 +184,7 @@ function serialize({ fields, active }) {
   };
   const shape = {};
   for (const key of keys) shape[key] = emit(built.get(key));
-  return { keys, active, fields: shape, definitions };
+  return { keys, active, batteries: { value: encodeBattery(VALUE_BATTERY), string: encodeBattery(STRING_BATTERY) }, fields: shape, definitions };
 }
 
 const VALUE_BATTERY = [
@@ -249,6 +249,11 @@ const STRING_BATTERY = [
   '00:00',
   '9:30',
 ];
+
+// Long strings are recorded as a repeat marker so the document stays small and the consumer rebuilds them.
+function encodeBattery(battery) {
+  return battery.map((input) => (typeof input === 'string' && input.length > 100 ? { repeat: [input[0], input.length] } : input));
+}
 
 // The recorded results of running a transform on a fixed battery of inputs. Transforms close over
 // values the source text alone does not show, so the battery pins their behaviour.

@@ -85,6 +85,8 @@ mod settings_resolve_sources;
 mod settings_resolve_tier;
 mod settings_resolve_values;
 mod settings_sandbox;
+mod settings_schema;
+mod settings_schema_builtins;
 mod stderr_tail;
 mod summary_dialect;
 mod task_id;
