@@ -1,0 +1,11 @@
+#!/bin/sh
+d=$(dirname "$0")
+case "$2" in
+HKLM*) f=hklm ;;
+HKCU*) f=hkcu ;;
+*) f=none ;;
+esac
+if [ -f "$d/$f.big" ]; then head -c 3000000 /dev/zero | tr '\0' x; exit 0; fi
+if [ -f "$d/$f.txt" ]; then cat "$d/$f.txt"; exit 0; fi
+echo "ERROR: The system was unable to find the specified registry key or value." >&2
+exit 1

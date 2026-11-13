@@ -1,12 +1,14 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Mutex, OnceLock},
 };
 
 use crate::{
     adapters::SettingsHost,
     constants::CONNECTOR_CACHE_LIMIT,
+    settings_resolve_platform::platform_kind,
+    settings_resolve_platform_kind::PlatformKind,
     settings_resolve_reread::{PolicyRereads, PolicyState, Reading},
 };
 
@@ -19,6 +21,7 @@ pub struct ResolverState {
     connector_folders: Mutex<HashMap<PathBuf, bool>>,
     policy: Mutex<PolicyState>,
     rereads: PolicyRereads,
+    platform: OnceLock<PlatformKind>,
 }
 
 impl ResolverState {
@@ -34,11 +37,17 @@ impl ResolverState {
         }
     }
 
+    /// `getPlatform()` upstream, which keeps its first answer for the life of the process.
+    pub(crate) fn platform<H: SettingsHost>(&self, host: &H) -> PlatformKind {
+        *self.platform.get_or_init(|| platform_kind(host))
+    }
+
     /// The machine policy reading this call goes on with, re-reading the host when upstream would.
     pub(crate) fn policy_reading<H: SettingsHost>(&self, host: &H) -> Reading {
+        let kind = self.platform(host);
         match self.policy.lock() {
-            Ok(mut policy) => policy.current(host, self.rereads),
-            Err(_) => PolicyState::default().current(host, self.rereads),
+            Ok(mut policy) => policy.current(host, kind, self.rereads),
+            Err(_) => PolicyState::default().current(host, kind, self.rereads),
         }
     }
 

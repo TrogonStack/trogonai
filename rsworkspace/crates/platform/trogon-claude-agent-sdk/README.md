@@ -462,8 +462,8 @@ thread, so the host's clock alone decides when one has ended. `filter_escalating
 byte for byte. Numbers read as `JSON.parse` reads them: integers above 2^53 round, and a number
 past the double range reads as `Infinity`. A typed setting refuses `Infinity`, an `env` value spells
 it `"Infinity"` (env values go through `String()`, as `z.coerce.string()` does), and the result
-holds `null` where it survives, which is what `JSON.stringify` prints for it. Gaps: schema value
-normalization, and cloud and org mode.
+holds `null` where it survives, which is what `JSON.stringify` prints for it. Gap: schema value
+normalization.
 
 The Python dialect reads every settings file as Python's `json.loads` reads it: integers of any
 size, floats that stay floats (`1.0` is not `1`), and `NaN`, `Infinity` and `-Infinity`.

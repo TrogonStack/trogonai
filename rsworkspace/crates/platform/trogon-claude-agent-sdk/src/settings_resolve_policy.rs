@@ -1,7 +1,6 @@
 use std::{
     cmp::Ordering,
     collections::HashMap,
-    ffi::OsStr,
     io,
     path::{Path, PathBuf},
 };
@@ -11,17 +10,18 @@ use serde_json::Value;
 use crate::{
     adapters::{DirectoryEntryKind, ReadFile, SettingsHost},
     constants::{
-        ALLOW_LIST_KEYS, AUTH_HELPERS, CLOUD_PROVIDER_FLAGS, DISABLE_ADMIN_ENV_UNION_VARIABLE, ENTRYPOINT_VARIABLE,
-        HELD_ALLOW_LIST_KEYS, LOGIN_METHOD_KEY, LOGIN_METHODS, LOGIN_ORGANIZATION_KEY,
-        MANAGED_SETTINGS_DROP_IN_DIRECTORY, MANAGED_SETTINGS_FILE, MANAGED_SOURCES_BEHAVIOR_KEY, MANAGED_SOURCES_MERGE,
-        MCP_SERVER_ALLOW_LIST_KEY, ORGANIZATION_ENTRYPOINTS, OTEL_EXACT, OTEL_PREFIXES, PARENT_RESTRICT_FALSE_KEYS,
-        PARENT_RESTRICT_TRUE_KEYS, PARENT_SETTINGS_BEHAVIOR_KEY, POLICY_META_KEYS, SETTINGS_FILE_MAX_BYTES,
+        ALLOW_LIST_KEYS, AUTH_HELPERS, CLOUD_PROVIDER_FLAGS, DISABLE_ADMIN_ENV_UNION_VARIABLE, HELD_ALLOW_LIST_KEYS,
+        LOGIN_METHOD_KEY, LOGIN_METHODS, LOGIN_ORGANIZATION_KEY, MANAGED_SETTINGS_DROP_IN_DIRECTORY,
+        MANAGED_SETTINGS_FILE, MANAGED_SOURCES_BEHAVIOR_KEY, MANAGED_SOURCES_MERGE, MCP_SERVER_ALLOW_LIST_KEY,
+        OTEL_EXACT, OTEL_PREFIXES, PARENT_RESTRICT_FALSE_KEYS, PARENT_RESTRICT_TRUE_KEYS, PARENT_SETTINGS_BEHAVIOR_KEY,
+        POLICY_META_KEYS, SETTINGS_FILE_MAX_BYTES,
     },
     settings_resolve_admin::build_admin,
     settings_resolve_parent::{AdminFacts, drop_open_gates, mcp_servers_managed_only, parent_slice},
     settings_resolve_platform::{
-        MdmEvaluation, PlatformKind, kernel_reports_wsl, managed_directory, platform_kind, wsl_managed_directory,
+        MdmEvaluation, asks_organization, kernel_reports_wsl, managed_directory, wsl_managed_directory,
     },
+    settings_resolve_platform_kind::PlatformKind,
     settings_resolve_restrict::{js_equal, restrict_policy_document},
     settings_resolve_tier::{LoadState, TierRead},
     settings_resolve_values::{SettingsMap, has_authored_value, has_policy_content, merge_with_union, omit, pick},
@@ -85,9 +85,20 @@ fn is_drop_in(name: &str) -> bool {
     name.ends_with(".json") && !name.starts_with('.')
 }
 
+/// Whether the user could rewrite a document `um` upstream reads, as the third argument of its callback tells it.
+#[derive(Clone, Copy)]
+enum Rewritable<'p> {
+    /// A document the read did not find (`() => false`).
+    Never,
+    /// A document the read found, and where to look to learn about it.
+    Ask(&'p DocumentProbe<'p>),
+    /// A registry document handed over to be held (`yX`).
+    Always,
+}
+
 /// The callback `um` upstream hands every document it reads: the settings to merge for that document, given the
-/// read and, for a document the read found, where to look to learn whether the user could rewrite it.
-type DocumentFilter<'f> = dyn FnMut(&TierRead, Option<&DocumentProbe<'_>>) -> Option<SettingsMap> + 'f;
+/// read and whether the user could rewrite it.
+type DocumentFilter<'f> = dyn FnMut(&TierRead, Rewritable<'_>) -> Option<SettingsMap> + 'f;
 
 /// The documents of one managed folder merged so far (`s` in `um` upstream).
 struct Folder {
@@ -120,18 +131,35 @@ impl Folder {
         self.unreadable |= document.unreadable;
         self.state = self.state.combine(document.load_state);
     }
+
+    /// `rX` upstream: the tier the merged documents make.
+    fn finish(self) -> TierRead {
+        TierRead {
+            settings: (self.found && has_policy_content(&self.merged)).then_some(self.merged),
+            has_policy_content: self.content,
+            load_state: self.state,
+            user_writable: false,
+            unreadable: self.unreadable,
+        }
+    }
 }
 
-/// `um` upstream: the managed settings file of `directory` plus its sorted drop-ins, merged after `filter` saw each.
+/// `um` upstream: the held registry documents, then the managed settings file of `directory` plus its sorted
+/// drop-ins, merged after `filter` saw each.
 fn read_managed_directory<H: SettingsHost>(
     host: &H,
     directory: Option<&Path>,
+    held: &[TierRead],
     filter: &mut DocumentFilter<'_>,
 ) -> TierRead {
-    let Some(directory) = directory else {
-        return TierRead::absent();
-    };
     let mut folder = Folder::new();
+    for document in held {
+        let settings = filter(document, Rewritable::Always);
+        folder.absorb(document, settings);
+    }
+    let Some(directory) = directory else {
+        return folder.finish();
+    };
     let (document, opened) = read_policy_file(host, &directory.join(MANAGED_SETTINGS_FILE));
     let probe = (document.load_state != LoadState::Absent).then(|| DocumentProbe {
         root: directory,
@@ -139,7 +167,7 @@ fn read_managed_directory<H: SettingsHost>(
         last_is_link: None,
         opened,
     });
-    let settings = filter(&document, probe.as_ref());
+    let settings = filter(&document, probe.as_ref().map_or(Rewritable::Never, Rewritable::Ask));
     folder.absorb(&document, settings);
     let drop_ins = directory.join(MANAGED_SETTINGS_DROP_IN_DIRECTORY);
     match host.read_directory(&drop_ins) {
@@ -159,7 +187,7 @@ fn read_managed_directory<H: SettingsHost>(
                     last_is_link: Some(linked),
                     opened,
                 });
-                let settings = filter(&document, probe.as_ref());
+                let settings = filter(&document, probe.as_ref().map_or(Rewritable::Never, Rewritable::Ask));
                 folder.absorb(&document, settings);
             }
         }
@@ -169,43 +197,49 @@ fn read_managed_directory<H: SettingsHost>(
             folder.unreadable = true;
         }
     }
-    TierRead {
-        settings: (folder.found && has_policy_content(&folder.merged)).then_some(folder.merged),
-        has_policy_content: folder.content,
-        load_state: folder.state,
-        user_writable: false,
-        unreadable: folder.unreadable,
-    }
+    folder.finish()
 }
 
-/// `Q5` upstream: the managed file tier for this platform. A session that asks its organization reads the Windows
-/// side of WSL only when the kernel says WSL.
+/// `Q5` upstream: the managed file tier for this platform, with the held registry documents ahead of the managed
+/// files. A session that asks its organization reads the Windows side of WSL only when the kernel says WSL.
 fn read_file_tier<H: SettingsHost>(
     host: &H,
     kind: PlatformKind,
-    mdm: &TierRead,
-    wsl_inherits: bool,
+    mdm: &MdmEvaluation,
     organization: bool,
     filter: &mut DocumentFilter<'_>,
 ) -> TierRead {
+    let held = mdm.held_documents.as_slice();
     let local = managed_directory(kind);
     if kind != PlatformKind::Wsl || (organization && !kernel_reports_wsl(host)) {
-        return read_managed_directory(host, Some(&local), filter);
+        return read_managed_directory(host, Some(&local), held, filter);
     }
-    let machine_holds = mdm.has_policy_content || mdm.load_state == LoadState::DidNotLoad;
-    if wsl_inherits {
-        let windows_side = read_managed_directory(host, Some(&wsl_managed_directory()), filter);
-        if windows_side.lo() || machine_holds {
+    let machine_holds = mdm.mdm.has_policy_content || mdm.mdm.load_state == LoadState::DidNotLoad;
+    if mdm.wsl_inherits {
+        let windows = wsl_managed_directory();
+        let windows_keeps_held = (!held.is_empty()).then(|| {
+            machine_holds
+                || read_managed_directory(
+                    host,
+                    Some(&windows),
+                    &[],
+                    &mut |document: &TierRead, _: Rewritable<'_>| document.settings.clone(),
+                )
+                .lo()
+        });
+        let windows_held: &[TierRead] = if windows_keeps_held == Some(true) { held } else { &[] };
+        let windows_side = read_managed_directory(host, Some(&windows), windows_held, filter);
+        if windows_keeps_held.unwrap_or_else(|| windows_side.lo() || machine_holds) {
             return windows_side;
         }
-        let mut local_tier = read_managed_directory(host, Some(&local), filter);
+        let mut local_tier = read_managed_directory(host, Some(&local), held, filter);
         local_tier.load_state = windows_side.load_state.combine(local_tier.load_state);
         return local_tier;
     }
     if machine_holds {
-        return read_managed_directory(host, None, filter);
+        return read_managed_directory(host, None, held, filter);
     }
-    read_managed_directory(host, Some(&local), filter)
+    read_managed_directory(host, Some(&local), held, filter)
 }
 
 /// What reading the managed file for an organization (`pE` upstream) tells the admin selection.
@@ -219,13 +253,6 @@ pub(crate) struct Held {
     allow_lists: Vec<&'static str>,
 }
 
-/// `asksOrganization()` upstream: a cloud session that takes its managed settings from its organization.
-fn asks_organization<H: SettingsHost>(host: &H) -> bool {
-    host.var_os(OsStr::new(ENTRYPOINT_VARIABLE))
-        .and_then(|value| value.to_str().map(str::to_owned))
-        .is_some_and(|value| ORGANIZATION_ENTRYPOINTS.contains(&value.as_str()))
-}
-
 /// Whether the user could rewrite a managed document, asked only of a session that asks its organization (`n` in
 /// `pE` upstream).
 struct Rewrites<'h, H> {
@@ -237,22 +264,21 @@ struct Rewrites<'h, H> {
 }
 
 impl<H: SettingsHost> Rewrites<'_, H> {
-    fn allowed(&mut self, probe: Option<&DocumentProbe<'_>>) -> bool {
-        self.organization
-            && probe.is_some_and(|probe| {
-                user_can_write(self.host, self.kind, self.wsl_organization, probe, &mut self.certain)
-            })
+    fn allowed(&mut self, rewritable: Rewritable<'_>) -> bool {
+        match rewritable {
+            Rewritable::Always => true,
+            Rewritable::Never => false,
+            Rewritable::Ask(probe) => {
+                self.organization
+                    && user_can_write(self.host, self.kind, self.wsl_organization, probe, &mut self.certain)
+            }
+        }
     }
 }
 
 /// `pE` upstream: the managed file tier, where a document the user could rewrite only restricts when the session
 /// asks its organization.
-fn read_managed_file<H: SettingsHost>(
-    host: &H,
-    kind: PlatformKind,
-    mdm: &TierRead,
-    wsl_inherits: bool,
-) -> (TierRead, Held) {
+fn read_managed_file<H: SettingsHost>(host: &H, kind: PlatformKind, mdm: &MdmEvaluation) -> (TierRead, Held) {
     let organization = asks_organization(host);
     let mut writes = Rewrites {
         host,
@@ -267,11 +293,10 @@ fn read_managed_file<H: SettingsHost>(
         host,
         kind,
         mdm,
-        wsl_inherits,
         organization,
-        &mut |document: &TierRead, probe: Option<&DocumentProbe<'_>>| {
+        &mut |document: &TierRead, rewritable: Rewritable<'_>| {
             let settings = document.settings.as_ref()?;
-            if !writes.allowed(probe) {
+            if !writes.allowed(rewritable) {
                 for (key, value) in pick(settings, &POLICY_META_KEYS) {
                     held_meta.insert(key, value);
                 }
@@ -288,11 +313,10 @@ fn read_managed_file<H: SettingsHost>(
         host,
         kind,
         mdm,
-        wsl_inherits,
         organization,
-        &mut |document: &TierRead, probe: Option<&DocumentProbe<'_>>| {
+        &mut |document: &TierRead, rewritable: Rewritable<'_>| {
             let settings = document.settings.as_ref()?;
-            if !writes.allowed(probe) {
+            if !writes.allowed(rewritable) {
                 return None;
             }
             Some(restrict_policy_document(settings).unwrap_or_else(|| settings.clone()))
@@ -685,12 +709,12 @@ fn pin_machine_login(
 /// `QP` upstream for the default configuration: no policy helper, no host-managed provider.
 pub(crate) fn resolve_policy<H: SettingsHost>(
     host: &H,
+    kind: PlatformKind,
     parent_managed: Option<&SettingsMap>,
     remote: Option<&SettingsMap>,
     evaluation: &MdmEvaluation,
 ) -> PolicyResolution {
-    let kind = platform_kind(host);
-    let (file, held) = read_managed_file(host, kind, &evaluation.mdm, evaluation.wsl_inherits);
+    let (file, held) = read_managed_file(host, kind, evaluation);
     let parent_managed = parent_managed.filter(|parent| !parent.is_empty());
     let remote = remote.filter(|settings| !settings.is_empty());
     let selection = select_admin(remote, &evaluation.mdm, &file, &held, parent_managed, kind.as_str());

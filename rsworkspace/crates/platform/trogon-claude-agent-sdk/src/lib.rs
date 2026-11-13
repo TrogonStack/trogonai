@@ -114,6 +114,7 @@ mod settings_resolve_connector;
 mod settings_resolve_env;
 mod settings_resolve_parent;
 mod settings_resolve_platform;
+mod settings_resolve_platform_kind;
 mod settings_resolve_policy;
 mod settings_resolve_reread;
 mod settings_resolve_restrict;

@@ -12,39 +12,18 @@ use crate::{
         EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest, ExecuteFileStatus, OperatingSystem,
         ReadFile, SettingsHost,
     },
-    constants::{BUSY_ERRNOS, MAX_BUFFER_ERRNO},
+    constants::{BUSY_ERRNOS, ENTRYPOINT_VARIABLE, MAX_BUFFER_ERRNO, ORGANIZATION_ENTRYPOINTS},
     constants::{
         LINUX_MANAGED_DIRECTORY, MACOS_MANAGED_DIRECTORY, PLIST_DIRECTORY, PLIST_DOMAIN, PLUTIL_CONVERT_ARGS,
         PLUTIL_LINT_ARGS, PLUTIL_PATH, POLICY_READ_MAX_BUFFER, POLICY_READ_TIMEOUT, PROC_VERSION_PATH,
         REGISTRY_MACHINE_KEY, REGISTRY_NOT_FOUND_TEXT, REGISTRY_USER_KEY, REGISTRY_VALUE_NAME,
         WINDOWS_MANAGED_DIRECTORY, WSL_MANAGED_DIRECTORY, WSL_REGISTRY_TOOL,
     },
+    settings_resolve_platform_kind::PlatformKind,
     settings_resolve_tier::{LoadState, TierRead},
     settings_resolve_values::SettingsMap,
+    settings_resolve_writable::registry_tool_writable,
 };
-
-/// Platform names `getPlatform()` upstream returns.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum PlatformKind {
-    Macos,
-    Windows,
-    Wsl,
-    Linux,
-    Unknown,
-}
-
-impl PlatformKind {
-    /// The name `getPlatform()` upstream returns.
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Macos => "macos",
-            Self::Windows => "windows",
-            Self::Wsl => "wsl",
-            Self::Linux => "linux",
-            Self::Unknown => "unknown",
-        }
-    }
-}
 
 fn variable_is_set<H: EnvironmentVariable>(host: &H, name: &str) -> bool {
     host.var_os(OsStr::new(name)).is_some_and(|value| !value.is_empty())
@@ -80,12 +59,21 @@ pub(crate) fn platform_kind<H: SettingsHost>(host: &H) -> PlatformKind {
     }
 }
 
-/// `Gc()` upstream: a Linux process that runs under WSL.
+/// `asksOrganization()` upstream (`bx()` where the reads decide): a cloud session that takes its managed settings
+/// from its organization.
+pub(crate) fn asks_organization<H: SettingsHost>(host: &H) -> bool {
+    host.var_os(OsStr::new(ENTRYPOINT_VARIABLE))
+        .and_then(|value| value.to_str().map(str::to_owned))
+        .is_some_and(|value| ORGANIZATION_ENTRYPOINTS.contains(&value.as_str()))
+}
+
+/// `Gc()` upstream: a Linux process that runs under WSL. A session that asks its organization believes only the
+/// kernel, not the environment.
 pub(crate) fn runs_under_wsl<H: SettingsHost>(host: &H) -> bool {
     if host.operating_system() != OperatingSystem::Linux {
         return false;
     }
-    if variable_is_set(host, "WSL_DISTRO_NAME") {
+    if variable_is_set(host, "WSL_DISTRO_NAME") && !asks_organization(host) {
         return true;
     }
     proc_version(host).is_some_and(|text| kernel_looks_like_wsl(&text))
@@ -511,6 +499,23 @@ pub(crate) struct MdmEvaluation {
     pub(crate) unread_without_errno: bool,
     /// The tier carries an error that is neither a warning nor about a document the user can write.
     pub(crate) blocking_error: bool,
+    /// What the reads evaluate to without the registry, for a session that asks its organization while the user
+    /// could replace the registry tool (`whereAsked` upstream).
+    pub(crate) where_asked: Option<Box<MdmEvaluation>>,
+    /// The registry documents such a session reads as managed files that may only restrict (`heldDocuments`
+    /// upstream), with no settings unless they loaded.
+    pub(crate) held_documents: Vec<TierRead>,
+}
+
+impl MdmEvaluation {
+    /// `Gu` upstream: the evaluation a session goes on with, the one without the registry when it asks its
+    /// organization.
+    pub(crate) fn in_effect(&self, organization: bool) -> &Self {
+        match &self.where_asked {
+            Some(asked) if organization => asked,
+            _ => self,
+        }
+    }
 }
 
 /// Errors the tier collected so far, as far as the re-read decision looks at them.
@@ -535,12 +540,54 @@ impl ErrorFacts {
             plist,
             unread_without_errno: self.unread_without_errno,
             blocking_error: self.blocking,
+            where_asked: None,
+            held_documents: Vec::new(),
         }
     }
 }
 
-/// `_E` upstream: turn the raw reads into the machine policy tier.
-pub(crate) fn evaluate_policy<H: SettingsHost>(host: &H, read: &MdmRead) -> MdmEvaluation {
+/// `_E` upstream: turn the raw reads into the machine policy tier. `kind` is the platform the process settled on
+/// first. When the registry answered a session that asks its organization and the user could replace the registry
+/// tool, the registry documents are also handed on as documents that may only restrict, next to the evaluation
+/// without them.
+pub(crate) fn evaluate_policy<H: SettingsHost>(host: &H, kind: PlatformKind, read: &MdmRead) -> MdmEvaluation {
+    let mut evaluation = evaluate_reads(host, kind, read);
+    let registry_answered = read.hklm_stdout.is_some() || read.hklm_oversize || read.hkcu_stdout.is_some();
+    if evaluation.plist.is_some()
+        || !registry_answered
+        || host.operating_system() == OperatingSystem::Win32
+        || !asks_organization(host)
+        || !registry_tool_writable(host, kind, kind == PlatformKind::Wsl && kernel_reports_wsl(host))
+    {
+        return evaluation;
+    }
+    let mut held: Vec<TierRead> = Vec::new();
+    if let Some(stdout) = &read.hklm_stdout {
+        held.push(TierRead::from_hm(&registry_value(stdout).unwrap_or_default(), false));
+    } else if read.hklm_oversize {
+        held.push(TierRead::did_not_load(true));
+    }
+    if let Some(stdout) = &read.hkcu_stdout {
+        held.push(TierRead::from_hm(&registry_value(stdout).unwrap_or_default(), true));
+    }
+    for document in &mut held {
+        if document.load_state != LoadState::Loaded {
+            document.settings = None;
+        }
+    }
+    let without_registry = MdmRead {
+        hklm_stdout: None,
+        hklm_oversize: false,
+        hkcu_stdout: None,
+        ..read.clone()
+    };
+    let mut asked = evaluate_reads(host, kind, &without_registry);
+    asked.held_documents = held;
+    evaluation.where_asked = Some(Box::new(asked));
+    evaluation
+}
+
+fn evaluate_reads<H: SettingsHost>(host: &H, kind: PlatformKind, read: &MdmRead) -> MdmEvaluation {
     let mut state = LoadState::Absent;
     let mut unreadable = false;
     let mut errors = ErrorFacts::default();
@@ -637,7 +684,7 @@ pub(crate) fn evaluate_policy<H: SettingsHost>(host: &H, read: &MdmRead) -> MdmE
     }
     if let Some(stdout) = &read.hkcu_stdout {
         let held = (inherits && directory_holds_managed_settings(host, &wsl_managed_directory()))
-            || directory_holds_managed_settings(host, &managed_directory(platform_kind(host)));
+            || directory_holds_managed_settings(host, &managed_directory(kind));
         if !held {
             let text = registry_value(stdout).unwrap_or_default();
             let user = TierRead::from_hm(&text, true);

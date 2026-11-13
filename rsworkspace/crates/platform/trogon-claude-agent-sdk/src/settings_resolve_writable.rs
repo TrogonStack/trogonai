@@ -15,7 +15,7 @@ use crate::{
     constants::{
         MODE_GROUP_WRITABLE, MODE_OTHER_WRITABLE, WRITABLE_WALK_LINK_LIMIT, WSL_MANAGED_DIRECTORY, WSL_REGISTRY_TOOL,
     },
-    settings_resolve_platform::PlatformKind,
+    settings_resolve_platform_kind::PlatformKind,
     settings_resolve_sources::resolve_path,
     settings_resolve_vetting::{Vetting, vet},
 };
@@ -317,6 +317,56 @@ fn walk_finds_writable_folder<H: SettingsHost>(
     true
 }
 
+/// What `GP` upstream settles before it looks at owners.
+enum ByIds {
+    Settled(bool),
+    /// The answer depends on the owners, asked for these effective and real user ids.
+    AskOwners(u32, Option<u32>),
+}
+
+fn settled_by_ids<H: SettingsHost>(host: &H, kind: PlatformKind, wsl_organization: bool, path: &Path) -> ByIds {
+    let euid = host.effective_user_id();
+    let uid = host.real_user_id();
+    if wsl_organization {
+        let text = path.to_string_lossy();
+        let managed = text
+            .strip_prefix(WSL_MANAGED_DIRECTORY)
+            .is_some_and(|rest| rest.starts_with('/'));
+        if text == WSL_REGISTRY_TOOL || managed {
+            return ByIds::Settled(false);
+        }
+    }
+    if euid == Some(0) || uid == Some(0) {
+        return ByIds::Settled(true);
+    }
+    let Some(euid) = euid else {
+        return ByIds::Settled(false);
+    };
+    if kind == PlatformKind::Windows {
+        return ByIds::Settled(false);
+    }
+    ByIds::AskOwners(euid, uid)
+}
+
+/// The rest of `GP` upstream, once the owners of the document and of the folder it counts are known.
+fn owners_or_folders_allow<H: SettingsHost>(
+    host: &H,
+    path: &Path,
+    identity: &Identity,
+    file: Option<Owner>,
+    folder: Option<Owner>,
+    unverified: bool,
+    certain: &mut HashMap<PathBuf, bool>,
+) -> bool {
+    if identity_allows(identity, file, folder) != Some(false) || unverified {
+        return true;
+    }
+    if write_check(host, path) != WriteCheck::No {
+        return true;
+    }
+    walk_finds_writable_folder(host, path, identity, certain)
+}
+
 /// `GP` upstream. `wsl_organization` is `_X(true)`: a WSL process whose kernel reports WSL. `certain` keeps the
 /// folders the walk already judged, for the rest of the resolution.
 pub(crate) fn user_can_write<H: SettingsHost>(
@@ -327,26 +377,10 @@ pub(crate) fn user_can_write<H: SettingsHost>(
     certain: &mut HashMap<PathBuf, bool>,
 ) -> bool {
     let path = probe.path();
-    let euid = host.effective_user_id();
-    let uid = host.real_user_id();
-    if wsl_organization {
-        let text = path.to_string_lossy();
-        let managed = text
-            .strip_prefix(WSL_MANAGED_DIRECTORY)
-            .is_some_and(|rest| rest.starts_with('/'));
-        if text == WSL_REGISTRY_TOOL || managed {
-            return false;
-        }
-    }
-    if euid == Some(0) || uid == Some(0) {
-        return true;
-    }
-    let Some(euid) = euid else {
-        return false;
+    let (euid, uid) = match settled_by_ids(host, kind, wsl_organization, &path) {
+        ByIds::Settled(answer) => return answer,
+        ByIds::AskOwners(euid, uid) => (euid, uid),
     };
-    if kind == PlatformKind::Windows {
-        return false;
-    }
     let linkage = linkage(host, probe);
     let identity = identity(host, euid, uid);
     let file = if probe.opened { stat_owner(host, &path) } else { None };
@@ -355,13 +389,29 @@ pub(crate) fn user_can_write<H: SettingsHost>(
     } else {
         file
     };
-    if identity_allows(&identity, file, folder) != Some(false) || linkage == Linkage::Unverified {
-        return true;
-    }
-    if write_check(host, &path) != WriteCheck::No {
-        return true;
-    }
-    walk_finds_writable_folder(host, &path, &identity, certain)
+    owners_or_folders_allow(
+        host,
+        &path,
+        &identity,
+        file,
+        folder,
+        linkage == Linkage::Unverified,
+        certain,
+    )
+}
+
+/// `GP(new Bs, Mi, ...)` upstream: whether the user could replace the registry tool WSL runs. Nothing has noted a
+/// link for it yet, so the owners are those of the tool and of its folder as `stat` reports them.
+pub(crate) fn registry_tool_writable<H: SettingsHost>(host: &H, kind: PlatformKind, wsl_organization: bool) -> bool {
+    let path = Path::new(WSL_REGISTRY_TOOL);
+    let (euid, uid) = match settled_by_ids(host, kind, wsl_organization, path) {
+        ByIds::Settled(answer) => return answer,
+        ByIds::AskOwners(euid, uid) => (euid, uid),
+    };
+    let identity = identity(host, euid, uid);
+    let file = stat_owner(host, path);
+    let folder = path.parent().and_then(|folder| stat_owner(host, folder));
+    owners_or_folders_allow(host, path, &identity, file, folder, false, &mut HashMap::new())
 }
 
 #[cfg(test)]

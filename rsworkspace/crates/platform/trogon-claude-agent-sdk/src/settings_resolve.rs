@@ -9,6 +9,7 @@ use crate::{
     settings_dialect::SettingsDialect,
     settings_numbers::{PythonNumbers, approximate_numbers, exact_numbers, infinities_to_null, normalize_numbers},
     settings_resolve_connector::skips_repository_settings,
+    settings_resolve_platform::asks_organization,
     settings_resolve_policy::{PolicyResolution, resolve_policy},
     settings_resolve_sources::{
         local_settings_path, project_settings_path, read_settings_file, resolve_cwd, user_settings_path,
@@ -196,8 +197,9 @@ fn resolve_core<H: SettingsHost>(
         parent
     });
     let remote = options.server_managed_settings.as_ref().and_then(to_map);
+    let kind = state.platform(host);
     let reading = state.policy_reading(host);
-    let evaluation = reading.evaluation;
+    let evaluation = reading.evaluation.in_effect(asks_organization(host));
     let outcome_lost = reading.hklm.as_ref().map(|outcome| outcome.lost_the_answer());
     let PolicyResolution {
         settings: policy_settings,
@@ -205,7 +207,7 @@ fn resolve_core<H: SettingsHost>(
         mdm_did_not_load,
         file_did_not_load,
         ..
-    } = resolve_policy(host, parent.as_ref(), remote.as_ref(), &evaluation);
+    } = resolve_policy(host, kind, parent.as_ref(), remote.as_ref(), evaluation);
     let policy_settings = policy_settings.map(|mut settings| {
         for entry in settings.values_mut() {
             normalize_numbers(entry, dialect);

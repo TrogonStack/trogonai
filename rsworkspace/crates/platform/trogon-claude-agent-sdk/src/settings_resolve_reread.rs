@@ -11,8 +11,9 @@ use crate::{
         MDM_UNANSWERED_RETRY_LIMIT,
     },
     settings_resolve_platform::{
-        CommandOutcome, MdmEvaluation, PlistLabel, evaluate_policy, read_policy, runs_under_wsl,
+        CommandOutcome, MdmEvaluation, PlistLabel, asks_organization, evaluate_policy, read_policy, runs_under_wsl,
     },
+    settings_resolve_platform_kind::PlatformKind,
     settings_resolve_tier::LoadState,
     settings_resolve_values::SettingsMap,
 };
@@ -45,9 +46,9 @@ struct Finished {
 
 /// Reads the host starting at `started`. The read ends once its programs are done by the host's clock, and no
 /// earlier than the time they report having taken, so a host whose clock does not move still sees them take it.
-fn read_host<H: SettingsHost>(host: &H, started: i128) -> Finished {
+fn read_host<H: SettingsHost>(host: &H, kind: PlatformKind, started: i128) -> Finished {
     let read = read_policy(host);
-    let evaluation = evaluate_policy(host, &read);
+    let evaluation = evaluate_policy(host, kind, &read);
     let took = i128::try_from(read.elapsed_ms).unwrap_or(i128::MAX);
     Finished {
         reading: Reading {
@@ -77,25 +78,33 @@ fn holds_no_settings(evaluation: &MdmEvaluation) -> bool {
     is_empty(evaluation.mdm.settings.as_ref()) && evaluation.hkcu.is_empty()
 }
 
-/// `iet` upstream: whether a fresh read is good enough to replace the reading in force.
-fn is_acceptable(candidate: &Reading, in_force: &Reading, nothing_answered_yet: bool, under_wsl: bool) -> bool {
-    let tier = &candidate.evaluation.mdm;
+/// `iet` upstream: whether a fresh read is good enough to replace the reading in force, each judged by the
+/// evaluation the session goes on with.
+fn is_acceptable(
+    candidate: &Reading,
+    in_force: &Reading,
+    nothing_answered_yet: bool,
+    under_wsl: bool,
+    organization: bool,
+) -> bool {
+    let fresh = candidate.evaluation.in_effect(organization);
+    let current = in_force.evaluation.in_effect(organization);
+    let tier = &fresh.mdm;
     let machine_answered = candidate
         .hklm
         .as_ref()
         .is_none_or(|outcome| outcome.answered || (nothing_answered_yet && !outcome.lost_the_answer()));
-    let user_answered = candidate.hkcu.as_ref().is_none_or(|outcome| outcome.answered)
-        || tier.lo()
-        || in_force.evaluation.hkcu.is_empty();
-    let nothing_to_lose = !under_wsl && !in_force.evaluation.mdm.lo() && holds_no_settings(&in_force.evaluation);
-    let loaded_cleanly = tier.load_state != LoadState::DidNotLoad && !candidate.evaluation.blocking_error;
+    let user_answered =
+        candidate.hkcu.as_ref().is_none_or(|outcome| outcome.answered) || tier.lo() || current.hkcu.is_empty();
+    let nothing_to_lose = !under_wsl && !current.mdm.lo() && holds_no_settings(current);
+    let loaded_cleanly = tier.load_state != LoadState::DidNotLoad && !fresh.blocking_error;
     machine_answered && user_answered && (nothing_to_lose || loaded_cleanly)
 }
 
 /// `aet` upstream: what the fresh read would take away from the reading in force, as the names upstream compares.
-fn describe_loss(candidate: &Reading, in_force: &Reading) -> String {
-    let fresh = &candidate.evaluation;
-    let current = &in_force.evaluation;
+fn describe_loss(candidate: &Reading, in_force: &Reading, organization: bool) -> String {
+    let fresh = candidate.evaluation.in_effect(organization);
+    let current = in_force.evaluation.in_effect(organization);
     let mut lost: Vec<&str> = Vec::new();
     if !fresh.mdm.lo() && (current.mdm.lo() || (!holds_no_settings(current) && holds_no_settings(fresh))) {
         lost.push("all policy");
@@ -110,8 +119,9 @@ fn describe_loss(candidate: &Reading, in_force: &Reading) -> String {
 }
 
 /// `replace` upstream counts a read as answered when the machine answered and nothing was unreadable for no reason.
-fn answered(reading: &Reading) -> bool {
-    reading.hklm.as_ref().is_none_or(|outcome| outcome.answered) && !reading.evaluation.unread_without_errno
+fn answered(reading: &Reading, organization: bool) -> bool {
+    reading.hklm.as_ref().is_none_or(|outcome| outcome.answered)
+        && !reading.evaluation.in_effect(organization).unread_without_errno
 }
 
 /// Where a re-read stands: still running on its thread, or ended (`None` when its thread went away without an
@@ -134,16 +144,22 @@ struct InFlight {
 }
 
 impl InFlight {
-    fn start<H: SettingsHost>(host: &H, started: i128, retrying: bool, rereads: PolicyRereads) -> Self {
+    fn start<H: SettingsHost>(
+        host: &H,
+        kind: PlatformKind,
+        started: i128,
+        retrying: bool,
+        rereads: PolicyRereads,
+    ) -> Self {
         let outcome = match rereads {
-            PolicyRereads::Inline => Outcome::Ended(Some(Box::new(read_host(host, started)))),
+            PolicyRereads::Inline => Outcome::Ended(Some(Box::new(read_host(host, kind, started)))),
             PolicyRereads::Background => {
                 let (sender, receiver) = mpsc::sync_channel(1);
                 let reader = host.clone();
                 // A thread that cannot start drops the sender with it, so the read ends without an answer, the way a
                 // read that threw does upstream.
                 let _ = thread::Builder::new().spawn(move || {
-                    let _ = sender.send(read_host(&reader, started));
+                    let _ = sender.send(read_host(&reader, kind, started));
                 });
                 Outcome::Running(receiver)
             }
@@ -214,8 +230,8 @@ struct Policy {
 
 impl Policy {
     /// `startLoad` upstream: the first read becomes the reading in force when it ends.
-    fn loaded(first: Finished) -> Self {
-        let answered = answered(&first.reading);
+    fn loaded(first: Finished, organization: bool) -> Self {
+        let answered = answered(&first.reading, organization);
         Self {
             reading: first.reading,
             answered_once: answered,
@@ -227,8 +243,8 @@ impl Policy {
     }
 
     /// `replace` upstream: the fresh read becomes the reading in force.
-    fn replace(&mut self, reading: Reading) {
-        if answered(&reading) {
+    fn replace(&mut self, reading: Reading, organization: bool) {
+        if answered(&reading, organization) {
             self.unanswered_in_a_row = 0;
             self.answered_once = true;
         } else {
@@ -238,17 +254,23 @@ impl Policy {
     }
 
     /// The body of the re-read upstream and its `finally`, applied at the instant the read ended.
-    fn apply<H: SettingsHost>(&mut self, host: &H, flight: InFlight, now: i128) {
+    fn apply<H: SettingsHost>(&mut self, host: &H, flight: InFlight, now: i128, organization: bool) {
         let mut loss = String::new();
         let mut ended = now;
         let mut taken = false;
         if let Outcome::Ended(Some(finished)) = flight.outcome {
             let Finished { reading, at } = *finished;
             ended = at;
-            if is_acceptable(&reading, &self.reading, !self.answered_once, runs_under_wsl(host)) {
-                let description = describe_loss(&reading, &self.reading);
+            if is_acceptable(
+                &reading,
+                &self.reading,
+                !self.answered_once,
+                runs_under_wsl(host),
+                organization,
+            ) {
+                let description = describe_loss(&reading, &self.reading, organization);
                 if description.is_empty() || description == self.loss_seen {
-                    self.replace(reading);
+                    self.replace(reading, organization);
                     taken = true;
                 } else if !flight.retrying {
                     loss = description;
@@ -264,7 +286,13 @@ impl Policy {
     }
 
     /// Applies the read in flight if it has ended and `counts` accepts when it ended relative to when it started.
-    fn apply_if<H: SettingsHost>(&mut self, host: &H, now: i128, counts: impl Fn(i128, i128) -> bool) {
+    fn apply_if<H: SettingsHost>(
+        &mut self,
+        host: &H,
+        now: i128,
+        organization: bool,
+        counts: impl Fn(i128, i128) -> bool,
+    ) {
         let Some(flight) = &mut self.in_flight else {
             return;
         };
@@ -276,15 +304,16 @@ impl Policy {
             return;
         }
         if let Some(flight) = self.in_flight.take() {
-            self.apply(host, flight, now);
+            self.apply(host, flight, now, organization);
         }
     }
 
     /// `o8` upstream at the instant `now`: a read that has ended by now has been applied, a new read starts once the
     /// interval for the last outcomes has passed and none is running, and while at most one read in a row went
     /// unanswered the call waits up to a second from the start of the running read for it.
-    fn current<H: SettingsHost>(&mut self, host: &H, now: i128, rereads: PolicyRereads) -> Reading {
-        self.apply_if(host, now, |_, ended| ended <= now);
+    fn current<H: SettingsHost>(&mut self, host: &H, kind: PlatformKind, now: i128, rereads: PolicyRereads) -> Reading {
+        let organization = asks_organization(host);
+        self.apply_if(host, now, organization, |_, ended| ended <= now);
         let unanswered = self.unanswered_in_a_row;
         if self.in_flight.is_none() {
             let retrying = (1..=MDM_UNANSWERED_RETRY_LIMIT).contains(&unanswered);
@@ -302,14 +331,16 @@ impl Policy {
             // the pinned resolver doing.
             let since = now - self.last_read_at;
             if !(0..interval).contains(&since) {
-                self.in_flight = Some(InFlight::start(host, now, retrying, rereads));
+                self.in_flight = Some(InFlight::start(host, kind, now, retrying, rereads));
             }
         }
         if unanswered <= 1 {
             if let Some(flight) = &mut self.in_flight {
                 flight.wait(host);
             }
-            self.apply_if(host, now, |started, ended| ended - started < MDM_REREAD_WAIT_MS);
+            self.apply_if(host, now, organization, |started, ended| {
+                ended - started < MDM_REREAD_WAIT_MS
+            });
         }
         self.reading.clone()
     }
@@ -324,15 +355,15 @@ pub(crate) struct PolicyState {
 impl PolicyState {
     /// The reading `resolveSettings` goes on with. The first call reads the host and goes on from the instant that
     /// read ended; every call then applies `o8` upstream at its instant.
-    pub(crate) fn current<H: SettingsHost>(&mut self, host: &H, rereads: PolicyRereads) -> Reading {
+    pub(crate) fn current<H: SettingsHost>(&mut self, host: &H, kind: PlatformKind, rereads: PolicyRereads) -> Reading {
         let started = epoch_millis(host);
         let mut loaded_at = None;
         let policy = self.policy.get_or_insert_with(|| {
-            let first = read_host(host, started);
+            let first = read_host(host, kind, started);
             loaded_at = Some(first.at);
-            Policy::loaded(first)
+            Policy::loaded(first, asks_organization(host))
         });
         let now = loaded_at.map_or(started, |at| epoch_millis(host).max(at));
-        policy.current(host, now, rereads)
+        policy.current(host, kind, now, rereads)
     }
 }
