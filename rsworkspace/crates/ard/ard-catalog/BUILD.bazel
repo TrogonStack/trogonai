@@ -1,0 +1,6 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "ard-catalog",
+    compile_data = glob(["schemas/**"]),
+)
