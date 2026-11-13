@@ -4975,6 +4975,70 @@
       ],
       "tests": [
         {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_spare_times_out_with_the_startup_texts_and_marks"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "prewarm_rejects_options_that_describe_a_session"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_plain_claim_writes_the_claim_and_the_prompt_before_any_answer"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "every_claim_option_keeps_the_upstream_key_order"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claim_that_sets_the_model_and_thinking_writes_them_before_the_prompt"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "settings_surround_the_claim_and_the_prompt_waits_for_every_answer"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "failed_settings_close_the_process_without_sending_the_prompt"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "failed_options_report_what_was_not_applied_after_sending_the_prompt"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_refused_claim_carries_the_cli_text_and_still_gets_a_result"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claimed_spare_yields_the_error_result_then_names_it_on_a_nonzero_exit"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "hook_settings_are_refused_without_sending_anything_and_the_spare_stays_claimable"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_spare_can_be_claimed_only_once_and_not_after_it_closed"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_relative_claim_directory_resolves_against_the_process_and_a_home_one_is_sent_as_is"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "the_claim_answer_replaces_the_initialization_result_and_keeps_the_applied_flags"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_spare_without_a_directory_parks_under_the_config_home_until_it_is_claimed"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_relative_config_home_falls_back_to_the_process_home"
+        },
+        {
           "path": "src/prewarm_tests.rs",
           "name": "settings_split_into_what_precedes_and_what_follows_the_claim"
         },

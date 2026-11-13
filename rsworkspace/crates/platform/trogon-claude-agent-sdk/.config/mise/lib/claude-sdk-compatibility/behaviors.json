@@ -4106,11 +4106,227 @@
         "golden_startup::a_reason_the_sdk_does_not_list_is_kept_and_a_non_string_is_dropped",
         "golden_startup::the_error_result_text_trims_and_joins_the_errors_or_uses_the_result_of_a_success_subtype",
         "golden_startup::an_error_result_after_a_prompt_is_a_message_and_a_nonzero_exit_then_names_it",
-        "golden_startup::an_error_result_after_a_prompt_ends_the_stream_cleanly_when_the_process_exits_zero"
+        "golden_startup::an_error_result_after_a_prompt_ends_the_stream_cleanly_when_the_process_exits_zero",
+        "golden_prewarm::a_claimed_spare_yields_the_error_result_then_names_it_on_a_nonzero_exit"
       ],
       "rust": [
         "src/driver.rs",
         "src/error.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-await-claim",
+      "concept": "How prewarm starts a spare the CLI keeps parked",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "extraArgs:{...i.extraArgs,\"await-claim\":null}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 28,
+        "sha256": "c8fa8db07609b675fcd6bf0bfbd953d2262c346f851d7af7eb4808643019ad86"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "prewarm() starts the CLI like startup() with the extra flag --await-claim after the other arguments, completes the initialize handshake and writes nothing else until the spare is claimed. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::a_plain_claim_writes_the_claim_and_the_prompt_before_any_answer"
+      ],
+      "rust": [
+        "src/prewarm.rs",
+        "src/client.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-claim-session",
+      "concept": "The claim_session request a claim writes",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "subtype:\"claim_session\",...e,include_initialize:e.include_initialize??!0",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "916369728bdfc8c2ce7798d28057bce88d0b423aa2fd1f46c1af59021839cf16"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A claim writes one claim_session control request whose keys keep a fixed order (cwd, permission_mode, env, additional_directories, append_system_prompt, title, agents, workspace_trust, sdk_mcp_servers, include_initialize) and asks for the initialize answer unless told not to. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::every_claim_option_keeps_the_upstream_key_order"
+      ],
+      "rust": [
+        "src/prewarm.rs",
+        "src/client.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-settings-not-applied",
+      "concept": "A claim whose settings were refused",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "if(je?.status===\"rejected\")g=!0,l.close(),S.reject(Object.assign(new De(`settings_not_applied: ${xt(je.reason)}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "a9a87517335777a10a99396c88f9ab97b16cd8ea8b796e1038f96a6386b51f2b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "When the settings a claim applies after claim_session are refused, the process is closed, the prompt is never sent and the claim fails with settings_not_applied carrying the claim information. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::failed_settings_close_the_process_without_sending_the_prompt",
+        "golden_prewarm::settings_surround_the_claim_and_the_prompt_waits_for_every_answer"
+      ],
+      "rust": [
+        "src/prewarm.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-option-not-applied",
+      "concept": "A claim whose other options were refused",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "else if(mn.length>0)S.reject(Object.assign(new De(`option_not_applied: ${mn.join(\"; \")}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "bc618bb015c2577dd5cce4b499424197ea3047972dfc9d8101999fce73714903"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "When only options other than settings fail to apply, the prompt is still sent and the claim fails with option_not_applied listing each refused option, so the session runs without them. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::failed_options_report_what_was_not_applied_after_sending_the_prompt"
+      ],
+      "rust": [
+        "src/prewarm.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-claim-initialize",
+      "concept": "What the claim answer does to the initialization result",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "if(r?.initialize===void 0)return n;let o=r.initialize",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 203,
+        "sha256": "ec12e0c3d2d91bdbc16fd083752b03c230db1761d5bbc29a3185b10eda3de047"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The initialize result in a claim answer replaces the initialization result, while the four applied flags (hooks, plugins, managed settings, code running MCP tools) keep the values of the first answer. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::the_claim_answer_replaces_the_initialization_result_and_keeps_the_applied_flags"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/prewarm.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-parked-directory",
+      "concept": "Where a spare without a directory is parked",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "let F=Lt(M,\"spares\");await vE(F,{recursive:!0,mode:448}),r=await Btt(Lt(F,\"spare-\"))",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "887d4cdce9b406564739de79d2daada0816df77ff34988052201fb1a994e962b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A spare started without a working directory is parked in a new directory spare-XXXXXX under the spares directory of the config home, created with mode 0700 and removed once the spare is claimed or closed; a config home that is not absolute falls back to the process home. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::a_spare_without_a_directory_parks_under_the_config_home_until_it_is_claimed",
+        "golden_prewarm::a_relative_config_home_falls_back_to_the_process_home"
+      ],
+      "rust": [
+        "src/prewarm.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-workspace-trust",
+      "concept": "Where workspace trust goes when prewarming",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "prewarm(): workspaceTrust is a per-session attestation",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 62,
+        "sha256": "76e8bf7441180152b45a8c647321645982eee2f7ec8d32171ed3c6837bfa0c33"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "prewarm() does not send workspaceTrust to the spare and warns that it belongs to claim(), where it travels in the claim_session request only when accepted with an absolute directory. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::prewarm_rejects_options_that_describe_a_session"
+      ],
+      "rust": [
+        "src/prewarm.rs"
       ]
     }
   ]
