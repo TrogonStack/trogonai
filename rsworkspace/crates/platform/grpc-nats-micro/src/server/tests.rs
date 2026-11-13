@@ -8,7 +8,7 @@ use trogon_nats::AdvancedMockNatsClient;
 use trogonai_proto::google::rpc::Code;
 use trogonai_proto::nats::micro::v1alpha1::{ContentType as ProtoContentType, ServiceOptions};
 
-use super::{EndpointHandler, ReplyKind, reply_error, resolve, warn_if_undelivered, warn_unencodable};
+use super::{EndpointHandler, ReplyKind, answer, reply_error, resolve, warn_if_undelivered, warn_unencodable};
 use crate::constants::{HEADER_CONTENT_TYPE, HEADER_ERROR_CODE};
 use crate::content_type::{ContentType, EncodeError};
 use crate::service_fault::ServiceFault;
@@ -98,6 +98,76 @@ async fn an_encoding_the_binding_does_not_speak_falls_back_to_protobuf() {
         outcome.expect_err("an unknown encoding is turned away").code().code(),
         Code::INVALID_ARGUMENT
     );
+}
+
+#[tokio::test]
+async fn an_answer_to_a_rejected_encoding_is_an_error_in_the_encoding_the_caller_asked_for() {
+    let headers = content_type_header(ContentType::Json.header_value());
+
+    let reply = answer(Some(&headers), b"payload", &protobuf_only(), &EchoHandler)
+        .await
+        .expect("an encodable status");
+
+    assert_eq!(
+        reply
+            .headers
+            .get(HEADER_ERROR_CODE)
+            .expect("error code header")
+            .as_str(),
+        Code::INVALID_ARGUMENT.to_i32().to_string()
+    );
+    assert_eq!(
+        reply
+            .headers
+            .get(HEADER_CONTENT_TYPE)
+            .expect("content type header")
+            .as_str(),
+        ContentType::Json.header_value()
+    );
+}
+
+#[tokio::test]
+async fn an_answer_to_a_handler_fault_is_an_error_reply() {
+    let reply = answer(None, b"payload", &protobuf_only(), &FailingHandler)
+        .await
+        .expect("an encodable status");
+
+    assert_eq!(
+        reply
+            .headers
+            .get(HEADER_ERROR_CODE)
+            .expect("error code header")
+            .as_str(),
+        Code::INTERNAL.to_i32().to_string()
+    );
+    assert_eq!(
+        reply
+            .headers
+            .get(HEADER_CONTENT_TYPE)
+            .expect("content type header")
+            .as_str(),
+        ContentType::Protobuf.header_value()
+    );
+}
+
+#[tokio::test]
+async fn an_answer_to_a_handler_success_carries_its_body_in_the_negotiated_encoding() {
+    let headers = content_type_header(ContentType::Json.header_value());
+
+    let reply = answer(Some(&headers), b"payload", &ServiceOptions::default(), &EchoHandler)
+        .await
+        .expect("a success needs no encoding");
+
+    assert!(reply.headers.get(HEADER_ERROR_CODE).is_none());
+    assert_eq!(
+        reply
+            .headers
+            .get(HEADER_CONTENT_TYPE)
+            .expect("content type header")
+            .as_str(),
+        ContentType::Json.header_value()
+    );
+    assert_eq!(reply.body, b"payload".as_slice());
 }
 
 #[tokio::test]
