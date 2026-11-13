@@ -271,6 +271,16 @@ typed field, and keys it does not declare are kept in order. `Settings::from_jso
 `PolicySettingsOrigin`, `ResolveSettingsOptions` and `SDKSettingsParseError` carry the upstream
 names; Python sandbox dicts decode and encode through the sandbox types unchanged.
 
+`resolve_settings` ports TypeScript `resolveSettings`: the user, project, local and flag sources
+cascade with array union, and the managed policy comes from the first tier that has settings
+(remote, macOS plist via `plutil`, Windows registry via `reg query`, `/etc/claude-code`, the
+parent process). The result carries per-key provenance and `machinePolicy.didNotLoad`.
+`resolve_settings_with` runs it against any `SettingsHost`, so tests inject files, variables and
+command output. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
+`claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
+byte for byte. Gaps: schema value normalization, `managedSourcesBehavior: "merge"`, cloud and
+org mode, and the git-ignored cwd check.
+
 ## External session stores
 
 Set `session_store` to a `SessionStoreOptions`. Implement `SessionStore` for a
