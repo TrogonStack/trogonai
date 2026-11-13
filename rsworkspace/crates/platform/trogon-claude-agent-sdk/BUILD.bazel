@@ -53,6 +53,7 @@ workspace_crate(
         "agent_definition": {},
         "allowed_tools": {},
         "assistant_message": {},
+        "bridge_credentials": {"compile_data": ["tests/fixtures/bridge_credentials/goldens.json"]},
         "builtin_tool_name": {},
         "builtin_tool_name_storage": {},
         "bundled_cli": {},
