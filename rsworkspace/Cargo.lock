@@ -7279,6 +7279,7 @@ name = "trogon-claude-agent-sdk"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "indexmap 2.14.0",
  "jsonschema",
  "serde",
  "serde_json",

@@ -1,0 +1,18 @@
+{
+  "package": "@anthropic-ai/claude-agent-sdk",
+  "version": "0.3.323",
+  "targets": [
+    {
+      "source": "sdk-tools.d.ts",
+      "output": "src/upstream/tool_inputs.rs",
+      "roots": [
+        "AgentInput",
+        "AskUserQuestionInput",
+        "EnterPlanModeInput",
+        "GrepInput",
+        "McpInput",
+        "TodoWriteInput"
+      ]
+    }
+  ]
+}
