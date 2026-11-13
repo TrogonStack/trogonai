@@ -9,9 +9,10 @@ use std::{
 };
 
 use trogon_claude_agent_sdk::adapters::{
-    CheckReadable, CurrentDirectory, DirectoryEntry, EnvironmentVariable, ExecuteFile, ExecuteFileOutcome,
-    ExecuteFileRequest, HostIdentity, LinkMetadata, NativeHost, OperatingSystem, ReadDirectory, ReadFile, ReadLink,
-    ReadSymlinkMetadata, WallClock,
+    CheckReadable, CheckWritable, CurrentDirectory, DirectoryEntry, EffectiveGroupId, EffectiveUserId,
+    EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest, HostIdentity, LinkMetadata, NativeHost,
+    OperatingSystem, ReadDirectory, ReadFile, ReadLink, ReadMetadata, ReadSymlinkMetadata, RealGroupId, RealUserId,
+    SupplementaryGroupIds, WallClock,
 };
 
 /// Machine-wide locations the resolver reads, which the host moves under a sandbox root.
@@ -32,6 +33,32 @@ pub struct RemapHost {
     pub env: BTreeMap<String, Option<String>>,
     /// Milliseconds since the epoch the host's clock shows.
     pub now_ms: u64,
+    /// The process ids the case pins; `None` keeps the real ones.
+    pub identity: Option<ProcessIdentity>,
+    /// Write checks the case answers, by the path the resolver asks about (`*` answers every other path): `yes`
+    /// succeeds and an errno name such as `EACCES` fails. Paths without an answer get the native check.
+    pub writable: BTreeMap<String, String>,
+}
+
+/// The ids a process reports; a `None` field is a call the platform lacks.
+#[derive(Clone, Debug, Default)]
+pub struct ProcessIdentity {
+    pub euid: Option<u32>,
+    pub uid: Option<u32>,
+    pub egid: Option<u32>,
+    pub gid: Option<u32>,
+    pub groups: Option<Vec<u32>>,
+}
+
+/// The error kind Rust gives the errno a case names.
+fn errno_error(name: &str) -> io::Error {
+    io::Error::from(match name {
+        "EACCES" | "EPERM" => io::ErrorKind::PermissionDenied,
+        "EROFS" => io::ErrorKind::ReadOnlyFilesystem,
+        "ENOENT" => io::ErrorKind::NotFound,
+        "ENOTDIR" => io::ErrorKind::NotADirectory,
+        _ => io::ErrorKind::Other,
+    })
 }
 
 impl RemapHost {
@@ -82,6 +109,74 @@ impl ReadLink for RemapHost {
 
     fn read_link(&self, path: &Path) -> Result<PathBuf, io::Error> {
         NativeHost.read_link(&self.remap(path))
+    }
+}
+
+impl ReadMetadata for RemapHost {
+    type Error = io::Error;
+
+    fn metadata(&self, path: &Path) -> Result<std::fs::Metadata, io::Error> {
+        NativeHost.metadata(&self.remap(path))
+    }
+}
+
+impl CheckWritable for RemapHost {
+    type Error = io::Error;
+
+    fn check_writable(&self, path: &Path) -> Result<(), io::Error> {
+        let asked = path.to_string_lossy();
+        match self.writable.get(&*asked).or_else(|| self.writable.get("*")) {
+            Some(answer) if answer == "yes" => Ok(()),
+            Some(answer) => Err(errno_error(answer)),
+            None => NativeHost.check_writable(&self.remap(path)),
+        }
+    }
+}
+
+impl EffectiveUserId for RemapHost {
+    fn effective_user_id(&self) -> Option<u32> {
+        match &self.identity {
+            Some(identity) => identity.euid,
+            None => NativeHost.effective_user_id(),
+        }
+    }
+}
+
+impl RealUserId for RemapHost {
+    fn real_user_id(&self) -> Option<u32> {
+        match &self.identity {
+            Some(identity) => identity.uid,
+            None => NativeHost.real_user_id(),
+        }
+    }
+}
+
+impl EffectiveGroupId for RemapHost {
+    fn effective_group_id(&self) -> Option<u32> {
+        match &self.identity {
+            Some(identity) => identity.egid,
+            None => NativeHost.effective_group_id(),
+        }
+    }
+}
+
+impl RealGroupId for RemapHost {
+    fn real_group_id(&self) -> Option<u32> {
+        match &self.identity {
+            Some(identity) => identity.gid,
+            None => NativeHost.real_group_id(),
+        }
+    }
+}
+
+impl SupplementaryGroupIds for RemapHost {
+    type Error = io::Error;
+
+    fn supplementary_group_ids(&self) -> Option<Result<Vec<u32>, io::Error>> {
+        match &self.identity {
+            Some(identity) => identity.groups.clone().map(Ok),
+            None => NativeHost.supplementary_group_ids(),
+        }
     }
 }
 

@@ -3,12 +3,17 @@
 //
 // usage: node resolve_settings_oracle.mjs <package-dir> <spec.json>
 //
-// The spec holds {root, platform, env, cases: [{name, options, at?, files?}]}. Machine-wide locations that the SDK reads
-// (managed settings, managed preferences, /proc/version, plutil) are remapped under `root`, and
-// `process.platform` is replaced by `platform`, so every case runs the same way on any host.
+// The spec holds {root, platform, env, process?, writable?, cases: [{name, options, at?, files?}]}. Machine-wide
+// locations that the SDK reads (managed settings, managed preferences, /proc/version, plutil) are remapped under
+// `root`, and `process.platform` is replaced by `platform`, so every case runs the same way on any host.
+//
+// `process` pins the ids the process reports ({euid, uid, egid, gid, groups}; a missing or null field removes that
+// call, as on a platform without it), and `writable` answers write checks by the path asked about (`*` for every
+// other path): `yes` succeeds and an errno name such as `EACCES` fails. Paths without an answer get the real check.
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import cp from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -49,6 +54,22 @@ const functions = (object) => Object.keys(object).filter((key) => typeof object[
 patch(fs, functions(fs).filter((name) => /^[a-z]/.test(name) && name !== 'realpathSync'));
 if (fs.realpathSync.native) patch(fs.realpathSync, ['native']);
 patch(fsp, functions(fsp));
+const answers = spec.writable || {};
+const access = fs.accessSync;
+fs.accessSync = function (target, mode, ...rest) {
+  const asked = typeof target === 'string' ? target : String(target);
+  const answer = (mode ?? fs.constants.F_OK) & fs.constants.W_OK ? (answers[asked] ?? answers['*']) : undefined;
+  if (answer === 'yes') return undefined;
+  if (answer !== undefined) {
+    const error = new Error(`${answer}: injected, access '${asked}'`);
+    error.code = answer;
+    error.errno = -(os.constants.errno[answer] ?? 0);
+    error.syscall = 'access';
+    error.path = asked;
+    throw error;
+  }
+  return access.call(this, target, mode, ...rest);
+};
 const execFile = cp.execFile;
 cp.execFile = function (file, args, options, callback) {
   return execFile.call(this, remap(file), (args || []).map(remap), options, callback);
@@ -58,6 +79,22 @@ Object.defineProperty(process, 'platform', { value: spec.platform || process.pla
 for (const [name, value] of Object.entries(spec.env || {})) {
   if (value === null) delete process.env[name];
   else process.env[name] = value;
+}
+if (spec.process) {
+  const pinned = spec.process;
+  const call = (value) => (value === undefined || value === null ? undefined : () => value);
+  process.geteuid = call(pinned.euid);
+  process.getuid = call(pinned.uid);
+  process.getegid = call(pinned.egid);
+  process.getgid = call(pinned.gid);
+  // Node appends the effective group id to the list getgroups(2) returns when the list lacks it.
+  process.getgroups = call(
+    Array.isArray(pinned.groups)
+      ? pinned.groups.includes(pinned.egid) || pinned.egid == null
+        ? [...pinned.groups]
+        : [...pinned.groups, pinned.egid]
+      : undefined,
+  );
 }
 const sdk = await import(pathToFileURL(path.join(pkg, 'sdk.mjs')).href);
 // A case may move the clock (`at`, milliseconds since the epoch) and change files under the root before it runs

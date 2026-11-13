@@ -13,9 +13,10 @@ use std::{
 };
 
 use trogon_claude_agent_sdk::adapters::{
-    CheckReadable, CurrentDirectory, DirectoryEntry, DirectoryEntryKind, EnvironmentVariable, ExecuteFile,
-    ExecuteFileOutcome, ExecuteFileRequest, ExecuteFileStatus, HostIdentity, LinkMetadata, OperatingSystem,
-    ReadDirectory, ReadFile, ReadLink, ReadSymlinkMetadata, WallClock,
+    CheckReadable, CheckWritable, CurrentDirectory, DirectoryEntry, DirectoryEntryKind, EffectiveGroupId,
+    EffectiveUserId, EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest, ExecuteFileStatus,
+    HostIdentity, LinkMetadata, OperatingSystem, ReadDirectory, ReadFile, ReadLink, ReadMetadata, ReadSymlinkMetadata,
+    RealGroupId, RealUserId, SupplementaryGroupIds, WallClock,
 };
 
 /// A host made of maps, so every platform branch runs on any machine.
@@ -215,6 +216,56 @@ impl ReadLink for FakeHost {
             .get(path)
             .cloned()
             .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))
+    }
+}
+
+/// The maps hold no real files, so there is no native metadata to return.
+impl ReadMetadata for FakeHost {
+    type Error = io::Error;
+
+    fn metadata(&self, _path: &Path) -> Result<std::fs::Metadata, io::Error> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+}
+
+impl CheckWritable for FakeHost {
+    type Error = io::Error;
+
+    fn check_writable(&self, _path: &Path) -> Result<(), io::Error> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+}
+
+/// The process ids of a platform without them, so nothing asks the maps for ownership.
+impl EffectiveUserId for FakeHost {
+    fn effective_user_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl RealUserId for FakeHost {
+    fn real_user_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl EffectiveGroupId for FakeHost {
+    fn effective_group_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl RealGroupId for FakeHost {
+    fn real_group_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl SupplementaryGroupIds for FakeHost {
+    type Error = io::Error;
+
+    fn supplementary_group_ids(&self) -> Option<Result<Vec<u32>, io::Error>> {
+        None
     }
 }
 

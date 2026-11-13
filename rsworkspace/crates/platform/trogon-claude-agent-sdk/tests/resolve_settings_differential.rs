@@ -25,7 +25,7 @@ use trogon_claude_agent_sdk::{
 #[path = "support/remap_settings_host.rs"]
 mod remap_settings_host;
 
-use remap_settings_host::RemapHost;
+use remap_settings_host::{ProcessIdentity, RemapHost};
 
 const PACKAGE_VARIABLE: &str = "CLAUDE_SDK_TS_PACKAGE_DIR";
 const SCRUBBED: [&str; 4] = [
@@ -127,6 +127,35 @@ fn environment(spec: &Value, root: &str) -> BTreeMap<String, Option<String>> {
     env
 }
 
+/// The process ids a case pins (`process`: `euid`, `uid`, `egid`, `gid` and `groups`, null for a call the platform
+/// lacks); without `process` the real ids stay.
+fn identity(spec: &Value) -> Option<ProcessIdentity> {
+    let process = spec.get("process").filter(|process| process.is_object())?;
+    let id = |name: &str| process[name].as_u64().map(|value| u32::try_from(value).expect("id"));
+    Some(ProcessIdentity {
+        euid: id("euid"),
+        uid: id("uid"),
+        egid: id("egid"),
+        gid: id("gid"),
+        groups: process["groups"].as_array().map(|groups| {
+            groups
+                .iter()
+                .map(|group| u32::try_from(group.as_u64().expect("group")).expect("group"))
+                .collect()
+        }),
+    })
+}
+
+/// The write checks a case answers (`writable`: path, with `$ROOT` for the root, or `*` to an answer).
+fn writable(spec: &Value, root: &str) -> BTreeMap<String, String> {
+    spec["writable"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(path, answer)| (path.replace("$ROOT", root), answer.as_str().expect("answer").to_owned()))
+        .collect()
+}
+
 /// The calls a case makes: one without `steps`, otherwise one per step, each at its own time and after the
 /// step's file changes (`files`: path under the root to new text, or null to delete it).
 fn steps(spec: &Value) -> Vec<Value> {
@@ -165,6 +194,8 @@ fn rust_results(name: &str, spec: &Value, root: &Path) -> Vec<String> {
             system: OperatingSystem::Linux,
             env: environment(spec, &root_text),
             now_ms: step["at"].as_u64().unwrap_or(0),
+            identity: identity(spec),
+            writable: writable(spec, &root_text),
         };
         let resolved = resolve_settings_with_state(&host, &options, &state).expect("resolve");
         let filtered = filter_escalating_default_mode(&resolved);
@@ -197,6 +228,8 @@ fn oracle_results(package: &str, cases: &[(String, PathBuf, Value, PathBuf)]) ->
             "root": root_text,
             "platform": spec["platform"],
             "env": environment(&spec, &root_text),
+            "process": spec["process"],
+            "writable": writable(&spec, &root_text),
             "cases": steps(&spec).iter().enumerate().map(|(index, step)| {
                 let label = if spec["steps"].is_array() { format!("{name}/{index}") } else { name.clone() };
                 json!({

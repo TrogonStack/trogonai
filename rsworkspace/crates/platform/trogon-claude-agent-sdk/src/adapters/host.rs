@@ -1,5 +1,7 @@
 use crate::constants::MAX_BUFFER_ERRNO;
 
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     ffi::OsStr,
     io::{self, Read},
@@ -69,6 +71,47 @@ pub trait ReadLink {
     type Error;
 
     fn read_link(&self, path: &Path) -> Result<PathBuf, Self::Error>;
+}
+
+/// Checks write access exactly as libc `access(path, W_OK)` does, which is what Node's
+/// `fs.accessSync(path, fs.constants.W_OK)` calls.
+pub trait CheckWritable {
+    type Error;
+
+    fn check_writable(&self, path: &Path) -> Result<(), Self::Error>;
+}
+
+/// Reads the effective user id exactly as libc `geteuid` does; absent where the platform has no such call, as Node's
+/// `process.geteuid` is.
+pub trait EffectiveUserId {
+    fn effective_user_id(&self) -> Option<u32>;
+}
+
+/// Reads the real user id exactly as libc `getuid` does; absent where the platform has no such call, as Node's
+/// `process.getuid` is.
+pub trait RealUserId {
+    fn real_user_id(&self) -> Option<u32>;
+}
+
+/// Reads the effective group id exactly as libc `getegid` does; absent where the platform has no such call, as Node's
+/// `process.getegid` is.
+pub trait EffectiveGroupId {
+    fn effective_group_id(&self) -> Option<u32>;
+}
+
+/// Reads the real group id exactly as libc `getgid` does; absent where the platform has no such call, as Node's
+/// `process.getgid` is.
+pub trait RealGroupId {
+    fn real_group_id(&self) -> Option<u32>;
+}
+
+/// Lists the supplementary group ids exactly as libc `getgroups` does; absent where the platform has no such call,
+/// as Node's `process.getgroups` is. Node also appends the effective group id when the list lacks it; callers that
+/// mirror Node do that themselves.
+pub trait SupplementaryGroupIds {
+    type Error;
+
+    fn supplementary_group_ids(&self) -> Option<Result<Vec<u32>, Self::Error>>;
 }
 
 /// The operating system the process runs on, as `process.platform` names it.
@@ -220,6 +263,120 @@ impl HostIdentity for NativeHost {
                 .map(|value| value.to_string_lossy().into_owned())
                 .filter(|value| !value.is_empty())
         })
+    }
+}
+
+impl super::ReadMetadata for NativeHost {
+    type Error = io::Error;
+
+    fn metadata(&self, path: &Path) -> Result<std::fs::Metadata, Self::Error> {
+        std::fs::metadata(path)
+    }
+}
+
+impl CheckWritable for NativeHost {
+    type Error = io::Error;
+
+    #[cfg(unix)]
+    fn check_writable(&self, path: &Path) -> Result<(), Self::Error> {
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes())?;
+        // SAFETY: `path` is a NUL terminated string that outlives the call, and `access` only reads it.
+        if unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+
+    /// Windows has no `access`; libuv answers a write check from the read-only attribute, which it ignores on
+    /// directories.
+    #[cfg(not(unix))]
+    fn check_writable(&self, path: &Path) -> Result<(), Self::Error> {
+        let metadata = std::fs::metadata(path)?;
+        if metadata.permissions().readonly() && !metadata.is_dir() {
+            Err(io::Error::from(io::ErrorKind::PermissionDenied))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl EffectiveUserId for NativeHost {
+    #[cfg(unix)]
+    fn effective_user_id(&self) -> Option<u32> {
+        // SAFETY: `geteuid` takes no arguments and always succeeds.
+        Some(unsafe { libc::geteuid() })
+    }
+
+    #[cfg(not(unix))]
+    fn effective_user_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl RealUserId for NativeHost {
+    #[cfg(unix)]
+    fn real_user_id(&self) -> Option<u32> {
+        // SAFETY: `getuid` takes no arguments and always succeeds.
+        Some(unsafe { libc::getuid() })
+    }
+
+    #[cfg(not(unix))]
+    fn real_user_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl EffectiveGroupId for NativeHost {
+    #[cfg(unix)]
+    fn effective_group_id(&self) -> Option<u32> {
+        // SAFETY: `getegid` takes no arguments and always succeeds.
+        Some(unsafe { libc::getegid() })
+    }
+
+    #[cfg(not(unix))]
+    fn effective_group_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl RealGroupId for NativeHost {
+    #[cfg(unix)]
+    fn real_group_id(&self) -> Option<u32> {
+        // SAFETY: `getgid` takes no arguments and always succeeds.
+        Some(unsafe { libc::getgid() })
+    }
+
+    #[cfg(not(unix))]
+    fn real_group_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl SupplementaryGroupIds for NativeHost {
+    type Error = io::Error;
+
+    /// Asks for the count first and then fills a list of that size, as Node does.
+    #[cfg(unix)]
+    fn supplementary_group_ids(&self) -> Option<Result<Vec<u32>, Self::Error>> {
+        // SAFETY: a zero size with a null list only asks for the count and writes nothing.
+        let count = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
+        let listed = usize::try_from(count)
+            .map_err(|_| io::Error::last_os_error())
+            .and_then(|size| {
+                let mut groups: Vec<libc::gid_t> = vec![0; size];
+                // SAFETY: `groups` holds `count` writable entries and `count` is passed as its capacity.
+                let filled = unsafe { libc::getgroups(count, groups.as_mut_ptr()) };
+                let filled = usize::try_from(filled).map_err(|_| io::Error::last_os_error())?;
+                groups.truncate(filled);
+                Ok(groups)
+            });
+        Some(listed)
+    }
+
+    #[cfg(not(unix))]
+    fn supplementary_group_ids(&self) -> Option<Result<Vec<u32>, Self::Error>> {
+        None
     }
 }
 
@@ -384,6 +541,13 @@ pub trait SettingsHost:
     + ReadDirectory<Error = io::Error>
     + ReadSymlinkMetadata<Error = io::Error>
     + ReadLink<Error = io::Error>
+    + super::ReadMetadata<Error = io::Error>
+    + CheckWritable<Error = io::Error>
+    + EffectiveUserId
+    + RealUserId
+    + EffectiveGroupId
+    + RealGroupId
+    + SupplementaryGroupIds<Error = io::Error>
     + ExecuteFile
     + HostIdentity
     + super::EnvironmentVariable
@@ -401,6 +565,13 @@ impl<T> SettingsHost for T where
         + ReadDirectory<Error = io::Error>
         + ReadSymlinkMetadata<Error = io::Error>
         + ReadLink<Error = io::Error>
+        + super::ReadMetadata<Error = io::Error>
+        + CheckWritable<Error = io::Error>
+        + EffectiveUserId
+        + RealUserId
+        + EffectiveGroupId
+        + RealGroupId
+        + SupplementaryGroupIds<Error = io::Error>
         + ExecuteFile
         + HostIdentity
         + super::EnvironmentVariable
@@ -411,3 +582,7 @@ impl<T> SettingsHost for T where
         + 'static
 {
 }
+
+#[cfg(test)]
+#[path = "host_tests.rs"]
+mod tests;
