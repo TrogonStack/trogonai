@@ -1,6 +1,7 @@
 mod environment;
 mod filesystem;
 mod host;
+mod passwd;
 mod process;
 mod wall_clock;
 

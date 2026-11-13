@@ -22,6 +22,7 @@ use crate::{
         APPROVED_OAUTH_ENDPOINTS_TS, CLEANUP_ATTEMPTS, CLEANUP_DELAY, KEYCHAIN_FALLBACK_ACCOUNT, KEYCHAIN_SERVICE_NAME,
         KEYCHAIN_TIMEOUT, OAUTH_FILE_SUFFIXES_TS, RESUME_SETTINGS_STRIPPED_KEYS, RESUME_SETTINGS_STRIPPED_KEYS_TS,
     },
+    home_directory::{HomeDirectoryError, Platform, node_homedir, node_join, python_home, python_join},
     js_object_order::js_ordered,
     session_project_key::lexical_resolve,
     settings_json::js_stringify,
@@ -169,7 +170,7 @@ impl<F: SessionFileSystem> SessionRuntime<F> {
         let caller_config_dir = caller_config_dir(options, environment, ts)?;
         let source_config_dir = match &caller_config_dir {
             Some(directory) => directory.clone(),
-            None => home_dir(environment, options.require_absolute_config_paths)?.join(".claude"),
+            None => home_join(environment, ts, options.require_absolute_config_paths, ".claude")?,
         };
         let project = match (&options.project_key, ts) {
             (Some(key), _) => key.clone(),
@@ -435,18 +436,36 @@ fn project_key_ts<F: SessionFileSystem, E: EnvironmentVariable>(
     )
 }
 
-/// Both SDKs join a relative home directory as given; `require_absolute` is the opt-in
+/// The home directory joined with one segment, the way each upstream does it: TypeScript `path.join(os.homedir(),
+/// segment)` and Python `Path.home() / segment`. Neither fails for a missing or empty `HOME`; only a home that
+/// neither the environment nor the passwd database provides does. `require_absolute` is the opt-in
 /// [`SessionStoreOptions::require_absolute_config_paths`] check.
-fn home_dir<E: EnvironmentVariable>(environment: &E, require_absolute: bool) -> Result<PathBuf, SessionError> {
-    let home = environment
-        .var_os(OsStr::new(if cfg!(windows) { "USERPROFILE" } else { "HOME" }))
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .ok_or(SessionError::MissingConfigDirectory)?;
-    if require_absolute && !home.is_absolute() {
+fn home_join<E: EnvironmentVariable>(
+    environment: &E,
+    ts: bool,
+    require_absolute: bool,
+    segment: &str,
+) -> Result<PathBuf, SessionError> {
+    let platform = Platform::host();
+    let home = if ts {
+        node_homedir(environment, platform).map_err(home_unavailable)?
+    } else {
+        python_home(environment, platform)
+            .map_err(home_unavailable)?
+            .into_os_string()
+    };
+    if require_absolute && !Path::new(&home).is_absolute() {
         return Err(SessionError::UnsafeConfigPath);
     }
-    Ok(home)
+    Ok(if ts {
+        node_join(platform, &home, segment)
+    } else {
+        python_join(platform, Path::new(&home), segment)
+    })
+}
+
+fn home_unavailable(_: HomeDirectoryError) -> SessionError {
+    SessionError::MissingConfigDirectory
 }
 
 /// Upstream TypeScript points a child resumed from a store at the caller's secure storage on Windows, because the
@@ -751,7 +770,7 @@ where
     }
     let claude_json = match caller_config_dir {
         Some(directory) => directory.join(".claude.json"),
-        None => home_dir(environment, false)?.join(".claude.json"),
+        None => home_join(environment, false, false, ".claude.json")?,
     };
     copy_if_present(
         filesystem,
@@ -885,13 +904,14 @@ where
             redact_refresh_token_ts(credentials).as_bytes(),
         )?;
     }
+    let platform = Platform::host();
     let base = match configured_directory {
-        Some(directory) => directory.to_path_buf(),
-        None => home_dir(environment, false)?,
+        Some(directory) => directory.as_os_str().to_owned(),
+        None => node_homedir(environment, platform).map_err(home_unavailable)?,
     };
     copy_if_present(
         filesystem,
-        &base.join(".claude.json"),
+        &node_join(platform, &base, ".claude.json"),
         &config_dir.join(".claude.json"),
         CopyMode::SourceMode,
     );
@@ -905,7 +925,7 @@ where
         let name = format!(".claude{suffix}.json");
         copy_if_present(
             filesystem,
-            &base.join(&name),
+            &node_join(platform, &base, &name),
             &config_dir.join(&name),
             CopyMode::SourceMode,
         );

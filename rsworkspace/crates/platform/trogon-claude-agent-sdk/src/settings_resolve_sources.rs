@@ -8,6 +8,7 @@ use unicode_normalization::UnicodeNormalization;
 use crate::{
     adapters::{CurrentDirectory, EnvironmentVariable, ReadFile},
     constants::{LOCAL_SETTINGS_FILE, PROJECT_SETTINGS_FILE, USER_SETTINGS_FILE},
+    home_directory::{HomeDirectoryError, Platform, node_homedir, node_join},
     settings_dialect::SettingsDialect,
     settings_read::read_document,
     settings_resolve_values::SettingsMap,
@@ -40,25 +41,20 @@ pub(crate) fn nfc(path: &Path) -> PathBuf {
     PathBuf::from(path.to_string_lossy().nfc().collect::<String>())
 }
 
-fn home_directory<H: EnvironmentVariable>(host: &H) -> Option<PathBuf> {
-    ["HOME", "USERPROFILE"]
-        .iter()
-        .find_map(|name| host.var_os(std::ffi::OsStr::new(name)))
-        .map(PathBuf::from)
+/// The directory `userSettings` lives in: `CLAUDE_CONFIG_DIR` as set (an empty value counts), else
+/// `path.join(os.homedir(), ".claude")` (`Wt` upstream), which throws when no home directory exists.
+pub(crate) fn config_directory<H: EnvironmentVariable>(host: &H) -> Result<PathBuf, HomeDirectoryError> {
+    let platform = Platform::host();
+    let chosen = match host.var_os(std::ffi::OsStr::new("CLAUDE_CONFIG_DIR")) {
+        Some(directory) => PathBuf::from(directory),
+        None => node_join(platform, &node_homedir(host, platform)?, ".claude"),
+    };
+    Ok(nfc(&chosen))
 }
 
-/// The directory `userSettings` lives in: `CLAUDE_CONFIG_DIR`, else `~/.claude` (`Wt` upstream).
-pub(crate) fn config_directory<H: EnvironmentVariable>(host: &H) -> PathBuf {
-    let chosen = host
-        .var_os(std::ffi::OsStr::new("CLAUDE_CONFIG_DIR"))
-        .map(PathBuf::from)
-        .or_else(|| home_directory(host).map(|home| home.join(".claude")))
-        .unwrap_or_else(|| PathBuf::from(".claude"));
-    nfc(&chosen)
-}
-
-pub(crate) fn user_settings_path<H: EnvironmentVariable>(host: &H) -> PathBuf {
-    nfc(&config_directory(host)).join(USER_SETTINGS_FILE)
+pub(crate) fn user_settings_path<H: EnvironmentVariable>(host: &H) -> Result<PathBuf, HomeDirectoryError> {
+    let directory = config_directory(host)?;
+    Ok(node_join(Platform::host(), directory.as_os_str(), USER_SETTINGS_FILE))
 }
 
 pub(crate) fn project_settings_path(cwd: &Path) -> PathBuf {

@@ -107,6 +107,7 @@ impl ClaudeSdkClient {
             let inherited = capture_inherited(&adapters.environment, &options);
             crate::argv::request_await_initialize(&mut options);
             Some(crate::cli_discovery::discover(
+                &adapters.environment,
                 &inherited,
                 &adapters.filesystem,
                 cfg!(windows),
@@ -164,14 +165,18 @@ impl ClaudeSdkClient {
         let initialization = driver::Initialization::new(&options, &adapters.environment)?;
         let closed = Closed::default();
         // TypeScript derives a default debug file only when the SDK spawns the CLI and none was given.
-        let derived_debug_file = (derive_debug_file
+        let derived_debug_file = if derive_debug_file
             && options.argv_style == crate::ArgvStyle::TypeScript
             && options
                 .debug_file
                 .as_ref()
-                .is_none_or(|file| file.as_os_str().is_empty()))
-        .then(|| debug_probe(&adapters.environment, &inherited))
-        .and_then(|probe| crate::debug_file::process_debug_file(&probe));
+                .is_none_or(|file| file.as_os_str().is_empty())
+        {
+            let probe = debug_probe(&adapters.environment, &inherited);
+            crate::debug_file::process_debug_file(&adapters.environment, &probe)?
+        } else {
+            None
+        };
         let transport = ProcessTransport::spawn(ProcessSpawn {
             options: &options,
             cli_path: cli_path.clone(),

@@ -35,6 +35,7 @@ mod environment_plan;
 mod error;
 mod float_digits;
 mod framing;
+mod home_directory;
 mod hooks;
 mod js_json;
 mod js_object_order;
@@ -207,6 +208,7 @@ pub use error::{
     AbortError, ControlOperation, ControlRejectionError, Error, JsonDecodeError, JsonDecodeSourceError,
     MessageParseError, ProtocolError, ResultError, python_cli_not_found_text, python_process_error_text,
 };
+pub use home_directory::HomeDirectoryError;
 pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
     HookOutputVisibility, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, SyncHookOutput,

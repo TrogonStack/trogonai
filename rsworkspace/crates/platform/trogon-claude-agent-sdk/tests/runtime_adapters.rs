@@ -528,6 +528,14 @@ impl EnvironmentVariable for TrackedEnvironment {
         self.record(EnvironmentAccess::Variable(key.to_owned())).ok()?;
         self.variables.get(key).cloned()
     }
+
+    fn effective_user_home_directory(&self) -> Option<OsString> {
+        None
+    }
+
+    fn real_user_home_directory(&self) -> Option<OsString> {
+        None
+    }
 }
 
 impl TemporaryDirectory for TrackedEnvironment {

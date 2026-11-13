@@ -2320,7 +2320,7 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream creates its own temp config dir and copies auth files from the caller's config dir or home directory, joining a relative path as given; TypeScript keeps an empty options.env value while Python falls through to the next source. Rust does the same by default; SessionStoreOptions::require_absolute_config_paths opts into UnsafeConfigPath."
+        "behavior": "Upstream creates its own temp config dir and copies auth files from the caller's config dir or home directory (see r31-home-directory-fallback for the home lookup), joining a relative path as given; TypeScript keeps an empty options.env value while Python falls through to the next source. Rust does the same by default; SessionStoreOptions::require_absolute_config_paths opts into UnsafeConfigPath."
       },
       "decision": {
         "kind": "upstream"
@@ -3555,6 +3555,61 @@
       "rust": [
         "src/driver.rs",
         "src/wire.rs"
+      ]
+    },
+    {
+      "id": "r31-home-directory-fallback",
+      "concept": "Home directory when HOME is unset or empty",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/sessions.py",
+        "line_start": 122,
+        "line_end": 127,
+        "sha256": "04fd07ef9e562b140c436aeff6a5a1ed637dc61263e652dbe05bfb735228d17b"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "ED(e||a7(),\".claude.json\")",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "ed471c8227683083462841392075f144949a852368d7a96251e6f00bda32dc45"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Neither SDK fails for a missing HOME. TypeScript calls Node os.homedir(): HOME as set (even empty), else the passwd entry of the effective user, and it throws a system error only when there is no entry; the result is joined with path.join, which normalizes dot segments, repeated separators and empty bases. Python calls Path.home() (expanduser): HOME as set (even empty, which becomes the root directory), else the passwd entry of the real user, else it raises RuntimeError; a home that still starts with a tilde also raises, and dot-dot segments are kept. Both read the process environment, not options.env. Rust ports the exact algorithms: Node path.win32.join and normalize over UTF-16 code units, CPython ntpath.expanduser, splitroot and join with the pathlib PureWindowsPath normalization, byte-exact POSIX homes that are not UTF-8 (lossy UTF-8 for Node, surrogate escapes for Python), and the Windows process-token profile directory that libuv asks. Python has no Windows passwd fallback. The Python dialect reports a missing home as the RuntimeError text through SessionFiles::from_environment and the session helpers instead of an empty result."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "home_directory::an_unset_home_resolves_to_the_passwd_home_in_both_dialects",
+        "home_directory::the_process_home_wins_over_the_passwd_home",
+        "home_directory::an_empty_home_is_used_as_set_and_never_falls_back_to_the_passwd_home",
+        "home_directory::no_home_in_the_environment_or_the_passwd_database_is_a_missing_config_directory",
+        "home_directory::a_messy_home_is_normalized_by_node_but_not_by_python",
+        "home_directory::a_home_starting_with_a_tilde_fails_only_in_python",
+        "home_directory::the_absolute_path_check_stays_opt_in_for_a_relative_home",
+        "session_environment_helpers::the_environment_constructor_reports_a_missing_home_as_the_python_error",
+        "session_environment_helpers::listing_sessions_never_turns_a_missing_home_into_an_empty_list",
+        "session_environment_helpers::reading_one_session_never_turns_a_missing_home_into_none",
+        "session_environment_helpers::reading_messages_reports_a_missing_home_through_the_messages_error",
+        "session_environment_helpers::subagent_readers_never_turn_a_missing_home_into_an_empty_result",
+        "session_environment_helpers::mutations_report_a_missing_home_instead_of_a_missing_session"
+      ],
+      "rust": [
+        "src/adapters/passwd.rs",
+        "src/cli_discovery.rs",
+        "src/debug_file.rs",
+        "src/home_directory.rs",
+        "src/home_directory/node_win32.rs",
+        "src/home_directory/nt_path.rs",
+        "src/session_files.rs",
+        "src/session_messages_ts.rs",
+        "src/session_mutations.rs",
+        "src/session_reader.rs",
+        "src/session_resume.rs",
+        "src/settings_resolve_sources.rs"
       ]
     }
   ]
