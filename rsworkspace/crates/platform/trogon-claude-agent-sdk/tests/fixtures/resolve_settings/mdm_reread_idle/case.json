@@ -1,0 +1,36 @@
+{
+  "platform": "linux",
+  "env": {
+    "WSL_DISTRO_NAME": "Ubuntu"
+  },
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": []
+  },
+  "steps": [
+    {
+      "at": 0,
+      "files": {}
+    },
+    {
+      "at": 1000,
+      "files": {
+        "mnt/c/Windows/System32/hklm.txt": "    Settings    REG_SZ    {\"model\":\"B\",\"wslInheritsWindowsSettings\":true}\n"
+      }
+    },
+    {
+      "at": 1799999,
+      "files": {}
+    },
+    {
+      "at": 1800000,
+      "files": {}
+    },
+    {
+      "at": 1800001,
+      "files": {
+        "mnt/c/Windows/System32/hklm.txt": "    Settings    REG_SZ    {\"model\":\"A\",\"wslInheritsWindowsSettings\":true}\n"
+      }
+    }
+  ]
+}

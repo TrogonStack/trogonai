@@ -1,7 +1,8 @@
 use std::time::Duration;
 
-/// Rust host wait policy, capped at 24 hours with a 60-second default.
-/// The shutdown default is 5 seconds; these are not upstream SDK restrictions.
+/// A wait the caller opted into. Neither upstream SDK range-checks its timeouts, so any duration is accepted,
+/// including zero, which expires at once like Python's `anyio.fail_after(0)`. A deadline too far away to represent
+/// never fires. [`Timeout::checked`] keeps the stricter positive, at most 24 hours check.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Timeout(Duration);
 
@@ -14,10 +15,15 @@ pub enum TimeoutError {
 }
 
 impl Timeout {
+    /// The bound [`Timeout::checked`] enforces.
     pub const MAX: Duration = Duration::from_secs(24 * 60 * 60);
-    pub const SHUTDOWN_DEFAULT: Self = Self(Duration::from_secs(5));
 
-    pub fn new(value: Duration) -> Result<Self, TimeoutError> {
+    pub const fn new(value: Duration) -> Self {
+        Self(value)
+    }
+
+    /// Rejects zero and anything over [`Timeout::MAX`], for callers that want a misconfigured wait to fail early.
+    pub fn checked(value: Duration) -> Result<Self, TimeoutError> {
         if value.is_zero() {
             return Err(TimeoutError::Zero);
         }
@@ -32,16 +38,15 @@ impl Timeout {
     }
 }
 
+/// Python's 60-second control request wait, which its session store options reuse.
 impl Default for Timeout {
     fn default() -> Self {
         Self(Duration::from_secs(60))
     }
 }
 
-impl TryFrom<Duration> for Timeout {
-    type Error = TimeoutError;
-
-    fn try_from(value: Duration) -> Result<Self, Self::Error> {
+impl From<Duration> for Timeout {
+    fn from(value: Duration) -> Self {
         Self::new(value)
     }
 }
