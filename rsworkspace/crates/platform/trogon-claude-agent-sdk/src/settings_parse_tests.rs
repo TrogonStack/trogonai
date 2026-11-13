@@ -1,8 +1,11 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::cell::Cell;
+
+use serde::de::{DeserializeSeed, value::BytesDeserializer};
 use serde_json::Value;
 
-use super::parse_json;
+use super::{Seeded, parse_json};
 use crate::settings_numbers::{infinities_to_null, js_value};
 
 fn infinities(value: &Value) -> Vec<f64> {
@@ -70,4 +73,33 @@ fn a_finite_number_with_the_value_of_an_infinity_marker_keeps_its_value() {
     let value = parse_json("[9.223372036854775808e18]").unwrap();
     assert!(infinities(&value).is_empty());
     assert_eq!(value[0], Value::from(9_223_372_036_854_775_808_u64));
+}
+
+#[test]
+fn a_negative_integer_beside_an_overflowing_number_keeps_its_value() {
+    let value = parse_json("[-5,1e400,-9007199254740993]").unwrap();
+    assert_eq!(value[0], Value::from(-5));
+    assert_eq!(value[2], Value::from(-9_007_199_254_740_993_i64));
+    assert_eq!(infinities(&value), vec![f64::INFINITY]);
+}
+
+#[test]
+fn an_unterminated_string_after_an_overflowing_number_is_an_error() {
+    assert!(parse_json("[1e400,\"abc").is_err());
+    assert!(parse_json("[1e400,\"abc\\").is_err());
+}
+
+#[test]
+fn a_byte_string_is_not_a_json_value() {
+    let next = Cell::new(0);
+    let seeded = Seeded {
+        tokens: &[],
+        next: &next,
+    };
+    assert!(
+        seeded
+            .deserialize(BytesDeserializer::<serde_json::Error>::new(b"x"))
+            .is_err()
+    );
+    assert_eq!(next.get(), 0);
 }

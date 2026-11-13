@@ -154,14 +154,6 @@ impl<'de> Visitor<'de> for Seeded<'_> {
         Ok(Value::String(value.to_owned()))
     }
 
-    fn visit_string<E: Error>(self, value: String) -> Result<Value, E> {
-        Ok(Value::String(value))
-    }
-
-    fn visit_none<E: Error>(self) -> Result<Value, E> {
-        Ok(Value::Null)
-    }
-
     fn visit_unit<E: Error>(self) -> Result<Value, E> {
         Ok(Value::Null)
     }

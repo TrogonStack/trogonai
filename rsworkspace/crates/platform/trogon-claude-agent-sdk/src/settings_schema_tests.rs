@@ -160,3 +160,20 @@ fn every_port_reproduces_the_recorded_probes() {
             .join("\n")
     );
 }
+
+#[test]
+fn a_numeric_literal_matches_every_spelling_of_its_value() {
+    let literal = Node::Literal(vec![json!(0)]);
+    assert_eq!(literal.validate(Some(&json!(0.0))), Ok(Some(json!(0.0))));
+    assert_eq!(literal.validate(Some(&json!(-0.0))), Ok(Some(json!(-0.0))));
+    assert_eq!(literal.validate(Some(&json!(1))), Err(()));
+    assert_eq!(literal.validate(Some(&json!("0"))), Err(()));
+}
+
+#[test]
+fn a_coerced_string_runs_its_checks_on_the_javascript_string() {
+    let coerced = Node::CoercedStr(vec![Check::MaxLength(3)]);
+    assert_eq!(coerced.validate(Some(&json!(12))), Ok(Some(json!("12"))));
+    assert_eq!(coerced.validate(Some(&json!(1234))), Err(()));
+    assert_eq!(coerced.validate(None), Err(()));
+}
