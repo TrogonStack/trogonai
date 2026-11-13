@@ -31,7 +31,7 @@ fn structured_input_carries_blocks_and_every_identity_field() -> TestResult {
     input.uuid = Some(MessageId::from("message-1"));
     input.session_id = Some(SessionId::from("session-1"));
     input.parent_tool_use_id = Some(ToolUseId::from("tool-1".to_owned()));
-    input.origin = Some(MessageOrigin::new("task", JsonObject::new())?);
+    input.origin = Some(MessageOrigin::new("task", JsonObject::new()));
     let wire = input.to_wire_json()?;
     assert_eq!(wire["session_id"], "session-1");
     assert_eq!(wire["parent_tool_use_id"], "tool-1");
