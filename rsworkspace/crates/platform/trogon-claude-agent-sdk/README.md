@@ -402,7 +402,12 @@ and never fail the run; a transcript path outside the projects directory is
 logged and dropped. Pending entries are coalesced per key and drained early when
 they pass the entry or byte budget; frames are never rejected. A failed append
 is retried twice with 200 ms and 800 ms backoff, for any backend error; timeouts
-are not retried because an in-flight write may still complete.
+are not retried because an in-flight write may still complete. As upstream,
+every failure is reported and a flush waits as long as its appends take, each
+bounded by `append_timeout`. `SessionStoreLimits::max_retained_failures` opts
+into folding the overflow into one suppressed-count failure, and
+`SessionStoreLimits::flush_timeout` opts into a flush deadline that fails with
+`SessionError::MirrorFlushTimeout`.
 
 Store resume, like both upstream SDKs, loads transcripts before startup into a
 private temporary directory (`claude-resume-*`, mode 0700) and points the CLI's
