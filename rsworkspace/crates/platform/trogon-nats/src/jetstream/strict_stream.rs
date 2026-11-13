@@ -1,7 +1,11 @@
-use crate::NatsToken;
+use super::{native_stream_get_request::NativeStreamGetRequest, native_stream_get_response::NativeStreamGetResponse};
+use crate::{
+    NatsToken,
+    constants::{MAX_NATIVE_STORED_HEADER_BYTES, MAX_SUBJECT_BYTES},
+};
 use async_nats::{
     HeaderMap,
-    jetstream::{Context, message::StreamMessage, stream::RawMessage},
+    jetstream::{Context, message::StreamMessage},
 };
 use base64::Engine;
 use futures::StreamExt;
@@ -10,8 +14,6 @@ use std::{
     str::FromStr,
     time::Duration,
 };
-
-const MAX_HEADER_BYTES: usize = 16 * 1024;
 
 /// Bounded leader observations with original header cardinality. Neither an
 /// empty result nor a successful read proves quorum-complete absence.
@@ -35,6 +37,12 @@ pub enum NativeStreamReadError {
     Send(#[source] async_nats::PublishError),
     #[error("native stream reply subscription closed")]
     Closed,
+    #[error("native stream request received protocol status {0}")]
+    ProtocolStatus(async_nats::StatusCode),
+    #[error("native stream header name is malformed")]
+    HeaderName(#[source] async_nats::header::ParseHeaderNameError),
+    #[error("native stream header value is malformed")]
+    HeaderValue(#[source] async_nats::header::ParseHeaderValueError),
     #[error("native stream read deadline expired")]
     Timeout(#[source] tokio::time::error::Elapsed),
     #[error("native stream API refused the read")]
@@ -63,14 +71,11 @@ impl StrictNativeStreamReader {
         key: &super::NativeKvKey,
         sequence: NonZeroU64,
     ) -> Result<Option<StreamMessage>, NativeStreamReadError> {
-        let stream = NatsToken::new(scope.stream()).map_err(|_| NativeStreamReadError::InvalidBinding)?;
+        let stream = scope.stream_token();
         let subject = scope.subject(key);
-        if subject.len() > crate::MAX_SUBJECT_BYTES {
-            return Err(NativeStreamReadError::InvalidBinding);
-        }
         self.read(
-            &stream,
-            serde_json::json!({"seq":sequence.get()}),
+            stream,
+            NativeStreamGetRequest::Sequence { seq: sequence.get() },
             Some(&subject),
             Some(sequence.get()),
         )
@@ -82,14 +87,13 @@ impl StrictNativeStreamReader {
         scope: &super::NativeKvScope,
         key: &super::NativeKvKey,
     ) -> Result<Option<StreamMessage>, NativeStreamReadError> {
-        let stream = NatsToken::new(scope.stream()).map_err(|_| NativeStreamReadError::InvalidBinding)?;
+        let stream = scope.stream_token();
         let subject = scope.subject(key);
-        if subject.len() > crate::MAX_SUBJECT_BYTES {
-            return Err(NativeStreamReadError::InvalidBinding);
-        }
         self.read(
-            &stream,
-            serde_json::json!({"last_by_subj":subject.as_str()}),
+            stream,
+            NativeStreamGetRequest::LastBySubject {
+                last_by_subj: subject.as_str(),
+            },
             Some(&subject),
             None,
         )
@@ -102,7 +106,7 @@ impl StrictNativeStreamReader {
     ) -> Result<Option<StreamMessage>, NativeStreamReadError> {
         self.read(
             stream,
-            serde_json::json!({"seq":sequence.get()}),
+            NativeStreamGetRequest::Sequence { seq: sequence.get() },
             None,
             Some(sequence.get()),
         )
@@ -116,7 +120,10 @@ impl StrictNativeStreamReader {
         validate_subject(subject)?;
         self.read(
             stream,
-            serde_json::json!({"seq":0,"next_by_subj":subject}),
+            NativeStreamGetRequest::NextBySubject {
+                seq: 0,
+                next_by_subj: subject,
+            },
             Some(subject),
             None,
         )
@@ -134,7 +141,10 @@ impl StrictNativeStreamReader {
         let result = self
             .read(
                 stream,
-                serde_json::json!({"seq":sequence.get(),"next_by_subj":subject}),
+                NativeStreamGetRequest::NextBySubject {
+                    seq: sequence.get(),
+                    next_by_subj: subject,
+                },
                 Some(subject),
                 None,
             )
@@ -150,13 +160,18 @@ impl StrictNativeStreamReader {
         subject: &str,
     ) -> Result<Option<StreamMessage>, NativeStreamReadError> {
         validate_subject(subject)?;
-        self.read(stream, serde_json::json!({"last_by_subj":subject}), Some(subject), None)
-            .await
+        self.read(
+            stream,
+            NativeStreamGetRequest::LastBySubject { last_by_subj: subject },
+            Some(subject),
+            None,
+        )
+        .await
     }
     async fn read(
         &self,
         stream: &NatsToken,
-        request: serde_json::Value,
+        request: NativeStreamGetRequest<'_>,
         subject: Option<&str>,
         sequence: Option<u64>,
     ) -> Result<Option<StreamMessage>, NativeStreamReadError> {
@@ -166,10 +181,6 @@ impl StrictNativeStreamReader {
             .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
         {
             return Err(NativeStreamReadError::InvalidBinding);
-        }
-        #[derive(serde::Deserialize)]
-        struct RawResponse {
-            message: RawMessage,
         }
         let request = serde_json::to_vec(&request).map_err(NativeStreamReadError::Json)?;
         let response = tokio::time::timeout(self.timeout, async {
@@ -187,15 +198,17 @@ impl StrictNativeStreamReader {
                 .await
                 .map_err(NativeStreamReadError::Send)?;
             let message = subscription.next().await.ok_or(NativeStreamReadError::Closed)?;
-            if message.status.is_some() {
-                return Err(NativeStreamReadError::InvalidRecord);
+            if let Some(status) = message.status {
+                return Err(NativeStreamReadError::ProtocolStatus(status));
             }
-            let maximum = (self.maximum_record_bytes.get() + MAX_HEADER_BYTES) * 2 + 4096;
+            let maximum = (self.maximum_record_bytes.get() + MAX_NATIVE_STORED_HEADER_BYTES) * 2 + 4096;
             if message.payload.len() > maximum {
                 return Err(NativeStreamReadError::Limit);
             }
-            serde_json::from_slice::<async_nats::jetstream::response::Response<RawResponse>>(&message.payload)
-                .map_err(NativeStreamReadError::Json)
+            serde_json::from_slice::<async_nats::jetstream::response::Response<NativeStreamGetResponse>>(
+                &message.payload,
+            )
+            .map_err(NativeStreamReadError::Json)
         })
         .await
         .map_err(NativeStreamReadError::Timeout)??;
@@ -223,7 +236,7 @@ impl StrictNativeStreamReader {
         }
         let headers = match raw.headers {
             None => HeaderMap::new(),
-            Some(encoded) => parse_native_stored_headers(&decode(&encoded, MAX_HEADER_BYTES)?)?,
+            Some(encoded) => parse_native_stored_headers(&decode(&encoded, MAX_NATIVE_STORED_HEADER_BYTES)?)?,
         };
         let payload = decode(&raw.payload, self.maximum_record_bytes.get())?;
         Ok(Some(StreamMessage {
@@ -237,7 +250,7 @@ impl StrictNativeStreamReader {
 }
 fn validate_subject(subject: &str) -> Result<(), NativeStreamReadError> {
     if subject.is_empty()
-        || subject.len() > 1024
+        || subject.len() > MAX_SUBJECT_BYTES
         || subject.split('.').any(|token| {
             token.is_empty()
                 || !token
@@ -264,7 +277,7 @@ fn decode(value: &str, maximum: usize) -> Result<Vec<u8>, NativeStreamReadError>
 /// Parses original stored headers without collapsing repeated values. Owners
 /// still validate the cardinality and meaning of their authority metadata.
 pub fn parse_native_stored_headers(raw: &[u8]) -> Result<HeaderMap, NativeStreamReadError> {
-    if raw.len() > MAX_HEADER_BYTES {
+    if raw.len() > MAX_NATIVE_STORED_HEADER_BYTES {
         return Err(NativeStreamReadError::Limit);
     }
     let raw = std::str::from_utf8(raw).map_err(|_| NativeStreamReadError::InvalidRecord)?;
@@ -293,8 +306,8 @@ pub fn parse_native_stored_headers(raw: &[u8]) -> Result<HeaderMap, NativeStream
         if !value.bytes().all(|byte| byte == b'\t' || (32..=126).contains(&byte)) {
             return Err(NativeStreamReadError::InvalidRecord);
         }
-        let name = async_nats::HeaderName::from_str(name).map_err(|_| NativeStreamReadError::InvalidRecord)?;
-        let value = async_nats::HeaderValue::from_str(value).map_err(|_| NativeStreamReadError::InvalidRecord)?;
+        let name = async_nats::HeaderName::from_str(name).map_err(NativeStreamReadError::HeaderName)?;
+        let value = async_nats::HeaderValue::from_str(value).map_err(NativeStreamReadError::HeaderValue)?;
         headers.append(name, value);
     }
     Ok(headers)

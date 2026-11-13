@@ -1,5 +1,9 @@
 use super::*;
-use crate::test_support::JetStreamTestServer;
+use crate::{
+    NatsToken,
+    jetstream::{NativeKvExpectation, NativeKvKey, NativeKvScope},
+    test_support::JetStreamTestServer,
+};
 use async_nats::jetstream::{
     Context,
     context::{PublishError, PublishErrorKind},
@@ -7,6 +11,8 @@ use async_nats::jetstream::{
     publish::PublishAck,
     stream,
 };
+use bytes::Bytes;
+use std::num::NonZeroUsize;
 use std::{
     future::{IntoFuture, Ready, ready},
     sync::{
@@ -60,21 +66,15 @@ async fn conditional_kv_updates_require_both_exact_native_sequences() {
     let f = Fixture::new().await;
     let context = f.server.jetstream().await;
     let key = NativeKvKey::new("entry").unwrap();
-    let first = f
-        .bucket
-        .conditional_update(&context, request(&f.scope, &key, 0, 0))
+    let first = conditional_native_kv_update(&context, request(&f.scope, &key, 0, 0))
         .await
         .unwrap();
     assert_eq!(first.get(), 1);
     assert!(matches!(
-        f.bucket
-            .conditional_update(&context, request(&f.scope, &key, 0, first.get()))
-            .await,
+        conditional_native_kv_update(&context, request(&f.scope, &key, 0, first.get())).await,
         Err(NativeKvCasError::Conflict)
     ));
-    let next = f
-        .bucket
-        .conditional_update(&context, request(&f.scope, &key, first.get(), first.get()))
+    let next = conditional_native_kv_update(&context, request(&f.scope, &key, first.get(), first.get()))
         .await
         .unwrap();
     assert_eq!(next.get(), 2);
@@ -86,14 +86,12 @@ async fn conditional_kv_same_snapshot_race_has_one_native_winner_for_different_k
     let f = Fixture::new().await;
     let first_context = f.server.jetstream().await;
     let second_context = f.server.jetstream().await;
-    let first = first_context.get_key_value(f.scope.bucket().as_str()).await.unwrap();
-    let second = second_context.get_key_value(f.scope.bucket().as_str()).await.unwrap();
     let tail = f.tail().await;
     let a = NativeKvKey::new("first").unwrap();
     let b = NativeKvKey::new("second").unwrap();
     let (a, b) = tokio::join!(
-        first.conditional_update(&first_context, request(&f.scope, &a, 0, tail)),
-        second.conditional_update(&second_context, request(&f.scope, &b, 0, tail))
+        conditional_native_kv_update(&first_context, request(&f.scope, &a, 0, tail)),
+        conditional_native_kv_update(&second_context, request(&f.scope, &b, 0, tail))
     );
     assert_eq!([a.is_ok(), b.is_ok()].iter().filter(|ok| **ok).count(), 1);
     assert!(matches!(
@@ -118,9 +116,7 @@ async fn conditional_kv_strict_zero_never_resurrects_deleted_or_purged_keys() {
         assert_ne!(marker.operation, kv::Operation::Put);
         let typed = NativeKvKey::new(key).unwrap();
         assert!(matches!(
-            f.bucket
-                .conditional_update(&context, request(&f.scope, &typed, 0, f.tail().await))
-                .await,
+            conditional_native_kv_update(&context, request(&f.scope, &typed, 0, f.tail().await)).await,
             Err(NativeKvCasError::Conflict)
         ));
         let after = f.bucket.entry(key).await.unwrap().unwrap();
@@ -156,9 +152,7 @@ async fn conditional_kv_lost_ack_retains_uncertainty_and_never_returns_a_revisio
     };
     let key = NativeKvKey::new("entry").unwrap();
     assert!(matches!(
-        f.bucket
-            .conditional_update(&publisher, request(&f.scope, &key, 0, 0))
-            .await,
+        publish_checked_update(&f.bucket, &publisher, request(&f.scope, &key, 0, 0)).await,
         Err(NativeKvCasError::Uncertain {
             stage: NativeKvCasStage::Acknowledge,
             ..
@@ -166,9 +160,7 @@ async fn conditional_kv_lost_ack_retains_uncertainty_and_never_returns_a_revisio
     ));
     assert!(f.bucket.entry("entry").await.unwrap().is_some());
     assert!(matches!(
-        f.bucket
-            .conditional_update(&context, request(&f.scope, &key, 0, 0))
-            .await,
+        conditional_native_kv_update(&context, request(&f.scope, &key, 0, 0)).await,
         Err(NativeKvCasError::Conflict)
     ));
 }
@@ -186,7 +178,7 @@ async fn conditional_kv_envelope_bound_refuses_before_publishing() {
         NonZeroUsize::new(1).unwrap(),
     );
     assert!(matches!(
-        f.bucket.conditional_update(&context, request).await,
+        conditional_native_kv_update(&context, request).await,
         Err(NativeKvCasError::EnvelopeLimit)
     ));
     assert_eq!(f.tail().await, 0);
@@ -246,9 +238,7 @@ async fn conditional_kv_inconsistent_ack_never_proves_the_exact_write() {
         };
         let key = NativeKvKey::new(format!("entry-{index}")).unwrap();
         assert!(matches!(
-            f.bucket
-                .conditional_update(&publisher, request(&f.scope, &key, 0, f.tail().await))
-                .await,
+            publish_checked_update(&f.bucket, &publisher, request(&f.scope, &key, 0, f.tail().await)).await,
             Err(NativeKvCasError::InvalidAcknowledgement)
         ));
         assert!(f.bucket.entry(key.as_str()).await.unwrap().is_some());
@@ -262,10 +252,42 @@ async fn conditional_kv_refuses_redirected_bucket_handles_before_any_write() {
     let mut redirected = f.bucket.clone();
     redirected.put_prefix = Some("$KV.ANOTHER.".into());
     assert!(matches!(
-        redirected
-            .conditional_update(&context, request(&f.scope, &key, 0, 0))
-            .await,
+        publish_checked_update(&redirected, &context, request(&f.scope, &key, 0, 0)).await,
         Err(NativeKvCasError::InvalidBinding)
     ));
     assert_eq!(f.tail().await, 0);
+}
+
+#[derive(Clone)]
+struct FailedPublish;
+
+impl JetStreamPublishMessage for FailedPublish {
+    type PublishError = PublishError;
+    type AckFuture = Ready<Result<PublishAck, PublishError>>;
+
+    async fn publish_message(&self, _message: OutboundMessage) -> Result<Self::AckFuture, PublishError> {
+        Err(PublishError::new(PublishErrorKind::Other))
+    }
+}
+
+#[tokio::test]
+async fn conditional_kv_publish_failure_cannot_return_a_revision() {
+    let f = Fixture::new().await;
+    let key = NativeKvKey::new("entry").unwrap();
+    assert!(matches!(
+        publish_checked_update(&f.bucket, &FailedPublish, request(&f.scope, &key, 0, 0)).await,
+        Err(NativeKvCasError::Uncertain {
+            stage: NativeKvCasStage::Publish,
+            ..
+        })
+    ));
+    assert_eq!(f.tail().await, 0);
+}
+
+#[test]
+fn conditional_envelope_refuses_headerless_publications() {
+    let message = PublishMessage::build()
+        .payload(Bytes::from_static(b"unconditional value"))
+        .outbound_message("$KV.CONDITIONAL_KV.entry");
+    assert!(envelope_bytes(&message).is_none());
 }
