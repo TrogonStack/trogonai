@@ -93,6 +93,7 @@ impl DriverFixture {
             hook_callbacks: HashMap::new(),
             sdk_mcp_servers: McpSessions::new(),
             mcp: McpRouting::new(),
+            capture_manifests: false,
             initialize_request: crate::wire::runtime_payload::InitializeRequest::default()
                 .into_payload(crate::ArgvStyle::TypeScript)
                 .to_value()?,

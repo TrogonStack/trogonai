@@ -897,3 +897,12 @@ pub(crate) const JS_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 /// The `$schema` the TypeScript dialect adds to a tool input schema.
 pub(crate) const MCP_TS_JSON_SCHEMA_DRAFT_07: &str = "http://json-schema.org/draft-07/schema#";
+
+/// `OE`: the prefix of every request id the manifest capture sends, which marks a late reply for dropping.
+pub(crate) const MCP_MANIFEST_CAPTURE_ID_PREFIX: &str = "sdk-manifest-capture:";
+
+/// `$8`: how long the manifest capture waits for every server before the CLI is left to handshake the rest.
+pub(crate) const MCP_MANIFEST_CAPTURE_DEADLINE: Duration = Duration::from_millis(250);
+
+/// `F8`: the protocol version the manifest capture's `initialize` asks for.
+pub(crate) const MCP_MANIFEST_CAPTURE_PROTOCOL_VERSION: &str = "2025-11-25";

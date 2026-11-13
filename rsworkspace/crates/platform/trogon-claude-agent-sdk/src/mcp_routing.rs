@@ -15,6 +15,32 @@ pub(crate) fn is_tools_list_changed(message: &JsonObject) -> bool {
         && message.get("method").and_then(Value::as_str) == Some("notifications/tools/list_changed")
 }
 
+/// Puts the captured manifests where `buildInitializeRequest` has `sdkMcpServerManifests`: after
+/// `sdkMcpServerConfigs`, else after `sdkMcpServers`.
+pub(crate) fn insert_manifests(request: &mut Value, manifests: JsonObject) {
+    let Some(object) = request.as_object_mut() else {
+        return;
+    };
+    let anchor = if object.contains_key("sdkMcpServerConfigs") {
+        "sdkMcpServerConfigs"
+    } else {
+        "sdkMcpServers"
+    };
+    let mut rebuilt = JsonObject::new();
+    let mut manifests = Some(manifests);
+    for (key, value) in std::mem::take(object) {
+        let anchored = key == anchor;
+        rebuilt.insert(key, value);
+        if anchored && let Some(manifests) = manifests.take() {
+            rebuilt.insert("sdkMcpServerManifests".to_owned(), Value::Object(manifests));
+        }
+    }
+    if let Some(manifests) = manifests {
+        rebuilt.insert("sdkMcpServerManifests".to_owned(), Value::Object(manifests));
+    }
+    *object = rebuilt;
+}
+
 /// `sdk.mjs` `initialize`: a server whose tools changed while the manifests were captured keeps only its
 /// `initializeResult`, so the CLI lists its tools again over the control channel.
 pub(crate) fn trim_changed_manifests(request: &mut Value, changed: &std::collections::BTreeSet<String>) {

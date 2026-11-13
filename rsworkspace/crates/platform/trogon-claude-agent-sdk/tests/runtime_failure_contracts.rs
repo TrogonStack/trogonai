@@ -119,14 +119,23 @@ impl ScriptedCli {
 }
 
 async fn connect(options: ClaudeAgentOptions) -> Result<(ClaudeSdkClient, ScriptedCli), Box<dyn std::error::Error>> {
+    let (client, cli, _) = connect_reading_initialize(options).await?;
+    Ok((client, cli))
+}
+
+/// Like [`connect`], also returning the `initialize` request frame and the text it was written as.
+async fn connect_reading_initialize(
+    options: ClaudeAgentOptions,
+) -> Result<(ClaudeSdkClient, ScriptedCli, (Value, String)), Box<dyn std::error::Error>> {
     let (process, harness) = ScriptedProcessSpawner::new();
     let mut cli = ScriptedCli::from(harness);
     let connecting = tokio::spawn(ClaudeSdkClient::connect_with_adapters(options, adapters(process)));
     let request = cli.read().await?;
     assert_eq!(request["request"]["subtype"], "initialize");
+    let text = serde_json::to_string(&request)?;
     cli.success(&request, json!({"hooks_applied":true,"hook_on_failure_supported":true}))
         .await?;
-    Ok((connecting.await??, cli))
+    Ok((connecting.await??, cli, (request, text)))
 }
 
 fn result() -> Value {
@@ -692,10 +701,16 @@ struct ScriptedMcpServer {
     received: Arc<Mutex<Vec<Value>>>,
     /// What the transport sends as it connects, before the SDK has written `initialize`.
     connect_send: Vec<JsonObject>,
+    /// What the server answers each manifest capture message with, by method: `{delay_ms, message}`.
+    capture_replies: Value,
+    /// The manifest capture messages the server was handed.
+    capture_received: Arc<Mutex<Vec<Value>>>,
 }
 
 struct ScriptedMcpSession {
     received: Arc<Mutex<Vec<Value>>>,
+    capture_replies: Value,
+    capture_received: Arc<Mutex<Vec<Value>>>,
     outbound: tokio::sync::mpsc::UnboundedSender<JsonObject>,
     inbound: Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<JsonObject>>>,
 }
@@ -708,6 +723,8 @@ impl SdkMcpServer for ScriptedMcpServer {
         }
         Arc::new(ScriptedMcpSession {
             received: self.received.clone(),
+            capture_replies: self.capture_replies.clone(),
+            capture_received: self.capture_received.clone(),
             outbound,
             inbound: Mutex::new(Some(inbound)),
         })
@@ -717,6 +734,32 @@ impl SdkMcpServer for ScriptedMcpServer {
 impl SdkMcpSession for ScriptedMcpSession {
     fn request(&self, message: JsonObject, _signal: CancellationToken) -> McpFuture<'_> {
         Box::pin(async move {
+            let capturing = message
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| id.starts_with("sdk-manifest-capture:"))
+                || message.get("method").and_then(Value::as_str) == Some("notifications/initialized");
+            if capturing {
+                let method = message
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                self.capture_received
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(Value::Object(message));
+                let Some(Value::Object(reply)) = self.capture_replies[method.as_str()].get("message").cloned() else {
+                    return Ok(None);
+                };
+                let delay = self.capture_replies[method.as_str()]["delay_ms"].as_u64().unwrap_or(0);
+                let outbound = self.outbound.clone();
+                drop(tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    let _ = outbound.send(reply);
+                }));
+                return Ok(None);
+            }
             let entries = message
                 .get("params")
                 .and_then(|params| params.get("send"))
@@ -779,11 +822,19 @@ async fn mcp_message_routing_replays_the_typescript_golden() -> TestResult {
         let received = Arc::new(Mutex::new(Vec::new()));
         let mut configured = options()?;
         let servers = case["servers"].as_array().cloned().unwrap_or_else(|| vec![json!("s")]);
-        for server in &servers {
+        // The upstream run set `CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS`, which the option stands in for here.
+        if case.get("disable_env").is_some() {
+            configured.capture_sdk_mcp_manifests = Some(false);
+        }
+        let capture_received: Vec<_> = servers.iter().map(|_| Arc::new(Mutex::new(Vec::new()))).collect();
+        for (index, server) in servers.iter().enumerate() {
+            let server = server.as_str().unwrap_or("s");
             configured.sdk_mcp_servers.insert(
-                McpServerName::from(server.as_str().unwrap_or("s")),
+                McpServerName::from(server),
                 Arc::new(ScriptedMcpServer {
                     received: received.clone(),
+                    capture_replies: case["capture_replies"][server].clone(),
+                    capture_received: capture_received[index].clone(),
                     connect_send: case["connect_send"][server.as_str().unwrap_or("s")]
                         .as_array()
                         .into_iter()
@@ -793,7 +844,20 @@ async fn mcp_message_routing_replays_the_typescript_golden() -> TestResult {
                 }),
             );
         }
-        let (client, mut cli) = connect(configured).await?;
+        let (client, mut cli, (initialize, initialize_text)) = connect_reading_initialize(configured).await?;
+        // `initialize` carries `sdkMcpServerManifests` exactly as upstream built it, key order included.
+        assert_eq!(
+            initialize["request"].get("sdkMcpServerManifests"),
+            case.get("initialize_manifests"),
+            "{name}"
+        );
+        if let Some(manifests) = case.get("initialize_manifests") {
+            let wanted = serde_json::to_string(manifests)?;
+            assert!(
+                initialize_text.contains(&format!("\"sdkMcpServerManifests\":{wanted}")),
+                "{name}"
+            );
+        }
         for step in case["steps"].as_array().cloned().unwrap_or_default() {
             tokio::time::sleep(Duration::from_millis(step["wait_ms"].as_u64().unwrap_or(0))).await;
             cli.send(step["frame"].clone()).await?;
@@ -818,7 +882,42 @@ async fn mcp_message_routing_replays_the_typescript_golden() -> TestResult {
         );
         let seen = received.lock().unwrap_or_else(PoisonError::into_inner).clone();
         assert_eq!(Value::Array(seen), case["server_received"], "{name}");
+        for (index, server) in servers.iter().enumerate() {
+            let server = server.as_str().unwrap_or("s");
+            let handed = capture_received[index]
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            let wanted = case["capture_received"][server].as_array().cloned().unwrap_or_default();
+            assert_eq!(handed, wanted, "{name}: capture messages handed to {server}");
+        }
         // Closing with requests still waiting writes nothing, as the upstream transport is already closed.
+        cli.disconnect(client).await?;
+    }
+    Ok(())
+}
+
+/// Rust only: upstream turns the capture off with an environment variable and no query option, so
+/// `capture_sdk_mcp_manifests: Some(false)` is this crate's own switch. Off, `initialize` carries no manifests and
+/// the server is never handshaken; on, it carries the server's manifest.
+#[tokio::test]
+async fn manifest_capture_follows_the_option() -> TestResult {
+    for (setting, captured) in [(Some(false), false), (Some(true), true), (None, true)] {
+        let mut configured = options()?;
+        configured.capture_sdk_mcp_manifests = setting;
+        configured.sdk_mcp_servers.insert(
+            McpServerName::from("local"),
+            local_mcp_server(McpServerDialect::TypeScript),
+        );
+        let (client, cli, (initialize, _)) = connect_reading_initialize(configured).await?;
+        let manifests = initialize["request"].get("sdkMcpServerManifests");
+        assert_eq!(manifests.is_some(), captured, "{setting:?}");
+        if captured {
+            assert_eq!(
+                manifests.and_then(|manifests| manifests["local"]["initializeResult"]["serverInfo"]["name"].as_str()),
+                Some("local")
+            );
+        }
         cli.disconnect(client).await?;
     }
     Ok(())
