@@ -1,4 +1,25 @@
+use std::collections::HashMap;
+
 use super::*;
+
+/// What CPython's `str(float)` printed for each double of a corpus, as `[bits, text]` pairs per section
+/// (`.config/mise/lib/claude-sdk-freshness/usd_budget_goldens.py` writes it).
+const GOLDENS: &str = include_str!("../tests/fixtures/usd_budget/goldens.json");
+
+/// The pairs of one section of the goldens, next to the pairs `python_text` makes of the same doubles.
+fn printed_and_expected(section: &str) -> (Vec<(String, String)>, Vec<(String, String)>) {
+    let mut goldens: HashMap<String, Vec<(String, String)>> =
+        serde_json::from_str(GOLDENS).expect("goldens hold [bits, text] pairs");
+    let expected = goldens.remove(section).unwrap_or_default();
+    let printed = expected
+        .iter()
+        .map(|(bits, _)| {
+            let value = f64::from_bits(u64::from_str_radix(bits, 16).expect("bits are hex"));
+            (bits.clone(), UsdBudget::new(value).python_text())
+        })
+        .collect();
+    (printed, expected)
+}
 
 #[test]
 fn checked_budgets_reject_nonfinite_and_negative_values() {
@@ -49,4 +70,23 @@ fn python_text_matches_cpython_float_repr() {
     ] {
         assert_eq!(UsdBudget::new(value).python_text(), text, "{value}");
     }
+}
+
+#[test]
+fn python_text_keeps_the_even_digit_on_a_tie_like_cpython() {
+    let (printed, expected) = printed_and_expected("ties");
+    assert!(expected.len() > 500, "the corpus shrank to {} ties", expected.len());
+    let two_to_the_minus_25 = (
+        format!("{:016x}", 2f64.powi(-25).to_bits()),
+        "2.9802322387695312e-08".to_owned(),
+    );
+    assert!(expected.contains(&two_to_the_minus_25), "the corpus lost 2**-25");
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn python_text_prints_every_double_like_cpython_str() {
+    let (printed, expected) = printed_and_expected("values");
+    assert!(expected.len() > 5000, "the corpus shrank to {} values", expected.len());
+    assert_eq!(printed, expected);
 }

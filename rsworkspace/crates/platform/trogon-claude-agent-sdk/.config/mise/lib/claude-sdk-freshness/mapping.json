@@ -919,10 +919,18 @@
         {
           "path": "tests/runtime_features.rs",
           "name": "structured_input_and_declarative_configuration_reach_the_cli"
+        },
+        {
+          "path": "src/usd_budget_tests.rs",
+          "name": "python_text_keeps_the_even_digit_on_a_tie_like_cpython"
+        },
+        {
+          "path": "src/usd_budget_tests.rs",
+          "name": "python_text_prints_every_double_like_cpython_str"
         }
       ],
       "status": "supported",
-      "rationale": "Explicit typed Rust option is wired to CLI arguments or initialization. Fixture proves configuration transport; native inference behavior is not inferred."
+      "rationale": "Explicit typed Rust option is wired to CLI arguments or initialization. Fixture proves configuration transport; native inference behavior is not inferred. The Python dialect spells the amount as str(float) does, checked against CPython over a corpus that includes the shortest-digit ties (usd_budget_goldens.py writes the goldens)."
     },
     {
       "id": "output-schema",
