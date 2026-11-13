@@ -1,3 +1,5 @@
+//! JavaScript own-key enumeration order for JSON objects, shared by the TypeScript session helpers.
+
 use serde_json::Value;
 
 use crate::JsonObject;
