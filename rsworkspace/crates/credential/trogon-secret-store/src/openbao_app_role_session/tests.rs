@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use reqwest::StatusCode;
+use trogon_std::log_capture::{CapturedEvents, CapturedLogs, LevelFilter};
 
 use super::*;
 use crate::constants::{RENEWAL_WINDOW_DIVISOR, TOKEN_EXPIRY_MARGIN};
@@ -11,6 +12,7 @@ const RENEW_PATH: &str = "/v1/auth/token/renew-self";
 const FIRST_TOKEN: &str = "fake-login-token-1";
 const SECOND_TOKEN: &str = "fake-login-token-2";
 const TTL_SECS: u64 = 60;
+const CAPPED_RENEWAL_WARNING: &str = "OpenBao capped the login token renewal at its max TTL; logging in again";
 
 fn fake_approle() -> OpenBaoAppRole {
     approle("fake-role-id", "fake-secret-id")
@@ -34,6 +36,23 @@ fn into_renewal_window(clock: &StepClock) {
     clock.advance(Duration::from_secs(
         TTL_SECS - TTL_SECS / u64::from(RENEWAL_WINDOW_DIVISOR),
     ));
+}
+
+/// Renews into a grant shorter than the login TTL, which the session answers
+/// with a fresh login.
+async fn renew_into_a_capped_grant() {
+    let openbao = ScriptedOpenBao::start([grant(FIRST_TOKEN, TTL_SECS, true)]).await;
+    let clock = StepClock::new();
+    let session = started(&openbao, &clock).await;
+    openbao
+        .answer_next([
+            grant(FIRST_TOKEN, TTL_SECS / 2, true),
+            grant(SECOND_TOKEN, TTL_SECS, true),
+        ])
+        .await;
+    into_renewal_window(&clock);
+
+    assert_eq!(token(&session, &openbao).await.unwrap(), SECOND_TOKEN);
 }
 
 #[tokio::test]
@@ -147,6 +166,39 @@ async fn a_renewal_capped_by_the_max_ttl_falls_back_to_a_fresh_login() {
 
     assert_eq!(token(&session, &openbao).await.unwrap(), SECOND_TOKEN);
     assert_eq!(openbao.paths().await, [LOGIN_PATH, RENEW_PATH, LOGIN_PATH]);
+}
+
+#[tokio::test]
+async fn a_capped_renewal_warns_with_the_granted_and_requested_ttl() {
+    let captured = CapturedEvents::new();
+    let _guard = captured.install(LevelFilter::WARN);
+
+    renew_into_a_capped_grant().await;
+
+    let events = captured.events();
+    let capped = events
+        .iter()
+        .find(|event| event.message() == Some(CAPPED_RENEWAL_WARNING))
+        .unwrap();
+    assert_eq!(capped.field("granted_secs"), Some((TTL_SECS / 2).to_string().as_str()));
+    assert_eq!(capped.field("requested_secs"), Some(TTL_SECS.to_string().as_str()));
+}
+
+#[tokio::test]
+async fn a_capped_renewal_warning_reaches_the_log_facade_when_no_subscriber_is_installed() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+
+    renew_into_a_capped_grant().await;
+
+    let records = logs.records();
+    let capped = records
+        .iter()
+        .find(|record| record.message.contains(CAPPED_RENEWAL_WARNING))
+        .unwrap();
+    assert!(capped.message.contains(&format!("granted_secs={}", TTL_SECS / 2)));
+    assert!(capped.message.contains(&format!("requested_secs={TTL_SECS}")));
 }
 
 #[tokio::test]

@@ -198,6 +198,27 @@ async fn each_read_mints_a_bounded_child_carrying_the_correlation_id() {
 }
 
 #[tokio::test]
+async fn an_empty_material_answer_fails_the_read_instead_of_releasing_nothing() {
+    let openbao = ScriptedOpenBao::start([grant(LOGIN_TOKEN, 60, true)]).await;
+    let reader = scripted_reader(&openbao).await;
+    openbao
+        .answer_next([
+            grant(CHILD_TOKEN, 5, false),
+            active_metadata(),
+            (StatusCode::OK, json!({ "data": { "data": { "value": "" } } })),
+        ])
+        .await;
+
+    let error = reader
+        .get_correlated(&credential("tenant-1"), &correlation_id())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, SecretStoreError::BackendUnavailable { .. }));
+    assert_eq!(openbao.paths().await.len(), 4);
+}
+
+#[tokio::test]
 async fn debug_never_shows_a_token() {
     let openbao = ScriptedOpenBao::start([grant(LOGIN_TOKEN, 60, true)]).await;
     let reader = scripted_reader(&openbao).await;
