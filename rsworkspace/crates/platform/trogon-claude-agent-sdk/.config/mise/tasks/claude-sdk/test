@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Verify Claude SDK API extraction and report-only compatibility monitoring"
+#MISE depends=["claude-sdk:install"]
+set -euo pipefail
+
+root="${MISE_PROJECT_ROOT:?Run this task through mise}"
+cd "$root"
+exec python3 -m unittest discover -s .config/mise/lib/claude-sdk-freshness/tests -p 'test_*.py' -v "$@"
