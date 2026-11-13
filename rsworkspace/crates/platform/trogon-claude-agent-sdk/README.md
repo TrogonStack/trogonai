@@ -86,6 +86,19 @@ SessionStart or Setup hook running, for at most 10 minutes; a value you pass cou
 (or `none`) and its age. The process gets `CLAUDE_CODE_SDK_READS_STARTUP_MARKS=1` unless the environment has that
 key in any letter case. An error result exit carries `ResultError::startup_failure_reason`.
 
+## Spare processes with prewarm
+
+`prewarm(StartupOptions)` follows TypeScript `prewarm()`: it starts the CLI with `--await-claim`, completes the
+initialize handshake and returns a `SpareProcess` that is not tied to a session yet.
+`SpareProcess::claim(prompt, ClaimOptions)` writes one `claim_session` request (working directory, permission mode,
+environment, extra directories, system prompt addition, title, agents, accepted workspace trust and the SDK MCP server
+names), applies the model, thinking budget and settings around it and then sends the prompt, returning a `Query`.
+`claimed()` yields the `ClaimInfo`, `exited()` resolves when the process ends, and `close()` or `dispose()`
+discard the spare. A claim fails with `ClaimError` carrying the upstream text: `settings_not_applied` closes the
+process and sends no prompt, `option_not_applied` sends the prompt and says which options were skipped. A spare
+started without a directory parks under `spares/spare-XXXXXX` (mode 0700) in the config home until it is claimed.
+Settings that register hooks cannot be applied by a claim and are refused before anything is written.
+
 ## Messages and controls
 
 Every message keeps the object the CLI wrote (`Message::raw`), and

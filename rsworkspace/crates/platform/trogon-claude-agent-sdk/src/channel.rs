@@ -53,6 +53,14 @@ impl<T> Sender<T> {
         }
     }
 
+    /// Resolves once the receiver is gone or closed.
+    pub(crate) async fn closed(&self) {
+        match self {
+            Self::Bounded(sender) => sender.closed().await,
+            Self::Unbounded(sender) => sender.closed().await,
+        }
+    }
+
     /// Resolves once a bounded queue has room; an unbounded queue always has room.
     pub(crate) async fn ready(&self) -> bool {
         match self {

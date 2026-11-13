@@ -1204,3 +1204,22 @@ pub(crate) const STARTUP_UNCOUNTED_BUDGET: Duration = Duration::from_millis(600_
 pub(crate) const STARTUP_FOLLOWED_LIMIT: usize = 64;
 /// The hook events whose running time `startup()` leaves uncounted.
 pub(crate) const STARTUP_HOOK_EVENTS: [&str; 2] = ["SessionStart", "Setup"];
+
+/// The keys of `ClaimOptions.settings` that govern hooks. A claim cannot apply them.
+pub(crate) const CLAIM_HOOK_SETTINGS: [&str; 5] = [
+    "hooks",
+    "disableAllHooks",
+    "allowManagedHooksOnly",
+    "allowedHttpHookUrls",
+    "httpHookAllowedEnvVars",
+];
+
+/// The settings keys that follow the claim, in the order `claim()` sends them.
+pub(crate) const CLAIM_FOLLOWING_SETTINGS: [&str; 6] = [
+    "model",
+    "agent",
+    "fastMode",
+    "permissions",
+    "availableModels",
+    "disableAutoMode",
+];

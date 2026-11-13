@@ -4937,6 +4937,74 @@
       ],
       "status": "supported",
       "rationale": "startup() returns a WarmQuery after the initialize handshake, with the TypeScript initialize timer (60000 ms default, SessionStart and Setup hook time uncounted for at most 10 minutes only when no value is passed), startup marks and the SDKStartupFailureReason on the error result exit. Every golden, including the error result exit text and the default timer hook accounting, was captured live from the real sdk.mjs 0.3.323 talking to a scripted CLI (the default timer runs about 60 seconds there and under paused time here). Python 0.2.181 has no pre-warming. WarmQuery::query consumes self instead of throwing on a second call, so the once-only rule is enforced by Rust's type system."
+    },
+    {
+      "id": "prewarm",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "prewarm",
+            "core.prewarm",
+            "ClaimOptions",
+            "core.ClaimOptions",
+            "SpareProcess",
+            "core.SpareProcess"
+          ],
+          "prefixes": [
+            "SpareProcess",
+            "core.SpareProcess"
+          ]
+        }
+      },
+      "rust_api": [
+        "prewarm",
+        "prewarm_with_adapters",
+        "SpareProcess",
+        "SpareProcess.claim",
+        "SpareProcess.claimed",
+        "SpareProcess.exited",
+        "SpareProcess.close",
+        "SpareProcess.dispose",
+        "ClaimOptions",
+        "ClaimInfo",
+        "ClaimError"
+      ],
+      "tests": [
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "settings_split_into_what_precedes_and_what_follows_the_claim"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "hook_settings_are_the_keys_a_claim_cannot_apply"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "claim_directory_resolves_only_plain_relative_paths"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "claim_directory_reports_an_unreadable_process_directory"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "the_claim_request_keeps_upstream_key_order"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "workspace_trust_is_sent_only_when_accepted_with_an_absolute_directory"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "claim_errors_carry_the_upstream_messages"
+        }
+      ],
+      "status": "supported",
+      "rationale": "prewarm() starts a spare with --await-claim and SpareProcess::claim writes the claim_session request, applies model, thinking and settings around it and fails with settings_not_applied or option_not_applied like sdk.mjs 0.3.323; the claim initialize answer replaces the initialization result and keeps the four applied flags, and a spare without a directory parks under the config home spares directory, named spare- plus six characters of A-Z, a-z and 0-9 like Node's mkdtemp, until claimed. Goldens were captured from the real sdk.mjs. Python 0.2.181 has no pre-warming. A spare can be claimed only once, which Rust's type system and an internal flag enforce instead of a thrown error on reuse. ClaimOptions.settings takes a JSON object like TypeScript, whose declaration types it as the parameter of Query.applyFlagSettings. The claim prompt is a UserInput rather than an async iterable, consistent with the crate's query()."
     }
   ]
 }

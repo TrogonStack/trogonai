@@ -257,7 +257,10 @@ pub use permission_update::{
     PermissionBehavior, PermissionRuleValue, PermissionUpdate, PermissionUpdateDestination, PermissionUpdateError,
 };
 pub use plugin::{LocalPlugin, PluginDelivery};
-pub use prewarm::{StartupOptions, WarmQuery, startup, startup_with_adapters};
+pub use prewarm::{
+    ClaimError, ClaimInfo, ClaimOptions, SpareProcess, StartupOptions, WarmQuery, prewarm, prewarm_with_adapters,
+    startup, startup_with_adapters,
+};
 pub use process_options::{
     ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, OnProcessSpawned, ProcessSpawnInfo, ScriptRuntime,
     SpawnClaudeCodeProcess, SpawnOptions, StderrDelivery, StderrHandler, TraceContext,

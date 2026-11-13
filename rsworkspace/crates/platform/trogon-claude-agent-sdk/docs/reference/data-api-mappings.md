@@ -145,6 +145,11 @@ integrity-verified published `0.3.319` declaration archive.
 | `StartupOptions.on_startup_hooks_running`, `StartupHooksRunning` | not applicable | `onStartupHooksRunning` |
 | `Error::InitializeTimeout`, `InitializeTimeoutError` | not applicable | `errorClass: "initialize_timeout"`, `startupMark`, `startupMarkAgeMs` |
 | `ResultError::startup_failure_reason` | not applicable | `startupFailureReason` |
+| `prewarm`, `prewarm_with_adapters` | not applicable | `prewarm({options, initializeTimeoutMs})` (`--await-claim`) |
+| `SpareProcess::claim`, `ClaimOptions` | not applicable | `SpareProcess.claim({prompt, options})` (prompt is `UserInput`, `settings` is a JSON object) |
+| `SpareProcess::claimed`, `ClaimInfo` | not applicable | `claimed` (`cwd`, `sessionId`, `parkedMs`, `sdkMcpSettled`) |
+| `SpareProcess::exited`, `close`, `dispose` | not applicable | `exited`, `close`, `Symbol.asyncDispose` |
+| `ClaimError` | not applicable | `settings_not_applied`, `option_not_applied` |
 
 ## Query controls
 

@@ -56,6 +56,21 @@ pub struct ClientHandle {
     latest_commands: driver::LatestCommands,
     host: crate::remote_control::HostState,
     style: crate::ArgvStyle,
+    /// `true` while a `claim_session` request of a spare is unanswered.
+    claim_pending: std::sync::Arc<tokio::sync::watch::Sender<bool>>,
+}
+
+/// A control request that is queued for writing and not yet answered.
+pub(crate) struct ControlTicket {
+    handle: ClientHandle,
+    receiver: oneshot::Receiver<Result<Option<serde_json::Value>, Error>>,
+}
+
+impl ControlTicket {
+    /// The answer's `response` field, `None` when the frame has none.
+    pub(crate) async fn wait(self) -> Result<Option<serde_json::Value>, Error> {
+        self.receiver.await.map_err(|_| self.handle.stopped_error())?
+    }
 }
 
 /// TypeScript `Query.close()`: asks the driver to shut down, once, from the owner or any handle.
@@ -467,6 +482,7 @@ impl ClaudeSdkClient {
             latest_commands: driver::LatestCommands::default(),
             host: crate::remote_control::HostState::default(),
             style: options.argv_style,
+            claim_pending: std::sync::Arc::new(tokio::sync::watch::channel(false).0),
         };
         let latest_commands = handle.latest_commands.clone();
         let host = handle.host.clone();
@@ -685,6 +701,7 @@ impl ClientHandle {
     }
 
     async fn initialization_value(&self) -> Result<Option<serde_json::Value>, Error> {
+        self.wait_for_claim().await;
         let mut receiver = self.initialization.subscribe();
         loop {
             if let Some(outcome) = receiver.borrow_and_update().clone() {
@@ -694,6 +711,33 @@ impl ClientHandle {
                 return Err(Error::DriverStopped);
             }
         }
+    }
+
+    /// TypeScript `claimSession`: the response's `initialize` replaces the initialization result, keeping the
+    /// applied flags it omits. A response without one leaves the result as it was.
+    pub(crate) fn merge_claim_initialization(&self, response: &serde_json::Value) {
+        let Some(serde_json::Value::Object(update)) = response.get("initialize") else {
+            return;
+        };
+        self.initialization.send_modify(|slot| {
+            let previous = match &*slot {
+                Some(Ok(Some(serde_json::Value::Object(previous)))) => Some(previous),
+                _ => None,
+            };
+            let mut merged = update.clone();
+            for key in [
+                "hooks_applied",
+                "plugins_applied",
+                "managed_settings_applied",
+                "code_running_mcp_tools_applied",
+            ] {
+                let fresh = update.get(key).filter(|value| !value.is_null());
+                if let Some(value) = fresh.or_else(|| previous.and_then(|previous| previous.get(key))) {
+                    merged.insert(key.to_owned(), value.clone());
+                }
+            }
+            *slot = Some(Ok(Some(serde_json::Value::Object(merged))));
+        });
     }
 
     /// The initialize wait of `startup()`: TypeScript `m.race(initializationResult())`.
@@ -1263,7 +1307,7 @@ impl ClientHandle {
         }
     }
 
-    async fn finish_with(&self, completion: Completion) -> Result<(), Error> {
+    pub(crate) async fn finish_with(&self, completion: Completion) -> Result<(), Error> {
         let (response, receiver) = oneshot::channel();
         let command = Command::FinishInput { completion, response };
         match self.send_command(command).await {
@@ -1274,6 +1318,41 @@ impl ClientHandle {
             Ok(Err(_)) => Ok(()),
             Ok(Ok(())) => receiver.await.unwrap_or(Ok(())),
         }
+    }
+
+    /// Queues a control request without waiting for its answer, so a caller can queue several in order.
+    pub(crate) async fn control_started(
+        &self,
+        operation: ControlOperation,
+        request: serde_json::Value,
+    ) -> Result<ControlTicket, Error> {
+        let (response, receiver) = oneshot::channel();
+        self.enqueue(Command::Control {
+            operation,
+            request,
+            response,
+        })
+        .await?;
+        Ok(ControlTicket {
+            handle: self.clone(),
+            receiver,
+        })
+    }
+
+    /// Resolves once the process has stopped, however it ended.
+    pub(crate) async fn stopped(&self) {
+        self.commands.closed().await;
+    }
+
+    pub(crate) fn set_claim_pending(&self, pending: bool) {
+        self.claim_pending.send_replace(pending);
+    }
+
+    /// TypeScript reads such as `initializationResult()` of a claimed spare wait for the claim's answer, then
+    /// describe the claimed session. Resolves at once when no claim is waiting for its answer.
+    async fn wait_for_claim(&self) {
+        let mut pending = self.claim_pending.subscribe();
+        let _ = pending.wait_for(|pending| !*pending).await;
     }
 
     async fn control(
@@ -1347,6 +1426,17 @@ fn javascript_number(value: f64) -> serde_json::Value {
         return serde_json::Value::from(integer);
     }
     serde_json::Number::from_f64(value).map_or(serde_json::Value::Null, serde_json::Value::Number)
+}
+
+impl ClaudeSdkClient {
+    /// A query over this connection whose prompt the caller writes, as `SpareProcess::claim` does.
+    pub(crate) fn into_query(self) -> Query {
+        Query {
+            client: Some(self),
+            one_turn: false,
+            result_received: false,
+        }
+    }
 }
 
 /// Messages through run completion, including background-agent continuation turns.

@@ -30,6 +30,7 @@ pub enum ControlOperation {
     ReloadOutputStyles,
     SeedReadState,
     RemoteControl,
+    ClaimSession,
 }
 
 impl std::fmt::Display for ControlOperation {
@@ -59,6 +60,7 @@ impl std::fmt::Display for ControlOperation {
             Self::ReloadOutputStyles => "reload_output_styles",
             Self::SeedReadState => "seed_read_state",
             Self::RemoteControl => "remote_control",
+            Self::ClaimSession => "claim_session",
         })
     }
 }
