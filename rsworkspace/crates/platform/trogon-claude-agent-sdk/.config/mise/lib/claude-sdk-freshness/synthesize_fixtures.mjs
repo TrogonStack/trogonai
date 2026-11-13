@@ -58,6 +58,7 @@ function sample(node, variant) {
     return sample(members[variant % members.length], variant);
   }
   if (ts.isTypeLiteralNode(node)) return object(node.members, variant, false);
+  if (ts.isIntersectionTypeNode(node)) return Object.assign({}, ...node.types.map(type => sample(type, variant)));
   if (ts.isTypeReferenceNode(node)) {
     const name = node.typeName.getText(sourceFile);
     if (name === 'Record') return { key: sample(node.typeArguments[1], variant) };

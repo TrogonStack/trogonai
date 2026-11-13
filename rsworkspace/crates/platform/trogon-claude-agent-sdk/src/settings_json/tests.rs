@@ -45,3 +45,9 @@ fn python_separates_with_spaces_and_escapes_non_ascii() {
         "{\"a\": [1, 2.0, \"\\u00e9\\u007f\\ud83d\\ude00\"], \"b\": {\"c\": null}, \"d\": 1e+16, \"e\": 1e-07}"
     );
 }
+
+#[test]
+fn python_escapes_quotes_backslashes_and_control_characters_and_keeps_a_fraction() {
+    let value = json!(["\"\\\n\r\t\u{8}\u{c}", 1.5, -0.25]);
+    assert_eq!(python_dumps(&value), r#"["\"\\\n\r\t\b\f", 1.5, -0.25]"#);
+}

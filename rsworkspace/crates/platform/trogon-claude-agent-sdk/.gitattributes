@@ -6,3 +6,6 @@ tests/fixtures/upstream_tool_outputs.json linguist-generated=true
 src/upstream/settings.rs linguist-generated=true
 tests/fixtures/upstream_settings.json linguist-generated=true
 src/upstream/settings_resolution.rs linguist-generated=true
+tests/fixtures/upstream_hooks.json linguist-generated=true
+src/upstream/messages.rs linguist-generated=true
+src/upstream/hooks.rs linguist-generated=true

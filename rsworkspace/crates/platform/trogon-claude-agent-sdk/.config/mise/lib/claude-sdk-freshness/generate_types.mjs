@@ -186,6 +186,7 @@ function parseType(node, source) {
     return { k: 'indexed', object: parseType(node.objectType, source), prop: index.literal.text };
   }
   if (ts.isUnionTypeNode(node)) return unionOf(node.types.map(type => parseType(type, source)));
+  if (ts.isIntersectionTypeNode(node)) return { k: 'intersection', members: node.types.map(type => parseType(type, source)) };
   if (ts.isTypeReferenceNode(node)) {
     // `coreTypes` re-exports declarations of the same file, so `coreTypes.X` is `X`.
     const qualified = ts.isQualifiedName(node.typeName) && node.typeName.left.getText(source) === 'coreTypes';
@@ -245,6 +246,7 @@ class Emitter {
     this.externs = new Map();
     this.foreign = new Map();
     this.tagged = new Map();
+    this.taggedEmitted = new Set();
   }
 
   claim(name) {
@@ -285,8 +287,51 @@ class Emitter {
         index: ir.index ? this.resolve(ir.index) : null,
       };
       case 'union': return { k: 'union', members: ir.members.map(member => this.resolve(member)) };
+      case 'intersection': return this.intersection(ir.members);
       default: return ir;
     }
+  }
+
+  // `A & { b: B }` of object types is one object with the properties of every member. A property
+  // both declare must have the same type there; it is required when either requires it, as in
+  // TypeScript. Differing types are refused rather than guessed.
+  intersection(members) {
+    const props = [];
+    let index = null;
+    for (const member of members) {
+      const resolved = this.resolve(member);
+      let object = resolved.k === 'ref' ? this.declaration(resolved.name) : resolved;
+      if (object.k === 'map') object = { k: 'object', props: [], index: object.val };
+      if (object.k !== 'object') fail(`Intersection member ${resolved.k === 'ref' ? resolved.name : resolved.k} is not an object`);
+      for (const prop of object.props) {
+        const at = props.findIndex(existing => existing.name === prop.name);
+        if (at === -1) {
+          props.push(prop);
+          continue;
+        }
+        if (key(props[at].type) !== key(prop.type)) fail(`Intersection declares ${prop.name} with two types`);
+        props[at] = { ...props[at], optional: props[at].optional && prop.optional, doc: prop.doc || props[at].doc };
+      }
+      if (object.index) {
+        if (index) fail('Intersection merges two index signatures');
+        index = object.index;
+      }
+    }
+    return { k: 'object', props, index };
+  }
+
+  // `declare const NAME: readonly ['a', 'b']` becomes a Rust array of the listed strings.
+  constant(name, statement) {
+    const declaration = statement.declarationList.declarations[0];
+    let type = declaration.type;
+    if (type && ts.isTypeOperatorNode(type) && type.operator === ts.SyntaxKind.ReadonlyKeyword) type = type.type;
+    if (!type || !ts.isTupleTypeNode(type)) fail(`Constant ${name} is not a readonly tuple`);
+    const values = type.elements.map(element => (ts.isLiteralTypeNode(element) && ts.isStringLiteral(element.literal)
+      ? element.literal.text
+      : fail(`Constant ${name} lists something other than a string literal`)));
+    this.claim(name);
+    const doc = docLines(statement, '');
+    this.chunks.push(`${doc}pub const ${name}: [&str; ${values.length}] = [${values.map(rustString).join(', ')}];\n`);
   }
 
   declaration(name) {
@@ -347,7 +392,7 @@ class Emitter {
       case 'nullable': return `Option<${this.type(ir.inner, name)}>`;
       case 'object': this.claim(name); this.struct(name, ir, ''); return name;
       case 'strenum': this.claim(name); this.strenum(name, ir, ''); return name;
-      case 'union': this.claim(name); this.union(name, ir, ''); return name;
+      case 'union': this.claim(name); this.union(name, ir, '', this.tagged.get(name)); return name;
       default: return fail(`Unhandled type ${ir.k}`);
     }
   }
@@ -501,6 +546,7 @@ class Emitter {
     for (const { variant } of variants) out.push(`            Self::${variant}(inner) => inner.serialize(serializer),`);
     out.push('            Self::Unknown(inner) => inner.serialize(serializer),', '        }', '    }', '}', '');
     if (tags) {
+      this.taggedEmitted.add(name);
       this.taggedMatch(name, tags, variants, out);
       this.chunks.push(out.join('\n'));
       return;
@@ -593,10 +639,16 @@ class Emitter {
 
 function declarationsOf(sourceFile) {
   const declarations = new Map();
+  const constants = new Map();
   for (const statement of sourceFile.statements) {
     if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) declarations.set(statement.name.text, statement);
+    else if (ts.isVariableStatement(statement) && statement.declarationList.flags & ts.NodeFlags.Const) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) constants.set(declaration.name.text, statement);
+      }
+    }
   }
-  return declarations;
+  return { declarations, constants };
 }
 
 export function generate({ packageDir, target, label }) {
@@ -604,7 +656,7 @@ export function generate({ packageDir, target, label }) {
   if (!fs.existsSync(file)) fail(`Missing declaration file ${target.source}`);
   const text = fs.readFileSync(file, 'utf8');
   const sourceFile = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-  const declarations = declarationsOf(sourceFile);
+  const { declarations, constants } = declarationsOf(sourceFile);
   const emitter = new Emitter(declarations, sourceFile);
   for (const [name, omitted] of Object.entries(target.omit_members ?? {})) {
     if (!declarations.has(name)) fail(`omit_members names ${name}, which is not declared`);
@@ -615,8 +667,9 @@ export function generate({ packageDir, target, label }) {
     if (!FOREIGN[shape]) fail(`foreign ${name} has unsupported shape ${JSON.stringify(shape)}`);
     emitter.foreign.set(name, FOREIGN[shape]);
   }
+  // A tagged name is a declared union or one the emitter derives for an inline property union
+  // (such as `SyncHookJSONOutputHookSpecificOutput`); the check after emission catches a typo.
   for (const [name, keys] of Object.entries(target.tagged ?? {})) {
-    if (!declarations.has(name)) fail(`tagged names ${name}, which is not declared`);
     if (!Array.isArray(keys) || keys.length === 0) fail(`tagged ${name} needs at least one key`);
     emitter.tagged.set(name, keys);
   }
@@ -625,11 +678,18 @@ export function generate({ packageDir, target, label }) {
     emitter.externs.set(name, rustPath);
   }
   for (const name of target.roots) {
+    if (constants.has(name)) {
+      emitter.constant(name, constants.get(name));
+      continue;
+    }
     if (!declarations.has(name)) fail(`Root ${name} is not declared in ${target.source}`);
     if (emitter.emitted.has(name)) continue;
     emitter.emitted.add(name);
     emitter.root(name);
     emitter.drain();
+  }
+  for (const name of emitter.tagged.keys()) {
+    if (!emitter.taggedEmitted.has(name)) fail(`tagged names ${name}, which is not a union emitted for ${target.output}`);
   }
   const header = [
     `// @generated by .config/mise/lib/claude-sdk-freshness/generate_types.mjs from ${label} ${target.source}.`,

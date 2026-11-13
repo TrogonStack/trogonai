@@ -224,6 +224,58 @@ export type Message = Base | Sub | Replay | Other;
         self.assertEqual(result.returncode, 2)
         self.assertIn("unsupported shape", result.stderr)
 
+    def test_an_inline_property_union_dispatches_on_its_configured_tag(self):
+        declarations = self.TAGGED + "export interface Holder { specific?: Base | Other }\n"
+        result = self.generate_from(declarations, ["Holder"], foreign={"Foreign": "string"}, tagged={"HolderSpecific": ["type"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('super::support::tag_str(value, "type", &["base"])', result.output)
+        self.assertIn("super::support::keep_most_specific(&mut best, 1,", result.output)
+        result = self.generate_from(declarations, ["Holder"], foreign={"Foreign": "string"}, tagged={"HolderSpecifc": ["type"]})
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("tagged names HolderSpecifc, which is not a union emitted for", result.stderr)
+
+    INTERSECTED = '''
+export interface Base { id: string; agent?: string }
+export type Event = Base & { kind: "event"; agent: string; size?: number };
+export type Clash = Base & { id: number };
+/** The names. */
+export declare const NAMES: readonly ["a", "b-c"];
+export declare const BAD: readonly [1, 2];
+'''
+
+    def test_intersections_merge_their_members_and_a_required_redeclaration_wins(self):
+        result = self.generate_from(self.INTERSECTED, ["Event"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "pub struct Event {\n    pub id: String,\n    pub agent: String,\n    pub kind: EventKind,\n    pub size: Option<serde_json::Number>,",
+            result.output,
+        )
+        result = self.generate_from(self.INTERSECTED, ["Clash"])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Intersection declares id with two types", result.stderr)
+
+    def test_readonly_string_tuple_constants_become_rust_arrays(self):
+        result = self.generate_from(self.INTERSECTED, ["NAMES"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('/// The names.\npub const NAMES: [&str; 2] = ["a", "b-c"];', result.output)
+        result = self.generate_from(self.INTERSECTED, ["BAD"])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Constant BAD lists something other than a string literal", result.stderr)
+
+    def test_fixture_synthesis_merges_intersection_members(self):
+        out = tempfile.TemporaryDirectory()
+        self.addCleanup(out.cleanup)
+        config = self.config(["Event"], fixtures={"output": "fixtures.json", "roots": ["Event"]})
+        result = subprocess.run(
+            ["node", str(LIB / "synthesize_fixtures.mjs"), "--typescript-package", str(self.package(self.INTERSECTED)), "--config", str(config), "--out-root", out.name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fixtures = json.loads((Path(out.name) / "fixtures.json").read_text(encoding="utf-8"))
+        self.assertEqual(fixtures, {"Event": [{"id": "text", "agent": "text", "kind": "event", "size": 3}]})
+
     def test_unsupported_declarations_fail_instead_of_guessing(self):
         for declarations in ("export interface Bad { run(): void }", "export type Bad = Foo<string>;", "export interface Bad { x: Missing }"):
             out = tempfile.TemporaryDirectory()

@@ -365,6 +365,38 @@
         "SDKControlRequest",
         "SDKControlResponse"
       ]
+    },
+    {
+      "source": "sdk.d.ts",
+      "output": "src/upstream/hooks.rs",
+      "extern": {
+        "PermissionMode": "super::messages::PermissionMode",
+        "SDKAssistantMessageError": "super::messages::SDKAssistantMessageError"
+      },
+      "tagged": {
+        "HookInput": [
+          "hook_event_name"
+        ],
+        "SyncHookJSONOutputHookSpecificOutput": [
+          "hookEventName"
+        ]
+      },
+      "roots": [
+        "HOOK_EVENTS",
+        "EXIT_REASONS",
+        "HookEvent",
+        "ExitReason",
+        "HookInput",
+        "HookJSONOutput"
+      ],
+      "fixtures": {
+        "output": "tests/fixtures/upstream_hooks.json",
+        "roots": [
+          "HookInput",
+          "SyncHookJSONOutput",
+          "AsyncHookJSONOutput"
+        ]
+      }
     }
   ]
 }

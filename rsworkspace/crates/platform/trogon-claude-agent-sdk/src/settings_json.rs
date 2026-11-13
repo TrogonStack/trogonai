@@ -176,10 +176,7 @@ pub(crate) fn js_normalize(value: &Value) -> Value {
 }
 
 /// Python `repr(float)`.
-fn python_float(number: &Number) -> String {
-    let Some(float) = number.as_f64() else {
-        return number.to_string();
-    };
+fn python_float(float: f64) -> String {
     let text = format!("{float:e}");
     let (mantissa, exponent) = text.split_once('e').unwrap_or((&text, "0"));
     let exponent: i32 = exponent.parse().unwrap_or(0);
@@ -222,8 +219,10 @@ fn python_write(value: &Value, out: &mut String) {
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(flag) => out.push_str(if *flag { "true" } else { "false" }),
-        Value::Number(number) if number.is_f64() => out.push_str(&python_float(number)),
-        Value::Number(number) => out.push_str(&number.to_string()),
+        Value::Number(number) => match number.as_f64().filter(|_| number.is_f64()) {
+            Some(float) => out.push_str(&python_float(float)),
+            None => out.push_str(&number.to_string()),
+        },
         Value::String(text) => python_string(text, out),
         Value::Array(items) => {
             out.push('[');

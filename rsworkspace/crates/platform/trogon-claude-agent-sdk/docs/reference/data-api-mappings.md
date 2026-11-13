@@ -181,6 +181,18 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 | `ContentBlock::{ServerToolUse, ServerToolResult}` | `ServerToolUseBlock`, `ServerToolResultBlock` | server tool blocks of `BetaMessage` |
 | `Error::MessageParse(MessageParseError)` with Python decoding | `MessageParseError` (`KeyError` text) | not applicable |
 
+## Hooks
+
+| Rust | Python | TypeScript |
+| --- | --- | --- |
+| `HookRegistration` (`matcher`, `callbacks`, `timeout`, `on_failure`) | `HookMatcher` | `HookCallbackMatcher` |
+| `HookRequest` (`input`, `tool_use_id`, `signal`) | callback arguments and `HookContext.signal` | `HookCallback` arguments and `{ signal }` |
+| `HookRequest::typed_input()` returning `HookInput` (generated, every event plus `Unknown`) | `HookInput` and its `*HookInput` TypedDicts | `HookInput` and its `*HookInput` members |
+| `HookOutput::Json(HookJSONOutput)` (generated, sent exactly as given) | `HookJSONOutput`, `SyncHookJSONOutput`, `AsyncHookJSONOutput` (`continue_` and `async_` renamed on the wire) | `HookJSONOutput`, `SyncHookJSONOutput`, `AsyncHookJSONOutput` |
+| `HookOutput::{Sync, Async}`, `HookOutput::block` | `SyncHookJSONOutput`, `AsyncHookJSONOutput` (common fields only) | same |
+| `HookEvent`, `HookEvent::ALL`, `HOOK_EVENTS` | `HookEvent` | `HookEvent`, `HOOK_EVENTS` |
+| `ExitReason`, `EXIT_REASONS` | no type | `ExitReason`, `EXIT_REASONS` |
+
 ## Settings
 
 | Rust | Python | TypeScript |
