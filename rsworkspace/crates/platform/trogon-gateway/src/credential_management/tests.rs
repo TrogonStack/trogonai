@@ -8,6 +8,10 @@ use chrono::Utc;
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tower::ServiceExt;
+use trogon_credential_aggregate::proto::{
+    active_state_to_proto, cleanup_failed_to_proto_state, destroy_requested_to_proto_state, destroyed_to_proto_state,
+    pending_write_to_proto_state, revoked_to_proto_state, rotation_pending_to_proto_state, write_failed_to_proto_state,
+};
 use trogon_decider_runtime::{
     AppendStreamRequest, AppendStreamResponse, ReadFrom, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
     ReadStreamResponse, Snapshot, SnapshotRead, SnapshotWrite, StreamAppend, StreamEvent, StreamPosition, StreamRead,
@@ -16,10 +20,6 @@ use trogon_decider_runtime::{
 
 use super::idempotency::IdempotencyKeyError;
 use super::*;
-use crate::credential::commands::proto::{
-    active_state_to_proto, cleanup_failed_to_proto_state, destroy_requested_to_proto_state, destroyed_to_proto_state,
-    pending_write_to_proto_state, revoked_to_proto_state, rotation_pending_to_proto_state, write_failed_to_proto_state,
-};
 use crate::credential_lifecycle::recovery_worker::{
     CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError,
 };

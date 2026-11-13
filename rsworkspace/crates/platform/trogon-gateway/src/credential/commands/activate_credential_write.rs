@@ -1,9 +1,10 @@
+use trogon_credential_aggregate::CredentialEvolveError;
+use trogon_credential_aggregate::proto::{activated_to_proto, decode_pending_write_state};
 use trogon_credential_domain::{CredentialKey, CredentialMetadata};
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::proto::{activated_to_proto, decode_pending_write_state};
-use super::state::{CredentialDecideError, CredentialEvolveError, ensure_active_metadata, ensure_recorded_identity};
+use super::state::{CredentialDecideError, ensure_active_metadata, ensure_recorded_identity};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActivateCredentialWrite {
@@ -34,11 +35,11 @@ impl Decider for ActivateCredentialWrite {
     }
 
     fn initial_state() -> Self::State {
-        super::state::initial_state()
+        trogon_credential_aggregate::initial_state()
     }
 
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
+        trogon_credential_aggregate::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {

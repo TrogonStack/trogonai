@@ -7370,6 +7370,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-credential-aggregate"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa",
+ "thiserror 2.0.21",
+ "trogon-credential-domain",
+ "trogon-decider-nats",
+ "trogon-nats",
+ "trogonai-proto",
+]
+
+[[package]]
 name = "trogon-credential-domain"
 version = "0.1.0"
 dependencies = [
@@ -7651,6 +7664,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-config-value",
+ "trogon-credential-aggregate",
  "trogon-credential-domain",
  "trogon-decider",
  "trogon-decider-nats",

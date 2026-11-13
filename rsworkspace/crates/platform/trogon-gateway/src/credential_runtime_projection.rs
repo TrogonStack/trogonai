@@ -13,6 +13,11 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+use trogon_credential_aggregate::proto::{
+    decode_cleanup_failed_state, decode_destroy_requested_state, decode_destroyed_state, decode_pending_write_state,
+    decode_revoked_state, decode_write_failed_state, event_key,
+};
+use trogon_credential_aggregate::{CredentialProtoDecodeError, credential_event_subject, releasable_version};
 use trogon_credential_domain::{
     CredentialId, CredentialKey, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope,
     RuntimeReleaseDeniedError, RuntimeReleasePolicy, RuntimeReleaseRequest, SourceIntegrationId, SourceKind,
@@ -30,14 +35,8 @@ use trogonai_proto::gateway::credentials::{
 };
 
 use crate::constants::METER_NAME;
-use crate::credential::commands::proto::{
-    CredentialProtoDecodeError, active_credential_ref, decode_cleanup_failed_state, decode_destroy_requested_state,
-    decode_destroyed_state, decode_message_field, decode_pending_write_state, decode_revoked_state,
-    decode_write_failed_state, event_key,
-};
 use crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX;
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
-use crate::credential::stream::credential_event_subject;
 use crate::credential::{CredentialEvolveError, evolve_stream, initial_state};
 
 #[derive(Debug)]
@@ -246,30 +245,8 @@ impl RuntimeIntegrationProjection {
         state: &state_v1::CredentialStateSnapshot,
         version: u64,
     ) -> Result<Option<Self>, RuntimeProjectionBuildError> {
-        match state.state.as_ref() {
-            Some(CredentialStateSnapshotCase::Active(active)) => {
-                let credential_ref =
-                    active_credential_ref(active).map_err(RuntimeProjectionBuildError::InvalidState)?;
-                Ok(Some(Self::active_from_credential_ref(credential_ref, version)))
-            }
-            Some(CredentialStateSnapshotCase::RotationPending(rotation)) => {
-                let active = decode_message_field("rotation_pending.active", &rotation.active)
-                    .map_err(RuntimeProjectionBuildError::InvalidState)?;
-                let credential_ref =
-                    active_credential_ref(active).map_err(RuntimeProjectionBuildError::InvalidState)?;
-                Ok(Some(Self::active_from_credential_ref(credential_ref, version)))
-            }
-            None
-            | Some(
-                CredentialStateSnapshotCase::Missing(_)
-                | CredentialStateSnapshotCase::PendingWrite(_)
-                | CredentialStateSnapshotCase::WriteFailed(_)
-                | CredentialStateSnapshotCase::Revoked(_)
-                | CredentialStateSnapshotCase::DestroyRequested(_)
-                | CredentialStateSnapshotCase::Destroyed(_)
-                | CredentialStateSnapshotCase::CleanupFailed(_),
-            ) => Ok(None),
-        }
+        let credential_ref = releasable_version(state).map_err(RuntimeProjectionBuildError::InvalidState)?;
+        Ok(credential_ref.map(|credential_ref| Self::active_from_credential_ref(credential_ref, version)))
     }
 
     pub fn key(&self) -> &RuntimeIntegrationKey {
