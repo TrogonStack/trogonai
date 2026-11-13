@@ -5,7 +5,10 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::Command,
 };
-use trogon_claude_agent_sdk::adapters::{SpawnProcess, TokioProcessSpawner};
+use trogon_claude_agent_sdk::{
+    Environment, InMemorySessionStore, SessionRuntime, SessionStoreOptions, StoreResume,
+    adapters::{CurrentDirectory, SpawnProcess, SystemEnvironment, TokioProcessSpawner},
+};
 
 type TestResult = Result<(), Box<dyn StdError>>;
 
@@ -43,5 +46,18 @@ async fn native_spawner_returns_the_spawn_error() -> TestResult {
         .err()
         .ok_or("spawn unexpectedly succeeded")?;
     assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_environment_defaults_prepare_a_store_without_materializing_transcripts() -> TestResult {
+    let directory = SystemEnvironment.current_dir()?;
+    let store: InMemorySessionStore = InMemorySessionStore::default();
+    let options = SessionStoreOptions::from(std::sync::Arc::new(store));
+    let runtime = SessionRuntime::prepare(&options, StoreResume::None, &directory, &Environment::default()).await?;
+    assert!(runtime.config_dir.is_none());
+    assert!(runtime.projects_dir.is_absolute());
+    assert!(runtime.materialized.is_none());
+    assert!(runtime.resume_session_id.is_none());
     Ok(())
 }
