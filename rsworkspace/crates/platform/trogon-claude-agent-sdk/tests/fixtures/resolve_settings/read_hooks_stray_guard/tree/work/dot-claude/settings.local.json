@@ -1,0 +1,1 @@
+{"hooks":{"Bogus":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo ok"}]}]}},"effortLevel":"low"}

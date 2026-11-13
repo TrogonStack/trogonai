@@ -39,8 +39,8 @@
       "concept": "Non-JSON CLI stdout lines",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 199,
-        "line_end": 221,
+        "line_start": 213,
+        "line_end": 235,
         "sha256": "82674a3b8e39ff834085da7b9c07508d6d4b24ef16533cbc6f80472e502db608"
       },
       "typescript": {
@@ -50,7 +50,7 @@
         "occurrences": 1,
         "span_before": 120,
         "span_after": 60,
-        "sha256": "69863888977cd6dfdc89bc3a0f20611c599ee56212d5f02755c8fa70396f0299"
+        "sha256": "724eb2414aeecfd605805181d2e29f219b237739288822374175ebcd4cbf3780"
       },
       "upstream": {
         "verdict": "disagree",
@@ -84,7 +84,7 @@
         "occurrences": 3,
         "span_before": 30,
         "span_after": 420,
-        "sha256": "897542e981051a733da65f79d20c39ae547b37e4bd2a8004c813abd8fe30b6f6"
+        "sha256": "7ef142a5b7d65e80235c910cd4cd7454cafa6f76ce7cfb1d0839e1cd974092bd"
       },
       "upstream": {
         "verdict": "agree",
@@ -149,7 +149,7 @@
         "occurrences": 1,
         "span_before": 110,
         "span_after": 50,
-        "sha256": "23bc19154e1be97e8efccfeba1a909ef6e566c14e1c5facfe5fbc093a4a1a2bf"
+        "sha256": "d4e7d1456ec778820278ace5a3f84818c0d0059e0406e866e35190f1aa78d457"
       },
       "upstream": {
         "verdict": "agree",
@@ -192,6 +192,8 @@
         "kind": "upstream"
       },
       "contracts": [
+        "golden_initialize::hooks_applied_false_only_matters_for_blocking_hooks",
+        "golden_initialize::hooks_that_were_not_applied_are_refused",
         "runtime_features::s06_continue_hooks_tolerate_a_session_that_did_not_apply_them"
       ],
       "rust": [
@@ -214,7 +216,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 320,
-        "sha256": "0e4f10c056329c0462ac9f8d611594c6d9dcb4629a2d17e7fd5b840c79d920a1"
+        "sha256": "92e7576785b4625d03dfba5fb061a4b1525715f54dac2226b00c72485bdc1d19"
       },
       "upstream": {
         "verdict": "agree",
@@ -244,7 +246,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 320,
-        "sha256": "0e4f10c056329c0462ac9f8d611594c6d9dcb4629a2d17e7fd5b840c79d920a1"
+        "sha256": "92e7576785b4625d03dfba5fb061a4b1525715f54dac2226b00c72485bdc1d19"
       },
       "upstream": {
         "verdict": "agree",
@@ -274,7 +276,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 320,
-        "sha256": "0e4f10c056329c0462ac9f8d611594c6d9dcb4629a2d17e7fd5b840c79d920a1"
+        "sha256": "92e7576785b4625d03dfba5fb061a4b1525715f54dac2226b00c72485bdc1d19"
       },
       "upstream": {
         "verdict": "agree",
@@ -304,7 +306,7 @@
         "occurrences": 1,
         "span_before": 70,
         "span_after": 2,
-        "sha256": "517601c6e5d57e22f115a753e7af6a9340c3c4a0723cf7a4c94c4d2dbb28ac08"
+        "sha256": "ef1af33f781fe535f15907e755ccc7771f4e612fd87c97669000d9c4077af8bb"
       },
       "upstream": {
         "verdict": "agree",
@@ -335,7 +337,7 @@
         "occurrences": 1,
         "span_before": 200,
         "span_after": 60,
-        "sha256": "3b72a80b04294b823f5f322c352068ac0a16ff96b1a3e6a910b06a65e0b2cc30"
+        "sha256": "f9f4e745afad4ee138ad23a7a12499b9edb89cc875a5b3ae7279a165a1dc949d"
       },
       "upstream": {
         "verdict": "agree",
@@ -367,7 +369,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 520,
-        "sha256": "3617e51e1edcd3812973a43ff060f8bfefcc2fdc7f4bd5267505544359b678c6"
+        "sha256": "bc5ffe95ef140369072521fdc443c7a14831eb36fc8c73c97c84b29a9a38e8db"
       },
       "upstream": {
         "verdict": "agree",
@@ -421,8 +423,8 @@
       "concept": "tools, allowedTools and disallowedTools argv",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 527,
-        "line_end": 552,
+        "line_start": 541,
+        "line_end": 566,
         "sha256": "479069eb36f4a7eab2e79fade36c255755925777fa643ca06612b249ceec1477"
       },
       "typescript": {
@@ -432,7 +434,7 @@
         "occurrences": 1,
         "span_before": 170,
         "span_after": 60,
-        "sha256": "dee400545c0c024a4184b82c9d9bc661d03dcec55bc794b7acf437ce70549bc0"
+        "sha256": "db11172b3dff7b3c339408a348e84490485e6e8fcf8bc5588ee26b7656da61f9"
       },
       "upstream": {
         "verdict": "agree",
@@ -464,7 +466,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 520,
-        "sha256": "3617e51e1edcd3812973a43ff060f8bfefcc2fdc7f4bd5267505544359b678c6"
+        "sha256": "bc5ffe95ef140369072521fdc443c7a14831eb36fc8c73c97c84b29a9a38e8db"
       },
       "upstream": {
         "verdict": "agree",
@@ -565,7 +567,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 520,
-        "sha256": "3617e51e1edcd3812973a43ff060f8bfefcc2fdc7f4bd5267505544359b678c6"
+        "sha256": "bc5ffe95ef140369072521fdc443c7a14831eb36fc8c73c97c84b29a9a38e8db"
       },
       "upstream": {
         "verdict": "agree",
@@ -597,7 +599,7 @@
         "occurrences": 1,
         "span_before": 1150,
         "span_after": 0,
-        "sha256": "93be44fa8a2f030fb1a18738aa6e21ce02165cba372be91d46a5d635d36fce7e"
+        "sha256": "990f1575605973ba930aa88daadc65f75b8fc7a8d2f6508e0dca9651f1036b8d"
       },
       "upstream": {
         "verdict": "agree",
@@ -632,7 +634,7 @@
         "occurrences": 1,
         "span_before": 40,
         "span_after": 80,
-        "sha256": "ae445ed7bb743ba23215b0ec4d97cd9d0b394adfbcc35e82a32baaacdf049cdb"
+        "sha256": "020bd286980a30775323d2e49b15083f4c7d60267f61900e9e243898d6f32cd3"
       },
       "upstream": {
         "verdict": "agree",
@@ -662,7 +664,7 @@
         "occurrences": 1,
         "span_before": 70,
         "span_after": 120,
-        "sha256": "8c19c888800b0d019d0c3d06da2d9431a5b9352fcc7f8510075bb9881107b540"
+        "sha256": "68fbc903dc33f0375d384b3593b1efedb1a6a4848e8432baff77778c3f935c3c"
       },
       "upstream": {
         "verdict": "agree",
@@ -694,7 +696,7 @@
         "occurrences": 1,
         "span_before": 260,
         "span_after": 0,
-        "sha256": "e6d11d1fb28008a6ae5e2e80189873230bfaec4fb946b54dda1e3bb209ab978d"
+        "sha256": "d08247be1ee37ea810ee6d436a577ed254bb0788e8cb06cea033d4dfb0edb327"
       },
       "upstream": {
         "verdict": "agree",
@@ -726,7 +728,7 @@
         "occurrences": 1,
         "span_before": 260,
         "span_after": 0,
-        "sha256": "e6d11d1fb28008a6ae5e2e80189873230bfaec4fb946b54dda1e3bb209ab978d"
+        "sha256": "d08247be1ee37ea810ee6d436a577ed254bb0788e8cb06cea033d4dfb0edb327"
       },
       "upstream": {
         "verdict": "agree",
@@ -758,7 +760,7 @@
         "occurrences": 1,
         "span_before": 150,
         "span_after": 30,
-        "sha256": "c7fd3ea3519954a8e7a7d3649b29a4fd9382814175c8d6d4e62af19acdb2d219"
+        "sha256": "a244fb112df641bc1c40f081d269e61724f3e083fbe6101092ffdc7c290b6304"
       },
       "upstream": {
         "verdict": "agree",
@@ -792,7 +794,7 @@
         "occurrences": 3,
         "span_before": 0,
         "span_after": 420,
-        "sha256": "bd8a73f0c47593dd4f8fffe8a7bb2c7236d6aa2bafeb9a159d229887743d86b9"
+        "sha256": "9782fb65800bea8a8496a1a4c9406602fe6fcebba2b841396be7563872f34fd4"
       },
       "upstream": {
         "verdict": "agree",
@@ -824,7 +826,7 @@
         "occurrences": 2,
         "span_before": 0,
         "span_after": 300,
-        "sha256": "45dab0a1d580b0243566345ce0166e659b4ad743bf9b11c9058aa9a4630117ea"
+        "sha256": "58e78633ec3fb950e261a46c4e6a95ed9a5ff057d06b0bd04f44fd95c71f90d4"
       },
       "upstream": {
         "verdict": "disagree",
@@ -928,7 +930,7 @@
         "occurrences": 1,
         "span_before": 60,
         "span_after": 230,
-        "sha256": "e455e0c542113b9a769700da1b1ca8a994f8953c102b39f411d6ac4a381ccb3c"
+        "sha256": "66a4bdfd531eef8408f1612fad507a466d3c1eb3c3e03d4cdc49252dd53aa9c2"
       },
       "upstream": {
         "verdict": "agree",
@@ -962,7 +964,7 @@
         "occurrences": 1,
         "span_before": 20,
         "span_after": 100,
-        "sha256": "eb96d63130c1e5363a441f27f8c7b49263adc6b00822a9d3c560f7d58424cdb0"
+        "sha256": "c69983680ceb126a16f17fa240e53077462d1681563bfda2801e0e0e32f449aa"
       },
       "upstream": {
         "verdict": "agree",
@@ -995,7 +997,7 @@
         "occurrences": 1,
         "span_before": 30,
         "span_after": 220,
-        "sha256": "9b5e98ce2d28c19e417d53539deeaac0b9eb2c9f7519a06547bdb8bfdbf1434e"
+        "sha256": "e492cdcb202af5a5a2b169c8e9d75db4e8ee273fe5c6c256b4ecb645a514b7b7"
       },
       "upstream": {
         "verdict": "agree",
@@ -1073,7 +1075,7 @@
         "occurrences": 1,
         "span_before": 1500,
         "span_after": 0,
-        "sha256": "ad3bd79a2da95951542ff453692af67a754fb20cd3c6064e8e86e87cbe47726e"
+        "sha256": "be91179bafba586e50a2b5e598bc269ca0d9bf33eda62cc5097398dbe7ef289b"
       },
       "upstream": {
         "verdict": "agree",
@@ -1105,7 +1107,7 @@
         "occurrences": 1,
         "span_before": 400,
         "span_after": 80,
-        "sha256": "aae6b3c30e4d161c530d8f3936964e4707101c54b415ab51a8fca7d0dd31d09b"
+        "sha256": "375251652a1fe819d0f12115b89cde33ff72777fc67eb2cb2fa2bfca3316ea33"
       },
       "upstream": {
         "verdict": "agree",
@@ -1135,7 +1137,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 100,
-        "sha256": "7bb69142edd82b06d7568ce29f17c80f5c8c8aa678e1b112829e67dbac37c2aa"
+        "sha256": "348732e08d469f3d92047abe0b35c24614ca7523ac73ecc910f47ee66f66df19"
       },
       "upstream": {
         "verdict": "agree",
@@ -1174,7 +1176,9 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "golden_initialize::blocking_hooks_need_on_failure_support"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1195,21 +1199,26 @@
         "occurrences": 2,
         "span_before": 120,
         "span_after": 120,
-        "sha256": "fe2e1dec936fba4516e0a8d3916e3b72cee00852ff559ec103a607db5d386f5c"
+        "sha256": "312b3567436db9a84e9e3143d4323a0037e15657d5e17ccb77ea86b83596bc78"
       },
       "upstream": {
         "verdict": "disagree",
-        "behavior": "Python times out after 60 s by default. TypeScript waits until the response arrives, the abort signal fires, or the query closes."
+        "behavior": "Python times out after 60 s with \"Control request timeout: {subtype}\". TypeScript waits until the response arrives, the abort signal fires, or the query closes; its only initialize deadline is 660000 ms, armed when a hook is set to block on failure or managed settings are sent."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "A CLI that never answers would otherwise hang the session; a bounded wait turns that into a typed error."
+        "kind": "follow-typescript",
+        "reason": "Limits::control_timeout is None by default and InitializeTimeout::TypeScript arms 660 s only for blocking hooks or managed settings, failing with InitializeNotConfirmed or ManagedSettingsNotConfirmed and TypeScript's text. Limits::python() selects the 60 s wait, Python's message and the CLAUDE_CODE_STREAM_CLOSE_TIMEOUT initialize wait."
       },
       "contracts": [
-        "subprocess::missing_control_reply_times_out"
+        "upstream_defaults::m06_a_control_request_has_no_deadline_by_default",
+        "subprocess::missing_control_reply_times_out",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
+        "error_contracts::control_timeout_diagnostics_identify_each_wire_operation"
       ],
       "rust": [
-        "src/driver.rs"
+        "src/driver.rs",
+        "src/options.rs",
+        "src/error.rs"
       ]
     },
     {
@@ -1228,7 +1237,7 @@
         "occurrences": 1,
         "span_before": 90,
         "span_after": 40,
-        "sha256": "58037355866ec978918e45a8e67482d853b174481cf483bcba144ad42b388f1d"
+        "sha256": "8d7e1f6a1a487455dc6db042c2d0f87e39b470925dfdcf32714dfbcf39da48b5"
       },
       "upstream": {
         "verdict": "agree",
@@ -1247,8 +1256,8 @@
       "concept": "Size of one inbound stdout message",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 1041,
-        "line_end": 1049,
+        "line_start": 1065,
+        "line_end": 1073,
         "sha256": "25220afa8f0f949ff30edb7b31ef75ca7ff11e96e3e09fe32651febde5a078f0"
       },
       "typescript": {
@@ -1258,21 +1267,24 @@
         "occurrences": 1,
         "span_before": 430,
         "span_after": 0,
-        "sha256": "c0d00169e6a3b5bbbc3519f31af58b8e97b9acede5bc12d755b7125c47b7fedb"
+        "sha256": "922a7ed61827dbac40222e5ae1fbea78fb8cedb8fa150fc61247a17e6ba53243"
       },
       "upstream": {
         "verdict": "disagree",
-        "behavior": "Python rejects a message over max_buffer_size (1 MiB default). TypeScript reads lines with node:readline and no length limit."
+        "behavior": "Python rejects a line over max_buffer_size (1 MiB by default) with \"JSON message exceeded maximum buffer size of {N} bytes\". TypeScript reads lines with node:readline and no length limit."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "An unbounded line lets a misbehaving CLI exhaust memory; the limit is configurable for large messages."
+        "kind": "follow-typescript",
+        "reason": "Limits::max_buffer_size is None by default; Limits::python() sets Python's 1 MiB cap with its message."
       },
       "contracts": [
-        "subprocess::oversized_frame_is_rejected"
+        "upstream_defaults::m08_a_long_stdout_line_is_not_capped_by_default",
+        "subprocess::oversized_frame_is_rejected",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values"
       ],
       "rust": [
-        "src/framing.rs"
+        "src/framing.rs",
+        "src/options.rs"
       ]
     },
     {
@@ -1291,7 +1303,7 @@
         "occurrences": 1,
         "span_before": 260,
         "span_after": 0,
-        "sha256": "e6d11d1fb28008a6ae5e2e80189873230bfaec4fb946b54dda1e3bb209ab978d"
+        "sha256": "d08247be1ee37ea810ee6d436a577ed254bb0788e8cb06cea033d4dfb0edb327"
       },
       "upstream": {
         "verdict": "agree",
@@ -1321,7 +1333,7 @@
         "occurrences": 1,
         "span_before": 60,
         "span_after": 230,
-        "sha256": "e455e0c542113b9a769700da1b1ca8a994f8953c102b39f411d6ac4a381ccb3c"
+        "sha256": "66a4bdfd531eef8408f1612fad507a466d3c1eb3c3e03d4cdc49252dd53aa9c2"
       },
       "upstream": {
         "verdict": "agree",
@@ -1351,7 +1363,7 @@
         "occurrences": 2,
         "span_before": 0,
         "span_after": 300,
-        "sha256": "45dab0a1d580b0243566345ce0166e659b4ad743bf9b11c9058aa9a4630117ea"
+        "sha256": "58e78633ec3fb950e261a46c4e6a95ed9a5ff057d06b0bd04f44fd95c71f90d4"
       },
       "upstream": {
         "verdict": "disagree",
@@ -1382,7 +1394,7 @@
         "occurrences": 1,
         "span_before": 160,
         "span_after": 120,
-        "sha256": "f200f529e12b76e8df7ff7e22334435a9847053a8bf11751b380445993dd31f1"
+        "sha256": "37b89939ad5867be2731186f3143d4cbbbbcc6fa3cf40f6b691752e33546415c"
       },
       "upstream": {
         "verdict": "agree",
@@ -1412,7 +1424,7 @@
         "occurrences": 1,
         "span_before": 100,
         "span_after": 120,
-        "sha256": "82be17d1917ea259bdeb06211e941267644748e9d23354c2fdf5182e73505feb"
+        "sha256": "6c86f4eefffe90b864c7a6c3432dafcdd757f823eed1cb46f7bf6ec44cc32ebd"
       },
       "upstream": {
         "verdict": "agree",
@@ -1445,7 +1457,7 @@
         "occurrences": 2,
         "span_before": 40,
         "span_after": 0,
-        "sha256": "3e2080506c57b2dfd404ea27fdc992997e8fc18f743fcd7ef14b68f48487368a"
+        "sha256": "a627589c07e7d3c130aae5486004d42ec66f54176f1bf6b0a42fbe6abf29aec5"
       },
       "upstream": {
         "verdict": "agree",
@@ -1472,15 +1484,20 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "No queue capacity setting exists upstream."
+        "behavior": "No queue capacity setting exists upstream. Rust queues are unbounded unless a caller opts into a bound, and an opted-in QueueCapacity still rejects zero and values past the semaphore permit limit."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounded channels need a nonzero capacity within the semaphore permit limit."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "queue_capacity::unsupported_queue_capacities_fail_before_any_channel_is_created",
+        "subprocess::queue_capacity_rejects_values_that_would_panic"
+      ],
       "rust": [
-        "src/queue_capacity.rs"
+        "src/queue_capacity.rs",
+        "src/options.rs",
+        "src/channel.rs"
       ]
     },
     {
@@ -1496,15 +1513,19 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Timeouts are not range-checked upstream."
+        "behavior": "Timeouts are not range-checked upstream. Timeout::new accepts any duration and a deadline past the clock's range never fires; Timeout::checked keeps the Zero and TooLarge errors for callers that want them."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A zero or multi-day timeout is a configuration error that would fire instantly or never."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "timeout::timeouts_preserve_exact_durations_and_documented_defaults",
+        "timeout::checked_timeouts_reject_values_outside_the_supported_range",
+        "subprocess::timeout_rejects_values_that_would_overflow_an_instant"
+      ],
       "rust": [
-        "src/timeout.rs"
+        "src/timeout.rs",
+        "src/driver.rs"
       ]
     },
     {
@@ -1512,8 +1533,8 @@
       "concept": "max budget value",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 548,
-        "line_end": 549,
+        "line_start": 562,
+        "line_end": 563,
         "sha256": "e0a39434998bceb62f39e109e205dfa73582df97c620b10354dc5239caa343ed"
       },
       "typescript": {
@@ -1523,19 +1544,23 @@
         "occurrences": 1,
         "span_before": 30,
         "span_after": 10,
-        "sha256": "10f7395de703b0f2a37063420d02306d727d4fed3792beb72503a8c3198613af"
+        "sha256": "c04aa0d3cd293ac753ceb6fc3c9e75ac4c69fb72181e1f16fa6b6e8414454b6c"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "The budget is passed to the CLI without validation."
+        "behavior": "The budget is passed to the CLI without validation: TypeScript as --max-budget-usd=${String(f)} and Python as str(value) after --max-budget-usd."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A non-finite or negative budget cannot be rendered as a meaningful CLI argument."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "golden_argv_env::r03_budgets_reach_argv_unvalidated_in_each_sdk_spelling",
+        "usd_budget::budget_keeps_any_amount_like_both_upstream_sdks",
+        "usd_budget::checked_budget_rejects_negative_and_non_finite_amounts_with_a_typed_error"
+      ],
       "rust": [
-        "src/usd_budget.rs"
+        "src/usd_budget.rs",
+        "src/argv.rs"
       ]
     },
     {
@@ -1543,8 +1568,8 @@
       "concept": "CLI path that is a .bat or .cmd script",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 400,
-        "line_end": 412,
+        "line_start": 414,
+        "line_end": 426,
         "sha256": "54022ffc8773e108a89250f9f0214329dac899376aef665f27a03aedfeed9227"
       },
       "typescript": {
@@ -1556,14 +1581,17 @@
         "behavior": "Python refuses .bat and .cmd CLI paths on Windows. TypeScript spawns them."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "cmd.exe re-parses batch script arguments and has no reliable escaping, so runtime arguments can inject commands."
+        "kind": "follow-typescript",
+        "reason": "WindowsBatchCli::Run is the default, so a .bat or .cmd path starts as in TypeScript; WindowsBatchCli::Refuse selects Python's refusal with its message as CliPathError::WindowsBatchScript."
       },
       "contracts": [
+        "windows_batch_cli::windows_batch_cli_is_spawned_by_default",
         "windows_batch_cli::windows_batch_cli_is_refused_before_spawn"
       ],
       "rust": [
-        "src/cli_path.rs"
+        "src/cli_path.rs",
+        "src/options.rs",
+        "src/process_transport.rs"
       ]
     },
     {
@@ -1574,18 +1602,24 @@
         "reason": "The pinned Python sources have no equivalent bound."
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "Write buffer full, data queued",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 20,
+        "sha256": "3552af2a2a90275dbeb0d74220bcc3fa5434a3a40db6430e0a87d293e6a53a0c"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Writes to the CLI are not time-bounded upstream."
+        "behavior": "Writes to the CLI are not time-bounded upstream; TypeScript only logs when the stdin buffer is full. Rust waits for the write unless Limits::write_timeout is set, which fails a stalled write with WriteTimeout."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A stalled CLI stdin must not block the driver forever."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1603,63 +1637,89 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "No client command queue exists upstream."
+        "behavior": "No client command queue exists upstream. Rust's command queue is unbounded and never times out unless Limits::command_queue_capacity is set; Limits::command_queue_timeout then bounds the wait for room with CommandQueueTimeout."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "The client talks to the driver task through a bounded queue that must not block callers forever."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk"
+      ],
       "rust": [
-        "src/client.rs"
+        "src/client.rs",
+        "src/options.rs"
       ]
     },
     {
       "id": "r07-shutdown-timeouts",
       "concept": "Shutdown and stderr drain timeouts",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 984,
+        "line_end": 1001,
+        "sha256": "9bb7f137932cc2b23021e173f33cbc3a492fbfee80838fb81a53da41c6e19a4b"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "setTimeout((s,i)=>{if(s.exitCode!==null||s.signalCode!=null){i();return}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 260,
+        "sha256": "209549c22a7d8d37a4a9c579f04edbccd85ec665f1cd91bcb495cd5fcc3cb3a6"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "Shutdown waits are not bounded the same way upstream."
+        "verdict": "disagree",
+        "behavior": "TypeScript closes stdin, waits 2000 ms, sends SIGTERM (none on Windows) and SIGKILL 5000 ms later without waiting, gives stderr 200 ms after the exit, and never reports an error. Python waits 5 s, terminates, waits 5 s, kills and waits 5 s, suppressing every error."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Teardown must finish even when the CLI or its stderr pipe stalls."
+        "kind": "follow-typescript",
+        "reason": "Shutdown::TypeScript is the default; Limits::python() selects Shutdown::Python, and Shutdown::Strict keeps ShutdownTimeout and StderrDrainTimeout as an opt-in."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::r07_the_default_shutdown_stops_a_stuck_cli_without_an_error",
+        "runtime_failure_contracts::a_stderr_pipe_that_stays_open_after_the_cli_exits_fails_a_clean_shutdown",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values"
+      ],
       "rust": [
-        "src/driver.rs"
+        "src/process_transport.rs",
+        "src/options.rs"
       ]
     },
     {
       "id": "r08-stderr-tail",
       "concept": "Retained stderr tail size",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 1112,
+        "line_end": 1117,
+        "sha256": "a8816ec72691df050861d24afbb94d2fea668ce53b8327211005ccb5f067ea80"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "var qet=2000,iD=2048",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 10,
+        "span_after": 80,
+        "sha256": "1a15a69741457ccd5a781e68e1e1b87b1b7afca87787f2397b365204019dc8e5"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "No retained stderr tail bound exists upstream."
+        "verdict": "disagree",
+        "behavior": "TypeScript keeps the last 2048 UTF-16 code units of stderr and appends them, trimmed, to the process error. Python keeps no stderr and reports \"Check stderr output for details\"."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Only a 64 KiB tail is kept for error reports so a chatty CLI cannot grow memory."
+        "kind": "follow-typescript",
+        "reason": "Limits::stderr_tail defaults to TypeScript's 2048 units; Limits::python() sets it to 0. TypeScript's secret redaction of the tail is not ported."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::r08_a_process_error_keeps_the_last_2048_stderr_units_trimmed",
+        "subprocess::process_failure_preserves_status_and_bounded_stderr",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values"
+      ],
       "rust": [
-        "src/framing.rs"
+        "src/framing.rs",
+        "src/process_transport.rs"
       ]
     },
     {
@@ -1675,13 +1735,14 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream request ids are random strings that never run out."
+        "behavior": "Upstream request ids are random strings that never run out. The Rust counter wraps by default so ids never run out either; RequestIdExhaustion::Fail keeps RequestIdExhausted as an opt-in."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Rust uses a counter for request ids, which needs a defined overflow outcome."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1699,13 +1760,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream awaits initialization implicitly and has no typed closed-input error."
+        "behavior": "Upstream holds writes until initialize is sent and writes input sent after the caller ended its stream. Rust writes such input by default; InputAfterFinish::Reject keeps InputClosed as an opt-in. NotInitialized is only reachable from inside the driver, because the client returns only after initialize succeeds."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Typed errors replace implicit waits so misuse is visible to callers."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::s15_input_sent_during_a_turn_is_written_and_closed_input_stays_recoverable"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1723,13 +1786,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Outstanding control requests are unbounded upstream."
+        "behavior": "Outstanding control requests are unbounded upstream. Limits::max_pending_controls is opt-in and fails the excess request with TooManyControls."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds memory held by pending requests against an unresponsive CLI."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::pending_controls_and_mcp_replacements_reject_overlapping_admission"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1747,13 +1812,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Inbound callbacks are unbounded upstream."
+        "behavior": "Inbound callbacks are unbounded upstream. Limits::max_incoming_callbacks is opt-in and answers the excess request with an error response."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds concurrent callback tasks a misbehaving CLI can start."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::callback_capacity_is_bounded_and_cancellation_preserves_control_progress"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1762,24 +1829,37 @@
       "id": "r13-message-queue-full",
       "concept": "Deferred message queue capacity",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 234,
+        "line_end": 236,
+        "sha256": "7c9ac5bf77dc1a597c5a087de0e9e0351c1c5c509a6887d5f908f1b2032ddddf"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "class bf{returned;queue=[]",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 160,
+        "sha256": "63f388d228d03c99a41bca634d5296a0b3fa63cc9fdc8f89c23b3eba8f088328"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "Upstream message buffers are unbounded."
+        "verdict": "disagree",
+        "behavior": "TypeScript queues messages in an unbounded array and keeps reading stdout. Python buffers 100 messages and then stops reading until the caller takes one."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds memory when the caller stops reading messages."
+        "kind": "follow-typescript",
+        "reason": "MessageBuffer::Unbounded is the default; Limits::python() selects MessageBuffer::Backpressure(100), and MessageBuffer::FailWhenFull keeps MessageQueueFull as an opt-in."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
+        "subprocess::consumer_lag_fails_with_a_bounded_queue"
+      ],
       "rust": [
-        "src/driver.rs"
+        "src/driver.rs",
+        "src/options.rs",
+        "src/channel.rs"
       ]
     },
     {
@@ -1795,13 +1875,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Tracked tasks are unbounded upstream."
+        "behavior": "Tracked tasks are unbounded upstream. Limits::max_tracked_tasks is opt-in and fails the run with TooManyTasks."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Caps tracked task ids at 256 so task notifications cannot grow memory without bound."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::background_task_ledger_rejects_new_tasks_at_its_limit_but_accepts_duplicates"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1819,13 +1901,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Queued prompts are unbounded upstream."
+        "behavior": "Queued prompts are unbounded upstream. Limits::max_queued_inputs is opt-in and fails with TooManyInputs."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds queued turns held by the driver."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::a_second_input_beyond_the_queue_capacity_is_rejected_without_ending_the_session"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1834,24 +1918,36 @@
       "id": "r16-duplicate-control-request",
       "concept": "Inbound control_request with a duplicate id",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 406,
+        "line_end": 415,
+        "sha256": "e8dbe4a0fc1de782e6919998a31878abcb47d3336197e3e77093967fa85d4558"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "Duplicate delivery of in-flight request",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 80,
+        "sha256": "9f3cf0c8d6df7cc9cc52c4aba9bfd235c1ba91422f69b79196a1b83b71bcff58"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "Duplicate inbound request ids are not detected upstream."
+        "verdict": "disagree",
+        "behavior": "TypeScript skips an inbound request whose id is still in flight, with a debug log and no response. Python runs both handlers and both answer."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Two callbacks answering one id would send conflicting responses."
+        "kind": "follow-typescript",
+        "reason": "DuplicateControlRequests::Skip is the default; Limits::python() selects RunBoth, and DuplicateControlRequests::Fail keeps DuplicateControlRequest as an opt-in."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
+        "runtime_failure_contracts::duplicate_callback_request_id_is_a_terminal_protocol_error"
+      ],
       "rust": [
-        "src/driver.rs"
+        "src/driver.rs",
+        "src/options.rs"
       ]
     },
     {
@@ -1916,7 +2012,7 @@
         "occurrences": 1,
         "span_before": 40,
         "span_after": 30,
-        "sha256": "d58cad6420b88ee7cac829e1dc9c727dd9bbf7fc303f9d3dc4996fee0528abba"
+        "sha256": "b5a0b701d34f6f5b5abff3ff491cd110d2c565154cca586774edecf79d7e7d5f"
       },
       "upstream": {
         "verdict": "agree",
@@ -1945,19 +2041,22 @@
         "occurrences": 3,
         "span_before": 260,
         "span_after": 0,
-        "sha256": "82f1a191b352f00d54124922399ac7df93f75eacd55ed44d5f4ae493169e907f"
+        "sha256": "f47a6bc651ffe5390382d02a46fd7e00c249669674146b2b26d0c75ec614240c"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "The MCP tool schema declares inputSchema with type 'object'."
+        "behavior": "The declared input schema is listed as given. Python's run_tool reports a schema error as the tool result text; neither SDK requires type 'object' before the server starts."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Checked at construction so an invalid schema fails before the server starts."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "mcp_tool_values::validated_mcp_tool_input_schema_rejects_non_object_declarations",
+        "mcp_tool_values::mcp_tool_input_schema_preserves_json_and_validates_arguments"
+      ],
       "rust": [
-        "src/mcp_tool_input_schema.rs"
+        "src/mcp_tool_input_schema.rs",
+        "src/sdk_mcp_server.rs"
       ]
     },
     {
@@ -1976,10 +2075,12 @@
         "behavior": "Output schemas are passed through upstream."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Prevents remote schema resolution from a caller-supplied document."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "mcp_tool_values::output_schemas_with_external_references_are_kept_like_both_upstream_sdks",
+        "mcp_tool_values::validated_mcp_tool_input_schema_rejects_external_references"
+      ],
       "rust": [
         "src/output_schema.rs"
       ]
@@ -2023,10 +2124,12 @@
         "behavior": "Origins are passed through upstream."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "The kind field is the serde tag; a caller value would collide with it."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "message_origin::message_origins_round_trip_future_kinds_and_extension_values",
+        "message_origin::message_origins_reject_missing_nonstring_kinds_and_reserved_extension_keys"
+      ],
       "rust": [
         "src/message_origin.rs"
       ]
@@ -2222,13 +2325,16 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "The TypeScript type declares matcher as an optional string, so null is outside the declared shape. Omitting the key sends only values the type allows."
+        "reason": "TypeScript is the default dialect and declares matcher as an optional string, so the key is omitted; ArgvStyle::Python sends null."
       },
       "contracts": [
+        "golden_initialize::python_initialize_matches_claude_agent_sdk_bytes",
+        "golden_initialize::typescript_initialize_matches_sdk_mjs_bytes",
         "value_contracts::callback_configuration_debug_reports_structure_without_callback_or_input_details"
       ],
       "rust": [
-        "src/hooks.rs"
+        "src/hooks.rs",
+        "src/driver.rs"
       ]
     },
     {
@@ -2247,7 +2353,7 @@
         "occurrences": 1,
         "span_before": 250,
         "span_after": 300,
-        "sha256": "f79d49bb55a4c49036eb9788743c8b251df77c5b6c1a8f022538f1f82a2983dd"
+        "sha256": "61933b7902d6497974205322b9fca582b3302cb6067a67a1b1efcee6fea52a04"
       },
       "upstream": {
         "verdict": "disagree",
@@ -2258,10 +2364,437 @@
         "reason": "An answer from this client would pre-empt another client that can show the dialog, and an error would end the dialog for the user. The session continues without a response."
       },
       "contracts": [
-        "runtime_failure_contracts::a_declared_dialog_without_a_handler_does_not_emit_a_response"
+        "runtime_failure_contracts::a_dialog_without_a_handler_does_not_emit_a_response"
       ],
       "rust": [
         "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s31-bundled-cli-python-lookup",
+      "concept": "Bundled Claude Code executable beside the Python package",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 330,
+        "line_end": 343,
+        "sha256": "f161f93044d567459ac107e9071547b615df8d87b9951c0f812dcbdd0aa4d0c8"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves a platform package instead of a bundled directory."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Python checks <package>/_bundled/claude (claude.exe on Windows) before any other discovery and accepts it only when it exists and is a file."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "A Rust crate ships no binary and has no package directory, so find_bundled_cli takes the directory that holds _bundled from the caller and is not part of connect's discovery."
+      },
+      "contracts": [
+        "bundled_cli::bundled_cli_is_a_file_under_the_bundled_directory"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "s32-native-cli-platform-package",
+      "concept": "Native executable from the platform optional dependency package",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources bundle the binary in the wheel and never resolve npm packages."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function A8(e,t={})",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 397,
+        "sha256": "c90347975dc7fa5928971e981735552414c263652ec0fd7f4f6aad134672d04b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript resolves <package>-<platform>-<arch>/claude (claude.exe on win32) through Node module resolution, tries the musl variant first on musl Linux and the glibc one first otherwise, uses a dedicated linux-<arch>-android package for Android, skips a candidate whose resolution throws or whose file is missing, and fails with a message naming the platform when none is found."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Node module resolution is a ResolveNodeModule adapter with a default that searches the same relative node_modules, NODE_PATH and home or prefix directories. Musl is read from the compile target because a Rust process has no Node process report."
+      },
+      "contracts": [
+        "bundled_cli::linux_orders_the_libc_variants_by_preference",
+        "bundled_cli::other_platforms_have_one_package_and_only_windows_adds_exe",
+        "bundled_cli::a_resolved_path_must_exist_and_later_candidates_are_tried",
+        "bundled_cli::a_miss_names_the_platform_and_the_upstream_remedy",
+        "bundled_cli::lookup_directories_follow_node_order",
+        "bundled_cli::lookup_resolves_the_nearest_file_to_its_canonical_path"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "s33-bundled-cli-version-gate",
+      "concept": "Minimum version a bundled Claude Code record must meet to derive an app label",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 1145,
+        "line_end": 1151,
+        "sha256": "5b7b54ba56bab28391913c221dabce6d252d6839e4be66d2629105e48491b3be"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no derived client app minimum and reads no version record."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The recorded version must start with major.minor.patch (up to nine digits each) and that triple, compared as a list, must not be below 999.0.0 (DERIVED_CLIENT_APP_MINIMUM_CLAUDE_CODE_VERSION). Nothing qualifies until upstream lowers the minimum."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bundled_cli::derived_client_app_minimum_compares_the_leading_triple_as_a_list"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "s34-bundled-cli-derived-client-app-trigger",
+      "concept": "Bundled Claude Code executable as the trigger for a derived client app label",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 1120,
+        "line_end": 1143,
+        "sha256": "d00e58fde9505de93e02121f775054f1e6bbc6ee531256aaf6695058e469abda"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs derives no client app label from the executable that it spawns."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A label is derived only when the SDK package pin (__cli_version__) meets the minimum, the spawned CLI is the bundled executable, and the claude.version file beside it records a version that meets the minimum. Any other CLI counts as too old, a bundled one with no readable record does too, and a failure to read never breaks connect."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "bundled_cli_derives_client_app answers the trigger for a caller-supplied package root and pin, because a Rust crate has no package directory or __cli_version__. connect asks it only when ClaudeAgentOptions::client_app_derivation names a BundledCli, so TypeScript's behavior stays the default, and the label names this crate because Rust has no Python distribution metadata."
+      },
+      "contracts": [
+        "bundled_cli::the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
+        "bundled_cli::a_bundled_cli_without_a_record_counts_as_too_old",
+        "bundled_cli::only_the_executable_found_in_the_bundled_directory_derives_a_label"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "c01-control-request-id",
+      "concept": "Outbound control request id and envelope",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 747,
+        "line_end": 762,
+        "sha256": "7b02cd99c9821a3741be6008b03d0b477e9a69fb23aecb51c27705531085e76a"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Math.random().toString(36).substring(2,15)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 110,
+        "sha256": "2c2f70cfcf0d75924c28128f165c53fbf3cd9b11697eb0235efa6cab9a27057f"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript sends Math.random().toString(36).substring(2,15) with no counter, in a compact envelope that starts with request_id. Python sends req_{counter}_{8 hex digits} in an envelope that starts with type, written by json.dumps with spaced separators and ASCII escapes."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; ArgvStyle::Python selects the Python id, envelope order and json.dumps spelling."
+      },
+      "contracts": [
+        "golden_initialize::typescript_initialize_matches_sdk_mjs_bytes",
+        "golden_initialize::python_initialize_matches_claude_agent_sdk_bytes"
+      ],
+      "rust": [
+        "src/control_request_id.rs",
+        "src/python_json.rs",
+        "src/wire.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c02-initialize-request-shape",
+      "concept": "Initialize request fields and hook matcher entries",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 323,
+        "line_end": 366,
+        "sha256": "1c36c551c0c9e5af6bce39f1a81b87977fba2a297cbe857a4cf1bfc28198e403"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "return{subtype:\"initialize\",hooks:this.initHooksPayload",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 260,
+        "sha256": "5e1983e7fc99426c5ff8ed331262241f62ce7e61197afb37cdf09e660e973e0c"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript omits hooks when none are configured, omits an unset matcher, and sends jsonSchema, systemPrompt, appendSystemPrompt and supportedDialogKinds in the request. Python sends hooks null when none are configured, matcher null when unset, and none of those prompt or schema fields. Both skip events with no matchers and keep matchers with no callbacks."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; ArgvStyle::Python sends the Python request."
+      },
+      "contracts": [
+        "golden_initialize::typescript_initialize_matches_sdk_mjs_bytes",
+        "golden_initialize::typescript_default_initialize_matches_sdk_mjs_bytes",
+        "golden_initialize::python_initialize_matches_claude_agent_sdk_bytes",
+        "golden_initialize::python_default_initialize_sends_null_hooks"
+      ],
+      "rust": [
+        "src/runtime_payload.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c03-initialize-response-shape",
+      "concept": "Initialize response that is not the documented object",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 775,
+        "line_end": 776,
+        "sha256": "d4047a01b9417c32f423a868962aee98be1962429a8424894bf1d21bdc9454e7"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "let o=(await n).response;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 40,
+        "sha256": "5d9207ade7d9edb5297d958c59e3c93a0fd9ec75d620ce60f87a99f138c6d3bb"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Neither SDK validates the initialize response. TypeScript keeps any value as the initialization result; Python replaces anything but an object with an empty object."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; ArgvStyle::Python reads a non-object as an empty object. Typed fields of an unexpected type read as absent and the response stays available unchanged."
+      },
+      "contracts": [
+        "golden_initialize::a_non_object_initialize_response_is_kept_in_typescript_and_empty_in_python",
+        "subprocess::malformed_initialization_is_accepted_like_upstream"
+      ],
+      "rust": [
+        "src/control.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c04-dialog-kinds-without-handler",
+      "concept": "supportedDialogKinds without onUserDialog",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no user dialog support."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "supportedDialogKinds requires an onUserDialog",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 190,
+        "sha256": "0898e963617c279f4e698a9b87b4bb55f648717877528d674105dafc57153db7"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript refuses non-empty dialog kinds without a handler before the session starts."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_initialize::dialog_kinds_without_a_handler_are_refused_before_initialize"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "c05-managed-settings-and-plugins-confirmation",
+      "concept": "Initialize response for managed settings and plugins sent in initialize",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not send managed settings or plugins in initialize."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "managedSettingsDelivery 'initialize', so the session",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 560,
+        "sha256": "dd689a81664a9ef77652475577ec0b913cee9fefc7cfc642577ca9d577ba9f67"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript ends the session when managed settings were sent and managed_settings_applied is not true, and logs a warning when plugins were sent and plugins_applied is not true."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "s35-message-decoding",
+      "concept": "Messages that are unknown, malformed or missing required keys",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/message_parser.py",
+        "line_start": 50,
+        "line_end": 395,
+        "sha256": "593c3682c27254290fab6957b7bf100bd6c6a1e314df5347de708c464d3594e5"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "e.type===\"keep_alive\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 140,
+        "sha256": "cb2a0debf83466596fd658d07a531814c2d32532eb58d6e23bdb585f24f35b70"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript yields every message the CLI writes without validating it, consuming only keep_alive and host-only session_state_changed. Python parse_message raises MessageParseError with a KeyError text for a known message missing a key it reads, skips unknown message types and skips content blocks of kinds it does not parse."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default and never loses a message, so newer CLI shapes still reach the caller. MessageDecoding::Python reproduces parse_message, error texts included, for callers that need Python's outcome."
+      },
+      "contracts": [
+        "message_decoding::typescript_decoding_yields_what_the_pinned_typescript_query_yields",
+        "message_decoding::python_decoding_yields_what_the_pinned_python_query_yields"
+      ],
+      "rust": [
+        "src/message_decode.rs",
+        "src/message_decode/python.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s35-system-prompt-delivery",
+      "concept": "Where the system prompt travels and which forms it takes",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 511,
+        "line_end": 523,
+        "sha256": "79050a160bc02b75621e9b49fb59c73c5bbec6bdb712685cc03f53decf09e0a2"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "appendSubagentSystemPrompt",
+        "occurrence": 2,
+        "occurrences": 4,
+        "span_before": 120,
+        "span_after": 120,
+        "sha256": "0553333d8cdd93e114245b1816c13c4c3f19b1fd4ad6ee2ac6e105af2acfa7d2"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript sends the prompt in the initialize request (systemPrompt as a list, appendSystemPrompt, systemPromptSnapshot, excludeDynamicSections) and has no prompt flag. Python puts the prompt on the command line (--system-prompt, --system-prompt-file, --append-system-prompt) and sends only excludeDynamicSections and systemPromptSnapshot in the request."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect. ClaudeAgentOptions::argv_style = ArgvStyle::Python selects Python's argv and request, and the prompt forms that exist in only one SDK (a list of texts, a prompt file) are refused in the other dialect instead of being dropped."
+      },
+      "contracts": [
+        "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects",
+        "initialize_options::typescript_refuses_a_prompt_file_and_python_refuses_several_prompt_texts"
+      ],
+      "rust": [
+        "src/system_prompt.rs",
+        "src/driver.rs",
+        "src/initialize_order.rs",
+        "src/argv.rs"
+      ]
+    },
+    {
+      "id": "s36-workspace-trust-validation",
+      "concept": "workspaceTrust with an accepted trust and no absolute directory",
+      "python": {
+        "status": "absent",
+        "reason": "claude_agent_sdk has no workspace trust option."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "workspaceTrust ignored",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 200,
+        "span_after": 120,
+        "sha256": "bb4abec4d5b4ab2dd0cec29fa6c0d0f913c5b10dca6b03bb3be1dcba3771fcd0"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "An accepted trust needs a directory that is absolute on posix or win32; otherwise the whole value is dropped with a warning. A declined or empty trust passes through as given."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects"
+      ],
+      "rust": [
+        "src/workspace_trust.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s37-verbatim-prompts",
+      "concept": "Marking user messages client_composed so the CLI skips @path expansion and slash commands",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 137,
+        "line_end": 148,
+        "sha256": "88a315163410552e5ac7a01ff7fb7379aa4a0012898ebd25f70fc9ceafabf603"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "client_composed:!0",
+        "occurrence": 0,
+        "occurrences": 2,
+        "span_before": 100,
+        "span_after": 40,
+        "sha256": "4c9286c57bf726904ad943b28917569c5f54dfde5b0dc8919515ab911383cf32"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "With the option on, every outgoing user message carries client_composed:true after its other keys. Python additionally warns at the first init message when the CLI is older than 2.1.248 or reports no version."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/version_check.rs"
       ]
     }
   ]

@@ -15,10 +15,11 @@ use trogon_claude_agent_sdk::{
     AgentDefinition, AgentName, CancellationToken, ClaudeAgentOptions, ClaudeSdkClient, DialogKind, EffortLevel,
     ElicitationMode, ElicitationRequest, ElicitationResponse, Error, FeatureSupport, FileCheckpointing, HookEvent,
     HookFailureMode, HookOutput, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, InputBlock,
-    InterruptReceipt, LocalMcpServer, LocalMcpServerOptions, McpEnabled, McpServerName, McpServerOptions,
+    InterruptReceipt, LocalMcpServer, LocalMcpServerOptions, LocalPlugin, McpEnabled, McpServerName, McpServerOptions,
     McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, McpUrl, Message, MessageId, OutputSchema,
-    PermissionDecision, PermissionMode, Prompt, QueueCapacity, RewindMode, SdkTool, SdkToolOptions, SyncHookOutput,
-    TaskId, Timeout, ToolPermissionRequest, ToolUseId, UsdBudget, UserDialogRequest, UserDialogResponse, UserInput,
+    PermissionDecision, PermissionMode, PluginDelivery, Prompt, QueueCapacity, RewindMode, SdkTool, SdkToolOptions,
+    SyncHookOutput, TaskId, Timeout, ToolPermissionRequest, ToolUseId, UsdBudget, UserDialogRequest,
+    UserDialogResponse, UserInput,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -29,8 +30,8 @@ fn options(mode: &str) -> Result<ClaudeAgentOptions, Box<dyn StdError>> {
         model: Some(format!("fixture:{mode}").into()),
         ..ClaudeAgentOptions::default()
     };
-    options.limits.control_timeout = Timeout::new(Duration::from_secs(2))?;
-    options.limits.shutdown_timeout = Timeout::new(Duration::from_millis(200))?;
+    options.limits.control_timeout = Some(Timeout::new(Duration::from_secs(2)));
+    options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(Timeout::new(Duration::from_millis(200)));
     // The runtime force-kills the fixture on shutdown, possibly while it is writing its coverage
     // profile at exit, which leaves a corrupt profile. The fixture runs no crate code, so its
     // profile is discarded.
@@ -131,7 +132,7 @@ fn blocking_hook() -> HookRegistration {
             })))
         })],
         timeout: None,
-        on_failure: HookFailureMode::Block,
+        on_failure: Some(HookFailureMode::Block),
     }
 }
 
@@ -169,7 +170,7 @@ async fn embedded_mcp_server_keeps_its_session_across_rpc_calls() -> TestResult 
     let observed = Arc::clone(&calls);
     let schema = McpToolInputSchema::new(serde_json::from_value(
         json!({"type":"object","required":["value"],"properties":{"value":{"type":"string"}}}),
-    )?)?;
+    )?);
     let tool = SdkTool::from(SdkToolOptions {
         name: McpToolName::from("echo"),
         description: "Echo".into(),
@@ -203,12 +204,12 @@ async fn embedded_mcp_server_keeps_its_session_across_rpc_calls() -> TestResult 
 #[tokio::test]
 async fn structured_input_and_declarative_configuration_reach_the_cli() -> TestResult {
     let mut options = options("structured")?;
-    options.max_budget_usd = Some(UsdBudget::new(0.25)?);
+    options.max_budget_usd = Some(UsdBudget::new(0.25));
     options.effort = Some(EffortLevel::High);
     options.file_checkpointing = FileCheckpointing::Enabled;
     options.output_schema = Some(OutputSchema::new(serde_json::from_value(
         json!({"type":"object","properties":{"ok":{"type":"boolean"}}}),
-    )?)?);
+    )?));
     options.agents.insert(
         AgentName::from("reviewer"),
         AgentDefinition::new("Review", Prompt::from("Review the code")),
@@ -234,11 +235,8 @@ async fn structured_input_and_declarative_configuration_reach_the_cli() -> TestR
             .iter()
             .any(|value| value.as_str().is_some_and(|value| value.starts_with("--json-schema=")))
     );
-    assert!(
-        arguments
-            .iter()
-            .any(|value| value.as_str().is_some_and(|value| value.starts_with("--mcp-config=")))
-    );
+    // Upstream TypeScript passes `--mcp-config` and its value as separate tokens.
+    assert!(arguments.iter().any(|value| value == "--mcp-config"));
     assert_eq!(
         init.data["initialize_request"]["agents"]["reviewer"]["prompt"],
         "Review the code"
@@ -259,6 +257,54 @@ async fn structured_input_and_declarative_configuration_reach_the_cli() -> TestR
     assert_eq!(observed.data["input"]["message"]["content"][1]["type"], "image");
     assert_eq!(result(&mut client).await?, "structured");
     client.disconnect().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn plugins_reach_the_cli_by_argv_or_by_the_initialize_request() -> TestResult {
+    for delivery in [PluginDelivery::Argv, PluginDelivery::Initialize] {
+        let mut options = options("structured")?;
+        options.plugin_delivery = delivery;
+        options.plugins = vec![
+            LocalPlugin::new("/plugins/one"),
+            LocalPlugin {
+                path: "/plugins/two".into(),
+                skip_mcp_discovery: Some(true),
+            },
+        ];
+        let mut client = ClaudeSdkClient::connect(options).await?;
+        let Some(Message::System(init)) = client.next_message().await? else {
+            return Err(std::io::Error::other("missing init").into());
+        };
+        let arguments = init.data["arguments"]
+            .as_array()
+            .ok_or_else(|| std::io::Error::other("missing argv"))?;
+        let has = |token: &str| arguments.iter().any(|value| value == token);
+        match delivery {
+            PluginDelivery::Argv => {
+                assert!(has("--plugin-dir=/plugins/one"));
+                assert!(has("--plugin-dir-no-mcp=/plugins/two"));
+                assert!(!has("--await-initialize"));
+                assert!(init.data["initialize_request"].get("plugins").is_none());
+            }
+            PluginDelivery::Initialize => {
+                assert!(has("--await-initialize"));
+                assert!(
+                    !arguments
+                        .iter()
+                        .any(|value| value.as_str().is_some_and(|value| value.starts_with("--plugin-dir")))
+                );
+                assert_eq!(
+                    init.data["initialize_request"]["plugins"],
+                    json!([
+                        {"type": "local", "path": "/plugins/one"},
+                        {"type": "local", "path": "/plugins/two", "skipMcpDiscovery": true}
+                    ])
+                );
+            }
+        }
+        client.disconnect().await?;
+    }
     Ok(())
 }
 
@@ -415,7 +461,7 @@ async fn undeclared_dialog_does_not_invoke_or_settle_a_handler() -> TestResult {
 
 async fn undeclared_dialog_with_pending_callback(mode: &str) -> TestResult {
     let mut options = options(mode)?;
-    options.limits.max_pending_controls = QueueCapacity::new(1)?;
+    options.limits.max_incoming_callbacks = Some(QueueCapacity::new(1)?);
     options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| {
         std::future::pending::<PermissionDecision>()
     }));
@@ -449,7 +495,7 @@ async fn duplicate_id_does_not_settle_undeclared_dialog() -> TestResult {
 async fn s06_continue_hooks_tolerate_a_session_that_did_not_apply_them() -> TestResult {
     let mut options = options("hook-not-applied")?;
     let mut hook = blocking_hook();
-    hook.on_failure = HookFailureMode::Continue;
+    hook.on_failure = Some(HookFailureMode::Continue);
     options.hooks = vec![hook];
     let client = ClaudeSdkClient::connect(options).await?;
     client.disconnect().await?;
@@ -460,7 +506,7 @@ async fn s06_continue_hooks_tolerate_a_session_that_did_not_apply_them() -> Test
 async fn continue_hook_does_not_require_blocking_failure_capability() -> TestResult {
     let mut options = options("hook-unsupported")?;
     let mut hook = blocking_hook();
-    hook.on_failure = HookFailureMode::Continue;
+    hook.on_failure = Some(HookFailureMode::Continue);
     options.hooks = vec![hook];
     let client = ClaudeSdkClient::connect(options).await?;
     client.disconnect().await?;
