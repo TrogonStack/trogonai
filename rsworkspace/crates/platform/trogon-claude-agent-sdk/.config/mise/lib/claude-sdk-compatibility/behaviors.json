@@ -2248,7 +2248,9 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "session_failure_contracts::s19_mirror_never_rejects_frames_and_drains_eagerly_past_the_pending_budget"
+      ],
       "rust": [
         "src/transcript_mirror.rs"
       ]
@@ -2266,15 +2268,19 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "The final flush is not separately bounded upstream."
+        "behavior": "The final flush is not separately bounded upstream. Rust waits for the flush by default, each append still bounded by append_timeout; SessionStoreLimits::flush_timeout opts into a deadline that fails with MirrorFlushTimeout."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Shutdown must not wait indefinitely on a slow store."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::a_mirror_flush_waits_for_slow_appends_without_a_deadline_by_default",
+        "upstream_defaults::the_default_store_limits_bound_only_what_upstream_bounds",
+        "session_store::delayed_flush_wait_keeps_the_original_deadline"
+      ],
       "rust": [
-        "src/transcript_mirror.rs"
+        "src/transcript_mirror.rs",
+        "src/session_store.rs"
       ]
     },
     {
@@ -2290,15 +2296,19 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream keeps no failure records."
+        "behavior": "Upstream keeps no failure records and reports every failed append. Rust reports every failure by default; SessionStoreLimits::max_retained_failures opts into a cap that folds the overflow into one Suppressed failure."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Caps retained failures so a failing store cannot grow memory."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_mirror_reports_every_failed_append_by_default",
+        "upstream_defaults::the_default_store_limits_bound_only_what_upstream_bounds",
+        "session_failure_contracts::w1_mirror_retries_every_backend_error_and_coalesces_failure_overflow"
+      ],
       "rust": [
-        "src/transcript_mirror.rs"
+        "src/transcript_mirror.rs",
+        "src/session_store.rs"
       ]
     },
     {

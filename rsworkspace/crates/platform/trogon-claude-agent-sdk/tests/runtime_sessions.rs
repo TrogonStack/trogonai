@@ -136,7 +136,7 @@ fn store_options(
     options.config_directory = Some(directory.to_path_buf());
     options.project_key = Some(SessionProjectKey::new("fixture-project")?);
     options.limits.append_timeout = Timeout::new(Duration::from_secs(3));
-    options.limits.flush_timeout = Timeout::new(Duration::from_secs(3));
+    options.limits.flush_timeout = Some(Timeout::new(Duration::from_secs(3)));
     Ok(options)
 }
 
