@@ -409,7 +409,7 @@ async fn timed_out_mirror_append_is_reported_and_never_retried() -> TestResult {
     let calls = Arc::new(AtomicUsize::new(0));
     let mut options = options(Arc::new(PendingStore { calls: calls.clone() }), &root)?;
     options.limits.append_timeout = Timeout::new(Duration::from_millis(20));
-    options.limits.flush_timeout = Timeout::new(Duration::from_secs(1));
+    options.limits.flush_timeout = Some(Timeout::new(Duration::from_secs(1)));
     let mirror = TranscriptMirror::new(&options, root.join("projects"));
     mirror.enqueue(
         &root.join("projects/project").join(format!("{SESSION}.jsonl")),
@@ -491,7 +491,7 @@ async fn delayed_flush_wait_keeps_the_original_deadline() -> TestResult {
         }),
         &root,
     )?;
-    options.limits.flush_timeout = Timeout::new(Duration::from_millis(50));
+    options.limits.flush_timeout = Some(Timeout::new(Duration::from_millis(50)));
     let mirror = TranscriptMirror::new(&options, root.join("projects"));
     mirror.enqueue(
         &root.join("projects/project").join(format!("{SESSION}.jsonl")),

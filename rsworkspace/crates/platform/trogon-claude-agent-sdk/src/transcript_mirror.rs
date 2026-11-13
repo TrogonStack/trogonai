@@ -119,17 +119,22 @@ enum MirrorCommand {
 
 pub struct MirrorFlush {
     receiver: oneshot::Receiver<Vec<MirrorFailureError>>,
-    deadline: tokio::time::Instant,
+    deadline: Option<tokio::time::Instant>,
     owner: Arc<WorkerOwner>,
 }
 
 impl MirrorFlush {
+    /// Waits for the flush. Without [`SessionStoreLimits::flush_timeout`] this waits as long as the appends take, as
+    /// upstream does; each append is still bounded by [`SessionStoreLimits::append_timeout`].
     pub async fn wait(self) -> Result<Vec<MirrorFailureError>, crate::SessionError> {
         let _owner = self.owner;
-        tokio::time::timeout_at(self.deadline, self.receiver)
-            .await
-            .map_err(|_| crate::SessionError::MirrorFlushTimeout)?
-            .map_err(|_| crate::SessionError::MirrorStopped)
+        let reported = match self.deadline {
+            Some(deadline) => tokio::time::timeout_at(deadline, self.receiver)
+                .await
+                .map_err(|_| crate::SessionError::MirrorFlushTimeout)?,
+            None => self.receiver.await,
+        };
+        reported.map_err(|_| crate::SessionError::MirrorStopped)
     }
 }
 
@@ -142,7 +147,7 @@ impl MirrorFlush {
 pub struct TranscriptMirror {
     projects_dir: PathBuf,
     commands: mpsc::UnboundedSender<MirrorCommand>,
-    flush_timeout: std::time::Duration,
+    flush_timeout: Option<std::time::Duration>,
     owner: Arc<WorkerOwner>,
 }
 
@@ -172,7 +177,7 @@ impl TranscriptMirror {
         Self {
             projects_dir,
             commands,
-            flush_timeout: options.limits.flush_timeout.as_duration(),
+            flush_timeout: options.limits.flush_timeout.map(crate::Timeout::as_duration),
             owner: Arc::new(WorkerOwner(worker.abort_handle())),
         }
     }
@@ -207,10 +212,8 @@ impl TranscriptMirror {
         let now = tokio::time::Instant::now();
         Ok(MirrorFlush {
             receiver,
-            // A timeout too long for an instant waits as long as tokio's own "never" (about 30 years).
-            deadline: now
-                .checked_add(self.flush_timeout)
-                .unwrap_or_else(|| now + std::time::Duration::from_secs(86_400 * 365 * 30)),
+            // A timeout too long for an instant waits without a deadline.
+            deadline: self.flush_timeout.and_then(|timeout| now.checked_add(timeout)),
             owner: self.owner.clone(),
         })
     }
@@ -258,12 +261,13 @@ fn encoded_len(entries: &[SessionEntry], estimate: MirrorSizeEstimate) -> usize 
 struct Failures {
     retained: Vec<MirrorFailureError>,
     suppressed: u64,
-    capacity: usize,
+    /// `None` keeps every failure, as upstream reports each one.
+    capacity: Option<usize>,
 }
 
 impl Failures {
     fn record(&mut self, failure: MirrorFailureError) {
-        if self.retained.len() < self.capacity {
+        if self.capacity.is_none_or(|capacity| self.retained.len() < capacity) {
             self.retained.push(failure);
         } else {
             self.suppressed = self.suppressed.saturating_add(1);
@@ -291,7 +295,7 @@ async fn run_worker(
     let mut failures = Failures {
         retained: Vec::new(),
         suppressed: 0,
-        capacity: limits.command_queue_capacity.get(),
+        capacity: limits.max_retained_failures.map(crate::QueueCapacity::get),
     };
     while let Some(command) = receiver.recv().await {
         match command {

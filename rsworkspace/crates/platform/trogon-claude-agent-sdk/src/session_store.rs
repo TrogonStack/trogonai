@@ -103,28 +103,34 @@ pub trait SessionStore: Send + Sync {
 
 #[derive(Clone, Debug)]
 pub struct SessionStoreLimits {
-    pub command_queue_capacity: QueueCapacity,
+    /// Opt-in cap on the transcript mirror failures kept between flushes. Upstream reports every failure, so `None`
+    /// keeps them all; with a cap, the rest are counted into one
+    /// [`MirrorFailureError::Suppressed`](crate::MirrorFailureError::Suppressed).
+    pub max_retained_failures: Option<QueueCapacity>,
     pub max_pending_entries: NonZeroUsize,
     pub max_pending_bytes: NonZeroUsize,
     pub max_resume_entries: NonZeroUsize,
     pub max_resume_bytes: NonZeroUsize,
     pub max_subkeys: QueueCapacity,
     pub append_timeout: Timeout,
-    pub flush_timeout: Timeout,
+    /// Opt-in deadline for waiting on a transcript mirror flush. Upstream does not bound the flush beyond each
+    /// append's own timeout, so `None` waits for it; a deadline fails the wait with
+    /// [`SessionError::MirrorFlushTimeout`](crate::SessionError::MirrorFlushTimeout).
+    pub flush_timeout: Option<Timeout>,
     pub load_timeout: Timeout,
 }
 
 impl Default for SessionStoreLimits {
     fn default() -> Self {
         Self {
-            command_queue_capacity: QueueCapacity::default(),
+            max_retained_failures: None,
             max_pending_entries: NonZeroUsize::new(500).unwrap_or(NonZeroUsize::MIN),
             max_pending_bytes: NonZeroUsize::new(1024 * 1024).unwrap_or(NonZeroUsize::MIN),
             max_resume_entries: NonZeroUsize::new(100_000).unwrap_or(NonZeroUsize::MIN),
             max_resume_bytes: NonZeroUsize::new(64 * 1024 * 1024).unwrap_or(NonZeroUsize::MIN),
             max_subkeys: QueueCapacity::default(),
             append_timeout: Timeout::default(),
-            flush_timeout: Timeout::default(),
+            flush_timeout: None,
             load_timeout: Timeout::default(),
         }
     }
