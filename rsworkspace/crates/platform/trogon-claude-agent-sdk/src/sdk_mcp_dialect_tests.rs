@@ -29,6 +29,7 @@ fn content(status: ToolResultStatus) -> McpToolOutput {
         content: Vec::new(),
         structured_content: None,
         status,
+        result: None,
     }
 }
 
@@ -64,22 +65,10 @@ fn output(handler: &str, request: &McpToolRequest) -> Result<McpToolOutput, Call
     }
 }
 
-/// A handler that returns `{content?, structuredContent?, isError?}` exactly as the generator's does.
+/// A handler that returns the JSON result the generator's handler returns, untouched.
 fn result_output(result: &str) -> Result<McpToolOutput, CallbackError> {
-    let parsed: JsonObject = serde_json::from_str(result).map_err(|error| failed(&error.to_string()))?;
-    let content = match parsed.get("content") {
-        Some(Value::Array(blocks)) => blocks.iter().filter_map(Value::as_object).cloned().collect(),
-        _ => Vec::new(),
-    };
-    Ok(McpToolOutput {
-        content,
-        structured_content: parsed.get("structuredContent").and_then(Value::as_object).cloned(),
-        status: match parsed.get("isError").and_then(Value::as_bool) {
-            None => ToolResultStatus::NotReported,
-            Some(true) => ToolResultStatus::Error,
-            Some(false) => ToolResultStatus::Success,
-        },
-    })
+    let parsed: Value = serde_json::from_str(result).map_err(|error| failed(&error.to_string()))?;
+    Ok(McpToolOutput::from_result(parsed))
 }
 
 fn field<'a>(value: &'a Value, name: &str) -> Result<&'a Value, String> {

@@ -1295,6 +1295,14 @@
           "name": "embedded_call_tool_result_schema_builds_the_bundled_zod_checks"
         },
         {
+          "path": "src/sdk_mcp_regexp_tests.rs",
+          "name": "compile_errors_read_like_the_node_regexp_constructor"
+        },
+        {
+          "path": "src/sdk_mcp_regexp_tests.rs",
+          "name": "matches_follow_ecmascript_lookaround_backreferences_named_groups_and_unicode_flags"
+        },
+        {
           "path": "src/sdk_mcp_server_tests.rs",
           "name": "server_retains_initialize_and_runs_typed_tool"
         },

@@ -63,6 +63,7 @@ mod queue_capacity;
 mod run_as;
 mod runtime_options;
 mod sdk_mcp_js;
+mod sdk_mcp_regexp;
 mod sdk_mcp_server;
 mod sdk_mcp_zod;
 mod sdk_mcp_zod_issue;

@@ -155,8 +155,12 @@ do, with their issue paths, codes, messages and order. The zod schema is
 rebuilt from the listed JSON Schema, so what JSON Schema cannot tell apart
 follows zod's own mapping: a discriminated union is a plain union, `nullable`
 and a union with `null` are the same, `length(n)` is `min(n).max(n)`, regular
-expression flags are lost, transforms and refinements are invisible, and the
-Rust regular expression and URL parsers stand in for the JavaScript ones.
+expression flags are lost unless the schema carries them in `x-flags`, and
+transforms and refinements are invisible. Patterns run through an ECMAScript
+regular expression engine (lookaround, backreferences, named groups and the `u`
+and `v` flags), and a pattern that does not compile fails when the tool is
+registered. A handler result is passed to the client as the JSON value it
+returned once it passes `CallToolResult`.
 Schemas that use keywords zod cannot express (`allOf`, `oneOf`, `$ref` and the
 like) are also checked by the JSON Schema validator. `McpServerDialect::Python`
 answers like `create_sdk_mcp_server`: it reports unreadable messages as

@@ -23,6 +23,7 @@ tokio-util = { workspace = true, features = ["rt"] }
 jsonschema = { workspace = true }
 url = { workspace = true }
 regex = "=1.12.3"
+regress = { version = "=0.12.0", features = ["utf16"] }
 uuid = { workspace = true }
 icu_collator = "=2.4.0"
 unicode-normalization = "=0.1.26"

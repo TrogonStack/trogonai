@@ -6,6 +6,10 @@ use crate::{McpToolName, SdkTool};
 pub enum SdkToolsError {
     #[error("Tool {name} is already registered")]
     DuplicateTool { name: McpToolName },
+    /// A `pattern` the JavaScript `RegExp` constructor rejects, which throws in the TypeScript SDK before the
+    /// tool exists. `message` is the `SyntaxError` text.
+    #[error("Tool {name} has a pattern that is not a regular expression: {message}")]
+    InvalidPattern { name: McpToolName, message: String },
 }
 
 /// The tools of one in-process MCP server, in registration order.
@@ -15,13 +19,22 @@ pub struct SdkTools {
 }
 
 impl SdkTools {
-    /// Rejects a repeated name like the TypeScript `McpServer.registerTool`.
+    /// Rejects a repeated name like the TypeScript `McpServer.registerTool`, and a pattern the `RegExp` constructor
+    /// rejects.
     pub fn new(tools: impl IntoIterator<Item = SdkTool>) -> Result<Self, SdkToolsError> {
         let mut registered: Vec<SdkTool> = Vec::new();
         for tool in tools {
             if registered.iter().any(|existing| existing.name() == tool.name()) {
                 return Err(SdkToolsError::DuplicateTool {
                     name: tool.name().clone(),
+                });
+            }
+            if let Some(message) =
+                crate::sdk_mcp_zod::pattern_error(&serde_json::Value::Object(tool.input_schema().as_json().clone()))
+            {
+                return Err(SdkToolsError::InvalidPattern {
+                    name: tool.name().clone(),
+                    message,
                 });
             }
             registered.push(tool);
