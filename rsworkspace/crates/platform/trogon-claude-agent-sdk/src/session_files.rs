@@ -21,6 +21,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     JsonObject, SdkSessionInfo, SessionId, SummaryDialect,
+    session_messages_ts::{ChainAlgorithm, MessageOptions, session_messages, subagent_messages},
     session_project_key::{canonicalize_lenient, sanitize_path},
     session_prompt::{entry_first_prompt, iso_to_epoch_ms},
     session_transcript::{
@@ -130,28 +131,64 @@ impl SessionFiles {
             .and_then(|lite| parse_session_info_from_lite(session_id, &lite, None))
     }
 
-    /// Reads a session's visible conversation by walking its `parentUuid` chain.
+    /// Reads a session's visible conversation under the TypeScript rules.
     pub fn get_session_messages(
         &self,
         session_id: &str,
         directory: Option<&Path>,
         page: MessagePage,
     ) -> Vec<SessionMessage> {
+        self.get_session_messages_with(
+            session_id,
+            directory,
+            MessageOptions {
+                page,
+                ..MessageOptions::default()
+            },
+        )
+    }
+
+    /// [`SessionFiles::get_session_messages`] under the selected upstream SDK's rules and options.
+    pub fn get_session_messages_with(
+        &self,
+        session_id: &str,
+        directory: Option<&Path>,
+        options: MessageOptions,
+    ) -> Vec<SessionMessage> {
         let Some(session_id) = valid_uuid(session_id) else {
             return Vec::new();
         };
+        if options.algorithm == ChainAlgorithm::TypeScript {
+            let Some((path, _)) = self.resolve_session_ts(session_id, directory) else {
+                return Vec::new();
+            };
+            let Some(content) = read_transcript_ts(&path) else {
+                return Vec::new();
+            };
+            return session_messages(&content, options.include_system_messages, options.page);
+        }
         let Some(content) = self.read_session_file(session_id, directory) else {
             return Vec::new();
         };
-        entries_to_session_messages(&parse_transcript_entries(&content), page)
+        entries_to_session_messages(&parse_transcript_entries(&content), options.page)
     }
 
     /// Lists the ids of the subagents of a session, including nested `subagents/workflows/<run>/` transcripts.
     pub fn list_subagents(&self, session_id: &str, directory: Option<&Path>) -> Vec<String> {
+        self.list_subagents_with(session_id, directory, ChainAlgorithm::TypeScript)
+    }
+
+    /// [`SessionFiles::list_subagents`] with the session located by the selected SDK's directory rules.
+    pub fn list_subagents_with(
+        &self,
+        session_id: &str,
+        directory: Option<&Path>,
+        algorithm: ChainAlgorithm,
+    ) -> Vec<String> {
         let Some(session_id) = valid_uuid(session_id) else {
             return Vec::new();
         };
-        let Some(subagents) = self.resolve_subagents_dir(session_id, directory) else {
+        let Some(subagents) = self.resolve_subagents_dir(session_id, directory, algorithm) else {
             return Vec::new();
         };
         collect_agent_files(&subagents).into_iter().map(|(id, _)| id).collect()
@@ -166,13 +203,32 @@ impl SessionFiles {
         directory: Option<&Path>,
         page: MessagePage,
     ) -> Vec<SessionMessage> {
+        self.get_subagent_messages_with(
+            session_id,
+            agent_id,
+            directory,
+            MessageOptions {
+                page,
+                ..MessageOptions::default()
+            },
+        )
+    }
+
+    /// [`SessionFiles::get_subagent_messages`] under the selected upstream SDK's rules.
+    pub fn get_subagent_messages_with(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+        directory: Option<&Path>,
+        options: MessageOptions,
+    ) -> Vec<SessionMessage> {
         let Some(session_id) = valid_uuid(session_id) else {
             return Vec::new();
         };
         if agent_id.is_empty() {
             return Vec::new();
         }
-        let Some(subagents) = self.resolve_subagents_dir(session_id, directory) else {
+        let Some(subagents) = self.resolve_subagents_dir(session_id, directory, options.algorithm) else {
             return Vec::new();
         };
         let Some((_, transcript)) = collect_agent_files(&subagents)
@@ -181,17 +237,28 @@ impl SessionFiles {
         else {
             return Vec::new();
         };
+        let meta = read_agent_metadata_sidecar(&transcript);
+        let (tool_use_id, parent_agent_id) = parent_ids_from_agent_metadata(meta.as_ref());
+        if options.algorithm == ChainAlgorithm::TypeScript {
+            let Ok(content) = std::fs::read(&transcript) else {
+                return Vec::new();
+            };
+            return subagent_messages(
+                &content,
+                options.page,
+                tool_use_id.as_deref(),
+                parent_agent_id.as_deref(),
+            );
+        }
         let Ok(content) = std::fs::read_to_string(&transcript) else {
             return Vec::new();
         };
         if content.is_empty() {
             return Vec::new();
         }
-        let meta = read_agent_metadata_sidecar(&transcript);
-        let (tool_use_id, parent_agent_id) = parent_ids_from_agent_metadata(meta.as_ref());
         entries_to_subagent_messages(
             &parse_transcript_entries(&content),
-            page,
+            options.page,
             tool_use_id.as_deref(),
             parent_agent_id.as_deref(),
         )
@@ -366,10 +433,29 @@ impl SessionFiles {
         self.project_dirs().into_iter().find_map(|dir| non_empty(&dir))
     }
 
-    fn resolve_subagents_dir(&self, session_id: &str, directory: Option<&Path>) -> Option<PathBuf> {
-        let transcript = self.resolve_session_file_path(session_id, directory)?;
+    fn resolve_subagents_dir(
+        &self,
+        session_id: &str,
+        directory: Option<&Path>,
+        algorithm: ChainAlgorithm,
+    ) -> Option<PathBuf> {
+        let transcript = match algorithm {
+            ChainAlgorithm::TypeScript => self.resolve_session_ts(session_id, directory)?.0,
+            ChainAlgorithm::Python => self.resolve_session_file_path(session_id, directory)?,
+        };
         Some(transcript.with_extension("").join("subagents"))
     }
+}
+
+/// The transcript bytes as `qIe` reads them.
+fn read_transcript_ts(path: &Path) -> Option<Vec<u8>> {
+    let size = std::fs::metadata(path).ok()?.len();
+    let content = if size > crate::session_precompact::SKIP_THRESHOLD && !crate::session_precompact::skip_disabled() {
+        crate::session_precompact::read_after_last_boundary(path, size)?
+    } else {
+        std::fs::read(path).ok()?
+    };
+    (!content.is_empty()).then_some(content)
 }
 
 pub(crate) fn valid_uuid(candidate: &str) -> Option<&str> {
