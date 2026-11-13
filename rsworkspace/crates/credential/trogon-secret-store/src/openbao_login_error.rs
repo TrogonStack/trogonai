@@ -2,8 +2,9 @@ use super::{OpenBaoCallError, OpenBaoSecretStoreConfigError};
 
 /// Why an OpenBao store that logs in could not be built.
 ///
-/// A service that cannot log in at startup refuses to start, per ADR#0023
-/// Decision 3, rather than run without a token.
+/// A service never serves without a token (ADR#0023 Decision 3): it retries a
+/// refused login with backoff, and refuses to start on a configuration error,
+/// which no retry can fix.
 #[derive(Debug, thiserror::Error)]
 pub enum OpenBaoLoginError {
     #[error(transparent)]
