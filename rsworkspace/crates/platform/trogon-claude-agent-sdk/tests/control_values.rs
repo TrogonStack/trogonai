@@ -112,14 +112,97 @@ fn control_responses_keep_extension_fields() -> TestResult {
     assert!(rewind.can_rewind);
     assert_eq!(rewind.files_changed, Some(vec!["a".to_owned()]));
     assert_eq!(rewind.additional_fields.get("extra"), Some(&json!(1)));
-    let status: McpStatusResponse = serde_json::from_value(json!({"mcpServers": [{"name": "s"}], "extra": 1}))?;
+    let status: McpStatusResponse =
+        serde_json::from_value(json!({"mcpServers": [{"name": "s", "status": "connected"}], "extra": 1}))?;
     assert_eq!(status.mcp_servers.len(), 1);
+    assert_eq!(status.mcp_servers[0].name, "s");
+    assert_eq!(status.additional_fields.get("extra"), Some(&json!(1)));
     let usage: ContextUsageResponse = serde_json::from_value(json!({
         "categories": [{"name": "c", "tokens": 1, "color": "red", "isDeferred": true}],
         "totalTokens": 1, "maxTokens": 2, "rawMaxTokens": 3, "percentage": 0.5, "model": "m",
         "isAutoCompactEnabled": false, "memoryFiles": [], "mcpTools": []
     }))?;
     assert_eq!(usage.categories[0].is_deferred, Some(true));
+    assert!(usage.agents.is_none() && usage.grid_rows.is_none() && usage.api_usage.is_none());
+    Ok(())
+}
+
+/// Python `ContextUsageResponse` declares more keys than the minimum a reply carries; each one is typed.
+#[test]
+fn context_usage_types_every_python_key() -> TestResult {
+    let usage: ContextUsageResponse = serde_json::from_value(json!({
+        "categories": [], "totalTokens": 1, "maxTokens": 2, "rawMaxTokens": 3, "percentage": 0.5, "model": "m",
+        "isAutoCompactEnabled": true, "memoryFiles": [], "mcpTools": [],
+        "agents": [{"agentType": "a"}],
+        "gridRows": [[{"square": 1}]],
+        "autoCompactThreshold": 9,
+        "deferredBuiltinTools": [{"name": "t"}],
+        "systemTools": [{"name": "s"}],
+        "systemPromptSections": [{"name": "p"}],
+        "slashCommands": {"totalCommands": 1},
+        "skills": {"totalSkills": 2},
+        "messageBreakdown": {"toolCallTokens": 3},
+        "apiUsage": {"input_tokens": 4}
+    }))?;
+    assert_eq!(usage.agents.map(|agents| agents.len()), Some(1));
+    assert_eq!(usage.grid_rows.map(|rows| rows[0].len()), Some(1));
+    assert_eq!(usage.auto_compact_threshold, Some(9));
+    assert_eq!(usage.deferred_builtin_tools.map(|tools| tools.len()), Some(1));
+    assert_eq!(usage.system_tools.map(|tools| tools.len()), Some(1));
+    assert_eq!(usage.system_prompt_sections.map(|sections| sections.len()), Some(1));
+    assert_eq!(
+        usage
+            .slash_commands
+            .and_then(|commands| commands.get("totalCommands").cloned()),
+        Some(json!(1))
+    );
+    assert_eq!(
+        usage.skills.and_then(|skills| skills.get("totalSkills").cloned()),
+        Some(json!(2))
+    );
+    assert_eq!(
+        usage
+            .message_breakdown
+            .and_then(|parts| parts.get("toolCallTokens").cloned()),
+        Some(json!(3))
+    );
+    assert_eq!(
+        usage.api_usage.and_then(|api| api.get("input_tokens").cloned()),
+        Some(json!(4))
+    );
+    assert!(usage.additional_fields.is_empty());
+    let null_usage: ContextUsageResponse = serde_json::from_value(json!({
+        "categories": [], "totalTokens": 1, "maxTokens": 2, "rawMaxTokens": 3, "percentage": 0.5, "model": "m",
+        "isAutoCompactEnabled": true, "memoryFiles": [], "mcpTools": [], "apiUsage": null
+    }))?;
+    assert!(null_usage.api_usage.is_none());
+    Ok(())
+}
+
+/// Python `McpServerStatus` and its nested types decode from the `mcpServers` list.
+#[test]
+fn mcp_status_types_every_python_server_key() -> TestResult {
+    let status: McpStatusResponse = serde_json::from_value(json!({"mcpServers": [{
+        "name": "docs", "status": "failed", "error": "refused", "scope": "project",
+        "serverInfo": {"name": "docs", "version": "1"},
+        "config": {"type": "http", "url": "https://example.test/mcp", "headers": {"x": "y"}},
+        "tools": [{"name": "t", "description": "d", "annotations": {"readOnly": true, "destructive": false, "openWorld": true}}]
+    }]}))?;
+    let server = &status.mcp_servers[0];
+    assert_eq!(server.error.as_deref(), Some("refused"));
+    assert_eq!(server.scope.as_deref(), Some("project"));
+    assert_eq!(server.server_info.as_ref().map(|info| info.name.as_str()), Some("docs"));
+    assert_eq!(server.tools.as_ref().map(Vec::len), Some(1));
+    assert!(server.config.is_some());
+    assert_eq!(
+        serde_json::to_value(server)?["config"]["url"],
+        "https://example.test/mcp"
+    );
+    Ok(())
+}
+
+#[test]
+fn mcp_set_servers_result_reads_errors() -> TestResult {
     let servers: McpSetServersResult =
         serde_json::from_value(json!({"added": ["a"], "removed": [], "errors": {"b": "failed"}}))?;
     assert_eq!(servers.errors.get("b").map(String::as_str), Some("failed"));

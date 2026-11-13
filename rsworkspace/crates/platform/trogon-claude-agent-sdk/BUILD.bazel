@@ -145,6 +145,7 @@ workspace_crate(
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
         "python_json_goldens": {"compile_data": ["tests/fixtures/python_json/goldens.json"]},
+        "python_module_imports": {},
         "queue_capacity": {},
         "resolve_settings_differential": {
             "compile_data": glob(["tests/support/*.rs"]),

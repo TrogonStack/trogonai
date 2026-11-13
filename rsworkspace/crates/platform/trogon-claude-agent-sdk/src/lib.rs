@@ -215,7 +215,7 @@ pub use environment::Environment;
 pub use environment_plan::EnvironmentPlan;
 pub use error::{
     AbortError, ControlOperation, ControlRejectionError, Error, JsonDecodeError, JsonDecodeSourceError,
-    MessageParseError, ProtocolError, ResultError,
+    MessageParseError, ProtocolError, ResultError, python_cli_not_found_text, python_process_error_text,
 };
 pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
