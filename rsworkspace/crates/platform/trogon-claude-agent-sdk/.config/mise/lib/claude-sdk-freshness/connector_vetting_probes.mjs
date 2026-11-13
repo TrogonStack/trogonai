@@ -92,7 +92,8 @@ function functionSource(name) {
   });
   if (found.length !== 1) throw new Error(`expected one definition of ${name}, found ${found.length}`);
   const start = found[0];
-  return bundle.slice(start, blockEnd(bundle, bundle.indexOf('{', start)));
+  // The body opens after the parameter list, which may itself destructure an object.
+  return bundle.slice(start, blockEnd(bundle, bundle.indexOf('){', start) + 1));
 }
 
 // Text the sandbox prelude restates by hand; each must still be in the bundle exactly as written here.
@@ -106,6 +107,7 @@ const FUNCTIONS = [
   'Or', 'Yn', 'vl', 'xl', 'Vb', 'ud', 'jm', 'Wb', 'MQ', 'FQ', 'Bb', 'BI', 'XI', 'HQ', 'cd', 'at', 'sg', 'rM', 'MC',
   'ag', 'oM', '$I', 'OI', 'Jo', 'Gb', 'es', 'Xo', 'Qo', 'ig', 'sM', 'IC', 'Bee', 'jee', 'Gee', 'Wee', 'LC', 'cg', 'Nm',
   'ae', 'tt', 'Jee', 'Xee', 'ete', 'Vee', 'n7e', 't7e', 'nE', 'rXe', 'uP', 'H5', 'im', 'X8e', 'Q8e', 'U5', 'we',
+  'Lx', 'jI', 'kYe', '_4',
 ];
 [
   'Dl=process.platform==="win32"?/[\\\\/]+/:/\\/+/;Kee=process.platform==="win32"?Bee:jee;',
@@ -140,6 +142,11 @@ const FUNCTIONS = [
   'return Ce.readlinkSync(e)',
   'return Ce.readdirSync(e,{withFileTypes:!0})',
   'let t=Ce.openSync(e,Ce.constants.O_DIRECTORY|Ce.constants.O_NOFOLLOW);Ce.closeSync(t)',
+  'var S4={unreadableAncestry:"unverified",surfaceNetworkRaw:!0,literalLinkText:"opaque"};',
+  'realpathSync as OYe}from"fs"',
+  'join as Mx,',
+  'function*E4(e,t,n,r){let o=Mx(e,...t),',
+  'let i=yield*Lx(o),a=yield*Lx(e);if(i==="gone"||a==="gone")return null;if(a==="unverified"||"network"in a||i==="unverified")return{path:o,folder:e,kind:"unverified"};',
 ].forEach(assertBundleHolds);
 
 const PRELUDE = `
@@ -156,6 +163,8 @@ var $m=new Map, zm=new Map, tE=new Map, Ub={value:void 0};
 var TI={readAutoMaster:()=>LQ("/etc/auto_master","utf8"),homeIsOwnMount:()=>{let e;try{e=AI("/home")}catch(t){if(at(t))return!0;throw t}return e.dev!==AI("/Users").dev}};
 var Dl=process.platform==="win32"?/[\\\\/]+/:/\\/+/;
 var UC=hostUC;
+var S4={unreadableAncestry:"unverified",surfaceNetworkRaw:!0,literalLinkText:"opaque"};
+var E4=function*(e){return yield*Lx(e)};
 `;
 const KEE = 'var Kee=process.platform==="win32"?Bee:jee;';
 const VQ_START = bundle.indexOf(';VQ=[');
@@ -227,6 +236,7 @@ function sandbox(probe) {
   const forcedOpendir = keyed(probe.opendir);
   const forcedReadlink = keyed(probe.readlink);
   const forcedReaddir = keyed(probe.readdir);
+  const forcedRealpath = keyed(probe.realpath);
   const parent = (key) => key.replace(/[\\/][^\\/]*$/, '');
   // A missing entry beneath a file is not a folder (ENOTDIR); any other missing entry does not exist (ENOENT).
   const missing = (key) => {
@@ -351,6 +361,21 @@ function sandbox(probe) {
       openFile = Buffer.from(found.content ?? '');
       return 3;
     },
+    // `realpathSync.native` answers the path itself unless a probe forces another answer with `realpath`.
+    OYe: {
+      native(key) {
+        trace.push(['realpath', key]);
+        const forced = forcedRealpath[fsKey(key)];
+        if (forced !== undefined) {
+          if (forced.errno) throw raise(forced.errno);
+          return forced.path;
+        }
+        const found = tree[fsKey(key)];
+        if (found === undefined) throw missing(key);
+        if (found.errno) throw raise(found.errno);
+        return key;
+      },
+    },
     F5: () => 0,
     V8e: (_, buffer, offset, length) => openFile.copy(buffer, offset, 0, length),
     K8e: () => {},
@@ -377,6 +402,9 @@ function answer(context, probe, input) {
       return attempt(() => ({ ignored: context.nE(input) }));
     case 'name':
       return { connector: context.H5(input), normalized: context.rXe(input, true), names: context.im(input) };
+    // The managed settings write check's `_4` driver and `kYe` host answering `Lx` for one path.
+    case 'locate':
+      return context._4(input);
     default:
       throw new Error(`unknown probe kind ${probe.kind}`);
   }

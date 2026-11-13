@@ -973,14 +973,6 @@ pub(crate) const VETTING_FIRMLINKED_FOLDERS: [&str; 16] = [
     "sw",
 ];
 
-/// `ENAMETOOLONG` as the host reports it.
-#[cfg(target_os = "macos")]
-pub(crate) const NAME_TOO_LONG_ERRNO: i32 = 63;
-
-/// `ENAMETOOLONG` as the host reports it.
-#[cfg(not(target_os = "macos"))]
-pub(crate) const NAME_TOO_LONG_ERRNO: i32 = 36;
-
 /// Milliseconds the machine policy reading stays in force when the last read answered (`ret` upstream).
 pub(crate) const MDM_REREAD_IDLE_MS: i128 = 1_800_000;
 

@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use serde_json::{Map, Value, json};
 
 use super::{
-    Absent, LinkStat, Platform, VetError, Vetted, Vetter, VettingHost, VettingState, Walked, collapse_at_dots,
+    Absent, LinkStat, Located, Platform, VetError, Vetted, Vetter, VettingHost, VettingState, Walked, collapse_at_dots,
     collapse_posix, firmlink_path, has_dotted_component, has_parent_component, in_dot_namespace, is_device_namespace,
     is_net_root, is_object_namespace, is_within, is_wsl_share, on_network_mount, read_failure, share_mount,
     share_server, strip_device_prefix,
@@ -20,6 +20,7 @@ pub(crate) struct FakeHost {
     opendir: Vec<(String, Value)>,
     readlink: Vec<(String, Value)>,
     readdir: Vec<(String, Value)>,
+    realpath: Vec<(String, Value)>,
     files: Map<String, Value>,
     stat: Map<String, Value>,
     homedir: Option<String>,
@@ -80,6 +81,7 @@ impl FakeHost {
             opendir: keyed("opendir"),
             readlink: keyed("readlink"),
             readdir: keyed("readdir"),
+            realpath: keyed("realpath"),
             files: object("files"),
             stat: object("stat"),
             homedir: text("homedir"),
@@ -269,6 +271,22 @@ impl VettingHost for FakeHost {
     fn home_directory(&self) -> Result<JsString, Option<String>> {
         self.record(json!(["homedir"]));
         self.homedir.as_deref().map(js).ok_or_else(|| errno("ENOENT"))
+    }
+
+    fn real_path(&self, path: &[u16]) -> Result<JsString, Option<String>> {
+        let path = rust(path);
+        self.record(json!(["realpath", path]));
+        if let Some(forced) = Self::find(&self.realpath, &self.key(&path)) {
+            if let Some(code) = truthy(forced.get("errno")) {
+                return Err(errno(code));
+            }
+            return forced.get("path").and_then(Value::as_str).map(js).ok_or(None);
+        }
+        let found = self.entry(&path).ok_or_else(|| self.missing(&path))?;
+        if let Some(code) = truthy(found.get("errno")) {
+            return Err(errno(code));
+        }
+        Ok(js(&path))
     }
 }
 
@@ -503,6 +521,39 @@ fn replays_every_vet_probe_recorded_from_the_bundle() {
             inputs(&probe)
                 .iter()
                 .map(|path| vetted_json(vetter.vet(path)))
+                .collect(),
+        );
+        compare(&probe, &actual, &setup.host, &mut failures);
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+fn located_json(located: Located) -> Value {
+    match located {
+        Located::Gone => json!("gone"),
+        Located::Unverified => json!("unverified"),
+        Located::Network(path) => json!({ "network": rust(&path) }),
+        Located::Real(path) => json!({ "real": rust(&path) }),
+    }
+}
+
+#[test]
+fn replays_every_locate_probe_recorded_from_the_bundle() {
+    let mut failures = Vec::new();
+    for probe in probes("locate") {
+        let setup = setup(&probe);
+        let state = VettingState::default();
+        let vetter = Vetter::new(
+            &setup.host,
+            setup.platform,
+            setup.dialect,
+            setup.launch.as_deref(),
+            &state,
+        );
+        let actual = Value::Array(
+            inputs(&probe)
+                .iter()
+                .map(|path| located_json(vetter.locate(path)))
                 .collect(),
         );
         compare(&probe, &actual, &setup.host, &mut failures);

@@ -488,6 +488,37 @@ function vetProbes() {
   return probes;
 }
 
+// Where the managed settings write check finds a path really is (`Lx`): every vet host again, plus what
+// `realpathSync.native` can answer once the walk is done.
+function locateProbes() {
+  const probes = vetProbes().map((probe) => ({ ...probe, name: probe.name.replace(/^vet /, 'locate '), kind: 'locate' }));
+  const add = (name, probe) => probes.push({ name: `locate ${name}`, kind: 'locate', platform: 'linux', cwd: '/w', ...probe });
+  const tree = folders('/w/a/b', '/real/a');
+
+  add('realpath moves', { fs: tree, realpath: { '/w/a': { path: '/real/a' } }, paths: ['/w/a', '/w/a/b'] });
+  add('realpath errors', { fs: tree, realpath: { '/w/a': { errno: 'EACCES' }, '/w/a/b': { errno: 'ENOENT' } }, paths: ['/w/a', '/w/a/b'] });
+  add('realpath not a folder', { fs: tree, realpath: { '/w/a/b': { errno: 'ENOTDIR' } }, paths: ['/w/a/b'] });
+  add('realpath on win32', {
+    platform: 'win32',
+    cwd: 'C:\\w',
+    fs: folders('C:\\w\\a', 'D:\\real'),
+    realpath: { 'C:\\w\\a': { path: '\\\\?\\D:\\real' }, 'c:\\w': { path: '\\\\?\\UNC\\srv\\sh' } },
+    paths: ['C:\\w\\a', 'c:/w', 'C:\\w\\missing'],
+  });
+  add('network spellings', {
+    platform: 'darwin',
+    fs: tree,
+    paths: ['/Volumes/x', '/net/host/share', '/home/u', '//srv/sh/x', '/??/x', '/w/??/x'],
+  });
+  add('wsl shares on win32', {
+    platform: 'win32',
+    cwd: 'C:\\w',
+    fs: { ...folders('C:\\w'), '\\\\wsl$\\Ubuntu\\home': { kind: 'dir' } },
+    paths: ['\\\\wsl$\\Ubuntu\\home', '\\\\srv\\sh\\x'],
+  });
+  return probes;
+}
+
 // Whether a folder named connector-downloads is marked ignored, directly (`n7e`) and from any path (`nE`).
 function connectorProbes() {
   const probes = [];
@@ -540,5 +571,5 @@ function connectorProbes() {
 }
 
 export function corpus() {
-  return [...pathFunctionProbes(), ...nameProbes(), ...callProbes(), ...vetProbes(), ...connectorProbes()];
+  return [...pathFunctionProbes(), ...nameProbes(), ...callProbes(), ...vetProbes(), ...locateProbes(), ...connectorProbes()];
 }

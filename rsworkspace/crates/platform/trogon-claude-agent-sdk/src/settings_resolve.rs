@@ -207,7 +207,7 @@ fn resolve_core<H: SettingsHost>(
         mdm_did_not_load,
         file_did_not_load,
         ..
-    } = resolve_policy(host, kind, parent.as_ref(), remote.as_ref(), evaluation);
+    } = resolve_policy(host, state, kind, parent.as_ref(), remote.as_ref(), evaluation);
     let policy_settings = policy_settings.map(|mut settings| {
         for entry in settings.values_mut() {
             normalize_numbers(entry, dialect);

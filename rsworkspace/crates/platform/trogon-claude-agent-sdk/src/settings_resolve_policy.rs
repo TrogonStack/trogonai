@@ -23,6 +23,7 @@ use crate::{
     },
     settings_resolve_platform_kind::PlatformKind,
     settings_resolve_restrict::{js_equal, restrict_policy_document},
+    settings_resolve_state::ResolverState,
     settings_resolve_tier::{LoadState, TierRead},
     settings_resolve_values::{SettingsMap, has_authored_value, has_policy_content, merge_with_union, omit, pick},
     settings_resolve_writable::{DocumentProbe, user_can_write},
@@ -257,6 +258,7 @@ pub(crate) struct Held {
 /// `pE` upstream).
 struct Rewrites<'h, H> {
     host: &'h H,
+    state: &'h ResolverState,
     kind: PlatformKind,
     organization: bool,
     wsl_organization: bool,
@@ -270,7 +272,14 @@ impl<H: SettingsHost> Rewrites<'_, H> {
             Rewritable::Never => false,
             Rewritable::Ask(probe) => {
                 self.organization
-                    && user_can_write(self.host, self.kind, self.wsl_organization, probe, &mut self.certain)
+                    && user_can_write(
+                        self.host,
+                        self.state,
+                        self.kind,
+                        self.wsl_organization,
+                        probe,
+                        &mut self.certain,
+                    )
             }
         }
     }
@@ -278,10 +287,16 @@ impl<H: SettingsHost> Rewrites<'_, H> {
 
 /// `pE` upstream: the managed file tier, where a document the user could rewrite only restricts when the session
 /// asks its organization.
-fn read_managed_file<H: SettingsHost>(host: &H, kind: PlatformKind, mdm: &MdmEvaluation) -> (TierRead, Held) {
+fn read_managed_file<H: SettingsHost>(
+    host: &H,
+    state: &ResolverState,
+    kind: PlatformKind,
+    mdm: &MdmEvaluation,
+) -> (TierRead, Held) {
     let organization = asks_organization(host);
     let mut writes = Rewrites {
         host,
+        state,
         kind,
         organization,
         wsl_organization: organization && kind == PlatformKind::Wsl && kernel_reports_wsl(host),
@@ -709,12 +724,13 @@ fn pin_machine_login(
 /// `QP` upstream for the default configuration: no policy helper, no host-managed provider.
 pub(crate) fn resolve_policy<H: SettingsHost>(
     host: &H,
+    state: &ResolverState,
     kind: PlatformKind,
     parent_managed: Option<&SettingsMap>,
     remote: Option<&SettingsMap>,
     evaluation: &MdmEvaluation,
 ) -> PolicyResolution {
-    let (file, held) = read_managed_file(host, kind, evaluation);
+    let (file, held) = read_managed_file(host, state, kind, evaluation);
     let parent_managed = parent_managed.filter(|parent| !parent.is_empty());
     let remote = remote.filter(|settings| !settings.is_empty());
     let selection = select_admin(remote, &evaluation.mdm, &file, &held, parent_managed, kind.as_str());

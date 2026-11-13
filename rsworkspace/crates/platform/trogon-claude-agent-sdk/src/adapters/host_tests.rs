@@ -8,7 +8,7 @@ use super::{
     CheckWritable, EffectiveGroupId, EffectiveUserId, HostIdentity, NativeHost, RealGroupId, RealUserId,
     SupplementaryGroupIds,
 };
-use crate::adapters::ReadMetadata;
+use crate::adapters::{CanonicalizePath, ReadMetadata};
 
 #[test]
 fn a_directory_the_process_made_passes_the_write_check() {
@@ -25,6 +25,21 @@ fn a_missing_path_fails_the_write_check_as_not_found() {
         .check_writable(&directory.path().join("missing"))
         .expect_err("missing");
 
+    assert_eq!(error.kind(), io::ErrorKind::NotFound);
+}
+
+#[test]
+fn canonicalizing_names_where_a_path_really_is() {
+    let directory = tempfile::tempdir().expect("directory");
+    let real = directory.path().canonicalize().expect("real directory");
+
+    assert_eq!(
+        NativeHost.canonicalize(&directory.path().join(".")).expect("canonical"),
+        real
+    );
+    let error = NativeHost
+        .canonicalize(&directory.path().join("missing"))
+        .expect_err("missing");
     assert_eq!(error.kind(), io::ErrorKind::NotFound);
 }
 
