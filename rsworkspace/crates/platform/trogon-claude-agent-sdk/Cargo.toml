@@ -24,6 +24,7 @@ jsonschema = { workspace = true }
 url = { workspace = true }
 regex = "=1.12.3"
 uuid = { workspace = true }
+sha2 = { workspace = true }
 icu_collator = "=2.4.0"
 unicode-normalization = "=0.1.26"
 unicode-general-category = "=1.1.0"

@@ -13,7 +13,7 @@ use serde_json::json;
 use trogon_claude_agent_sdk::{
     Environment, InMemorySessionStore, MirrorEnqueueError, MirrorFailureError, SessionEntry, SessionError, SessionId,
     SessionKey, SessionProjectKey, SessionRuntime, SessionStore, SessionStoreError, SessionStoreFuture,
-    SessionStoreOptions, SessionSubpath, StoreResume, Timeout, TranscriptMirror,
+    SessionStoreOptions, SessionSubpath, StoreResume, SummaryDialect, Timeout, TranscriptMirror,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -178,6 +178,7 @@ async fn resume_materializes_main_subagents_and_metadata_without_touching_creden
         StoreResume::Session(SessionId::from(SESSION)),
         root.path(),
         &Environment::default(),
+        Default::default(),
     )
     .await?;
     let config = runtime.config_dir.clone().ok_or("missing config directory")?;
@@ -211,6 +212,7 @@ async fn w3_resume_leaves_an_existing_caller_transcript_untouched() -> TestResul
         StoreResume::Session(SessionId::from(SESSION)),
         root.path(),
         &Environment::default(),
+        Default::default(),
     )
     .await?;
     let config = runtime.config_dir.clone().ok_or("missing config directory")?;
@@ -235,6 +237,7 @@ async fn configuring_mirror_without_resume_does_not_create_a_config_directory() 
         StoreResume::None,
         root.path(),
         &Environment::default(),
+        Default::default(),
     )
     .await?;
     assert_eq!(runtime.config_dir, Some(config_root.clone()));
@@ -250,20 +253,34 @@ async fn latest_resume_skips_sidechains_and_materializes_the_newest_main_session
     let main = key("project", SESSION)?;
     let sidechain = key("project", "123e4567-e89b-42d3-a456-426614174001")?;
     store.append(&main, &[entry("user", 1)?]).await?;
+    // The store stamps appends with the wall clock in milliseconds; keep the sidechain strictly newer.
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     store
         .append(
             &sidechain,
             &[SessionEntry::try_from(json!({"type":"assistant","isSidechain":true}))?],
         )
         .await?;
-    let runtime = SessionRuntime::prepare(
-        &options(store, root.path())?,
-        StoreResume::Latest,
-        root.path(),
-        &Environment::default(),
-    )
-    .await?;
-    assert_eq!(runtime.resume_session_id.as_ref().map(SessionId::as_str), Some(SESSION));
+    // Python walks past sidechains; TypeScript `nnt` resumes the newest listed session as is.
+    for (dialect, expected) in [
+        (SummaryDialect::Python, SESSION),
+        (SummaryDialect::TypeScript, sidechain.session_id().as_str()),
+    ] {
+        let mut options = options(store.clone(), root.path())?;
+        options.dialect = dialect;
+        let runtime = SessionRuntime::prepare(
+            &options,
+            StoreResume::Latest,
+            root.path(),
+            &Environment::default(),
+            Default::default(),
+        )
+        .await?;
+        assert_eq!(
+            runtime.resume_session_id.as_ref().map(SessionId::as_str),
+            Some(expected)
+        );
+    }
     Ok(())
 }
 
@@ -278,15 +295,16 @@ async fn resume_entry_and_byte_limits_refuse_materialization_without_transcript_
             .await?;
         let mut options = options(store, root.path())?;
         if bytes_limited {
-            options.limits.max_resume_bytes = NonZeroUsize::new(2).ok_or("zero bound")?;
+            options.limits.max_resume_bytes = Some(NonZeroUsize::new(2).ok_or("zero bound")?);
         } else {
-            options.limits.max_resume_entries = NonZeroUsize::new(1).ok_or("zero bound")?;
+            options.limits.max_resume_entries = Some(NonZeroUsize::new(1).ok_or("zero bound")?);
         }
         let outcome = SessionRuntime::prepare(
             &options,
             StoreResume::Session(SessionId::from(SESSION)),
             root.path(),
             &Environment::default(),
+            Default::default(),
         )
         .await;
         if bytes_limited {
@@ -321,12 +339,13 @@ async fn resume_subkey_limit_cleans_an_already_seeded_main_transcript() -> TestR
             .await?;
     }
     let mut options = options(store, root.path())?;
-    options.limits.max_subkeys = trogon_claude_agent_sdk::QueueCapacity::new(1)?;
+    options.limits.max_subkeys = Some(trogon_claude_agent_sdk::QueueCapacity::new(1)?);
     let outcome = SessionRuntime::prepare(
         &options,
         StoreResume::Session(SessionId::from(SESSION)),
         root.path(),
         &Environment::default(),
+        Default::default(),
     )
     .await;
     assert!(matches!(outcome, Err(SessionError::SubpathLimit)));
@@ -360,9 +379,10 @@ async fn resume_load_timeout_does_not_install_any_files() -> TestResult {
         StoreResume::Session(SessionId::from(SESSION)),
         root.path(),
         &Environment::default(),
+        Default::default(),
     )
     .await;
-    assert!(matches!(outcome, Err(SessionError::LoadTimeout)));
+    assert!(matches!(outcome, Err(SessionError::LoadTimeout(_))));
     assert!(std::fs::read_dir(root.path())?.next().is_none());
     Ok(())
 }

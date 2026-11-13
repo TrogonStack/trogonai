@@ -56,3 +56,67 @@ fn encoder_distinguishes_exhausted_writer_budget_from_data_failure() {
     assert!(writer.exceeded);
     assert!(writer.bytes.is_empty());
 }
+
+#[test]
+fn secure_storage_config_dir_follows_the_typescript_fallback_chain_on_windows_only() {
+    use std::ffi::OsString;
+
+    use super::secure_storage_config_dir;
+    use crate::{Environment, SummaryDialect};
+    let typescript = Some(SummaryDialect::TypeScript);
+    let configured = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).into()))
+            .collect::<Environment>()
+    };
+    let inherited = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(key, value)| (OsString::from(key), OsString::from(value)))
+            .collect::<crate::environment_plan::Inherited>()
+    };
+    type Pairs = &'static [(&'static str, &'static str)];
+    let cases: [(Pairs, Pairs, &str); 6] = [
+        (
+            &[
+                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", "env-secure"),
+                ("CLAUDE_CONFIG_DIR", "env-config"),
+            ],
+            &[("CLAUDE_SECURESTORAGE_CONFIG_DIR", "process-secure")],
+            "env-secure",
+        ),
+        (
+            &[("CLAUDE_CONFIG_DIR", "env-config")],
+            &[("CLAUDE_SECURESTORAGE_CONFIG_DIR", "process-secure")],
+            "process-secure",
+        ),
+        (
+            &[("CLAUDE_CONFIG_DIR", "env-config")],
+            &[("CLAUDE_CONFIG_DIR", "process-config")],
+            "env-config",
+        ),
+        (&[], &[("CLAUDE_CONFIG_DIR", "process-config")], "process-config"),
+        (
+            &[("CLAUDE_SECURESTORAGE_CONFIG_DIR", "")],
+            &[("CLAUDE_CONFIG_DIR", "process-config")],
+            "",
+        ),
+        (&[], &[], ""),
+    ];
+    for (env, process, expected) in cases {
+        assert_eq!(
+            secure_storage_config_dir(true, typescript, &configured(env), &inherited(process), true),
+            Some(OsString::from(expected))
+        );
+    }
+    let env = configured(&[("CLAUDE_CONFIG_DIR", "env-config")]);
+    let process = inherited(&[]);
+    assert_eq!(secure_storage_config_dir(true, typescript, &env, &process, false), None);
+    assert_eq!(
+        secure_storage_config_dir(true, Some(SummaryDialect::Python), &env, &process, true),
+        None
+    );
+    assert_eq!(secure_storage_config_dir(true, None, &env, &process, true), None);
+    assert_eq!(secure_storage_config_dir(false, typescript, &env, &process, true), None);
+}

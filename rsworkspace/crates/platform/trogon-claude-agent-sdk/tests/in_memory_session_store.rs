@@ -199,8 +199,8 @@ fn options_wrap_shared_stores_with_default_limits() {
             NonZeroUsize::MIN.saturating_add(499)
         );
         assert_eq!(options.limits.max_pending_bytes.get(), 1024 * 1024);
-        assert_eq!(options.limits.max_resume_entries.get(), 100_000);
-        assert_eq!(options.limits.max_resume_bytes.get(), 64 * 1024 * 1024);
+        assert_eq!(options.limits.max_resume_entries, None);
+        assert_eq!(options.limits.max_resume_bytes, None);
         assert!(format!("{options:?}").starts_with("SessionStoreOptions { limits: SessionStoreLimits"));
     }
 }

@@ -133,6 +133,8 @@ pub(crate) struct ProcessSpawn<'a, P> {
     pub config_dir: Option<&'a Path>,
     /// The TypeScript default debug file, derived by `connect` when the SDK spawns the CLI itself.
     pub derived_debug_file: Option<&'a Path>,
+    /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` for a child resumed from a store, when the session runtime sets it.
+    pub secure_storage_config_dir: Option<std::ffi::OsString>,
     pub closed: Closed,
 }
 
@@ -164,11 +166,15 @@ impl ProcessTransport {
             process,
             config_dir,
             derived_debug_file,
+            secure_storage_config_dir,
             closed,
         } = input;
         let mut command = command(options, &cli_path, inherited, derived_debug_file)?;
         if let Some(config_dir) = config_dir {
             command.env("CLAUDE_CONFIG_DIR", config_dir);
+        }
+        if let Some(directory) = secure_storage_config_dir {
+            command.env("CLAUDE_SECURESTORAGE_CONFIG_DIR", directory);
         }
         crate::cli_path::reject_windows_batch_cli(cli_path.as_os_str(), options.windows_batch_cli)?;
         let mut child = process.spawn(&mut command).map_err(|error| {

@@ -23,9 +23,9 @@ use std::{
 use recording_filesystem::{Operation, RecordingFileSystem};
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    Environment, InMemorySessionStore, SessionEntry, SessionError, SessionId, SessionKey, SessionListEntry,
-    SessionPreparationOptions, SessionProjectKey, SessionRuntime, SessionStore, SessionStoreFuture,
-    SessionStoreOptions, SessionSubpath, StoreResume,
+    Environment, EnvironmentMode, InMemorySessionStore, SessionEntry, SessionError, SessionId, SessionKey,
+    SessionListEntry, SessionPreparationOptions, SessionProjectKey, SessionRuntime, SessionStore, SessionStoreFuture,
+    SessionStoreOperation, SessionStoreOptions, SessionSubpath, StoreResume, SummaryDialect,
     adapters::{SpawnProcess, WallClock},
     test_support::FixedEnvironment,
 };
@@ -136,11 +136,18 @@ impl Fixture {
             resume,
             cwd: &self.environment.directory,
             subprocess_environment: &self.subprocess_environment,
+            environment_mode: EnvironmentMode::default(),
             environment: &self.environment,
             process: &self.process,
             filesystem: self.filesystem.clone(),
         })
         .await
+    }
+
+    /// Switches the fixture to the Python SDK's resume rules; the TypeScript rules are the default.
+    fn python(mut self) -> Self {
+        self.options.dialect = SummaryDialect::Python;
+        self
     }
 
     async fn resume(&self) -> Result<SessionRuntime<RecordingFileSystem>, SessionError> {
@@ -297,7 +304,7 @@ async fn w3_transcript_write_failure_removes_the_partial_temporary_directory() -
 
 #[tokio::test]
 async fn w3_resume_copies_auth_and_settings_without_refresh_tokens_or_plugins() -> TestResult {
-    let fixture = Fixture::new().await?;
+    let fixture = Fixture::new().await?.python();
     let source = fixture.filesystem.path("config");
     fixture.filesystem.write_file(
         &source.join(".credentials.json"),
@@ -351,7 +358,7 @@ async fn w3_resume_copies_auth_and_settings_without_refresh_tokens_or_plugins() 
 
 #[tokio::test]
 async fn w3_an_unreadable_optional_configuration_file_is_skipped() -> TestResult {
-    let fixture = Fixture::new().await?;
+    let fixture = Fixture::new().await?.python();
     let source = fixture.filesystem.path("config");
     fixture
         .filesystem
@@ -481,7 +488,7 @@ async fn w3_cleanup_reports_a_permanent_failure_without_failing() -> TestResult 
 
 #[tokio::test]
 async fn w3_a_relative_home_directory_is_rejected() -> TestResult {
-    let mut fixture = Fixture::new().await?;
+    let mut fixture = Fixture::new().await?.python();
     fixture.environment.variables.remove(OsStr::new("CLAUDE_CONFIG_DIR"));
     fixture
         .environment
@@ -512,7 +519,7 @@ async fn w3_a_credentials_write_failure_is_reported_and_removes_the_temporary_di
 
 #[tokio::test]
 async fn w3_credentials_that_are_not_a_regular_file_are_skipped() -> TestResult {
-    let fixture = Fixture::new().await?;
+    let fixture = Fixture::new().await?.python();
     fixture
         .filesystem
         .create_dir_all(&fixture.filesystem.path("config/.credentials.json"))?;
@@ -609,6 +616,12 @@ struct DeclaredSubkeyStore {
 }
 
 impl SessionStore for DeclaredSubkeyStore {
+    fn supports(&self, operation: SessionStoreOperation) -> bool {
+        matches!(
+            operation,
+            SessionStoreOperation::Append | SessionStoreOperation::Load | SessionStoreOperation::ListSubkeys
+        )
+    }
     fn append<'a>(&'a self, key: &'a SessionKey, entries: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
         self.inner.append(key, entries)
     }
@@ -661,6 +674,12 @@ struct ListedStore {
 }
 
 impl SessionStore for ListedStore {
+    fn supports(&self, operation: SessionStoreOperation) -> bool {
+        matches!(
+            operation,
+            SessionStoreOperation::Append | SessionStoreOperation::Load | SessionStoreOperation::List
+        )
+    }
     fn append<'a>(&'a self, key: &'a SessionKey, entries: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
         self.inner.append(key, entries)
     }
@@ -704,7 +723,167 @@ async fn s26_latest_resume_walks_newest_first_past_unusable_candidates() -> Test
             listed("00000000-0000-4000-8000-000000000004", 30),
         ],
     }) as Arc<dyn SessionStore>);
+    fixture.options.dialect = SummaryDialect::Python;
     let runtime = fixture.prepare(StoreResume::Latest).await?;
     assert_eq!(runtime.resume_session_id, Some(SessionId::from(SESSION)));
+    Ok(())
+}
+
+fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+}
+
+/// TypeScript `A7` creates the resume root and project directory `0700`, writes the transcript and credentials `0600`
+/// and rewritten settings `0600`, copies `.claude.json`, `.config.json` and the OAuth files with `fs.copyFile` (so
+/// they keep the source permission bits) and creates subagent directories with the default mode.
+#[tokio::test]
+async fn w3_ts_resume_permission_bits_follow_the_bundle() -> TestResult {
+    let fixture = Fixture::new().await?;
+    let source = fixture.filesystem.path("config");
+    fixture.filesystem.write_file(
+        &source.join(".credentials.json"),
+        b"{\"claudeAiOauth\":{\"refreshToken\":\"fixture-refresh\",\"accessToken\":\"fixture-access\"}}",
+    )?;
+    fixture.filesystem.write_file(
+        &source.join("settings.json"),
+        b"{\"enabledPlugins\":{},\"model\":\"fixture\"}",
+    )?;
+    fixture
+        .filesystem
+        .write_file(&source.join("cowork_settings.json"), b"{\"untouched\":true}")?;
+    let copied = [
+        (".claude.json", 0o644),
+        (".config.json", 0o640),
+        (".claude-staging-oauth.json", 0o604),
+        (".claude-local-oauth.json", 0o664),
+        (".claude-custom-oauth.json", 0o400),
+    ];
+    for (name, permissions) in copied {
+        let path = source.join(name);
+        fixture.filesystem.write_file(&path, name.as_bytes())?;
+        set_mode(&path, permissions)?;
+    }
+    let reference = fixture.filesystem.path("default-mode");
+    std::fs::create_dir(&reference)?;
+    let runtime = fixture.resume().await?;
+    let config = runtime.config_dir.clone().ok_or("missing config directory")?;
+    let project_dir = config.join("projects").join(fixture.project.as_str());
+    assert_eq!(mode(&config)?, 0o700);
+    assert_eq!(mode(&config.join("projects"))?, 0o700);
+    assert_eq!(mode(&project_dir)?, 0o700);
+    assert_eq!(mode(&project_dir.join(format!("{SESSION}.jsonl")))?, 0o600);
+    for directory in [project_dir.join(SESSION), project_dir.join(SESSION).join("subagents")] {
+        assert_eq!(mode(&directory)?, mode(&reference)?);
+    }
+    for file in ["subagents/agent-one.jsonl", "subagents/agent-one.meta.json"] {
+        assert_eq!(mode(&project_dir.join(SESSION).join(file))?, 0o600);
+    }
+    for name in [".credentials.json", "settings.json", "cowork_settings.json"] {
+        assert_eq!(mode(&config.join(name))?, 0o600, "{name}");
+    }
+    assert_eq!(
+        fixture.filesystem.read(&config.join(".credentials.json"))?,
+        b"{\"claudeAiOauth\":{\"accessToken\":\"fixture-access\"}}"
+    );
+    assert_eq!(
+        fixture.filesystem.read(&config.join("settings.json"))?,
+        b"{\"model\":\"fixture\"}"
+    );
+    for (name, permissions) in copied {
+        assert_eq!(fixture.filesystem.read(&config.join(name))?, name.as_bytes());
+        assert_eq!(mode(&config.join(name))?, permissions, "{name}");
+    }
+    for (name, _) in copied {
+        set_mode(&source.join(name), 0o600)?;
+    }
+    Ok(())
+}
+
+/// TypeScript reads `.credentials.json` with `readFile` and rethrows everything but `ENOENT`, so an unreadable file or
+/// a directory in its place fails the resume and the partial directory is removed.
+#[tokio::test]
+async fn w3_ts_unreadable_credentials_fail_the_resume() -> TestResult {
+    let fixture = Fixture::new().await?;
+    let source = fixture.filesystem.path("config");
+    fixture
+        .filesystem
+        .write_file(&source.join(".credentials.json"), b"{}")?;
+    fixture.filesystem.fail(
+        Operation::Metadata,
+        Some("config/.credentials.json"),
+        io::ErrorKind::PermissionDenied,
+        1,
+    )?;
+    assert!(
+        matches!(fixture.resume().await, Err(SessionError::Io(source)) if source.kind() == io::ErrorKind::PermissionDenied)
+    );
+    assert!(fixture.temporary_entries()?.is_empty());
+    std::fs::remove_file(source.join(".credentials.json"))?;
+    fixture.filesystem.create_dir_all(&source.join(".credentials.json"))?;
+    assert!(matches!(fixture.resume().await, Err(SessionError::Io(_))));
+    assert!(fixture.temporary_entries()?.is_empty());
+    Ok(())
+}
+
+/// TypeScript joins a relative home directory with `path.join` and does not reject it.
+#[tokio::test]
+async fn w3_ts_a_relative_home_directory_is_used_as_given() -> TestResult {
+    let mut fixture = Fixture::new().await?;
+    fixture.environment.variables.remove(OsStr::new("CLAUDE_CONFIG_DIR"));
+    fixture
+        .environment
+        .variables
+        .insert(OsString::from("HOME"), OsString::from("relative/home"));
+    let runtime = fixture.resume().await?;
+    assert!(runtime.materialized.is_some());
+    assert_eq!(runtime.resume_session_id, Some(SessionId::from(SESSION)));
+    Ok(())
+}
+
+/// TypeScript continue (`nnt`) takes the newest listed session as is: no UUID walk and no sidechain skip.
+#[tokio::test]
+async fn s26_ts_latest_resume_takes_only_the_newest_listed_session() -> TestResult {
+    let mut fixture = Fixture::new().await?;
+    let sidechain = SessionId::from(uuid::Uuid::from_u128(2).to_string());
+    let key = SessionKey::new(fixture.project.clone(), sidechain.clone())?;
+    fixture
+        .store
+        .append(&key, &[entry(json!({"type":"user","isSidechain":true}))?])
+        .await?;
+    let listed = |id: &SessionId, modified_at_ms| SessionListEntry {
+        session_id: id.clone(),
+        modified_at_ms,
+    };
+    let session = SessionId::from(SESSION);
+    let named = SessionId::from("not-a-uuid");
+    for (sessions, expected) in [
+        (
+            vec![listed(&session, 10), listed(&sidechain, 20)],
+            Some(sidechain.clone()),
+        ),
+        (vec![listed(&session, 10), listed(&named, 20)], None),
+        (
+            vec![
+                listed(&session, 10),
+                listed(&SessionId::from(uuid::Uuid::from_u128(3).to_string()), 20),
+            ],
+            None,
+        ),
+    ] {
+        fixture.options = SessionStoreOptions::from(Arc::new(ListedStore {
+            inner: fixture.store.clone(),
+            sessions,
+        }) as Arc<dyn SessionStore>);
+        let runtime = fixture.prepare(StoreResume::Latest).await?;
+        assert_eq!(runtime.resume_session_id, expected);
+    }
+    fixture.options = SessionStoreOptions::from(Arc::new(DeclaredSubkeyStore {
+        inner: fixture.store.clone(),
+        subkeys: Vec::new(),
+    }) as Arc<dyn SessionStore>);
+    assert!(matches!(
+        fixture.prepare(StoreResume::Latest).await,
+        Err(SessionError::ContinueRequiresList)
+    ));
     Ok(())
 }

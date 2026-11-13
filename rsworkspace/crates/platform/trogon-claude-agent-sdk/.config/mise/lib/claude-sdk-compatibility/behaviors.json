@@ -833,11 +833,12 @@
         "behavior": "Python skips the candidate and tries the next newest. TypeScript takes the newest entry only, so a non-UUID newest id starts a fresh session."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "Python matches the CLI's own --continue filter and resumes the newest valid session instead of silently starting fresh."
+        "kind": "follow-typescript",
+        "reason": "Both rules are exposed through SessionStoreOptions.dialect. TypeScript, the default, takes only the newest listed session and starts fresh when its id is not a UUID; the Python dialect tries the next newest."
       },
       "contracts": [
-        "session_filesystem::s26_latest_resume_walks_newest_first_past_unusable_candidates"
+        "session_filesystem::s26_latest_resume_walks_newest_first_past_unusable_candidates",
+        "session_filesystem::s26_ts_latest_resume_takes_only_the_newest_listed_session"
       ],
       "rust": [
         "src/session_resume.rs"
@@ -1017,7 +1018,10 @@
         "session_filesystem::w3_resume_materializes_into_a_private_temporary_directory_and_cleanup_removes_it",
         "session_filesystem::w3_temporary_root_creation_failure_is_reported_without_a_lease",
         "session_filesystem::w3_transcript_write_failure_removes_the_partial_temporary_directory",
-        "session_store::w3_resume_leaves_an_existing_caller_transcript_untouched"
+        "session_store::w3_resume_leaves_an_existing_caller_transcript_untouched",
+        "session_filesystem::w3_ts_resume_permission_bits_follow_the_bundle",
+        "session_filesystem::w3_ts_unreadable_credentials_fail_the_resume",
+        "session_filesystem::w3_ts_a_relative_home_directory_is_used_as_given"
       ],
       "rust": [
         "src/adapters/environment.rs",
@@ -1370,10 +1374,13 @@
         "behavior": "Python walks newest to oldest and skips sessions whose first entry has isSidechain true. TypeScript resumes the newest listed session."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "Sidechain transcripts often have the newest mtime; skipping them resumes the user's conversation rather than a subagent's, as the CLI's own --continue does."
+        "kind": "follow-typescript",
+        "reason": "Both rules are exposed through SessionStoreOptions.dialect. TypeScript, the default, resumes the newest listed session even when it is a sidechain; the Python dialect walks past sidechains."
       },
-      "contracts": [],
+      "contracts": [
+        "session_store::latest_resume_skips_sidechains_and_materializes_the_newest_main_session",
+        "session_filesystem::s26_ts_latest_resume_takes_only_the_newest_listed_session"
+      ],
       "rust": [
         "src/session_resume.rs"
       ]
@@ -1403,7 +1410,10 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "session_failure_contracts::project_keys_use_native_paths_and_the_pinned_long_path_hash",
+        "session_project_key::project_key_matches_upstream_utf16_replacement"
+      ],
       "rust": [
         "src/session_project_key.rs"
       ]
@@ -1466,7 +1476,10 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "session_failure_contracts::resume_rejects_relative_configuration_and_requires_listing_for_latest",
+        "session_failure_contracts::ts_resume_accepts_relative_configuration_and_requires_listing_for_latest"
+      ],
       "rust": [
         "src/session_store.rs"
       ]

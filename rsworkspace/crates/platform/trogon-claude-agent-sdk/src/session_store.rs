@@ -109,9 +109,10 @@ pub struct SessionStoreLimits {
     pub max_retained_failures: Option<QueueCapacity>,
     pub max_pending_entries: NonZeroUsize,
     pub max_pending_bytes: NonZeroUsize,
-    pub max_resume_entries: NonZeroUsize,
-    pub max_resume_bytes: NonZeroUsize,
-    pub max_subkeys: QueueCapacity,
+    /// Opt-in hardening for a store-backed resume. Upstream imposes none, so every default is unlimited.
+    pub max_resume_entries: Option<NonZeroUsize>,
+    pub max_resume_bytes: Option<NonZeroUsize>,
+    pub max_subkeys: Option<QueueCapacity>,
     pub append_timeout: Timeout,
     /// Opt-in deadline for waiting on a transcript mirror flush. Upstream does not bound the flush beyond each
     /// append's own timeout, so `None` waits for it; a deadline fails the wait with
@@ -126,9 +127,9 @@ impl Default for SessionStoreLimits {
             max_retained_failures: None,
             max_pending_entries: NonZeroUsize::new(500).unwrap_or(NonZeroUsize::MIN),
             max_pending_bytes: NonZeroUsize::new(1024 * 1024).unwrap_or(NonZeroUsize::MIN),
-            max_resume_entries: NonZeroUsize::new(100_000).unwrap_or(NonZeroUsize::MIN),
-            max_resume_bytes: NonZeroUsize::new(64 * 1024 * 1024).unwrap_or(NonZeroUsize::MIN),
-            max_subkeys: QueueCapacity::default(),
+            max_resume_entries: None,
+            max_resume_bytes: None,
+            max_subkeys: None,
             append_timeout: Timeout::default(),
             flush_timeout: None,
             load_timeout: Timeout::default(),
@@ -167,6 +168,8 @@ pub struct SessionStoreOptions {
     pub limits: SessionStoreLimits,
     pub flush: SessionStoreFlush,
     pub size_estimate: MirrorSizeEstimate,
+    /// The upstream SDK whose resume rules apply. Defaults to the TypeScript SDK.
+    pub dialect: crate::SummaryDialect,
 }
 
 impl<S: SessionStore + 'static> From<Arc<S>> for SessionStoreOptions {
@@ -184,6 +187,7 @@ impl From<Arc<dyn SessionStore>> for SessionStoreOptions {
             limits: SessionStoreLimits::default(),
             flush: SessionStoreFlush::default(),
             size_estimate: MirrorSizeEstimate::default(),
+            dialect: crate::SummaryDialect::default(),
         }
     }
 }

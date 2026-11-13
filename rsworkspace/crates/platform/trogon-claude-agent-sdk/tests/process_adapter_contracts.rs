@@ -54,7 +54,14 @@ async fn native_environment_defaults_prepare_a_store_without_materializing_trans
     let directory = SystemEnvironment.current_dir()?;
     let store: InMemorySessionStore = InMemorySessionStore::default();
     let options = SessionStoreOptions::from(std::sync::Arc::new(store));
-    let runtime = SessionRuntime::prepare(&options, StoreResume::None, &directory, &Environment::default()).await?;
+    let runtime = SessionRuntime::prepare(
+        &options,
+        StoreResume::None,
+        &directory,
+        &Environment::default(),
+        Default::default(),
+    )
+    .await?;
     assert!(runtime.config_dir.is_none());
     assert!(runtime.projects_dir.is_absolute());
     assert!(runtime.materialized.is_none());

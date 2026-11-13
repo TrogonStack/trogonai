@@ -171,6 +171,15 @@ impl ClaudeSdkClient {
             process: &adapters.process,
             config_dir: session.as_ref().and_then(|session| session.config_dir.as_deref()),
             derived_debug_file: derived_debug_file.as_deref(),
+            secure_storage_config_dir: session.as_ref().and_then(|session| {
+                crate::session_resume::secure_storage_config_dir(
+                    session.materialized.is_some(),
+                    options.session_store.as_ref().map(|store| store.dialect),
+                    &options.env,
+                    &inherited,
+                    cfg!(windows),
+                )
+            }),
             closed: closed.clone(),
         })?;
         let version_check = (!crate::version_check::skip_requested(
@@ -300,6 +309,7 @@ impl ClaudeSdkClient {
             resume,
             cwd: &cwd,
             subprocess_environment: &options.env,
+            environment_mode: options.environment_mode,
             environment,
             process,
             filesystem,
