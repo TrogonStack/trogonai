@@ -1,0 +1,10 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "trogon-telemetry",
+    deps = [
+        "//rsworkspace/crates/platform/trogon-semconv",
+        "//rsworkspace/crates/platform/trogon-std",
+    ],
+    integration_tests = {"lifecycle": {}},
+)
