@@ -10,10 +10,24 @@
 //! Where JSON Schema cannot tell two zod schemas apart, the result is the one zod's own mapping makes
 //! most likely: a discriminated union is a plain union, `nullable` and a union with `null` are the same,
 //! `length(n)` is `min(n).max(n)`, regular expression flags are lost, and transforms and refinements are
-//! invisible. The Rust regular expression and URL engines stand in for the JavaScript ones.
+//! invisible. The tool author overrides each of these with the `x-trogon-*` keywords that
+//! `ValidationChoices::prepare` writes into a copy of the schema, which `tools/list` never sees; the
+//! choices are checked by `tests/fixtures/sdk_mcp/typescript_choices.json`. The Rust regular expression and
+//! URL engines stand in for the JavaScript ones.
 
-use crate::{JsonObject, constants, sdk_mcp_js::ordered_keys, sdk_mcp_regexp, sdk_mcp_zod_issue::Issue};
+use crate::{
+    JsonObject, constants,
+    sdk_mcp_choices::{SchemaCallback, StringCheckKind},
+    sdk_mcp_js::ordered_keys,
+    sdk_mcp_regexp,
+    sdk_mcp_zod_issue::Issue,
+};
 use serde_json::{Number, Value};
+use std::sync::Arc;
+
+/// The callbacks of a tool's validation choices, indexed by the `x-trogon-callback` keyword of the schema nodes
+/// they belong to.
+pub(crate) type Callbacks<'a> = &'a [Arc<SchemaCallback>];
 
 pub(crate) use crate::sdk_mcp_zod_run::{Input, run};
 
@@ -67,7 +81,7 @@ pub(crate) enum StringCheck {
     Pattern {
         source: String,
         format: String,
-        /// The flags of the `RegExp`, which the listed JSON Schema does not carry (`x-flags`).
+        /// The flags of the `RegExp`, which the listed JSON Schema does not carry (a validation choice).
         flags: String,
         matcher: Option<regress::Regex>,
     },
@@ -77,6 +91,8 @@ pub(crate) struct StringNode {
     pub(crate) min: Option<Bound>,
     pub(crate) max: Option<Bound>,
     pub(crate) exact: bool,
+    /// The declared order of the minimum, maximum and format checks.
+    pub(crate) order: [StringCheckKind; 3],
     pub(crate) check: StringCheck,
     pub(crate) base64: bool,
 }
@@ -122,12 +138,25 @@ pub(crate) enum Node {
     Catch(Box<Node>, Value),
     Nullable(Box<Node>),
     Union(Vec<Node>),
+    /// `z.discriminatedUnion`: the option whose literal matches the value under `key`.
+    Discriminated {
+        key: String,
+        options: Vec<(Vec<Value>, Node)>,
+    },
+    /// A schema with the user code of a `.refine` or `.transform`.
+    Callback(Box<Node>, Arc<SchemaCallback>),
     Text(StringNode),
     Numeric(NumberNode),
     Array(Box<ArrayNode>),
-    Tuple { items: Vec<Node>, rest: Option<Box<Node>> },
+    Tuple {
+        items: Vec<Node>,
+        rest: Option<Box<Node>>,
+    },
     Object(ObjectNode),
-    Record { key: Box<Node>, value: Box<Node> },
+    Record {
+        key: Box<Node>,
+        value: Box<Node>,
+    },
     RecordEnum(Vec<(String, Node)>),
 }
 
@@ -139,8 +168,8 @@ pub(crate) struct Parsed {
 
 impl Node {
     /// The zod schema a JSON Schema document stands for.
-    pub(crate) fn from_schema(schema: &Value) -> Self {
-        inner(schema)
+    pub(crate) fn from_schema(schema: &Value, callbacks: Callbacks<'_>) -> Self {
+        modeled(schema, callbacks)
     }
 
     /// `schema.safeParse(input)`.
@@ -153,8 +182,23 @@ impl Node {
     }
 }
 
-fn build(schema: &Value, required: bool) -> Node {
-    let node = inner(schema);
+/// The node of a schema together with the callback its choices attach to it.
+fn modeled(schema: &Value, callbacks: Callbacks<'_>) -> Node {
+    let node = inner(schema, callbacks);
+    let callback = schema
+        .as_object()
+        .and_then(|object| object.get("x-trogon-callback"))
+        .and_then(Value::as_u64)
+        .and_then(|index| usize::try_from(index).ok())
+        .and_then(|index| callbacks.get(index));
+    match callback {
+        Some(callback) => Node::Callback(Box::new(node), Arc::clone(callback)),
+        None => node,
+    }
+}
+
+fn build(schema: &Value, required: bool, callbacks: Callbacks<'_>) -> Node {
+    let node = modeled(schema, callbacks);
     match schema.as_object().and_then(|object| object.get("default")) {
         Some(default) if required => Node::Catch(Box::new(node), default.clone()),
         Some(default) => Node::Default(Box::new(node), default.clone()),
@@ -163,7 +207,7 @@ fn build(schema: &Value, required: bool) -> Node {
     }
 }
 
-fn inner(schema: &Value) -> Node {
+fn inner(schema: &Value, callbacks: Callbacks<'_>) -> Node {
     let Some(object) = schema.as_object() else {
         return Node::Any;
     };
@@ -175,14 +219,19 @@ fn inner(schema: &Value) -> Node {
         return Node::Never;
     }
     if let Some(options) = object.get("anyOf").and_then(Value::as_array) {
+        if let Some(key) = object.get("x-trogon-discriminator").and_then(Value::as_str)
+            && let Some(node) = discriminated(key, options, callbacks)
+        {
+            return node;
+        }
         if let [first, second] = options.as_slice()
             && second
                 .as_object()
                 .is_some_and(|only| only.len() == 1 && only.get("type").and_then(Value::as_str) == Some("null"))
         {
-            return Node::Nullable(Box::new(build(first, true)));
+            return null_or(build(first, true, callbacks), object);
         }
-        return Node::Union(options.iter().map(|option| build(option, true)).collect());
+        return Node::Union(options.iter().map(|option| build(option, true, callbacks)).collect());
     }
     if let Some(values) = object.get("enum").and_then(Value::as_array) {
         return Node::Literal(values.clone());
@@ -194,12 +243,12 @@ fn inner(schema: &Value) -> Node {
         let member = |kind: &Value| {
             let mut copy = object.clone();
             copy.insert("type".into(), kind.clone());
-            inner(&Value::Object(copy))
+            inner(&Value::Object(copy), callbacks)
         };
         if let [first, second] = types.as_slice()
             && second.as_str() == Some("null")
         {
-            return Node::Nullable(Box::new(member(first)));
+            return null_or(member(first), object);
         }
         return Node::Union(types.iter().map(member).collect());
     }
@@ -209,10 +258,49 @@ fn inner(schema: &Value) -> Node {
         Some("integer") => number(object, true),
         Some("boolean") => Node::Boolean,
         Some("null") => Node::Null,
-        Some("array") => array(object),
-        Some("object") => self::object(object),
+        Some("array") => array(object, callbacks),
+        Some("object") => self::object(object, callbacks),
         _ => Node::Any,
     }
+}
+
+/// `z.nullable(schema)`, or `z.union([schema, z.null()])` when the schema's choices say so.
+fn null_or(node: Node, schema: &JsonObject) -> Node {
+    if schema.contains_key("x-trogon-union-with-null") {
+        Node::Union(vec![node, Node::Null])
+    } else {
+        Node::Nullable(Box::new(node))
+    }
+}
+
+/// The literals a discriminator property of an option can take: a `const`, an `enum` or `null`.
+fn literals(property: &Value) -> Option<Vec<Value>> {
+    let property = property.as_object()?;
+    if let Some(constant) = property.get("const") {
+        return Some(vec![constant.clone()]);
+    }
+    if let Some(values) = property.get("enum").and_then(Value::as_array) {
+        return Some(values.clone());
+    }
+    (property.get("type").and_then(Value::as_str) == Some("null")).then(|| vec![Value::Null])
+}
+
+/// `z.discriminatedUnion(key, options)`; `None` when an option has no literal under the key.
+fn discriminated(key: &str, options: &[Value], callbacks: Callbacks<'_>) -> Option<Node> {
+    let mut built = Vec::with_capacity(options.len());
+    for option in options {
+        let values = option
+            .as_object()
+            .and_then(|object| object.get("properties"))
+            .and_then(Value::as_object)
+            .and_then(|properties| properties.get(key))
+            .and_then(literals)?;
+        built.push((values, build(option, true, callbacks)));
+    }
+    Some(Node::Discriminated {
+        key: key.to_owned(),
+        options: built,
+    })
 }
 
 /// `text.replace(/\\(.)/g, "$1")`: the text a derived pattern escapes.
@@ -238,7 +326,7 @@ fn has_line_terminator(text: &str) -> bool {
 fn string(schema: &JsonObject) -> Node {
     let min = Bound::of(schema, "minLength");
     let max = Bound::of(schema, "maxLength");
-    let exact = matches!((&min, &max), (Some(low), Some(high)) if low.value == high.value);
+    let exact = is_exact(min.as_ref(), max.as_ref(), schema);
     let pattern = schema.get("pattern").and_then(Value::as_str);
     let format = schema.get("format").and_then(Value::as_str);
     let mut check = StringCheck::None;
@@ -279,6 +367,7 @@ fn string(schema: &JsonObject) -> Node {
                     flags,
                     source: pattern.to_owned(),
                     format: match format {
+                        None if schema.contains_key("x-trogon-iso-time") => "time",
                         None => "regex",
                         Some("date-time") => "datetime",
                         Some(other) => other,
@@ -293,15 +382,50 @@ fn string(schema: &JsonObject) -> Node {
         min,
         max,
         exact,
+        order: check_order(schema),
         check,
         base64: schema.get("x-refine").and_then(Value::as_str) == Some("atob"),
     })
 }
 
-/// The flags of the `RegExp` behind a pattern. The JSON Schema zod lists drops them, so the `x-flags`
-/// keyword names them; without it only the flags zod itself gives a format's regex apply (`u` for emoji).
+/// `.length(n)` rather than `.min(n).max(n)`: equal bounds, unless the choices say they were declared apart.
+fn is_exact(min: Option<&Bound>, max: Option<&Bound>, schema: &JsonObject) -> bool {
+    !schema.contains_key("x-trogon-min-max") && matches!((min, max), (Some(low), Some(high)) if low.value == high.value)
+}
+
+/// The declared order of the checks of a string: minimum, maximum, then the format, unless the choices name it.
+fn check_order(schema: &JsonObject) -> [StringCheckKind; 3] {
+    const DEFAULT: [StringCheckKind; 3] = [
+        StringCheckKind::Minimum,
+        StringCheckKind::Maximum,
+        StringCheckKind::Format,
+    ];
+    let named: Vec<StringCheckKind> = schema
+        .get("x-trogon-check-order")
+        .and_then(Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(|name| match name.as_str() {
+                    Some("minimum") => Some(StringCheckKind::Minimum),
+                    Some("maximum") => Some(StringCheckKind::Maximum),
+                    Some("format") => Some(StringCheckKind::Format),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    match named.as_slice() {
+        [first, second, third] => [*first, *second, *third],
+        _ => DEFAULT,
+    }
+}
+
+/// The flags of the `RegExp` behind a pattern. The JSON Schema zod lists drops them, so a validation choice
+/// names them (`x-trogon-flags`); without one only the flags zod itself gives a format's regex apply (`u` for
+/// emoji).
 fn regexp_flags(schema: &JsonObject, format: Option<&str>) -> String {
-    match schema.get("x-flags").and_then(Value::as_str) {
+    match schema.get("x-trogon-flags").and_then(Value::as_str) {
         Some(flags) => flags.to_owned(),
         None if format == Some("emoji") => "u".to_owned(),
         None => String::new(),
@@ -316,7 +440,7 @@ fn number(schema: &JsonObject, integer: bool) -> Node {
         Bound::integer(-constants::JS_MAX_SAFE_INTEGER),
         Bound::integer(constants::JS_MAX_SAFE_INTEGER),
     );
-    if integer {
+    if integer && !schema.contains_key("x-trogon-bounded-integer") {
         let bounds = (
             min.as_ref().map(|bound| bound.value),
             max.as_ref().map(|bound| bound.value),
@@ -350,22 +474,22 @@ fn number(schema: &JsonObject, integer: bool) -> Node {
     })
 }
 
-fn array(schema: &JsonObject) -> Node {
+fn array(schema: &JsonObject, callbacks: Callbacks<'_>) -> Node {
     if let Some(items) = schema.get("items").and_then(Value::as_array) {
         return Node::Tuple {
-            items: items.iter().map(|item| build(item, true)).collect(),
+            items: items.iter().map(|item| build(item, true, callbacks)).collect(),
             rest: schema
                 .get("additionalItems")
                 .filter(|rest| rest.is_object())
-                .map(|rest| Box::new(build(rest, true))),
+                .map(|rest| Box::new(build(rest, true, callbacks))),
         };
     }
     let min = Bound::of(schema, "minItems");
     let max = Bound::of(schema, "maxItems");
-    let exact = matches!((&min, &max), (Some(low), Some(high)) if low.value == high.value);
+    let exact = is_exact(min.as_ref(), max.as_ref(), schema);
     let element = match schema.get("items") {
-        Some(items) if items.is_object() => build(items, true),
-        _ => build(&Value::Object(JsonObject::new()), true),
+        Some(items) if items.is_object() => build(items, true, callbacks),
+        _ => build(&Value::Object(JsonObject::new()), true, callbacks),
     };
     Node::Array(Box::new(ArrayNode {
         element,
@@ -375,7 +499,7 @@ fn array(schema: &JsonObject) -> Node {
     }))
 }
 
-fn object(schema: &JsonObject) -> Node {
+fn object(schema: &JsonObject, callbacks: Callbacks<'_>) -> Node {
     let required: Vec<&str> = schema
         .get("required")
         .and_then(Value::as_array)
@@ -392,13 +516,13 @@ fn object(schema: &JsonObject) -> Node {
             return Node::RecordEnum(
                 keys.iter()
                     .filter_map(Value::as_str)
-                    .map(|key| (key.to_owned(), build(&value, required.contains(&key))))
+                    .map(|key| (key.to_owned(), build(&value, required.contains(&key), callbacks)))
                     .collect(),
             );
         }
         return Node::Record {
-            key: Box::new(inner(&Value::Object(names.clone()))),
-            value: Box::new(build(&value, true)),
+            key: Box::new(modeled(&Value::Object(names.clone()), callbacks)),
+            value: Box::new(build(&value, true, callbacks)),
         };
     }
     let properties = match schema.get("properties").and_then(Value::as_object) {
@@ -408,7 +532,7 @@ fn object(schema: &JsonObject) -> Node {
                 let is_required = required.contains(&key.as_str());
                 properties
                     .get(key)
-                    .map(|property| (key.clone(), build(property, is_required), is_required))
+                    .map(|property| (key.clone(), build(property, is_required, callbacks), is_required))
             })
             .collect(),
         None => Vec::new(),
@@ -416,7 +540,7 @@ fn object(schema: &JsonObject) -> Node {
     let mode = match additional {
         Some(Value::Bool(false)) => ObjectMode::Strict,
         Some(Value::Object(catchall)) if catchall.is_empty() => ObjectMode::Catchall(Node::Any),
-        Some(catchall @ Value::Object(_)) => ObjectMode::Catchall(build(catchall, true)),
+        Some(catchall @ Value::Object(_)) => ObjectMode::Catchall(build(catchall, true, callbacks)),
         _ => ObjectMode::Strip,
     };
     Node::Object(ObjectNode { properties, mode })
@@ -429,7 +553,7 @@ static CALL_TOOL_RESULT: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|
 });
 
 static CALL_TOOL_RESULT_NODE: std::sync::LazyLock<Node> =
-    std::sync::LazyLock::new(|| Node::from_schema(&CALL_TOOL_RESULT));
+    std::sync::LazyLock::new(|| Node::from_schema(&CALL_TOOL_RESULT, &[]));
 
 static META_NODE: std::sync::LazyLock<Node> = std::sync::LazyLock::new(|| {
     Node::from_schema(
@@ -437,6 +561,7 @@ static META_NODE: std::sync::LazyLock<Node> = std::sync::LazyLock::new(|| {
             .get("properties")
             .and_then(|properties| properties.get("_meta"))
             .unwrap_or(&Value::Null),
+        &[],
     )
 });
 
