@@ -30,8 +30,15 @@ workspace_crate(
         "tests/fixtures/probe_ts/*.jsonl",
     ]),
     crate_features = ["test-support"],
-    # resolve_settings_differential reads its fixture tree through
-    # CARGO_MANIFEST_DIR at run time, so it runs only under Cargo.
+    examples = {
+        "connect": {},
+        "feature_connect": {"compile_data": glob(["examples/support/*.rs"])},
+        "hooks": {},
+        "mcp_connect": {"compile_data": glob(["examples/support/*.rs"])},
+        "query": {},
+        "sdk_tools": {"compile_data": glob(["examples/support/*.rs"])},
+        "session_store": {},
+    },
     integration_tests = {
         "additional_directories": {},
         "agent": {},
@@ -84,6 +91,11 @@ workspace_crate(
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
         "queue_capacity": {},
+        "resolve_settings_differential": {
+            "compile_data": glob(["tests/support/*.rs"]),
+            "data": [".config/mise/lib/claude-sdk-freshness/resolve_settings_oracle.mjs"] + glob(["tests/fixtures/resolve_settings/**"]),
+            "rustc_env": {"CLAUDE_SDK_CRATE_DIR": package_name()},
+        },
         "result_message": {},
         "resume": {},
         "runtime_adapters": {
