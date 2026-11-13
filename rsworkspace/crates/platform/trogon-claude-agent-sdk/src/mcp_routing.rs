@@ -1,6 +1,6 @@
 //! How each SDK routes an `mcp_message` control request to its in-process MCP servers.
 
-use crate::JsonObject;
+use crate::{JsRuntime, JsonObject};
 use serde_json::Value;
 
 /// `sdk.mjs` `L8`: a message with a `method` and a non-null `id` waits for the server's response; anything else
@@ -62,12 +62,16 @@ pub(crate) fn js_string(value: Option<&Value>) -> String {
     }
 }
 
-/// The `TypeError` V8 raises for `"method" in value` when the value is not an object.
-pub(crate) fn typescript_not_an_object(value: Option<&Value>) -> String {
-    format!(
-        "Cannot use 'in' operator to search for 'method' in {}",
-        js_string(value)
-    )
+/// The `TypeError` the runtime raises for `"method" in value` when the value is not an object: V8 names the
+/// value, JavaScriptCore names the bundled parameter `e` whatever the value is.
+pub(crate) fn typescript_not_an_object(value: Option<&Value>, runtime: JsRuntime) -> String {
+    match runtime {
+        JsRuntime::Node => format!(
+            "Cannot use 'in' operator to search for 'method' in {}",
+            js_string(value)
+        ),
+        JsRuntime::Bun => "e is not an Object. (evaluating '\"method\" in e')".to_owned(),
+    }
 }
 
 #[cfg(test)]

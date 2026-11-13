@@ -1753,6 +1753,14 @@
           "name": "js_string_matches_the_javascript_string_conversion"
         },
         {
+          "path": "src/mcp_routing_tests.rs",
+          "name": "typescript_not_an_object_names_the_bundled_parameter_like_javascriptcore"
+        },
+        {
+          "path": "tests/runtime_failure_contracts.rs",
+          "name": "mcp_message_reports_a_non_object_message_like_bun"
+        },
+        {
           "path": "src/sdk_mcp_server_tests.rs",
           "name": "server_retains_initialize_and_runs_typed_tool"
         },

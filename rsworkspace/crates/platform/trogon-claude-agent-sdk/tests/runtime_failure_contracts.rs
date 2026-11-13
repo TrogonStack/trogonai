@@ -26,12 +26,12 @@ use tokio::{
 use trogon_claude_agent_sdk::{
     AgentName, ArgvStyle, CallbackError, CancellationToken, ClaudeAgentOptions, ClaudeSdkClient, Content, ContentBlock,
     ContinueConversation, Customizations, DialogKind, ElicitationMode, ElicitationRequest, ElicitationResponse, Error,
-    HookEvent, HookFailureMode, HookRegistration, HookRequest, JsonObject, LocalMcpServer, LocalMcpServerOptions,
-    McpFuture, McpRemoteServerOptions, McpServerDialect, McpServerName, McpServerOptions, McpServers, Message,
-    MessageId, PermissionDecision, Prompt, ProtocolError, QueueCapacity, ResultStatus, SdkMcpServer, SdkMcpServers,
-    SdkMcpSession, SessionEntry, SessionError, SessionFork, SessionKey, SessionPersistence, SessionProjectKey,
-    SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreOptions, SystemPrompt, Timeout,
-    ToolPermissionRequest, ToolResultStatus, UserDialogRequest, UserInput,
+    HookEvent, HookFailureMode, HookRegistration, HookRequest, JsRuntime, JsonObject, LocalMcpServer,
+    LocalMcpServerOptions, McpFuture, McpRemoteServerOptions, McpServerDialect, McpServerName, McpServerOptions,
+    McpServers, Message, MessageId, PermissionDecision, Prompt, ProtocolError, QueueCapacity, ResultStatus,
+    SdkMcpServer, SdkMcpServers, SdkMcpSession, SessionEntry, SessionError, SessionFork, SessionKey,
+    SessionPersistence, SessionProjectKey, SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreOptions,
+    SystemPrompt, Timeout, ToolPermissionRequest, ToolResultStatus, UserDialogRequest, UserInput,
     adapters::{NativeFileSystem, RuntimeAdapters, SpawnProcess, TokioProcessSpawner},
     query_turn_with_adapters, query_with_adapters,
     test_support::FixedEnvironment,
@@ -691,6 +691,33 @@ async fn mcp_message_routes_like_the_typescript_query() -> TestResult {
     assert_eq!(after["response"]["mcp_response"]["id"], 7);
     cli.send(json!({"type":"control_cancel_request","request_id":"silent"}))
         .await?;
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// Under Bun, JavaScriptCore words the `TypeError` for a `message` that is not an object after the bundled
+/// parameter, so every such value fails with the same text.
+#[tokio::test]
+async fn mcp_message_reports_a_non_object_message_like_bun() -> TestResult {
+    let mut configured = options()?;
+    configured.js_runtime = JsRuntime::Bun;
+    configured.sdk_mcp_servers.insert(
+        McpServerName::from("local"),
+        local_mcp_server(McpServerDialect::TypeScript),
+    );
+    let (client, mut cli) = connect(configured).await?;
+    for request in [
+        json!({"server_name":"local"}),
+        json!({"server_name":"local","message":"text"}),
+        json!({"server_name":"local","message":7}),
+    ] {
+        let response = mcp_message(&mut cli, "failed", request).await?;
+        assert_eq!(response["subtype"], "error");
+        assert_eq!(response["error"], "e is not an Object. (evaluating '\"method\" in e')");
+    }
+    let ping = json!({"jsonrpc":"2.0","id":7,"method":"ping"});
+    let missing = mcp_message(&mut cli, "missing", json!({"server_name":"missing","message":ping})).await?;
+    assert_eq!(missing["error"], "SDK MCP server not found: missing");
     cli.disconnect(client).await?;
     Ok(())
 }
