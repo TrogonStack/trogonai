@@ -246,7 +246,7 @@ async fn connected_client_exposes_cached_lossless_metadata() -> TestResult {
         client.connection_info().hook_on_failure_supported,
         FeatureSupport::NotReported
     );
-    assert!(client.connection_info().as_json().is_empty());
+    assert_eq!(client.connection_info().as_json(), &serde_json::json!({}));
     client.disconnect().await?;
     Ok(())
 }
@@ -534,12 +534,15 @@ async fn missing_control_reply_times_out() -> TestResult {
 }
 
 #[tokio::test]
-async fn malformed_initialization_is_rejected() -> TestResult {
-    for mode in ["init-malformed", "init-malformed-known"] {
-        assert!(matches!(
-            ClaudeSdkClient::connect(options(mode)?).await,
-            Err(Error::Protocol(_) | Error::MessageParse(_))
-        ));
+async fn malformed_initialization_is_accepted_like_upstream() -> TestResult {
+    for (mode, raw) in [
+        ("init-malformed", serde_json::json!(42)),
+        ("init-malformed-known", serde_json::json!({"models":"invalid"})),
+    ] {
+        let client = ClaudeSdkClient::connect(options(mode)?).await?;
+        assert!(client.connection_info().models.is_empty());
+        assert_eq!(client.connection_info().as_json(), &raw);
+        client.disconnect().await?;
     }
     Ok(())
 }

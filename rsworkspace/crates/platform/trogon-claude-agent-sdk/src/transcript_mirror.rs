@@ -233,48 +233,12 @@ fn encoded_len(entries: &[SessionEntry], estimate: MirrorSizeEstimate) -> usize 
         MirrorSizeEstimate::TypeScript => serde_json::to_string(&objects).map_or(0, |text| text.encode_utf16().count()),
         MirrorSizeEstimate::Python => {
             let mut out = Vec::new();
-            let mut serializer = serde_json::Serializer::with_formatter(&mut out, PythonFormatter);
+            let mut serializer = serde_json::Serializer::with_formatter(&mut out, crate::python_json::PythonFormatter);
             match serde::Serialize::serialize(&objects, &mut serializer) {
                 Ok(()) => out.len(),
                 Err(_) => 0,
             }
         }
-    }
-}
-
-/// `json.dumps` defaults: `", "` and `": "` separators with every non-ASCII character escaped as `\uXXXX`.
-struct PythonFormatter;
-
-impl serde_json::ser::Formatter for PythonFormatter {
-    fn begin_array_value<W: ?Sized + std::io::Write>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()> {
-        if first { Ok(()) } else { writer.write_all(b", ") }
-    }
-
-    fn begin_object_key<W: ?Sized + std::io::Write>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()> {
-        if first { Ok(()) } else { writer.write_all(b", ") }
-    }
-
-    fn begin_object_value<W: ?Sized + std::io::Write>(&mut self, writer: &mut W) -> std::io::Result<()> {
-        writer.write_all(b": ")
-    }
-
-    fn write_string_fragment<W: ?Sized + std::io::Write>(
-        &mut self,
-        writer: &mut W,
-        fragment: &str,
-    ) -> std::io::Result<()> {
-        for ch in fragment.chars() {
-            if ch.is_ascii() {
-                let mut buf = [0_u8; 4];
-                writer.write_all(ch.encode_utf8(&mut buf).as_bytes())?;
-            } else {
-                let mut units = [0_u16; 2];
-                for unit in ch.encode_utf16(&mut units) {
-                    write!(writer, "\\u{unit:04x}")?;
-                }
-            }
-        }
-        Ok(())
     }
 }
 

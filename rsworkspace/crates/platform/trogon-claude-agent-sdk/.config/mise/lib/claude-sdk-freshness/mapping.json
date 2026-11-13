@@ -731,7 +731,11 @@
       "rust_api": [
         "ClaudeSdkClient.connection_info",
         "ConnectionInfo",
-        "ConnectionInfo.as_json"
+        "ConnectionInfo.from_json",
+        "ConnectionInfo.as_json",
+        "FeatureSupport",
+        "ArgvStyle",
+        "Error.typescript_message"
       ],
       "tests": [
         {
@@ -740,11 +744,51 @@
         },
         {
           "path": "tests/subprocess.rs",
-          "name": "malformed_initialization_is_rejected"
+          "name": "malformed_initialization_is_accepted_like_upstream"
+        },
+        {
+          "path": "tests/control_values.rs",
+          "name": "connection_info_defaults_omitted_fields_and_reads_malformed_ones_as_absent"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "typescript_initialize_matches_sdk_mjs_bytes"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "typescript_default_initialize_matches_sdk_mjs_bytes"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "python_initialize_matches_claude_agent_sdk_bytes"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "python_default_initialize_sends_null_hooks"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "dialog_kinds_without_a_handler_are_refused_before_initialize"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "blocking_hooks_need_on_failure_support"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "hooks_that_were_not_applied_are_refused"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "hooks_applied_false_only_matters_for_blocking_hooks"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "a_non_object_initialize_response_is_kept_in_typescript_and_empty_in_python"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust exposes a cached, typed connection snapshot with capability flags and lossless raw metadata; not every upstream convenience projection is modeled."
+      "status": "supported",
+      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning."
     },
     {
       "id": "budget",

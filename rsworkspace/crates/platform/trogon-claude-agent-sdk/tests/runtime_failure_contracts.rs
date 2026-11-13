@@ -1114,10 +1114,8 @@ async fn owner_disposal_interrupts_a_backpressured_write() -> TestResult {
 }
 
 #[tokio::test]
-async fn a_declared_dialog_without_a_handler_does_not_emit_a_response() -> TestResult {
-    let mut configured = options()?;
-    configured.supported_dialog_kinds = vec![DialogKind::from("fixture")];
-    let (client, mut cli) = connect(configured).await?;
+async fn a_dialog_without_a_handler_does_not_emit_a_response() -> TestResult {
+    let (client, mut cli) = connect(options()?).await?;
     cli.send(json!({"type":"control_request","request_id":"ignored","request":{"subtype":"request_user_dialog","dialog_kind":"fixture","payload":{}}})).await?;
     let handle = client.handle();
     let control = tokio::spawn(async move { handle.set_model(None).await });
