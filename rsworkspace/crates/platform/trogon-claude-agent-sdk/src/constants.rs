@@ -50,9 +50,6 @@ pub(crate) const CLIENT_APP_ENV: &str = "CLAUDE_AGENT_SDK_CLIENT_APP";
 
 pub(crate) const DERIVED_CLIENT_APP_ENV: &str = "CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP";
 
-/// Python `DERIVED_CLIENT_APP_MINIMUM_CLAUDE_CODE_VERSION`.
-pub(crate) const DERIVED_CLIENT_APP_MINIMUM_VERSION: [u64; 3] = [999, 0, 0];
-
 /// Inherited variables the plan consults. Captured through the environment adapter before spawning.
 pub(crate) const INHERITED_KEYS: &[&str] = &[
     "CLAUDE_CODE_ENTRYPOINT",

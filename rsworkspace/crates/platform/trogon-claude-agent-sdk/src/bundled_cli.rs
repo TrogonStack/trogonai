@@ -11,6 +11,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use unicode_general_category::{GeneralCategory, get_general_category};
+
 use crate::{
     adapters::{CanonicalizePath, ReadFile, ReadMetadata},
     constants::{
@@ -31,17 +33,39 @@ pub fn find_bundled_cli<F: ReadMetadata>(package_root: &Path, windows: bool, fil
     is_file(filesystem, &candidate).then_some(candidate)
 }
 
+fn is_decimal(c: char) -> bool {
+    get_general_category(c) == GeneralCategory::DecimalNumber
+}
+
+/// The value Python's `int` gives a Unicode `Nd` digit. Every script's digits sit in runs of ten consecutive code
+/// points that start at zero, so the value is the offset from the start of the contiguous `Nd` block modulo ten.
+fn decimal_value(c: char) -> u32 {
+    let mut offset = 0;
+    let mut cursor = c;
+    while let Some(previous) = (cursor as u32)
+        .checked_sub(1)
+        .and_then(char::from_u32)
+        .filter(|previous| is_decimal(*previous))
+    {
+        offset += 1;
+        cursor = previous;
+    }
+    offset % 10
+}
+
 /// The leading `major.minor.patch` of a version string, like Python's `re.match(r"(\d{1,9})\.(\d{1,9})\.(\d{1,9})")`:
 /// anchored at the start, nothing is required after the patch number and a patch run longer than nine digits is
-/// cut at nine. Only ASCII digits count, where `\d` also accepts other Unicode decimal digits.
+/// cut at nine. Python's `\d` is any Unicode `Nd` digit and `int` reads every one of them.
 fn leading_version(version: &str) -> Option<[u32; 3]> {
     fn number(text: &str, exact: bool) -> Option<(u32, &str)> {
-        let digits = text.bytes().take_while(u8::is_ascii_digit).count();
+        let digits = text.chars().take_while(|c| is_decimal(*c)).count();
         let take = if exact { digits } else { digits.min(9) };
         if take == 0 || take > 9 {
             return None;
         }
-        text[..take].parse().ok().map(|value| (value, &text[take..]))
+        let (taken, rest) = text.split_at(text.chars().take(take).map(char::len_utf8).sum());
+        let value = taken.chars().fold(0, |value, c| value * 10 + decimal_value(c));
+        Some((value, rest))
     }
     let (major, rest) = number(version, true)?;
     let (minor, rest) = number(rest.strip_prefix('.')?, true)?;
@@ -61,8 +85,8 @@ pub fn meets_derived_client_app_minimum(version: &str) -> bool {
 /// under `package_root`, and the `claude.version` file beside it records a version that meets the minimum. A
 /// missing or unreadable record, or one that is not UTF-8, means no. Any other executable counts as too old.
 ///
-/// TypeScript has neither the gate nor the trigger, so `connect` does not call this; the caller that derives
-/// the label asks here when it uses the bundled executable.
+/// TypeScript has neither the gate nor the trigger, so `connect` calls this only when
+/// `ClaudeAgentOptions::client_app_derivation` names a [`crate::BundledCli`].
 pub fn bundled_cli_derives_client_app<F: ReadMetadata, H: ReadFile>(
     cli_path: &Path,
     package_root: &Path,

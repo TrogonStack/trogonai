@@ -5,18 +5,20 @@
 
 use std::path::{Path, PathBuf};
 
-use unicode_general_category::{GeneralCategory, get_general_category};
-
 use crate::{
+    adapters::{NativeFileSystem, NativeHost},
+    bundled_cli::bundled_cli_derives_client_app,
     client_app::format_client_app,
-    constants::{BUNDLED_CLI_VERSION_FILE, DERIVED_CLIENT_APP_MINIMUM_VERSION, SDK_PACKAGE_NAME, SDK_VERSION},
+    constants::{SDK_PACKAGE_NAME, SDK_VERSION},
 };
 
-/// A Claude Code executable the application ships beside a `claude.version` record, Python's `_bundled` CLI.
+/// The Claude Code executable the application ships in a `_bundled` directory with a `claude.version` record,
+/// Python's bundled CLI.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BundledCli {
-    /// Where the bundled executable lives. The version record is the sibling file `claude.version`.
-    pub path: PathBuf,
+    /// The directory that holds `_bundled`, Python's package directory. Only the executable that
+    /// [`crate::find_bundled_cli`] finds there qualifies.
+    pub package_root: PathBuf,
     /// Python `__cli_version__`, the version of the CLI this build bundles. Below the minimum nothing reads the disk.
     pub pinned_version: String,
 }
@@ -33,44 +35,6 @@ pub enum ClientAppDerivation {
     Bundled(BundledCli),
 }
 
-fn is_decimal(c: char) -> bool {
-    get_general_category(c) == GeneralCategory::DecimalNumber
-}
-
-/// The decimal value Python's `int` gives a Unicode `Nd` digit. Each script's digits sit in runs of ten
-/// consecutive code points, so the value is the offset from the start of the contiguous `Nd` block modulo ten.
-fn decimal_value(c: char) -> u64 {
-    let mut offset = 0u64;
-    let mut cursor = c as u32;
-    while let Some(previous) = cursor
-        .checked_sub(1)
-        .and_then(char::from_u32)
-        .filter(|p| is_decimal(*p))
-    {
-        offset += 1;
-        cursor = previous as u32;
-    }
-    offset % 10
-}
-
-/// Python `_meets_derived_client_app_minimum`: `re.match(r"(\d{1,9})\.(\d{1,9})\.(\d{1,9})")` then a numeric
-/// compare. Python's `\d` is any Unicode `Nd` digit and `int` reads them all.
-pub(crate) fn meets_derived_minimum(version: &str) -> bool {
-    fn number(text: &str) -> Option<(u64, &str)> {
-        let digits: Vec<char> = text.chars().take_while(|c| is_decimal(*c)).collect();
-        if digits.is_empty() || digits.len() > 9 {
-            return None;
-        }
-        let width: usize = digits.iter().map(|c| c.len_utf8()).sum();
-        let value = digits.iter().fold(0u64, |acc, c| acc * 10 + decimal_value(*c));
-        Some((value, &text[width..]))
-    }
-    let parsed = number(version)
-        .and_then(|(major, rest)| Some((major, number(rest.strip_prefix('.')?)?)))
-        .and_then(|(major, (minor, rest))| Some((major, minor, number(rest.strip_prefix('.')?)?.0)));
-    parsed.is_some_and(|(major, minor, patch)| [major, minor, patch] >= DERIVED_CLIENT_APP_MINIMUM_VERSION)
-}
-
 /// Python `_derive_client_app`: only the bundled CLI qualifies, and only when both the pin and the recorded
 /// version meet the minimum. A failure to read the record is no label, never an error. The caller decides whether
 /// an explicit label already exists, which Python checks before deriving.
@@ -78,14 +42,16 @@ pub(crate) fn derive(derivation: &ClientAppDerivation, cli_path: &Path) -> Optio
     let ClientAppDerivation::Bundled(bundled) = derivation else {
         return None;
     };
-    if !meets_derived_minimum(&bundled.pinned_version) || cli_path != bundled.path {
-        return None;
-    }
-    let record = std::fs::read_to_string(bundled.path.with_file_name(BUNDLED_CLI_VERSION_FILE)).ok()?;
-    if !meets_derived_minimum(&record) {
-        return None;
-    }
-    format_client_app(SDK_PACKAGE_NAME, Some(SDK_VERSION))
+    bundled_cli_derives_client_app(
+        cli_path,
+        &bundled.package_root,
+        cfg!(windows),
+        &bundled.pinned_version,
+        &NativeFileSystem,
+        &NativeHost,
+    )
+    .then(|| format_client_app(SDK_PACKAGE_NAME, Some(SDK_VERSION)))
+    .flatten()
 }
 
 #[cfg(test)]

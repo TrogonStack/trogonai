@@ -442,12 +442,17 @@ fn derived_label_in(options: &ClaudeAgentOptions, inherited: &Inherited, cli: &s
 fn a_derived_client_app_reaches_the_overlay_environment_unless_a_label_exists() -> Result<(), Box<dyn std::error::Error>>
 {
     let root = tempfile::tempdir()?;
-    let cli = root.path().join("claude");
-    std::fs::write(root.path().join("claude.version"), "999.0.0")?;
+    std::fs::create_dir(root.path().join("_bundled"))?;
+    let cli = root
+        .path()
+        .join("_bundled")
+        .join(if cfg!(windows) { "claude.exe" } else { "claude" });
+    std::fs::write(&cli, "")?;
+    std::fs::write(cli.with_file_name("claude.version"), "999.0.0")?;
     let derived = ClaudeAgentOptions {
         environment_mode: crate::EnvironmentMode::Overlay,
         client_app_derivation: crate::ClientAppDerivation::Bundled(crate::BundledCli {
-            path: cli.clone(),
+            package_root: root.path().to_path_buf(),
             pinned_version: "999.0.0".to_owned(),
         }),
         ..ClaudeAgentOptions::default()

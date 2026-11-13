@@ -211,7 +211,8 @@ the stdin `initialize` bytes).
   `bundled_cli_derives_client_app` and `meets_derived_client_app_minimum` port
   Python's version gate for deriving an app label (the pinned CLI version and the
   `claude.version` record beside the bundled binary must both be `999.0.0` or
-  later); `connect` follows TypeScript and does not call them.
+  later); `connect` asks them only through the Python dialect
+  `client_app_derivation` option and otherwise follows TypeScript.
   `find_native_cli` ports TypeScript's platform package selection
   (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`, musl before glibc on musl
   Linux, `-android` packages, `.exe` on win32) over a `ResolveNodeModule`
@@ -260,8 +261,9 @@ the stdin `initialize` bytes).
 - `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` is removed from the child environment.
   `ClaudeAgentOptions::client_app_derivation` (Python dialect, off by default
   like TypeScript) sets it with Python's trigger: the resolved `cli_path` is the
-  `BundledCli` path, its `pinned_version` and the `claude.version` file beside
-  it are both `999.0.0` or later, and no explicit `CLAUDE_AGENT_SDK_CLIENT_APP`
+  executable `find_bundled_cli` finds under the `BundledCli` package root, its
+  `pinned_version` and the `claude.version` file beside it are both `999.0.0`
+  or later, and no explicit `CLAUDE_AGENT_SDK_CLIENT_APP`
   exists in `client_app`, `env` or the inherited environment. The value is
   `name/version` for this crate, standing in for the Python distribution
   metadata Rust does not have.
