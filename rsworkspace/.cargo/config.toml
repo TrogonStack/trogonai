@@ -1,12 +1,14 @@
 [alias]
-# Codegen output (buf protobuf bindings, Weaver semconv) is not code this workspace
-# writes, so it stays out of the coverage gate.
+# Codegen output (buf protobuf bindings, Weaver semconv, the Claude agent SDK types
+# generated from the pinned upstream schemas) is not code this workspace writes, so it
+# stays out of the coverage gate. The hand-written files beside the generated SDK types
+# stay in.
 cov = [
     "llvm-cov",
     "--all-features",
     "--workspace",
     "--ignore-filename-regex",
-    "/src/gen/",
+    '/src/gen/|/trogon-claude-agent-sdk/src/upstream/(messages|settings|settings_resolution|tool_inputs|tool_outputs)\.rs$',
 ]
 
 [target.wasm32-wasip2]
