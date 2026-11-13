@@ -559,6 +559,8 @@ fn receipt(subtype: &str) -> Message {
         subtype: subtype.into(),
         session_id: None,
         data: JsonObject::new(),
+        event: crate::SystemEvent::Other,
+        raw: JsonObject::new(),
     })
 }
 
