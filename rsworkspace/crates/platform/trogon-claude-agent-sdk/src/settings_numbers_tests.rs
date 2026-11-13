@@ -2,8 +2,8 @@
 
 use serde_json::Value;
 
-use super::{finite_number, normalize_numbers};
-use crate::settings_dialect::SettingsDialect;
+use super::{PythonNumbers, finite_number, normalize_numbers, python_number, same_value_zero};
+use crate::{python_json_value::PythonNumber, settings_dialect::SettingsDialect};
 
 fn printed(text: &str, dialect: SettingsDialect) -> String {
     let mut value: Value = serde_json::from_str(text).expect("json");
@@ -90,4 +90,17 @@ fn a_finite_double_never_reads_back_as_an_infinity() {
     );
     assert_eq!(finite_number(1.5), Value::from(1.5));
     assert_eq!(finite_number(f64::NAN), Value::Null);
+}
+
+#[test]
+fn a_set_keeps_one_of_each_number_by_the_double_it_stands_for() {
+    let _numbers = PythonNumbers::start();
+    let nan = python_number(PythonNumber::Float(f64::NAN));
+    let one = python_number(PythonNumber::Float(1.0));
+    assert!(same_value_zero(&nan, &python_number(PythonNumber::Float(f64::NAN))));
+    assert!(same_value_zero(&one, &Value::from(1)));
+    assert!(same_value_zero(&Value::from(0), &Value::from(-0.0)));
+    assert!(!same_value_zero(&one, &Value::from(2)));
+    assert!(!same_value_zero(&Value::from(1), &Value::from("1")));
+    assert!(same_value_zero(&Value::from("a"), &Value::from("a")));
 }

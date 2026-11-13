@@ -8,18 +8,21 @@ use std::cell::Cell;
 use serde::de::{DeserializeSeed, Deserializer, Error, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value};
 
-use crate::settings_numbers::{finite_number, infinity, is_marker_value};
+use crate::{
+    json_scan::{Token, overflows, scan},
+    settings_numbers::{finite_number, infinity, is_marker_value},
+};
 
 /// `JSON.parse(text)`, reading a number past the double range as an infinity.
 pub(crate) fn parse_json(text: &str) -> Result<Value, serde_json::Error> {
-    let (spelled, tokens, holds_marker_value) = number_tokens(text);
-    if !holds_marker_value && tokens.iter().all(Option::is_none) {
+    let scanned = scan(text, false);
+    if !scanned.respelled && !scanned.tokens.iter().any(holds_marker_value) {
         return serde_json::from_str(text);
     }
     let next = Cell::new(0);
-    let mut deserializer = serde_json::Deserializer::from_str(&spelled);
+    let mut deserializer = serde_json::Deserializer::from_str(&scanned.text);
     let value = Seeded {
-        tokens: &tokens,
+        tokens: &scanned.tokens,
         next: &next,
     }
     .deserialize(&mut deserializer)?;
@@ -27,95 +30,36 @@ pub(crate) fn parse_json(text: &str) -> Result<Value, serde_json::Error> {
     Ok(value)
 }
 
-/// Every number token of `text` outside strings, in order, as `Some(negative)` for a token past the double range
-/// and `None` otherwise, plus `text` with each such token spelled `0`, and whether a finite token reads as the
-/// double of an infinity marker.
-fn number_tokens(text: &str) -> (String, Vec<Option<bool>>, bool) {
-    let bytes = text.as_bytes();
-    let mut spelled = String::with_capacity(text.len());
-    let mut tokens = Vec::new();
-    let mut copied = 0;
-    let mut index = 0;
-    let mut holds_marker_value = false;
-    while let Some(&byte) = bytes.get(index) {
-        match byte {
-            b'"' => index = string_end(bytes, index + 1),
-            b'-' | b'0'..=b'9' => {
-                let start = index;
-                while bytes
-                    .get(index)
-                    .is_some_and(|byte| matches!(byte, b'0'..=b'9' | b'+' | b'-' | b'.' | b'e' | b'E'))
-                {
-                    index += 1;
-                }
-                let value = text
-                    .get(start..index)
-                    .filter(|token| is_json_number(token))
-                    .and_then(|token| token.parse::<f64>().ok());
-                holds_marker_value |= value.is_some_and(is_marker_value);
-                let overflow = value.filter(|value| value.is_infinite()).map(f64::is_sign_negative);
-                if overflow.is_some() {
-                    spelled.push_str(text.get(copied..start).unwrap_or_default());
-                    spelled.push('0');
-                    copied = index;
-                }
-                tokens.push(overflow);
-            }
-            _ => index += 1,
-        }
+/// Whether `token` is a finite number whose double is an infinity marker.
+fn holds_marker_value(token: &Token<'_>) -> bool {
+    match token {
+        Token::Number(spelling) => spelling.parse::<f64>().is_ok_and(is_marker_value),
+        _ => false,
     }
-    spelled.push_str(text.get(copied..).unwrap_or_default());
-    (spelled, tokens, holds_marker_value)
-}
-
-/// Whether `token` is a number in the JSON grammar, so that spelling it `0` keeps invalid text invalid.
-fn is_json_number(token: &str) -> bool {
-    let unsigned = token.strip_prefix('-').unwrap_or(token);
-    let (mantissa, exponent) = match unsigned.split_once(['e', 'E']) {
-        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
-        None => (unsigned, None),
-    };
-    let (integer, fraction) = match mantissa.split_once('.') {
-        Some((integer, fraction)) => (integer, Some(fraction)),
-        None => (mantissa, None),
-    };
-    (integer == "0" || (all_digits(integer) && !integer.starts_with('0')))
-        && fraction.is_none_or(all_digits)
-        && exponent.is_none_or(|exponent| all_digits(exponent.strip_prefix(['+', '-']).unwrap_or(exponent)))
-}
-
-fn all_digits(part: &str) -> bool {
-    !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-/// The index just past the closing quote of the string whose contents start at `index`.
-fn string_end(bytes: &[u8], mut index: usize) -> usize {
-    while let Some(&byte) = bytes.get(index) {
-        match byte {
-            b'\\' => index += 2,
-            b'"' => return index + 1,
-            _ => index += 1,
-        }
-    }
-    bytes.len()
 }
 
 /// Builds the `Value` `serde_json` would, except that the number read for an overflowing token is its infinity.
-/// `serde_json` visits values in text order, so the n-th number visited is the n-th number token.
+/// `serde_json` visits values in text order, so the n-th number or `null` visited is the n-th token of the scan.
 #[derive(Clone, Copy)]
 struct Seeded<'a> {
-    tokens: &'a [Option<bool>],
+    tokens: &'a [Token<'a>],
     next: &'a Cell<usize>,
 }
 
 impl Seeded<'_> {
-    fn number(self, read: Value) -> Value {
+    /// Takes the next token: `Some(negative)` when it is a number past the double range.
+    fn advance(self) -> Option<bool> {
         let index = self.next.get();
         self.next.set(index + 1);
-        match self.tokens.get(index).copied().flatten() {
-            Some(negative) => Value::Number(infinity(negative)),
-            None => read,
+        match self.tokens.get(index) {
+            Some(Token::Number(spelling)) => overflows(spelling),
+            _ => None,
         }
+    }
+
+    fn number(self, read: Value) -> Value {
+        self.advance()
+            .map_or(read, |negative| Value::Number(infinity(negative)))
     }
 }
 
@@ -155,6 +99,7 @@ impl<'de> Visitor<'de> for Seeded<'_> {
     }
 
     fn visit_unit<E: Error>(self) -> Result<Value, E> {
+        self.advance();
         Ok(Value::Null)
     }
 

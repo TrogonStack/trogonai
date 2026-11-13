@@ -5,9 +5,10 @@
 use serde_json::{Map, Value};
 
 use crate::{
+    python_json_value::python_json_loads,
     session_prompt::js_trim,
     settings_dialect::SettingsDialect,
-    settings_numbers::normalize_numbers,
+    settings_numbers::{normalize_numbers, python_value},
     settings_parse::parse_json,
     settings_read_hooks::{declares_guard_hooks_outside_hooks, sanitize_hooks},
     settings_read_spec::ReadSpec,
@@ -40,7 +41,12 @@ pub(crate) fn read_document(text: &str, dialect: SettingsDialect) -> Option<Sett
 
 /// The document object of a settings text, with numbers the way JavaScript prints them (`Ya` plus `Tr`) for the dialect.
 fn parse_object(text: &str, dialect: SettingsDialect) -> Option<Map<String, Value>> {
-    let Value::Object(mut document) = parse_json(text.strip_prefix('\u{feff}').unwrap_or(text)).ok()? else {
+    let body = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let parsed = match dialect {
+        SettingsDialect::TypeScript => parse_json(body).ok()?,
+        SettingsDialect::Python => python_value(python_json_loads(body).ok()?),
+    };
+    let Value::Object(mut document) = parsed else {
         return None;
     };
     for entry in document.values_mut() {

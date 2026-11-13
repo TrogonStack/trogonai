@@ -6,7 +6,12 @@
 
 use serde_json::{Number, Value};
 
-use crate::{constants::JS_MAX_EXACT_INTEGER, js_object_order::js_key_order};
+use crate::{
+    constants::JS_MAX_EXACT_INTEGER,
+    float_digits::shortest_digits,
+    js_object_order::js_key_order,
+    python_json_value::{PythonJsonValue, python_json_dumps},
+};
 
 /// JavaScript `Number::toString` for the double a JSON number token parses to.
 pub(crate) fn js_number(number: &Number) -> String {
@@ -15,19 +20,6 @@ pub(crate) fn js_number(number: &Number) -> String {
         return number.to_string();
     }
     number.as_f64().map_or_else(|| "null".to_owned(), js_float)
-}
-
-/// The shortest digits that read back as a positive finite `value`, closest to it and even on a tie, with the
-/// position of the decimal point among them. `Number::toString` and `ryu`, which `serde_json` prints doubles
-/// with, break a tie to the even digit; Rust's `{:e}` rounds it up, so 2^-25 would end in 3 instead of 2.
-fn shortest_digits(value: f64) -> (String, i32) {
-    let printed = Value::from(value).to_string();
-    let (mantissa, exponent) = printed.split_once('e').unwrap_or((printed.as_str(), "0"));
-    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
-    let digits = format!("{whole}{fraction}");
-    let leading = digits.len() - digits.trim_start_matches('0').len();
-    let point = whole.len() as i32 + exponent.parse::<i32>().unwrap_or(0) - leading as i32;
-    (digits.trim_matches('0').to_owned(), point)
 }
 
 /// `Number.prototype.toString` for a double: the shortest digits that read back as the same double, in fixed
@@ -175,85 +167,9 @@ pub(crate) fn js_normalize(value: &Value) -> Value {
     }
 }
 
-/// Python `repr(float)`.
-fn python_float(float: f64) -> String {
-    let text = format!("{float:e}");
-    let (mantissa, exponent) = text.split_once('e').unwrap_or((&text, "0"));
-    let exponent: i32 = exponent.parse().unwrap_or(0);
-    if (-4..16).contains(&exponent) || float == 0.0 {
-        let fixed = float.to_string();
-        return if fixed.contains('.') {
-            fixed
-        } else {
-            format!("{fixed}.0")
-        };
-    }
-    let sign = if exponent < 0 { '-' } else { '+' };
-    format!("{mantissa}e{sign}{:02}", exponent.abs())
-}
-
-fn python_string(text: &str, out: &mut String) {
-    out.push('"');
-    for ch in text.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{8}' => out.push_str("\\b"),
-            '\u{c}' => out.push_str("\\f"),
-            ' '..='~' => out.push(ch),
-            _ => {
-                let mut units = [0_u16; 2];
-                for unit in ch.encode_utf16(&mut units) {
-                    out.push_str(&format!("\\u{unit:04x}"));
-                }
-            }
-        }
-    }
-    out.push('"');
-}
-
-fn python_write(value: &Value, out: &mut String) {
-    match value {
-        Value::Null => out.push_str("null"),
-        Value::Bool(flag) => out.push_str(if *flag { "true" } else { "false" }),
-        Value::Number(number) => match number.as_f64().filter(|_| number.is_f64()) {
-            Some(float) => out.push_str(&python_float(float)),
-            None => out.push_str(&number.to_string()),
-        },
-        Value::String(text) => python_string(text, out),
-        Value::Array(items) => {
-            out.push('[');
-            for (position, item) in items.iter().enumerate() {
-                if position > 0 {
-                    out.push_str(", ");
-                }
-                python_write(item, out);
-            }
-            out.push(']');
-        }
-        Value::Object(map) => {
-            out.push('{');
-            for (position, (key, item)) in map.iter().enumerate() {
-                if position > 0 {
-                    out.push_str(", ");
-                }
-                python_string(key, out);
-                out.push_str(": ");
-                python_write(item, out);
-            }
-            out.push('}');
-        }
-    }
-}
-
 /// `json.dumps(value)` with its defaults.
 pub(crate) fn python_dumps(value: &Value) -> String {
-    let mut out = String::new();
-    python_write(value, &mut out);
-    out
+    python_json_dumps(&PythonJsonValue::from(value))
 }
 
 #[cfg(test)]

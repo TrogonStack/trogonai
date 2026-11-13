@@ -5,6 +5,7 @@ use crate::{
         ALLOW_LIST_GATES, ALLOW_LIST_KEYS, MCP_SERVER_ALLOW_LIST_KEY, PARENT_RESTRICT_FALSE_KEYS,
         PARENT_RESTRICT_TRUE_KEYS,
     },
+    settings_numbers::js_value,
     settings_resolve_values::{SettingsMap, get_path, omit, pick},
 };
 
@@ -20,7 +21,7 @@ fn truthy(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) | Some(Value::Bool(false)) => false,
         Some(Value::String(text)) => !text.is_empty(),
-        Some(Value::Number(number)) => number.as_f64().is_some_and(|value| value != 0.0),
+        Some(Value::Number(number)) => js_value(number).is_some_and(|value| value != 0.0 && !value.is_nan()),
         Some(_) => true,
     }
 }

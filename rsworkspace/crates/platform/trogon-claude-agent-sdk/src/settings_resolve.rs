@@ -5,8 +5,9 @@ use serde_json::{Map, Value};
 use crate::{
     adapters::{NativeHost, SettingsHost},
     constants::{DEFAULT_SETTING_SOURCES, ESCALATING_DEFAULT_MODES, SOURCE_ORDER, STRICT_ESCALATING_DEFAULT_MODES},
+    python_json_value::PythonJsonValue,
     settings_dialect::SettingsDialect,
-    settings_numbers::{infinities_to_null, normalize_numbers},
+    settings_numbers::{PythonNumbers, approximate_numbers, exact_numbers, infinities_to_null, normalize_numbers},
     settings_resolve_connector::skips_repository_settings,
     settings_resolve_policy::{PolicyResolution, resolve_policy},
     settings_resolve_sources::{
@@ -137,13 +138,57 @@ pub fn resolve_settings_in_dialect_with<H: SettingsHost>(
     resolve_settings_in_dialect_with_state(host, options, dialect, &ResolverState::new())
 }
 
-/// [`resolve_settings_with_state`] reading numbers like the chosen SDK's JSON parser.
+/// [`resolve_settings_with_state`] reading numbers like the chosen SDK's JSON parser. In the Python dialect an
+/// integer past 64 bits holds its nearest double; [`resolve_python_settings_with_state`] keeps it exact.
 pub fn resolve_settings_in_dialect_with_state<H: SettingsHost>(
     host: &H,
     options: &ResolveSettingsOptions,
     dialect: SettingsDialect,
     state: &ResolverState,
 ) -> Result<ResolvedSettings, ResolveSettingsError> {
+    let _numbers = (dialect == SettingsDialect::Python).then(PythonNumbers::start);
+    decode(resolve_core(host, options, dialect, state)?)
+}
+
+/// [`resolve_settings_with_state`] in the Python dialect, with every number as `json.loads` read it from a
+/// settings file: integers exact at any size, whole floats as floats, and `NaN`, `Infinity` and `-Infinity` kept.
+/// The value has the shape of [`ResolvedSettings`]; [`python_json_dumps`](crate::python_json_dumps) prints it as
+/// `json.dumps` would. Managed policy documents read like `JSON.parse` in either dialect.
+pub fn resolve_python_settings_with_state<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    state: &ResolverState,
+) -> Result<PythonJsonValue, ResolveSettingsError> {
+    let _numbers = PythonNumbers::start();
+    let result = resolve_core(host, options, SettingsDialect::Python, state)?;
+    let exact = exact_numbers(&result);
+    decode(result)?;
+    Ok(exact)
+}
+
+/// [`resolve_python_settings_with_state`] with the module state of a process that starts now.
+pub fn resolve_python_settings_with<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+) -> Result<PythonJsonValue, ResolveSettingsError> {
+    resolve_python_settings_with_state(host, options, &ResolverState::new())
+}
+
+/// The resolved settings with their numbers turned into the nearest `serde_json` numbers, checked against the
+/// declared types. Infinities turn into `null` first: a kept whole float of 2^63 approximates to the double that
+/// marks `Infinity`, and must not print as `null`.
+fn decode(mut result: Value) -> Result<ResolvedSettings, ResolveSettingsError> {
+    infinities_to_null(&mut result);
+    approximate_numbers(&mut result);
+    serde_json::from_value(result).map_err(ResolveSettingsError::Decode)
+}
+
+fn resolve_core<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    dialect: SettingsDialect,
+    state: &ResolverState,
+) -> Result<Value, ResolveSettingsError> {
     let cwd = resolve_cwd(host, options.cwd.as_deref()).map_err(ResolveSettingsError::CurrentDirectory)?;
     let allowed = allowed_sources(options);
     let parent = options.managed_settings.as_ref().and_then(to_map).map(|mut parent| {
@@ -278,9 +323,7 @@ pub fn resolve_settings_in_dialect_with_state<H: SettingsHost>(
         crate::settings_read::js_property_order(Value::Array(sources)),
     );
     result.insert("machinePolicy".to_owned(), Value::Object(machine_policy));
-    let mut result = Value::Object(result);
-    infinities_to_null(&mut result);
-    serde_json::from_value(result).map_err(ResolveSettingsError::Decode)
+    Ok(Value::Object(result))
 }
 
 static PROCESS_STATE: LazyLock<ResolverState> = LazyLock::new(ResolverState::new);
@@ -301,6 +344,16 @@ pub async fn resolve_settings_in_dialect(
     })
     .await
     .map_err(ResolveSettingsError::Join)?
+}
+
+/// [`resolve_settings`] in the Python dialect with exact numbers; see [`resolve_python_settings_with_state`].
+pub async fn resolve_python_settings(
+    options: &ResolveSettingsOptions,
+) -> Result<PythonJsonValue, ResolveSettingsError> {
+    let options = options.clone();
+    tokio::task::spawn_blocking(move || resolve_python_settings_with_state(&NativeHost, &options, &PROCESS_STATE))
+        .await
+        .map_err(ResolveSettingsError::Join)?
 }
 
 /// `filterEscalatingDefaultMode` upstream: drops a `defaultMode` that only a repo-controlled source set.
