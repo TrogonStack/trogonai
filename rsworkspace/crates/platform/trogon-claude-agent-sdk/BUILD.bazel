@@ -31,6 +31,7 @@ workspace_crate(
         "tests/fixtures/oracle_ts/*.json",
         "tests/fixtures/initialize_options.json",
         "tests/fixtures/probe_ts/*.jsonl",
+        "tests/fixtures/sdk_mcp/*.json",
         "tests/fixtures/settings_option/*.json",
     ]),
     crate_features = ["test-support"],

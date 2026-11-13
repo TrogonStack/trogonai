@@ -10,7 +10,7 @@ use crate::{
     OptionError, PartialMessages, ProtocolError, SessionPersistence, ThinkingConfig, ToolSet,
     adapters::{NativeHost, ReadFile},
     process_options::ArgvStyle,
-    skills::python_repr,
+    python_json::python_repr,
     wire::runtime_payload::{EmbeddedMcpPayload, McpConfigPayload},
 };
 
@@ -347,7 +347,7 @@ fn typescript(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -
         push_spaced(&mut a, "--mcp-config", config);
     }
     if let Some(config) = &options.mcp_config {
-        push_spaced(&mut a, "--mcp-config", config);
+        push_spaced(&mut a, "--mcp-config", config.as_os_str());
     }
     if let Some(sources) = &options.setting_sources {
         equals(&mut a, "--setting-sources", joined(sources.iter().map(|s| s.as_str())));
@@ -564,7 +564,7 @@ where
     }
     if let Some(config) = &options.mcp_config {
         a.push("--mcp-config".into());
-        a.push(config.into());
+        a.push(config.as_os_str().into());
     }
     if options.partial_messages == PartialMessages::Include {
         a.push("--include-partial-messages".into());

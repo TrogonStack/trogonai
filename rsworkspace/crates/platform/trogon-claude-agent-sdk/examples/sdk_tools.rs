@@ -4,8 +4,9 @@ mod schema;
 use std::sync::Arc;
 
 use trogon_claude_agent_sdk::{
-    ClaudeAgentOptions, LocalMcpServer, LocalMcpServerOptions, McpServerName, McpToolInputSchema, McpToolName,
-    McpToolOutput, McpToolRequest, Message, Prompt, SdkMcpServers, SdkTool, SdkToolOptions, ToolRule, query,
+    ClaudeAgentOptions, LocalMcpServer, LocalMcpServerOptions, McpServerDialect, McpServerName, McpToolInputSchema,
+    McpToolName, McpToolOutput, McpToolRequest, Message, Prompt, SdkMcpServers, SdkTool, SdkToolOptions, ToolRule,
+    query,
 };
 
 #[cfg_attr(
@@ -27,12 +28,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 request.arguments["text"].as_str().unwrap_or_default(),
             ))
         }),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
     });
     let server_name = McpServerName::from("example");
     let server = LocalMcpServer::from(LocalMcpServerOptions {
         name: server_name.clone(),
-        version: "1.0.0".into(),
-        tools: echo.into(),
+        version: Some("1.0.0".into()),
+        tools: Some(echo.into()),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
     });
     let options = ClaudeAgentOptions {
         sdk_mcp_servers: SdkMcpServers::from([(

@@ -1340,6 +1340,7 @@
       "rust_api": [
         "LocalMcpServer",
         "LocalMcpServerOptions",
+        "McpServerDialect",
         "SdkTool",
         "SdkToolOptions",
         "SdkMcpServer",
@@ -1348,7 +1349,10 @@
         "McpToolInputSchema",
         "McpToolInputSchemaError",
         "SdkTools",
-        "SdkToolsError"
+        "SdkToolsError",
+        "McpServerError",
+        "McpToolRequest",
+        "McpToolOutput"
       ],
       "tests": [
         {
@@ -1409,11 +1413,59 @@
         },
         {
           "path": "tests/sdk_tools.rs",
-          "name": "server_lists_and_dispatches_every_validated_tool_in_name_order"
+          "name": "server_lists_and_dispatches_every_validated_tool_in_registration_order"
+        },
+        {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "typescript_dialect_answers_like_create_sdk_mcp_server"
+        },
+        {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "python_dialect_answers_like_create_sdk_mcp_server"
+        },
+        {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "python_dialect_rejects_a_second_request_with_an_id_in_flight_and_answers_its_cancellation"
+        },
+        {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "typescript_dialect_keeps_answering_while_a_call_runs_and_drops_it_once_cancelled"
+        },
+        {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "python_dialect_reports_messages_it_cannot_read_and_typescript_drops_them"
+        },
+        {
+          "path": "tests/sdk_tools.rs",
+          "name": "python_collections_keep_repeated_names"
+        },
+        {
+          "path": "tests/value_contracts.rs",
+          "name": "s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_reinitialize"
+        },
+        {
+          "path": "tests/value_contracts.rs",
+          "name": "s08_local_mcp_discovery_does_not_wait_for_the_initialized_notice_and_supports_empty_registries"
+        },
+        {
+          "path": "tests/value_contracts.rs",
+          "name": "s08_s09_s10_m04_python_dialect_negotiates_gates_and_reads_ids_like_the_mcp_package"
+        },
+        {
+          "path": "tests/value_contracts.rs",
+          "name": "m04_typescript_dialect_reads_string_and_safe_integer_ids"
+        },
+        {
+          "path": "tests/value_contracts.rs",
+          "name": "m02_m03_local_mcp_reports_tool_failures_as_error_results_before_invoking_tools"
+        },
+        {
+          "path": "tests/value_contracts.rs",
+          "name": "s11_local_mcp_lists_tools_whose_names_upstream_only_warns_about"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust supports persistent per-client tool registry sessions, initialize/list/call/ping and schema validation. Tool names are forwarded as given without Rust-side name validation (the CLI validates), object input schemas are validated, and the immutable SdkTools collection rejects duplicate exact names before infallible LocalMcpServer assembly. Empty and single-tool collections are infallible; multi-tool collection validation returns a typed error naming the duplicate. Full server-initiated MCP client requests and every protocol method are not implemented."
+      "status": "supported",
+      "rationale": "LocalMcpServer answers the JSON-RPC surface of the server each SDK helper builds: initialize with protocol negotiation, ping, tools/list, tools/call and request cancellation, with the same envelopes and error shapes. McpServerDialect::TypeScript, the default, follows createSdkMcpServer: unreadable messages are dropped, parameter errors are -32603 zod issue lists, schemas are listed with their draft-07 $schema, and instructions, alwaysLoad and searchHint are answered. McpServerDialect::Python follows create_sdk_mcp_server over the mcp package: unreadable messages surface as McpServerError::Protocol, requests before initialize are refused, a cancelled call is answered with -32800, annotations keep the standard hints and SdkTools::with_duplicates keeps repeated names. Both helpers register only tools, so resources, prompts and server-initiated client requests belong to custom SdkMcpServer implementations. Argument checks reproduce the upstream messages for type, required, enum, const, items and string or number bounds; other schema keywords report the Rust validator's message."
     },
     {
       "id": "external-mcp",

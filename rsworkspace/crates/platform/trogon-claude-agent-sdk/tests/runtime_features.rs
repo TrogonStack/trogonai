@@ -15,9 +15,9 @@ use trogon_claude_agent_sdk::{
     ElicitationMode, ElicitationRequest, ElicitationResponse, Error, FeatureSupport, FileCheckpointing, HookEvent,
     HookFailureMode, HookOutput, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, InputBlock,
     InterruptReceipt, LocalMcpServer, LocalMcpServerOptions, LocalPlugin, McpEnabled, McpRemoteServerOptions,
-    McpServerName, McpServerOptions, McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, Message,
-    MessageId, OutputSchema, PermissionDecision, PermissionMode, PluginDelivery, Prompt, QueueCapacity, RewindMode,
-    SdkTool, SdkToolOptions, SyncHookOutput, TaskId, Timeout, ToolPermissionRequest, ToolUseId, UsdBudget,
+    McpServerDialect, McpServerName, McpServerOptions, McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest,
+    Message, MessageId, OutputSchema, PermissionDecision, PermissionMode, PluginDelivery, Prompt, QueueCapacity,
+    RewindMode, SdkTool, SdkToolOptions, SyncHookOutput, TaskId, Timeout, ToolPermissionRequest, ToolUseId, UsdBudget,
     UserDialogRequest, UserDialogResponse, UserInput,
 };
 
@@ -250,11 +250,17 @@ async fn embedded_mcp_server_keeps_its_session_across_rpc_calls() -> TestResult 
                 ))
             }
         }),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
     });
     let server = LocalMcpServer::from(LocalMcpServerOptions {
         name: McpServerName::from("local"),
-        version: "1".into(),
-        tools: tool.into(),
+        version: Some("1".into()),
+        tools: Some(tool.into()),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
     });
     options
         .sdk_mcp_servers

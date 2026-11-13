@@ -1,4 +1,5 @@
 use crate::{ConfigValue, Environment, JsonObject, McpServerToolPolicy, McpUrl};
+use serde::ser::Error as _;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -14,8 +15,8 @@ pub enum McpServerOptions {
 }
 
 /// TypeScript `McpStdioServerConfig` / Python `McpStdioServerConfig`. Arguments and environment values
-/// are sensitive unless marked plain, so debug output stays safe.
-#[derive(Clone, Debug, Default)]
+/// are sensitive unless marked plain, and `extra` values are always sensitive, so debug output stays safe.
+#[derive(Clone, Default)]
 pub struct McpStdioServerOptions {
     pub command: std::path::PathBuf,
     /// Both SDKs make `type: "stdio"` optional; `true` writes it.
@@ -27,8 +28,9 @@ pub struct McpStdioServerOptions {
     pub extra: JsonObject,
 }
 
-/// TypeScript `McpHttpServerConfig` and `McpSSEServerConfig`; the variant picks the `type`.
-#[derive(Clone, Debug)]
+/// TypeScript `McpHttpServerConfig` and `McpSSEServerConfig`; the variant picks the `type`. Debug output
+/// redacts header values and `extra`.
+#[derive(Clone)]
 pub struct McpRemoteServerOptions {
     pub url: McpUrl,
     pub headers: Option<BTreeMap<String, ConfigValue>>,
@@ -38,13 +40,63 @@ pub struct McpRemoteServerOptions {
     pub extra: JsonObject,
 }
 
-/// TypeScript `McpSdkServerConfig` without `instance`.
-#[derive(Clone, Debug, Default)]
+/// TypeScript `McpSdkServerConfig` without `instance`. Debug output redacts `extra`.
+#[derive(Clone, Default)]
 pub struct McpSdkServerOptions {
     pub name: String,
     pub timeout: Option<u64>,
     pub tools: Option<Vec<McpServerToolPolicy>>,
     pub extra: JsonObject,
+}
+
+/// Stands in for `extra` in debug output: its values are verbatim wire JSON that can carry credentials.
+struct RedactedExtra;
+
+impl std::fmt::Debug for RedactedExtra {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("<redacted>")
+    }
+}
+
+impl std::fmt::Debug for McpStdioServerOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpStdioServerOptions")
+            .field("command", &self.command)
+            .field("declare_type", &self.declare_type)
+            .field("args", &self.args)
+            .field("env", &self.env)
+            .field("timeout", &self.timeout)
+            .field("always_load", &self.always_load)
+            .field("extra", &RedactedExtra)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for McpRemoteServerOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpRemoteServerOptions")
+            .field("url", &self.url)
+            .field("headers", &self.headers)
+            .field("tools", &self.tools)
+            .field("timeout", &self.timeout)
+            .field("always_load", &self.always_load)
+            .field("extra", &RedactedExtra)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for McpSdkServerOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpSdkServerOptions")
+            .field("name", &self.name)
+            .field("timeout", &self.timeout)
+            .field("tools", &self.tools)
+            .field("extra", &RedactedExtra)
+            .finish()
+    }
 }
 
 impl McpRemoteServerOptions {
@@ -61,6 +113,8 @@ impl McpRemoteServerOptions {
 }
 
 impl McpServerOptions {
+    /// Fails when a stdio `command` is not valid UTF-8: both SDKs take the command as a string, and
+    /// replacing the invalid bytes would start a different program.
     pub fn to_wire_json(&self) -> Result<Value, serde_json::Error> {
         let mut object = JsonObject::new();
         let extra = match self {
@@ -68,7 +122,11 @@ impl McpServerOptions {
                 if options.declare_type {
                     object.insert("type".into(), "stdio".into());
                 }
-                object.insert("command".into(), options.command.to_string_lossy().into_owned().into());
+                let command = options
+                    .command
+                    .to_str()
+                    .ok_or_else(|| serde_json::Error::custom("MCP server command is not valid UTF-8"))?;
+                object.insert("command".into(), command.into());
                 if let Some(args) = &options.args {
                     object.insert(
                         "args".into(),

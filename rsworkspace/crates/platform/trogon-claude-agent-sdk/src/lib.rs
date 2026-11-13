@@ -36,7 +36,9 @@ mod hooks;
 mod js_json;
 mod js_object_order;
 mod managed_settings_delivery;
+mod mcp_config;
 mod mcp_read_resource_response;
+mod mcp_server_dialect;
 mod mcp_server_name;
 mod mcp_server_options;
 mod mcp_server_tool_policy;
@@ -187,7 +189,9 @@ pub use hooks::{
     HookOutputVisibility, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, SyncHookOutput,
 };
 pub use managed_settings_delivery::ManagedSettingsDelivery;
+pub use mcp_config::McpConfig;
 pub use mcp_read_resource_response::McpReadResourceResponse;
+pub use mcp_server_dialect::McpServerDialect;
 pub use mcp_server_name::McpServerName;
 pub use mcp_server_options::{McpRemoteServerOptions, McpSdkServerOptions, McpServerOptions, McpStdioServerOptions};
 pub use mcp_server_tool_policy::{McpServerToolPolicy, McpToolOrgMaxPermission, McpToolPermissionPolicy};

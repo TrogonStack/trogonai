@@ -301,8 +301,8 @@ pub struct ClaudeAgentOptions {
     /// way a TypeScript object spread does.
     pub sdk_mcp_servers: SdkMcpServers,
     /// Python `mcp_servers` given as a `str` or `Path`: a config file path or JSON text sent as its own
-    /// `--mcp-config` value, verbatim, after the one built from the server maps.
-    pub mcp_config: Option<std::ffi::OsString>,
+    /// `--mcp-config` value, verbatim, after the one built from the server maps. Debug output redacts it.
+    pub mcp_config: Option<crate::McpConfig>,
     pub max_budget_usd: Option<UsdBudget>,
     pub output_schema: Option<OutputSchema>,
     pub file_checkpointing: FileCheckpointing,

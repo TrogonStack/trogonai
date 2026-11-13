@@ -5,8 +5,9 @@ use std::{sync::Arc, time::Duration};
 
 use trogon_claude_agent_sdk::{
     ClaudeAgentOptions, ClaudeSdkClient, Customizations, HookEvent, HookFailureMode, HookOutput, HookRegistration,
-    HookRequest, LocalMcpServer, LocalMcpServerOptions, McpServerName, McpToolInputSchema, McpToolName, McpToolOutput,
-    McpToolRequest, SdkMcpServer, SdkMcpServers, SdkTool, SdkToolOptions, SessionPersistence, ToolSet,
+    HookRequest, LocalMcpServer, LocalMcpServerOptions, McpServerDialect, McpServerName, McpToolInputSchema,
+    McpToolName, McpToolOutput, McpToolRequest, SdkMcpServer, SdkMcpServers, SdkTool, SdkToolOptions,
+    SessionPersistence, ToolSet,
 };
 
 #[cfg_attr(
@@ -30,11 +31,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 request.arguments["text"].as_str().unwrap_or_default(),
             ))
         }),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
     });
     let server = LocalMcpServer::from(LocalMcpServerOptions {
         name: name.clone(),
-        version: "1.0.0".into(),
-        tools: tool.into(),
+        version: Some("1.0.0".into()),
+        tools: Some(tool.into()),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
     });
     let options = ClaudeAgentOptions {
         cli_path,
