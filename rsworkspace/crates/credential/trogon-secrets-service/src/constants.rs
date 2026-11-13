@@ -13,6 +13,9 @@ pub const RELEASE_TTL_BOUND: Duration = Duration::from_secs(300);
 /// value has none, which the wire contract spells as zero.
 pub const UNBUNDLED_GENERATION: u64 = 0;
 
+/// Why a credential state read that found its bound gone answers nothing.
+pub(crate) const BOUND_VANISHED: &str = "the last event of the credential's subject was removed during the read";
+
 /// The destination a release record names when `host:port` is longer than an
 /// audit name may be (a 250 byte host and a port do not fit). It is the egress
 /// proxy's spelling, so both records of the dual audit (ADR#0023 Decision 6)
