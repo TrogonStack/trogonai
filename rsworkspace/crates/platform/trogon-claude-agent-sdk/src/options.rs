@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, num::NonZeroUsize, path::PathBuf, sync::Arc};
+use std::{num::NonZeroUsize, path::PathBuf, sync::Arc};
 
 use crate::{
     AgentDefinition, AgentName, BuiltinToolName, DialogKind, EffortLevel, ElicitationHandler, Environment,
@@ -294,7 +294,8 @@ pub struct ClaudeAgentOptions {
     pub limits: Limits,
     pub permission_handler: Option<Arc<dyn ToolPermissionHandler>>,
     pub hooks: Vec<HookRegistration>,
-    pub agents: BTreeMap<AgentName, AgentDefinition>,
+    /// Agents in insertion order, like the object either SDK sends.
+    pub agents: indexmap::IndexMap<AgentName, AgentDefinition>,
     pub agent: Option<AgentName>,
     /// Servers the CLI connects to itself, sent in insertion order like a TypeScript object.
     pub mcp_servers: McpServers,

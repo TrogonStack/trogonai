@@ -475,7 +475,11 @@ fn initialize_config(
             options
                 .agents
                 .iter()
-                .map(|(name, definition)| definition.to_wire_json().map(|value| (name.as_str().to_owned(), value)))
+                .map(|(name, definition)| {
+                    definition
+                        .to_wire_json_for(options.argv_style)
+                        .map(|value| (name.as_str().to_owned(), value))
+                })
                 .collect::<Result<JsonObject, _>>()
                 .map_err(ProtocolError::from)?,
         )

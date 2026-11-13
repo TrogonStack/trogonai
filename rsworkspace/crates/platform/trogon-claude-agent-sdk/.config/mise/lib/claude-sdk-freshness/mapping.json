@@ -1067,6 +1067,7 @@
       },
       "rust_api": [
         "AgentDefinition",
+        "AgentEffort",
         "AgentExecution",
         "AgentMcpServerSpec"
       ],
@@ -1074,10 +1075,22 @@
         {
           "path": "src/agent_definition_tests.rs",
           "name": "agent_uses_initialize_field_names"
+        },
+        {
+          "path": "tests/agent_definition.rs",
+          "name": "every_optional_field_reaches_the_wire_form"
+        },
+        {
+          "path": "tests/value_contracts.rs",
+          "name": "agent_definitions_preserve_inline_and_named_mcp_scopes"
+        },
+        {
+          "path": "tests/initialize_options.rs",
+          "name": "every_case_matches_the_captured_initialize_bytes_in_both_dialects"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust represents background execution and names with enums/value objects. Core agent initialization is tested; aggregate declaration equality is not assumed."
+      "status": "supported",
+      "rationale": "Every TypeScript field, numeric effort and unchecked turn limits, MCP entries and extra keys reach the initialize request as given, in insertion order. The Python dialect sends the dataclass fields in dataclass order and drops the TypeScript-only ones. Pinned against captured initialize requests from both SDKs."
     },
     {
       "id": "permission-callback",
