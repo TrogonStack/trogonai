@@ -10,7 +10,6 @@ use crate::{
     TaskProgressMessage, TaskStartedMessage, TaskUpdatedMessage, ToolName, ToolResultStatus, ToolUseId, UserMessage,
 };
 
-#[path = "message_decode/python.rs"]
 mod python;
 
 /// What one message line becomes.
@@ -565,5 +564,4 @@ fn conversation_reset(raw: &JsonObject) -> Option<ConversationResetMessage> {
 }
 
 #[cfg(test)]
-#[path = "message_decode/tests.rs"]
 mod tests;
