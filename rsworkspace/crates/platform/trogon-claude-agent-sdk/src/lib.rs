@@ -57,8 +57,10 @@ mod session_files_ts;
 mod session_id;
 mod session_info;
 mod session_key;
+mod session_messages_ts;
 mod session_mutations;
 mod session_path_component;
+mod session_precompact;
 mod session_project_key;
 mod session_prompt;
 mod session_reader;
@@ -153,19 +155,20 @@ pub use sdk_tools::{SdkTools, SdkToolsError};
 pub use sensitive_string::SensitiveString;
 pub use session_entry::{SessionEntry, SessionEntryError};
 pub use session_error::SessionError;
-pub use session_files::{
-    ListSessionsOptions, SessionFiles, get_session_messages, get_subagent_messages, list_subagents,
-};
+pub use session_files::{ListSessionsOptions, SessionFiles};
 pub use session_id::SessionId;
 pub use session_info::SdkSessionInfo;
 pub use session_key::{SessionKey, SessionKeyError};
+pub use session_messages_ts::{ChainAlgorithm, MessageOptions, MessagesError};
 pub use session_mutations::{
     ForkSessionResult, JsonEscaping, SessionMutationError, delete_session, fork_session, rename_session, tag_session,
 };
 pub use session_project_key::{
     SessionProjectKey, SessionProjectKeyError, project_key_for_directory, project_key_for_directory_in,
 };
-pub use session_reader::{get_session_info, list_sessions};
+pub use session_reader::{
+    get_session_info, get_session_messages, get_subagent_messages, list_sessions, list_subagents,
+};
 pub use session_resume::{MaterializedSession, SessionPreparationOptions, SessionRuntime, StoreResume};
 pub use session_store::{
     InMemorySessionStore, MirrorSizeEstimate, SessionListEntry, SessionStore, SessionStoreError, SessionStoreFlush,
@@ -179,7 +182,7 @@ pub use session_store_helpers::{
 };
 pub use session_subpath::{SessionSubpath, SessionSubpathError};
 pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_entry_to_sdk_info};
-pub use session_transcript::{MessagePage, SessionMessage, SessionMessageKind};
+pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
 pub use stderr_tail::StderrTail;
 pub use summary_dialect::SummaryDialect;

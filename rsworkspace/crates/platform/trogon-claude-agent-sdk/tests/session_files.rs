@@ -159,7 +159,7 @@ fn messages_follow_the_parent_chain_and_skip_meta_and_sidechain_entries() -> Tes
     )?;
     fs::write(dir.join("corrupt.jsonl"), "garbage")?;
     let files = SessionFiles::with_config_dir(config.path());
-    let messages = files.get_session_messages(SESSION, None, MessagePage::default());
+    let messages = files.get_session_messages(SESSION, None, MessagePage::default())?;
     let uuids: Vec<&str> = messages.iter().map(|message| message.uuid.as_str()).collect();
     assert_eq!(uuids, ["u1", "a1", "u2"]);
     assert_eq!(messages[0].kind, SessionMessageKind::User);
@@ -175,10 +175,10 @@ fn messages_follow_the_parent_chain_and_skip_meta_and_sidechain_entries() -> Tes
             limit: Some(1),
             offset: 1,
         },
-    );
+    )?;
     assert_eq!(paged.len(), 1);
     assert_eq!(paged[0].uuid, "a1");
-    let tail = files.get_session_messages(SESSION, None, MessagePage { limit: None, offset: 2 });
+    let tail = files.get_session_messages(SESSION, None, MessagePage { limit: None, offset: 2 })?;
     assert_eq!(tail.len(), 1);
     let zero_limit = files.get_session_messages(
         SESSION,
@@ -187,11 +187,11 @@ fn messages_follow_the_parent_chain_and_skip_meta_and_sidechain_entries() -> Tes
             limit: Some(0),
             offset: 0,
         },
-    );
+    )?;
     assert_eq!(zero_limit.len(), 3, "a zero limit means no limit");
     assert!(
         files
-            .get_session_messages(OTHER, None, MessagePage::default())
+            .get_session_messages(OTHER, None, MessagePage::default())?
             .is_empty()
     );
     Ok(())
@@ -228,7 +228,7 @@ fn parallel_tool_calls_and_results_are_recovered_around_the_walked_branch() -> T
     )?;
     let files = SessionFiles::with_config_dir(config.path());
     let uuids: Vec<String> = files
-        .get_session_messages(SESSION, None, MessagePage::default())
+        .get_session_messages(SESSION, None, MessagePage::default())?
         .into_iter()
         .map(|message| message.uuid)
         .collect();
