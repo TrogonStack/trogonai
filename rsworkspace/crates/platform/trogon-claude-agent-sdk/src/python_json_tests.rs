@@ -41,6 +41,7 @@ fn python_repr_matches_python() {
     assert_eq!(python_repr("it's"), "\"it's\"");
     assert_eq!(python_repr("it's \"x\""), "'it\\'s \"x\"'");
     assert_eq!(python_repr("a\tb\n"), "'a\\tb\\n'");
+    assert_eq!(python_repr("a\\b\r"), "'a\\\\b\\r'");
     assert_eq!(python_repr("\u{7f}\u{a0}\u{2028}\u{e9}"), "'\\x7f\\xa0\\u2028\u{e9}'");
     assert_eq!(python_repr("\u{10ffff}"), "'\\U0010ffff'");
 }
