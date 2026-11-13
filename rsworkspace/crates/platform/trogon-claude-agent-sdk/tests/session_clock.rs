@@ -37,7 +37,7 @@ fn key() -> Result<SessionKey, Box<dyn std::error::Error>> {
     Ok(SessionKey::new(
         SessionProjectKey::new("clock-project")?,
         SessionId::from("clock-session"),
-    )?)
+    ))
 }
 
 fn entry(value: usize) -> Result<SessionEntry, Box<dyn std::error::Error>> {

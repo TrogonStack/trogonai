@@ -260,7 +260,7 @@ async fn injected_session_adapters_resolve_resume_and_clean_up() -> Result<(), B
     let project_key = SessionProjectKey::for_directory_with_filesystem(&project, &filesystem)?;
     let relative_transcript = format!("projects/{}/{session_id}.jsonl", project_key.as_str());
     let store = Arc::new(InMemorySessionStore::with_clock(FrozenClock));
-    let key = SessionKey::new(project_key, SessionId::from(session_id))?;
+    let key = SessionKey::new(project_key, SessionId::from(session_id));
     let entry = SessionEntry::new(serde_json::from_value(json!({"type":"assistant","text":"seed"}))?);
     store.append(&key, std::slice::from_ref(&entry)).await?;
     let (process, harness) = ScriptedProcessSpawner::new();

@@ -18,8 +18,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
     ChainAlgorithm, JsonObject, MessageOptions, MessagePage, SdkSessionInfo, SessionEntry, SessionFiles, SessionId,
-    SessionKey, SessionKeyError, SessionMessage, SessionMutationError, SessionProjectKey, SessionStore,
-    SessionStoreError, SessionStoreOperation, SessionSubpath, SummaryDialect, project_key_for_directory_in,
+    SessionKey, SessionMessage, SessionMutationError, SessionProjectKey, SessionStore, SessionStoreError,
+    SessionStoreOperation, SessionSubpath, SummaryDialect, project_key_for_directory_in,
     session_files::{
         extract_first_prompt_from_head, parse_session_info_from_lite, read_agent_metadata_sidecar, sort_page,
         valid_uuid,
@@ -113,17 +113,12 @@ async fn derive_infos_via_load(
     project: &SessionProjectKey,
     project_path: &str,
 ) -> Vec<SdkSessionInfo> {
-    let keys: Vec<Option<SessionKey>> = listing
+    let keys: Vec<SessionKey> = listing
         .iter()
-        .map(|(id, _)| SessionKey::new(project.clone(), id.clone()).ok())
+        .map(|(id, _)| SessionKey::new(project.clone(), id.clone()))
         .collect();
-    let outcomes: Vec<Option<Result<Option<Vec<SessionEntry>>, SessionStoreError>>> = stream::iter(keys.iter())
-        .map(|key| async move {
-            match key {
-                Some(key) => Some(store.load(key).await),
-                None => None,
-            }
-        })
+    let outcomes: Vec<Result<Option<Vec<SessionEntry>>, SessionStoreError>> = stream::iter(keys.iter())
+        .map(|key| store.load(key))
         .buffered(LIST_LOAD_CONCURRENCY)
         .collect()
         .await;
@@ -131,15 +126,15 @@ async fn derive_infos_via_load(
     let mut results = Vec::new();
     for ((id, mtime), outcome) in listing.iter().zip(outcomes) {
         match outcome {
-            Some(Ok(Some(entries))) if !entries.is_empty() => {
+            Ok(Some(entries)) if !entries.is_empty() => {
                 let lite = jsonl_to_lite(&entries_to_jsonl(&entries), *mtime);
                 if let Some(mut info) = parse_session_info_from_lite(id.as_str(), &lite, Some(project_path)) {
                     info.last_modified = *mtime;
                     results.push(info);
                 }
             }
-            Some(Ok(_)) => {}
-            Some(Err(_)) | None => results.push(SdkSessionInfo {
+            Ok(_) => {}
+            Err(_) => results.push(SdkSessionInfo {
                 session_id: id.clone(),
                 summary: String::new(),
                 last_modified: *mtime,
@@ -284,7 +279,7 @@ async fn py_get_session_info_from_store(
     if valid_uuid(session_id).is_none() {
         return Ok(None);
     }
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     let entries = load_entries(store, &key).await?;
     if entries.is_empty() {
         return Ok(None);
@@ -308,7 +303,7 @@ async fn py_get_session_messages_from_store(
     if valid_uuid(session_id).is_none() {
         return Ok(Vec::new());
     }
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     let entries = load_entries(store, &key).await?;
     Ok(entries_to_session_messages(&filter_transcript(entries), page))
 }
@@ -325,7 +320,7 @@ async fn py_list_subagents_from_store(
     if !store.supports(SessionStoreOperation::ListSubkeys) {
         return Err(SessionStoreHelperError::UnsupportedStore("list_subkeys"));
     }
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     let mut seen = HashSet::new();
     let mut ids = Vec::new();
     for subpath in store.list_subkeys(&key).await? {
@@ -354,7 +349,7 @@ async fn py_get_subagent_messages_from_store(
         return Ok(Vec::new());
     }
     let project = project_key(directory)?;
-    let base = main_key(project, session_id)?;
+    let base = main_key(project, session_id);
     let mut subpath = format!("subagents/agent-{agent_id}");
     if store.supports(SessionStoreOperation::ListSubkeys) {
         let target = format!("agent-{agent_id}");
@@ -368,10 +363,7 @@ async fn py_get_subagent_messages_from_store(
             None => return Ok(Vec::new()),
         }
     }
-    let Ok(subpath) = SessionSubpath::new(subpath) else {
-        return Ok(Vec::new());
-    };
-    let key = base.with_subpath(subpath);
+    let key = base.with_subpath(SessionSubpath::new(subpath));
     let entries = load_entries(store, &key).await?;
 
     let mut metadata: Option<JsonObject> = None;
@@ -419,7 +411,7 @@ async fn py_rename_session_via_store(
     if stripped.is_empty() {
         return Err(SessionMutationError::EmptyTitle.into());
     }
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     let entry = metadata_entry([
         ("type", Value::from("custom-title")),
         ("customTitle", Value::from(stripped)),
@@ -449,7 +441,7 @@ async fn py_tag_session_via_store(
         }
         None => String::new(),
     };
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     let entry = metadata_entry([
         ("type", Value::from("tag")),
         ("tag", Value::from(tag)),
@@ -471,7 +463,7 @@ async fn py_delete_session_via_store(
     if !store.supports(SessionStoreOperation::Delete) {
         return Ok(());
     }
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     store.delete(&key).await?;
     Ok(())
 }
@@ -517,7 +509,7 @@ async fn py_fork_session_via_store(
         return Err(SessionMutationError::InvalidMessageId(message_id.to_owned()).into());
     }
     let project = project_key(directory)?;
-    let source = main_key(project.clone(), session_id)?;
+    let source = main_key(project.clone(), session_id);
     let loaded = load_entries(store, &source).await?;
     if loaded.is_empty() {
         return Err(not_found(session_id));
@@ -551,7 +543,7 @@ async fn py_fork_session_via_store(
             Err(error) => Err(SessionStoreHelperError::Encoding(error)),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let destination = main_key(project, &forked)?;
+    let destination = main_key(project, &forked);
     store.append(&destination, &entries).await?;
     Ok(crate::ForkSessionResult {
         session_id: SessionId::from(forked),
@@ -585,7 +577,7 @@ async fn py_import_session_to_store(
         options.batch_size
     };
 
-    let main = main_key(project.clone(), session_id)?;
+    let main = main_key(project.clone(), session_id);
     append_jsonl_in_batches(&resolved, &main, store, batch_size).await?;
     if !options.include_subagents {
         return Ok(());
@@ -603,7 +595,7 @@ async fn py_import_session_to_store(
         if let Some(last) = parts.last_mut() {
             last.truncate(last.len().saturating_sub(".jsonl".len()));
         }
-        let subpath = SessionSubpath::new(parts.join("/")).map_err(SessionKeyError::from)?;
+        let subpath = SessionSubpath::new(parts.join("/"));
         let key = main.clone().with_subpath(subpath);
         append_jsonl_in_batches(&file, &key, store, batch_size).await?;
         if let Some(mut metadata) = read_agent_metadata_sidecar(&file) {

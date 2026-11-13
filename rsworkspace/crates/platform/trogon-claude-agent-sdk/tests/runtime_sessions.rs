@@ -187,7 +187,7 @@ async fn each_result_waits_for_its_own_mirror_fence_and_controls_progress() -> T
     let key = SessionKey::new(
         SessionProjectKey::new("fixture-project")?,
         SessionId::from("fixture-session"),
-    )?;
+    );
     assert_eq!(store.load(&key).await?.map(|entries| entries.len()), Some(2));
     client.disconnect().await?;
     Ok(())

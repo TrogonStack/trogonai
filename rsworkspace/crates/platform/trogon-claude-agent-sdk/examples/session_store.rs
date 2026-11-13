@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let key = SessionKey::new(
         SessionProjectKey::new("example-project")?,
         SessionId::from("123e4567-e89b-42d3-a456-426614174000"),
-    )?;
+    );
     let entry = SessionEntry::try_from(serde_json::to_value(TranscriptEntry {
         kind: "user",
         uuid: "example-message",

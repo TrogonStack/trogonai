@@ -1477,7 +1477,7 @@ async fn m13_s19_unmappable_and_oversized_mirror_frames_are_never_rejected() -> 
     cli.send(eager_mirror_frame(directory.path())).await?;
     control_barrier(&client, &mut cli).await?;
     cli.disconnect(client).await?;
-    let key = SessionKey::new(SessionProjectKey::new("project")?, "memory-session".into())?;
+    let key = SessionKey::new(SessionProjectKey::new("project")?, "memory-session".into());
     let stored = store.load(&key).await?.ok_or("oversized frame was not mirrored")?;
     assert_eq!(stored.len(), 2);
     assert_ne!(events.load(Ordering::SeqCst), 0);

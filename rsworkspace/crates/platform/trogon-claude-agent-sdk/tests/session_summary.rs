@@ -23,7 +23,7 @@ fn key() -> Result<SessionKey, Box<dyn Error>> {
     Ok(SessionKey::new(
         SessionProjectKey::new("project")?,
         SessionId::from(SESSION),
-    )?)
+    ))
 }
 
 fn entries(values: Vec<Value>) -> Result<Vec<SessionEntry>, Box<dyn Error>> {

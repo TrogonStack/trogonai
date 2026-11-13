@@ -105,14 +105,14 @@ impl Fixture {
             ]),
         };
         let project = SessionProjectKey::for_directory_with_filesystem(&environment.directory, &filesystem)?;
-        let key = SessionKey::new(project.clone(), SessionId::from(SESSION))?;
+        let key = SessionKey::new(project.clone(), SessionId::from(SESSION));
         let store = Arc::new(InMemorySessionStore::with_clock(FrozenClock));
         store
             .append(&key, &[entry(json!({"type":"user","message":"hello"}))?])
             .await?;
         store
             .append(
-                &key.with_subpath(SessionSubpath::new("subagents/agent-one")?),
+                &key.with_subpath(SessionSubpath::new("subagents/agent-one")),
                 &[
                     entry(json!({"type":"assistant","message":"child"}))?,
                     entry(json!({"type":"agent_metadata","agentType":"reviewer"}))?,
@@ -603,7 +603,7 @@ async fn s23_a_missing_or_empty_stored_session_skips_materialization() -> TestRe
     let empty = SessionId::from(uuid::Uuid::nil().to_string());
     fixture
         .store
-        .append(&SessionKey::new(fixture.project.clone(), empty.clone())?, &[])
+        .append(&SessionKey::new(fixture.project.clone(), empty.clone()), &[])
         .await?;
     for session in [SessionId::from("00000000-0000-4000-8000-000000000001"), empty] {
         let runtime = fixture.prepare(StoreResume::Session(session)).await?;
@@ -672,9 +672,10 @@ async fn s24_unsafe_subkeys_from_the_store_are_skipped() -> TestResult {
     Ok(())
 }
 
-/// Lists one subkey with a `.` component and serves the same transcript for it.
+/// Lists one subkey, whatever its spelling, and serves the same transcript for it.
 struct DotSubkeyStore {
     inner: Arc<InMemorySessionStore<FrozenClock>>,
+    subkey: String,
     transcript: Vec<SessionEntry>,
 }
 
@@ -696,7 +697,7 @@ impl SessionStore for DotSubkeyStore {
         self.inner.load(key)
     }
     fn list_subkeys<'a>(&'a self, _: &'a SessionKey) -> SessionStoreFuture<'a, Vec<String>> {
-        Box::pin(async { Ok(vec!["./subagents/agent-dot".to_owned()]) })
+        Box::pin(async { Ok(vec![self.subkey.clone()]) })
     }
 }
 
@@ -708,6 +709,7 @@ async fn s24_ts_a_dot_component_subpath_is_written_where_typescript_writes_it() 
         let mut fixture = Fixture::new().await?;
         fixture.options = SessionStoreOptions::from(Arc::new(DotSubkeyStore {
             inner: fixture.store.clone(),
+            subkey: "./subagents/agent-dot".to_owned(),
             transcript: vec![entry(json!({"type":"user","message":"from the dot subkey"}))?],
         }) as Arc<dyn SessionStore>);
         if python {
@@ -722,6 +724,104 @@ async fn s24_ts_a_dot_component_subpath_is_written_where_typescript_writes_it() 
                 .exists(&session_dir.join("subagents/agent-dot.jsonl")),
             !python
         );
+    }
+    Ok(())
+}
+
+const RESUME_GOLDENS: &str = include_str!("fixtures/session_key/resume.json");
+
+/// Every file below `root`, relative to it, in sorted order; none when `root` does not exist.
+fn files_below(root: &Path) -> io::Result<Vec<String>> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            let path = entry?.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                found.push(
+                    path.strip_prefix(root)
+                        .map_err(io::Error::other)?
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
+/// Goldens captured from the real TypeScript `Jtt` and Python `_materialize_subkeys` with the same store: which
+/// transcript file each listed subpath produces, if any, or whether the write fails.
+#[tokio::test]
+async fn s24_listed_subpaths_are_written_or_skipped_as_each_upstream_sdk_does() -> TestResult {
+    let goldens: Value = serde_json::from_str(RESUME_GOLDENS)?;
+    for case in goldens["subpaths"].as_array().ok_or("missing subpaths")? {
+        let subpath = case["subpath"].as_str().ok_or("missing subpath")?;
+        for (dialect, python) in [("typescript", false), ("python", true)] {
+            let expected: Vec<&str> = case[dialect]
+                .as_array()
+                .ok_or("missing files")?
+                .iter()
+                .map(|file| file.as_str().ok_or("file is not text"))
+                .collect::<Result<_, _>>()?;
+            let fails = case[format!("{dialect}_write_fails")]
+                .as_bool()
+                .ok_or("missing failure flag")?;
+            let mut fixture = Fixture::new().await?;
+            fixture.options = SessionStoreOptions::from(Arc::new(DotSubkeyStore {
+                inner: fixture.store.clone(),
+                subkey: subpath.to_owned(),
+                transcript: vec![entry(json!({"type":"user","message":"listed"}))?],
+            }) as Arc<dyn SessionStore>);
+            if python {
+                fixture = fixture.python();
+            }
+            let outcome = fixture.resume().await;
+            if fails {
+                assert!(outcome.is_err(), "{dialect} {subpath:?} should fail to write");
+                assert!(expected.is_empty());
+                continue;
+            }
+            let runtime = outcome?;
+            let config = runtime.config_dir.clone().ok_or("missing config directory")?;
+            let session_dir = config.join("projects").join(fixture.project.as_str()).join(SESSION);
+            assert_eq!(files_below(&session_dir)?, expected, "{dialect} {subpath:?}");
+        }
+    }
+    Ok(())
+}
+
+/// Goldens captured from the real TypeScript `Qe` and Python `_validate_uuid`: a resume id that fails the check is
+/// passed to the CLI without materializing, even when the store holds a session under that id.
+#[tokio::test]
+async fn s22_resume_ids_are_checked_as_each_upstream_sdk_checks_them() -> TestResult {
+    let goldens: Value = serde_json::from_str(RESUME_GOLDENS)?;
+    for case in goldens["session_ids"].as_array().ok_or("missing session ids")? {
+        let id = case["session_id"].as_str().ok_or("missing id")?;
+        for (dialect, python) in [("typescript", false), ("python", true)] {
+            let accepted = case[dialect].as_bool().ok_or("missing verdict")?;
+            let mut fixture = Fixture::new().await?;
+            fixture
+                .store
+                .append(
+                    &SessionKey::new(fixture.project.clone(), SessionId::from(id)),
+                    &[entry(json!({"type":"user","message":"stored"}))?],
+                )
+                .await?;
+            if python {
+                fixture = fixture.python();
+            }
+            let runtime = fixture.prepare(StoreResume::Session(SessionId::from(id))).await?;
+            assert_eq!(runtime.materialized.is_some(), accepted, "{dialect} {id:?}");
+        }
     }
     Ok(())
 }
@@ -903,7 +1003,7 @@ async fn w3_ts_a_relative_home_directory_is_used_as_given() -> TestResult {
 async fn s26_ts_latest_resume_takes_only_the_newest_listed_session() -> TestResult {
     let mut fixture = Fixture::new().await?;
     let sidechain = SessionId::from(uuid::Uuid::from_u128(2).to_string());
-    let key = SessionKey::new(fixture.project.clone(), sidechain.clone())?;
+    let key = SessionKey::new(fixture.project.clone(), sidechain.clone());
     fixture
         .store
         .append(&key, &[entry(json!({"type":"user","isSidechain":true}))?])

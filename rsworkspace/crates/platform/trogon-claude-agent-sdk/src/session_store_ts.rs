@@ -17,9 +17,8 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
-    JsonObject, MessagePage, SdkSessionInfo, SessionEntry, SessionFiles, SessionId, SessionKey, SessionKeyError,
-    SessionMessage, SessionMutationError, SessionProjectKey, SessionStore, SessionStoreOperation, SessionSubpath,
-    SummaryDialect,
+    JsonObject, MessagePage, SdkSessionInfo, SessionEntry, SessionFiles, SessionId, SessionKey, SessionMessage,
+    SessionMutationError, SessionProjectKey, SessionStore, SessionStoreOperation, SessionSubpath, SummaryDialect,
     constants::{DEFAULT_IMPORT_BATCH, MAX_IMPORT_BYTES},
     js_object_order::js_ordered,
     session_files::valid_uuid,
@@ -112,7 +111,7 @@ async fn fill_from_load(
     canonical: &str,
 ) -> Vec<SdkSessionInfo> {
     let rows = join_all(slots.iter().map(|(id, mtime)| async move {
-        let key = SessionKey::new(project.clone(), id.clone()).map_err(SessionStoreHelperError::from)?;
+        let key = SessionKey::new(project.clone(), id.clone());
         let Some(objects) = load_objects(store, &key).await? else {
             return Ok::<Option<SdkSessionInfo>, SessionStoreHelperError>(None);
         };
@@ -268,7 +267,7 @@ pub(crate) async fn get_session_info(
         return Ok(None);
     }
     let (project, _) = project(directory)?;
-    let key = main_key(project, session_id)?;
+    let key = main_key(project, session_id);
     let Some(objects) = load_objects(store, &key).await? else {
         return Ok(None);
     };
@@ -294,7 +293,7 @@ pub(crate) async fn get_session_messages(
         return Ok(Vec::new());
     }
     let (project, _) = project(directory)?;
-    let key = main_key(project, session_id)?;
+    let key = main_key(project, session_id);
     let Some(objects) = load_objects(store, &key).await? else {
         return Ok(Vec::new());
     };
@@ -314,7 +313,7 @@ pub(crate) async fn list_subagents(
         return Err(SessionStoreHelperError::ListSubkeysNotImplemented);
     }
     let (project, _) = project(directory)?;
-    let key = main_key(project, session_id)?;
+    let key = main_key(project, session_id);
     let mut seen = HashSet::new();
     let mut ids = Vec::new();
     for subkey in store.list_subkeys(&key).await? {
@@ -343,7 +342,7 @@ pub(crate) async fn get_subagent_messages(
         return Ok(Vec::new());
     }
     let (project, _) = project(directory)?;
-    let base = main_key(project, session_id)?;
+    let base = main_key(project, session_id);
     let mut subpath = format!("subagents/agent-{agent_id}");
     if store.supports(SessionStoreOperation::ListSubkeys) {
         let target = format!("agent-{agent_id}");
@@ -357,10 +356,7 @@ pub(crate) async fn get_subagent_messages(
             None => return Ok(Vec::new()),
         }
     }
-    let Ok(subpath) = SessionSubpath::new(subpath) else {
-        return Ok(Vec::new());
-    };
-    let Some(objects) = load_objects(store, &base.with_subpath(subpath)).await? else {
+    let Some(objects) = load_objects(store, &base.with_subpath(SessionSubpath::new(subpath))).await? else {
         return Ok(Vec::new());
     };
     let is_metadata = |object: &JsonObject| object.get("type").and_then(Value::as_str) == Some("agent_metadata");
@@ -409,7 +405,7 @@ pub(crate) async fn rename_session(
         return Err(SessionMutationError::EmptyTitle.into());
     }
     let (project, _) = project(directory)?;
-    let key = main_key(project, session_id)?;
+    let key = main_key(project, session_id);
     let entry = metadata_entry([
         ("type", Value::from("custom-title")),
         ("customTitle", Value::from(title)),
@@ -441,7 +437,7 @@ pub(crate) async fn tag_session(
         None => String::new(),
     };
     let (project, _) = project(directory)?;
-    let key = main_key(project, session_id)?;
+    let key = main_key(project, session_id);
     let entry = metadata_entry([
         ("type", Value::from("tag")),
         ("tag", Value::from(tag)),
@@ -464,7 +460,7 @@ pub(crate) async fn delete_session(
         return Ok(());
     }
     let (project, _) = project(directory)?;
-    store.delete(&main_key(project, session_id)?).await?;
+    store.delete(&main_key(project, session_id)).await?;
     Ok(())
 }
 
@@ -513,7 +509,7 @@ pub(crate) async fn fork_session(
         return Err(invalid_session(session_id));
     }
     let (project, _) = project(directory)?;
-    let source = main_key(project.clone(), session_id)?;
+    let source = main_key(project.clone(), session_id);
     let Some(objects) = load_objects(store, &source).await? else {
         return Err(not_found(session_id));
     };
@@ -533,7 +529,7 @@ pub(crate) async fn fork_session(
     )
     .map_err(SessionMutationError::from)?;
     let entries: Vec<SessionEntry> = forked.entries.into_iter().map(SessionEntry::new).collect();
-    store.append(&main_key(project, &forked.session_id)?, &entries).await?;
+    store.append(&main_key(project, &forked.session_id), &entries).await?;
     Ok(crate::ForkSessionResult {
         session_id: SessionId::from(forked.session_id),
     })
@@ -559,7 +555,7 @@ pub(crate) async fn import_session(
     } else {
         options.batch_size
     };
-    let main = main_key(project, session_id)?;
+    let main = main_key(project, session_id);
     append_jsonl_in_batches(&resolved, &main, store, batch_size).await?;
     if !options.include_subagents {
         return Ok(());
@@ -576,7 +572,7 @@ pub(crate) async fn import_session(
         if let Some(last) = parts.last_mut() {
             last.truncate(last.len().saturating_sub(".jsonl".len()));
         }
-        let subpath = SessionSubpath::new(parts.join("/")).map_err(SessionKeyError::from)?;
+        let subpath = SessionSubpath::new(parts.join("/"));
         let key = main.clone().with_subpath(subpath);
         append_jsonl_in_batches(&file, &key, store, batch_size).await?;
         let sidecar = file.with_extension("meta.json");

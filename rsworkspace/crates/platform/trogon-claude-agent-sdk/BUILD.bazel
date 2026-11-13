@@ -180,8 +180,14 @@ workspace_crate(
         "sdk_tools": {},
         "session_clock": {},
         "session_failure_contracts": {"compile_data": glob(["tests/support/*.rs"])},
-        "session_filesystem": {"compile_data": glob(["tests/support/*.rs"])},
+        "session_filesystem": {
+            "compile_data": glob([
+                "tests/fixtures/session_key/resume.json",
+                "tests/support/*.rs",
+            ]),
+        },
         "session_id": {},
+        "session_key_upstream": {"compile_data": ["tests/fixtures/session_key/transcript_paths.json"]},
         "session_project_key": {},
         "session_store": {},
         "session_values": {},

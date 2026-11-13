@@ -60,17 +60,14 @@ fn store_error(check: u8) -> impl Fn(crate::SessionStoreError) -> ConformanceErr
 }
 
 fn key(project: &str, session: &str) -> Result<SessionKey, ConformanceError> {
-    SessionKey::new(
+    Ok(SessionKey::new(
         SessionProjectKey::new(project).map_err(|error| fail(0, error.to_string()))?,
         SessionId::from(session),
-    )
-    .map_err(|error| fail(0, error.to_string()))
+    ))
 }
 
 fn sub(base: &SessionKey, subpath: &str) -> Result<SessionKey, ConformanceError> {
-    Ok(base
-        .clone()
-        .with_subpath(SessionSubpath::new(subpath).map_err(|error| fail(0, error.to_string()))?))
+    Ok(base.clone().with_subpath(SessionSubpath::new(subpath)))
 }
 
 fn project(name: &str) -> Result<SessionProjectKey, ConformanceError> {

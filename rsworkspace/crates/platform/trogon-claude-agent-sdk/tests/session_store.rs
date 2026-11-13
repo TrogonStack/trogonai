@@ -32,7 +32,7 @@ fn key(project: &str, session: &str) -> Result<SessionKey, Box<dyn Error>> {
     Ok(SessionKey::new(
         SessionProjectKey::new(project)?,
         SessionId::from(session),
-    )?)
+    ))
 }
 fn entry(kind: &str, value: usize) -> Result<SessionEntry, Box<dyn Error>> {
     Ok(SessionEntry::try_from(
@@ -92,7 +92,7 @@ async fn repeated_stable_uuids_are_stored_again_like_upstream_reference_stores()
 async fn projects_sessions_and_subpaths_are_isolated_and_delete_cascades() -> TestResult {
     let store = InMemorySessionStore::new();
     let main = key("project", SESSION)?;
-    let sub = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one")?);
+    let sub = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one"));
     let other = key("other-project", SESSION)?;
     store.append(&main, &[entry("user", 1)?]).await?;
     store.append(&sub, &[entry("assistant", 2)?]).await?;
@@ -126,7 +126,7 @@ fn store_paths_reject_traversal_and_windows_aliases() -> TestResult {
         "C:escape",
         "subagents/nul\0byte",
     ] {
-        assert!(SessionSubpath::new(value).is_err(), "accepted unsafe subpath");
+        assert!(SessionSubpath::checked(value).is_err(), "accepted unsafe subpath");
     }
     if cfg!(windows) {
         for value in [
@@ -135,14 +135,17 @@ fn store_paths_reject_traversal_and_windows_aliases() -> TestResult {
             "subagents/name.",
             "subagents//empty",
         ] {
-            assert!(SessionSubpath::new(value).is_err(), "accepted a Windows alias");
+            assert!(SessionSubpath::checked(value).is_err(), "accepted a Windows alias");
         }
     }
     for value in ["..", "../project", "NUL", "project.", "project ", "C:project"] {
         assert!(SessionProjectKey::new(value).is_err(), "accepted unsafe project key");
     }
     for value in ["NUL", "session.", "session ", "../session", "C:session"] {
-        assert!(key("project", value).is_err(), "accepted unsafe session key");
+        assert!(
+            SessionKey::checked(SessionProjectKey::new("project")?, SessionId::from(value)).is_err(),
+            "accepted unsafe session key"
+        );
     }
     let root = tempfile::tempdir()?;
     assert!(SessionKey::from_transcript_path(&root.path().join("project/../escape.jsonl"), root.path()).is_err());
@@ -163,7 +166,7 @@ async fn resume_materializes_main_subagents_and_metadata_without_touching_creden
     let root = tempfile::tempdir()?;
     let store = Arc::new(InMemorySessionStore::new());
     let main = key("project", SESSION)?;
-    let sub = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one")?);
+    let sub = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one"));
     store.append(&main, &[entry("user", 1)?]).await?;
     store
         .append(
@@ -334,7 +337,7 @@ async fn resume_subkey_limit_cleans_an_already_seeded_main_transcript() -> TestR
     for name in ["subagents/one", "subagents/two"] {
         store
             .append(
-                &main.clone().with_subpath(SessionSubpath::new(name)?),
+                &main.clone().with_subpath(SessionSubpath::new(name)),
                 &[entry("assistant", 2)?],
             )
             .await?;
@@ -490,7 +493,7 @@ async fn python_resume_writes_only_the_subagent_files_that_have_entries() -> Tes
         .append(
             &main
                 .clone()
-                .with_subpath(SessionSubpath::new("subagents/metadata-only")?),
+                .with_subpath(SessionSubpath::new("subagents/metadata-only")),
             std::slice::from_ref(&metadata),
         )
         .await?;
@@ -498,7 +501,7 @@ async fn python_resume_writes_only_the_subagent_files_that_have_entries() -> Tes
         .append(
             &main
                 .clone()
-                .with_subpath(SessionSubpath::new("subagents/transcript-only")?),
+                .with_subpath(SessionSubpath::new("subagents/transcript-only")),
             &[entry("assistant", 2)?],
         )
         .await?;
@@ -527,7 +530,7 @@ async fn python_resume_counts_a_metadata_sidecar_against_the_entry_limit() -> Te
     store.append(&main, &[entry("user", 1)?]).await?;
     store
         .append(
-            &main.clone().with_subpath(SessionSubpath::new("subagents/agent-one")?),
+            &main.clone().with_subpath(SessionSubpath::new("subagents/agent-one")),
             &[SessionEntry::try_from(json!({"type":"agent_metadata"}))?],
         )
         .await?;

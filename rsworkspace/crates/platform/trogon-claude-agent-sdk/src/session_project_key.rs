@@ -29,6 +29,11 @@ impl SessionProjectKey {
         Ok(Self(value))
     }
 
+    /// A key taken as is from a transcript path, where upstream does not validate the project directory name.
+    pub(crate) fn unchecked(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
     pub fn for_directory(directory: &Path) -> Result<Self, SessionProjectKeyError> {
         Self::for_directory_with_filesystem(directory, &crate::adapters::NativeFileSystem)
     }

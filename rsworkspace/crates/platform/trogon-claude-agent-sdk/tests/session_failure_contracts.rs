@@ -44,7 +44,7 @@ fn key() -> Result<SessionKey, Box<dyn StdError>> {
     Ok(SessionKey::new(
         SessionProjectKey::new("project")?,
         SessionId::from(SESSION),
-    )?)
+    ))
 }
 
 fn entry() -> Result<SessionEntry, SessionEntryError> {
@@ -114,7 +114,7 @@ fn s25_transcript_paths_below_a_session_map_to_subpaths() -> TestResult {
 #[test]
 fn session_keys_preserve_identity_and_reject_unrecognized_or_non_unicode_paths() -> TestResult {
     let main = key()?;
-    let subpath = SessionSubpath::new("subagents/nested/agent-one")?;
+    let subpath = SessionSubpath::new("subagents/nested/agent-one");
     let sub = main.clone().with_subpath(subpath.clone());
     assert_eq!(sub.main(), main);
     assert_eq!(sub.subpath(), Some(&subpath));
@@ -122,7 +122,7 @@ fn session_keys_preserve_identity_and_reject_unrecognized_or_non_unicode_paths()
     assert_eq!(main.session_id().to_string(), SESSION);
     for unsafe_id in ["", "line\nbreak"] {
         assert!(matches!(
-            SessionKey::new(SessionProjectKey::new("project")?, SessionId::from(unsafe_id)),
+            SessionKey::checked(SessionProjectKey::new("project")?, SessionId::from(unsafe_id)),
             Err(SessionKeyError::UnsafeSessionId)
         ));
     }
@@ -235,7 +235,7 @@ async fn optional_store_operations_are_explicit_and_debug_output_hides_configura
 #[test]
 fn mirror_failure_messages_preserve_context_and_bound_suppressed_failures() -> TestResult {
     let main = key()?;
-    let child = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one")?);
+    let child = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one"));
     for (failure, expected_key) in [
         (
             MirrorFailureError::Append {
@@ -606,7 +606,7 @@ async fn latest_resume_limits_the_candidate_listing_before_materialization() -> 
     let other = SessionKey::new(
         SessionProjectKey::new("project")?,
         SessionId::from(uuid::Uuid::nil().to_string()),
-    )?;
+    );
     store.append(&other, &[entry()?]).await?;
     let filesystem = RecordingFileSystem::new()?;
     let config = filesystem.path("config");
@@ -637,7 +637,7 @@ async fn resume_counts_transcript_newlines_and_metadata_against_budgets() -> Tes
     let metadata = SessionEntry::try_from(json!({"type":"agent_metadata","agentType":"reviewer"}))?;
     store
         .append(
-            &main.with_subpath(SessionSubpath::new("subagents/metadata-only")?),
+            &main.with_subpath(SessionSubpath::new("subagents/metadata-only")),
             &[metadata],
         )
         .await?;
@@ -687,7 +687,7 @@ async fn resume_preserves_single_component_subpaths_and_their_metadata() -> Test
     let child = SessionEntry::try_from(json!({"type":"assistant","text":"child"}))?;
     store
         .append(
-            &main.clone().with_subpath(SessionSubpath::new("standalone")?),
+            &main.clone().with_subpath(SessionSubpath::new("standalone")),
             &[
                 child.clone(),
                 SessionEntry::try_from(json!({"type":"agent_metadata","agentType":"worker"}))?,
@@ -696,7 +696,7 @@ async fn resume_preserves_single_component_subpaths_and_their_metadata() -> Test
         .await?;
     store
         .append(
-            &main.clone().with_subpath(SessionSubpath::new("transcript-only")?),
+            &main.clone().with_subpath(SessionSubpath::new("transcript-only")),
             std::slice::from_ref(&child),
         )
         .await?;

@@ -46,9 +46,9 @@ async fn seed(
     subpath: Option<&str>,
     lines: &[Value],
 ) -> Result<SessionKey, Box<dyn Error>> {
-    let mut key = SessionKey::new(project_key_for_directory(Some(dir))?, SessionId::from(session))?;
+    let mut key = SessionKey::new(project_key_for_directory(Some(dir))?, SessionId::from(session));
     if let Some(subpath) = subpath {
-        key = key.with_subpath(SessionSubpath::new(subpath)?);
+        key = key.with_subpath(SessionSubpath::new(subpath));
     }
     let entries = lines.iter().cloned().map(entry).collect::<Result<Vec<_>, _>>()?;
     store.append(&key, &entries).await?;
@@ -348,9 +348,9 @@ async fn import_replays_the_transcript_subagents_and_sidecars() -> TestResult {
     )
     .await?;
 
-    let main = SessionKey::new(SessionProjectKey::new("-proj")?, SessionId::from(SESSION))?;
+    let main = SessionKey::new(SessionProjectKey::new("-proj")?, SessionId::from(SESSION));
     assert_eq!(store.load(&main).await?.map_or(0, |entries| entries.len()), 2);
-    let sub_key = main.with_subpath(SessionSubpath::new("subagents/agent-abc")?);
+    let sub_key = main.with_subpath(SessionSubpath::new("subagents/agent-abc"));
     let loaded = store.load(&sub_key).await?.ok_or("no subagent")?;
     assert_eq!(loaded.len(), 3);
     let last = loaded.last().ok_or("empty")?;
@@ -419,9 +419,9 @@ async fn ts_import_keys_the_session_by_the_directory_and_lets_the_sidecar_type_w
     };
     import_session_to_store(&files, SESSION, &store, &options).await?;
 
-    let main = SessionKey::new(key, SessionId::from(SESSION))?;
+    let main = SessionKey::new(key, SessionId::from(SESSION));
     assert_eq!(store.load(&main).await?.map_or(0, |entries| entries.len()), 2);
-    let sub_key = main.with_subpath(SessionSubpath::new("subagents/deep/agent-abc")?);
+    let sub_key = main.with_subpath(SessionSubpath::new("subagents/deep/agent-abc"));
     let loaded = store.load(&sub_key).await?.ok_or("no subagent")?;
     let last = loaded.last().ok_or("empty")?;
     assert_eq!(last.as_object().get("type"), Some(&json!("stray")));
