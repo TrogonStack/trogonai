@@ -31,7 +31,8 @@ impl SecretsService {
     /// before it opens its audit chain and joins the release queue group, so
     /// a service that cannot reach any of them never takes a release. It then
     /// serves until `shutdown`, stops taking releases, and drains the audit
-    /// records the releases it answered left behind.
+    /// records the releases it answered left behind. A `shutdown` that comes
+    /// while it still looks for the credential stream returns without serving.
     ///
     /// # Errors
     ///
@@ -45,13 +46,15 @@ impl SecretsService {
             .await
             .map_err(SecretsServiceError::Connect)?;
         let jetstream = async_nats::jetstream::new(client.clone());
-        let stream = jetstream
-            .get_stream(config.credential_stream.as_str())
-            .await
-            .map_err(|source| SecretsServiceError::CredentialStream {
-                stream: config.credential_stream.clone(),
-                source,
-            })?;
+        let stream = tokio::select! {
+            biased;
+            () = shutdown.cancelled() => return Ok(()),
+            stream = jetstream.get_stream(config.credential_stream.as_str()) => stream,
+        }
+        .map_err(|source| SecretsServiceError::CredentialStream {
+            stream: config.credential_stream.clone(),
+            source,
+        })?;
         let store = OpenBaoReleaseReader::login(
             config.openbao_address.as_str(),
             config.openbao_address.transport(),

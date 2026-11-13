@@ -167,6 +167,18 @@ async fn a_nats_server_that_cannot_be_reached_refuses_to_start() {
 }
 
 #[tokio::test]
+async fn a_service_told_to_stop_while_nats_cannot_be_reached_stops_cleanly() {
+    let (openbao, _openbao) = fake_openbao().await;
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+
+    tokio::time::timeout(STOPPED_WITHIN, service(UNREACHABLE_NATS, &openbao).run(shutdown))
+        .await
+        .expect("the service waited for the credential stream lookup instead of stopping")
+        .unwrap();
+}
+
+#[tokio::test]
 async fn a_credential_stream_that_does_not_exist_refuses_to_start() {
     let server = JetStreamTestServer::start().await;
     let (openbao, _openbao) = fake_openbao().await;
