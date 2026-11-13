@@ -1393,6 +1393,93 @@ pub mod trogonai {
         clippy::doc_lazy_continuation,
         clippy::module_inception
     )]
+    pub mod secrets {
+        use super::*;
+        #[allow(
+            non_camel_case_types,
+            dead_code,
+            unused_imports,
+            unused_qualifications,
+            clippy::derivable_impls,
+            clippy::match_single_binding,
+            clippy::uninlined_format_args,
+            clippy::doc_lazy_continuation,
+            clippy::module_inception
+        )]
+        pub mod credentials {
+            use super::*;
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
+            pub mod v1alpha1 {
+                use super::*;
+                include!("trogonai.secrets.credentials.v1alpha1.mod.rs");
+            }
+        }
+        #[allow(
+            non_camel_case_types,
+            dead_code,
+            unused_imports,
+            unused_qualifications,
+            clippy::derivable_impls,
+            clippy::match_single_binding,
+            clippy::uninlined_format_args,
+            clippy::doc_lazy_continuation,
+            clippy::module_inception
+        )]
+        pub mod exchange {
+            use super::*;
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
+            pub mod v1alpha1 {
+                use super::*;
+                include!("trogonai.secrets.exchange.v1alpha1.mod.rs");
+            }
+        }
+        #[allow(
+            non_camel_case_types,
+            dead_code,
+            unused_imports,
+            unused_qualifications,
+            clippy::derivable_impls,
+            clippy::match_single_binding,
+            clippy::uninlined_format_args,
+            clippy::doc_lazy_continuation,
+            clippy::module_inception
+        )]
+        pub mod v1alpha1 {
+            use super::*;
+            include!("trogonai.secrets.v1alpha1.mod.rs");
+        }
+    }
+    #[allow(
+        non_camel_case_types,
+        dead_code,
+        unused_imports,
+        unused_qualifications,
+        clippy::derivable_impls,
+        clippy::match_single_binding,
+        clippy::uninlined_format_args,
+        clippy::doc_lazy_continuation,
+        clippy::module_inception
+    )]
     pub mod session {
         use super::*;
         #[allow(

@@ -7,6 +7,12 @@ include!("trogonai.connections.types.v1alpha1.digest.rs");
 include!("trogonai.connections.types.v1alpha1.resource_parent.rs");
 include!("trogonai.connections.types.v1alpha1.reference.rs");
 include!("trogonai.connections.types.v1alpha1.proxy.rs");
+include!("trogonai.connections.types.v1alpha1.discovery.rs");
+include!("trogonai.connections.types.v1alpha1.access_expiry.rs");
+include!("trogonai.connections.types.v1alpha1.authority.rs");
+include!("trogonai.connections.types.v1alpha1.account.rs");
+include!("trogonai.connections.types.v1alpha1.audit_correlation.rs");
+include!("trogonai.connections.types.v1alpha1.use_result.rs");
 #[allow(
     non_camel_case_types,
     dead_code,
@@ -30,11 +36,20 @@ pub mod __buffa {
         include!("trogonai.connections.types.v1alpha1.resource_parent.__view.rs");
         include!("trogonai.connections.types.v1alpha1.reference.__view.rs");
         include!("trogonai.connections.types.v1alpha1.proxy.__view.rs");
+        include!("trogonai.connections.types.v1alpha1.discovery.__view.rs");
+        include!("trogonai.connections.types.v1alpha1.access_expiry.__view.rs");
+        include!("trogonai.connections.types.v1alpha1.authority.__view.rs");
+        include!("trogonai.connections.types.v1alpha1.account.__view.rs");
+        include!("trogonai.connections.types.v1alpha1.audit_correlation.__view.rs");
+        include!("trogonai.connections.types.v1alpha1.use_result.__view.rs");
         pub mod oneof {
             #[allow(unused_imports)]
             use super::*;
             include!(
                 "trogonai.connections.types.v1alpha1.resource_parent.__view_oneof.rs"
+            );
+            include!(
+                "trogonai.connections.types.v1alpha1.access_expiry.__view_oneof.rs"
             );
         }
     }
@@ -42,6 +57,7 @@ pub mod __buffa {
         #[allow(unused_imports)]
         use super::*;
         include!("trogonai.connections.types.v1alpha1.resource_parent.__oneof.rs");
+        include!("trogonai.connections.types.v1alpha1.access_expiry.__oneof.rs");
     }
     /// Register this package's `Any` type entries and extension entries.
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {
@@ -76,6 +92,19 @@ pub mod __buffa {
         reg.register_json_any(super::__PROXY_BINDING_REF_JSON_ANY);
         reg.register_json_any(super::__HTTP_REQUEST_RULE_JSON_ANY);
         reg.register_json_any(super::__HTTP_REQUEST_RESTRICTIONS_JSON_ANY);
+        reg.register_json_any(super::__CANONICAL_RESOURCE_URI_JSON_ANY);
+        reg.register_json_any(super::__MCP_SPECIFICATION_REVISION_JSON_ANY);
+        reg.register_json_any(super::__DISCOVERY_SNAPSHOT_JSON_ANY);
+        reg.register_json_any(super::__ACCESS_EXPIRY_JSON_ANY);
+        reg.register_json_any(super::__PROVIDER_RESOURCE_REF_JSON_ANY);
+        reg.register_json_any(super::__GRANTED_AUTHORITY_JSON_ANY);
+        reg.register_json_any(super::__AUTHORITY_CEILING_JSON_ANY);
+        reg.register_json_any(super::__PROVIDER_ACCOUNT_FINGERPRINT_JSON_ANY);
+        reg.register_json_any(super::__PROVIDER_ACCOUNT_IDENTITY_INPUT_JSON_ANY);
+        reg.register_json_any(super::__PROVIDER_IDENTITY_COMPONENT_JSON_ANY);
+        reg.register_json_any(super::__PROVIDER_ACCOUNT_JSON_ANY);
+        reg.register_json_any(super::__AUDIT_CORRELATION_ID_JSON_ANY);
+        reg.register_json_any(super::__PROVIDER_REQUEST_ID_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -202,5 +231,57 @@ pub use self::__buffa::view::HttpRequestRuleOwnedView;
 pub use self::__buffa::view::HttpRequestRestrictionsView;
 #[doc(inline)]
 pub use self::__buffa::view::HttpRequestRestrictionsOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CanonicalResourceUriView;
+#[doc(inline)]
+pub use self::__buffa::view::CanonicalResourceUriOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::McpSpecificationRevisionView;
+#[doc(inline)]
+pub use self::__buffa::view::McpSpecificationRevisionOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::DiscoverySnapshotView;
+#[doc(inline)]
+pub use self::__buffa::view::DiscoverySnapshotOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::AccessExpiryView;
+#[doc(inline)]
+pub use self::__buffa::view::AccessExpiryOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderResourceRefView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderResourceRefOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::GrantedAuthorityView;
+#[doc(inline)]
+pub use self::__buffa::view::GrantedAuthorityOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::AuthorityCeilingView;
+#[doc(inline)]
+pub use self::__buffa::view::AuthorityCeilingOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderAccountFingerprintView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderAccountFingerprintOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderAccountIdentityInputView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderAccountIdentityInputOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderIdentityComponentView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderIdentityComponentOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderAccountView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderAccountOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::AuditCorrelationIdView;
+#[doc(inline)]
+pub use self::__buffa::view::AuditCorrelationIdOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderRequestIdView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderRequestIdOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;

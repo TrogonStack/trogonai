@@ -21,7 +21,8 @@ inputs:
       - proto/trogonai/platform/api_keyspaces
       - proto/trogonai/platform/key_custody
       - proto/trogonai/projects
-      - proto/trogonai/secrets
+      - proto/trogonai/secrets/credentials
+      - proto/trogonai/secrets/v1alpha1
       - proto/trogonai/session
       - proto/trogonai/usage
       - proto/trogonai/workflows
