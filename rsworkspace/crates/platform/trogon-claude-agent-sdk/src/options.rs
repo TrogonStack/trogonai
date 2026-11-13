@@ -336,7 +336,8 @@ pub struct ClaudeAgentOptions {
     pub claude_code_marker: ClaudeCodeMarker,
     /// `CLAUDE_CODE_ENTRYPOINT`; `None` selects `sdk-trogon-rs`.
     pub entrypoint: Option<String>,
-    /// Application name (optionally `name/version`) reported as `CLAUDE_AGENT_SDK_CLIENT_APP`.
+    /// Application name (optionally `name/version`) reported as `CLAUDE_AGENT_SDK_CLIENT_APP` in every environment
+    /// mode, over a value `env` configures.
     pub client_app: Option<String>,
     /// Python dialect: derive `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` for a bundled CLI. TypeScript derives none.
     pub client_app_derivation: crate::ClientAppDerivation,

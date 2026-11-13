@@ -164,6 +164,7 @@ impl<F: SessionFileSystem> SessionRuntime<F> {
             process,
             filesystem,
         } = input;
+        let environment_mode = environment_mode.resolve(subprocess_environment);
         let ts = options.dialect == SummaryDialect::TypeScript;
         let caller_config_dir = caller_config_dir(options, environment, ts)?;
         let source_config_dir = match &caller_config_dir {

@@ -309,6 +309,7 @@ fn token_callbacks_announce_themselves_in_every_mode() {
     let host: std::sync::Arc<dyn crate::HostAuthTokenHandler> =
         std::sync::Arc::new(|_request: crate::HostAuthTokenRequest| async { Ok(None) });
     for mode in [
+        EnvironmentMode::TypeScript,
         EnvironmentMode::Overlay,
         EnvironmentMode::Replace,
         EnvironmentMode::Inherit,
@@ -325,4 +326,60 @@ fn token_callbacks_announce_themselves_in_every_mode() {
             Some("1")
         );
     }
+}
+
+#[test]
+fn the_typescript_default_replaces_with_a_configured_environment_and_inherits_without_one() {
+    assert_eq!(EnvironmentMode::default(), EnvironmentMode::TypeScript);
+    let process = inherited(&[("DEBUG_CLAUDE_AGENT_SDK", "1"), ("CLAUDE_CODE_ENTRYPOINT", "outer")]);
+    let configured = [("ANTHROPIC_API_KEY", "key"), ("NODE_OPTIONS", "x")];
+    assert_eq!(
+        plan(&options(EnvironmentMode::TypeScript, &configured), &process),
+        plan(&options(EnvironmentMode::Replace, &configured), &process)
+    );
+    assert!(plan(&options(EnvironmentMode::TypeScript, &configured), &process).clear);
+    assert_eq!(
+        plan(&options(EnvironmentMode::TypeScript, &[]), &process),
+        plan(&options(EnvironmentMode::Inherit, &[]), &process)
+    );
+    let overlay = options(EnvironmentMode::Overlay, &configured);
+    assert_eq!(overlay.environment_mode.resolve(&overlay.env), EnvironmentMode::Overlay);
+}
+
+#[test]
+fn an_explicit_client_app_is_set_in_every_mode_over_the_configured_env() {
+    let configured = [("CLAUDE_AGENT_SDK_CLIENT_APP", "configured/1")];
+    for mode in [
+        EnvironmentMode::TypeScript,
+        EnvironmentMode::Overlay,
+        EnvironmentMode::Replace,
+        EnvironmentMode::Inherit,
+    ] {
+        let mut chosen = options(mode, &configured);
+        chosen.client_app = Some("explicit/2".to_owned());
+        let explicit = plan(&chosen, &inherited(&[]));
+        assert_eq!(
+            set(&explicit, "CLAUDE_AGENT_SDK_CLIENT_APP").as_deref(),
+            Some("explicit/2"),
+            "{mode:?}"
+        );
+        assert_eq!(set(&explicit, "CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP"), None, "{mode:?}");
+    }
+    let replace = plan(
+        &ClaudeAgentOptions {
+            client_app: Some("explicit/2".to_owned()),
+            ..options(EnvironmentMode::Replace, &[("ANTHROPIC_API_KEY", "key")])
+        },
+        &inherited(&[]),
+    );
+    assert!(replace.clear);
+    assert_eq!(
+        set(&replace, "CLAUDE_AGENT_SDK_CLIENT_APP").as_deref(),
+        Some("explicit/2")
+    );
+    let unset = plan(&options(EnvironmentMode::Replace, &configured), &inherited(&[]));
+    assert_eq!(
+        set(&unset, "CLAUDE_AGENT_SDK_CLIENT_APP").as_deref(),
+        Some("configured/1")
+    );
 }

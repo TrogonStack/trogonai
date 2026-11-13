@@ -14,15 +14,33 @@ pub enum ArgvStyle {
 }
 
 /// How the child environment is assembled.
+///
+/// The two upstream SDKs disagree: TypeScript replaces the inherited environment with `options.env` when it is
+/// given, Python merges `options.env` over it. Both are exposed and TypeScript is the default.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum EnvironmentMode {
-    /// Python: inherited environment, then SDK defaults, then `ClaudeAgentOptions::env` on top.
+    /// TypeScript: `Replace` when `ClaudeAgentOptions::env` has entries, otherwise `Inherit`. TypeScript tells an
+    /// explicit empty `options.env` apart from an absent one; choose `Replace` for the former.
     #[default]
+    TypeScript,
+    /// Python: inherited environment, then SDK defaults, then `ClaudeAgentOptions::env` on top.
     Overlay,
     /// TypeScript with `options.env`: the child sees only `ClaudeAgentOptions::env` plus SDK defaults.
     Replace,
     /// TypeScript without `options.env`: the inherited environment plus SDK defaults.
     Inherit,
+}
+
+impl EnvironmentMode {
+    /// The concrete mode for a configured environment; only `TypeScript` depends on it.
+    #[must_use]
+    pub fn resolve(self, env: &crate::Environment) -> Self {
+        match self {
+            Self::TypeScript if env.is_empty() => Self::Inherit,
+            Self::TypeScript => Self::Replace,
+            mode => mode,
+        }
+    }
 }
 
 /// What to do with an inherited `CLAUDECODE` variable.

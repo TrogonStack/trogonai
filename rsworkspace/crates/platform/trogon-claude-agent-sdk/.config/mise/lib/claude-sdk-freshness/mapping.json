@@ -1951,7 +1951,9 @@
         "ClaudeAgentOptions.env",
         "ClaudeAgentOptions.client_app_derivation",
         "adapters::EnvironmentVariable",
-        "adapters::CurrentDirectory"
+        "adapters::CurrentDirectory",
+        "EnvironmentMode",
+        "ClaudeCodeMarker"
       ],
       "tests": [
         {
@@ -1969,10 +1971,30 @@
         {
           "path": "src/client_app_derivation/tests.rs",
           "name": "derives_this_crate_for_a_qualifying_bundled_cli"
+        },
+        {
+          "path": "src/environment_plan/tests.rs",
+          "name": "the_typescript_default_replaces_with_a_configured_environment_and_inherits_without_one"
+        },
+        {
+          "path": "src/environment_plan/tests.rs",
+          "name": "overlay_forces_version_and_lets_options_override_the_entrypoint"
+        },
+        {
+          "path": "src/environment_plan/tests.rs",
+          "name": "replace_clears_and_only_defaults_what_options_env_lacks"
+        },
+        {
+          "path": "src/environment_plan/tests.rs",
+          "name": "inherit_keeps_an_inherited_entrypoint_and_drops_node_options_and_debug"
+        },
+        {
+          "path": "src/environment_plan/tests.rs",
+          "name": "an_explicit_client_app_is_set_in_every_mode_over_the_configured_env"
         }
       ],
-      "status": "rust_difference",
-      "rationale": "Rust overlays inherited environment, matching Python; TypeScript supplied env replaces its subprocess environment. This difference must remain visible in maintenance review. Injectable environment providers control SDK lookups, not implicit native child-environment inheritance. The Python-dialect client_app_derivation option reproduces CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP with the same trigger (a bundled CLI whose pin and recorded claude.version are at least 999.0.0), the same variable and the same name/version format, but names the application with this crate's package name and version because Rust has no Python distribution metadata to look up; TypeScript derives none, which is the default."
+      "status": "supported",
+      "rationale": "EnvironmentMode exposes both upstream behaviors. The default, TypeScript, replaces the inherited environment with options.env when it has entries and inherits otherwise, as sdk.mjs does; Replace and Inherit select either branch explicitly (Replace covers an explicit empty options.env), and Overlay merges options.env over the inherited environment as Python does. Injectable environment providers control SDK lookups. The Python-dialect client_app_derivation option reproduces CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP with the same trigger (a bundled CLI whose pin and recorded claude.version are at least 999.0.0), the same variable and the same name/version format, but names the application with this crate's package name and version because Rust has no Python distribution metadata to look up; TypeScript derives none, which is the default. An explicit client_app is written as CLAUDE_AGENT_SDK_CLIENT_APP over options.env, as Python writes it, in every environment mode."
     },
     {
       "id": "session-convenience",

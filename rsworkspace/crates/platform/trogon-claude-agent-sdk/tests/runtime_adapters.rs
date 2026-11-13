@@ -231,7 +231,9 @@ async fn injected_process_runs_protocol_and_closes_input_on_disconnect() -> Resu
             .windows(2)
             .any(|pair| pair == ["--output-format", "stream-json"])
     );
-    assert_eq!(command.environment.get(&OsString::from("CLAUDECODE")), Some(&None));
+    // A configured `env` replaces the child environment by default, as in TypeScript, so `CLAUDECODE` is never
+    // inherited and needs no explicit removal.
+    assert_eq!(command.environment.get(&OsString::from("CLAUDECODE")), None);
     assert_eq!(
         command.environment.get(&OsString::from("SDK_TEST_SENTINEL")),
         Some(&Some("child-value".into()))
@@ -585,12 +587,12 @@ fn variable(name: &str) -> EnvironmentAccess {
 }
 
 /// TypeScript `Wn(directory, undefined)` reads `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_PROJECT_DIR_NAME` from the process
-/// to name the project; Python derives the name from the directory alone.
-fn project_name_lookups(dialect: SummaryDialect, configured: &[&str]) -> Vec<EnvironmentAccess> {
+/// to name the project; Python derives the name from the directory alone. A configured `env` replaces the child
+/// environment by default, so TypeScript then reads those settings from it alone and nothing from the process.
+fn project_name_lookups(dialect: SummaryDialect) -> Vec<EnvironmentAccess> {
     match dialect {
         SummaryDialect::TypeScript => ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROJECT_DIR_NAME"]
             .into_iter()
-            .filter(|name| !configured.contains(name))
             .map(variable)
             .collect(),
         SummaryDialect::Python => Vec::new(),
@@ -623,7 +625,7 @@ async fn explicit_store_config_and_working_directory_short_circuit_environment_l
             environment.clone(),
         )
         .await?;
-        assert_eq!(environment.accesses()?, project_name_lookups(dialect, &[]));
+        assert_eq!(environment.accesses()?, project_name_lookups(dialect));
         assert_eq!(command.directory, Some(filesystem.path("project")));
         assert_eq!(
             command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
@@ -660,10 +662,7 @@ async fn child_config_override_precedes_environment_and_accepts_matching_store_c
                 environment.clone(),
             )
             .await?;
-            assert_eq!(
-                environment.accesses()?,
-                project_name_lookups(dialect, &["CLAUDE_CONFIG_DIR"])
-            );
+            assert!(environment.accesses()?.is_empty());
             assert_eq!(
                 command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
                 Some(&Some(child_config.clone().into_os_string()))
@@ -693,10 +692,7 @@ async fn s21_conflicting_config_warns_and_keeps_the_child_value() -> TestResult 
             environment.clone(),
         )
         .await?;
-        assert_eq!(
-            environment.accesses()?,
-            project_name_lookups(dialect, &["CLAUDE_CONFIG_DIR"])
-        );
+        assert!(environment.accesses()?.is_empty());
         assert_eq!(
             command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
             Some(&Some(OsString::from("/child-config")))
@@ -727,7 +723,7 @@ async fn injected_config_short_circuits_home_and_resolves_current_directory_once
         )
         .await?;
         let mut expected = vec![EnvironmentAccess::CurrentDirectory, variable("CLAUDE_CONFIG_DIR")];
-        expected.extend(project_name_lookups(dialect, &[]));
+        expected.extend(project_name_lookups(dialect));
         assert_eq!(environment.accesses()?, expected);
         assert_eq!(
             command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
@@ -766,7 +762,7 @@ async fn missing_config_variable_falls_back_to_injected_home_in_order() -> TestR
             variable("CLAUDE_CONFIG_DIR"),
             variable("HOME"),
         ];
-        expected.extend(project_name_lookups(dialect, &[]));
+        expected.extend(project_name_lookups(dialect));
         assert_eq!(environment.accesses()?, expected);
         assert_eq!(
             command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
@@ -801,7 +797,7 @@ async fn explicit_working_directory_skips_failing_current_directory_provider() -
         )
         .await?;
         let mut expected = vec![variable("CLAUDE_CONFIG_DIR")];
-        expected.extend(project_name_lookups(dialect, &[]));
+        expected.extend(project_name_lookups(dialect));
         assert_eq!(environment.accesses()?, expected);
         assert_eq!(command.directory, Some(filesystem.path("project")));
     }

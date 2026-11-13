@@ -85,7 +85,7 @@ integrity-verified published `0.3.319` declaration archive.
 | Rust field | Python equivalent | TypeScript equivalent |
 | --- | --- | --- |
 | `argv_style: ArgvStyle` | `subprocess_cli.py` argv shape | `sdk.mjs` argv shape (default) |
-| `environment_mode: EnvironmentMode` | env overlay (default) | `env` replace/inherit |
+| `environment_mode: EnvironmentMode` | env overlay (`Overlay`) | `env` replace/inherit (`TypeScript`, default) |
 | `claude_code_marker: ClaudeCodeMarker` | removes `CLAUDECODE` | keeps inherited value |
 | `entrypoint: Option<String>` | `CLAUDE_CODE_ENTRYPOINT` | `CLAUDE_CODE_ENTRYPOINT` |
 | `client_app: Option<String>` | `CLAUDE_AGENT_SDK_CLIENT_APP` | `CLAUDE_AGENT_SDK_CLIENT_APP` |

@@ -123,10 +123,19 @@ async fn w2_file_checkpointing_with_a_session_store_is_refused() -> TestResult {
     options.file_checkpointing = FileCheckpointing::Enabled;
     let store: Arc<dyn SessionStore> = Arc::new(InMemorySessionStore::<SystemClock>::default());
     options.session_store = Some(SessionStoreOptions::from(store));
-    assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
-        Err(Error::FileCheckpointingWithSessionStore)
-    ));
+    let Err(error @ Error::FileCheckpointingWithSessionStore) = ClaudeSdkClient::connect(options).await else {
+        return Err("file checkpointing with a session store was not refused".into());
+    };
+    assert_eq!(
+        error.to_string(),
+        "enableFileCheckpointing is not yet supported with sessionStore (backup blobs are not mirrored, so rewindFiles() fails after a store-backed resume)."
+    );
+    assert_eq!(
+        error.python_message(),
+        Some(
+            "session_store cannot be combined with enable_file_checkpointing (checkpoints are local-disk only and would diverge from the mirrored transcript)"
+        )
+    );
     Ok(())
 }
 
@@ -157,10 +166,18 @@ async fn st06_continue_conversation_requires_a_store_that_lists_sessions() -> Te
     options.continue_conversation = trogon_claude_agent_sdk::ContinueConversation::Yes;
     let store: Arc<dyn SessionStore> = Arc::new(RequiredOnly);
     options.session_store = Some(SessionStoreOptions::from(store));
-    assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
-        Err(Error::ContinueRequiresListSessions)
-    ));
+    let Err(error @ Error::ContinueRequiresListSessions) = ClaudeSdkClient::connect(options).await else {
+        return Err("continue against a store that cannot list sessions was not refused".into());
+    };
+    assert_eq!(
+        error.to_string(),
+        "Options.continue with sessionStore requires store.listSessions to be implemented"
+    );
+    assert_eq!(
+        error.python_message(),
+        Some("continue_conversation with session_store requires the store to implement list_sessions()")
+    );
+    assert_eq!(Error::InputClosed.python_message(), None);
     Ok(())
 }
 
