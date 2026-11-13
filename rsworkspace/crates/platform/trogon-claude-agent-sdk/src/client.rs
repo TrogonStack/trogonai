@@ -30,7 +30,6 @@ struct ClientRuntime {
     handle: ClientHandle,
     messages: crate::channel::Receiver<Message>,
     terminal: Option<oneshot::Receiver<Result<(), Error>>>,
-    shutdown: Option<oneshot::Sender<()>>,
     driver: Option<JoinHandle<()>>,
     process_id: Option<u32>,
 }
@@ -41,12 +40,33 @@ pub struct ClientHandle {
     commands: crate::channel::Sender<Command>,
     /// Only a bounded command queue can be full, so the wait applies only when the caller opted into both.
     timeout: Option<std::time::Duration>,
-    aborted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    abort: crate::CancellationToken,
+    close: CloseSignal,
     closed: Closed,
     /// The first initialize response, which `reinitialize` does not replace; `None` when the reply had none.
     initialization: std::sync::Arc<std::sync::OnceLock<Option<serde_json::Value>>>,
     latest_commands: driver::LatestCommands,
     style: crate::ArgvStyle,
+}
+
+/// TypeScript `Query.close()`: asks the driver to shut down, once, from the owner or any handle.
+#[derive(Clone)]
+struct CloseSignal(std::sync::Arc<std::sync::Mutex<Option<oneshot::Sender<()>>>>);
+
+impl CloseSignal {
+    fn new(sender: oneshot::Sender<()>) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(Some(sender))))
+    }
+
+    fn fire(&self) {
+        let sender = match self.0.lock() {
+            Ok(mut sender) => sender.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        };
+        if let Some(sender) = sender {
+            let _ = sender.send(());
+        }
+    }
 }
 
 /// The inherited variables plus the two the default debug file needs. They are read only here, and the
@@ -351,6 +371,7 @@ impl ClaudeSdkClient {
         let (message_tx, message_rx) = crate::channel::channel(options.limits.message_buffer.capacity());
         let (terminal_tx, terminal_rx) = oneshot::channel();
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let abort = options.abort_controller.clone().unwrap_or_default();
         let handle = ClientHandle {
             commands: command_tx,
             timeout: options
@@ -358,7 +379,8 @@ impl ClaudeSdkClient {
                 .command_queue_capacity
                 .and(options.limits.command_queue_timeout)
                 .map(crate::Timeout::as_duration),
-            aborted: std::sync::Arc::default(),
+            abort: abort.clone(),
+            close: CloseSignal::new(shutdown_tx),
             closed,
             initialization: std::sync::Arc::default(),
             latest_commands: driver::LatestCommands::default(),
@@ -371,6 +393,7 @@ impl ClaudeSdkClient {
             commands: command_rx,
             messages: message_tx,
             shutdown: shutdown_rx,
+            abort,
             terminal: terminal_tx,
             transport,
             initialization,
@@ -382,7 +405,6 @@ impl ClaudeSdkClient {
             handle,
             messages: message_rx,
             terminal: Some(terminal_rx),
-            shutdown: Some(shutdown_tx),
             driver: Some(driver),
             process_id,
         };
@@ -395,6 +417,8 @@ impl ClaudeSdkClient {
                     connection_info,
                 })
             }
+            // TypeScript: a process spawned under an aborted signal ends with "Claude Code process aborted by user".
+            Err(error) if runtime.handle.abort.is_cancelled() => Err(runtime.finish().await.err().unwrap_or(error)),
             Err(error) => {
                 let cleanup = if matches!(error, Error::DriverStopped) {
                     runtime.finish().await
@@ -434,6 +458,13 @@ impl ClaudeSdkClient {
     /// Stops the CLI process immediately; the run then ends with `Error::Aborted` (TypeScript `AbortError`).
     pub async fn abort(&self) -> Result<(), Error> {
         self.runtime.handle.abort().await
+    }
+
+    /// TypeScript `Query.close()`: shuts the process down without waiting. Idempotent. Messages already received
+    /// stay readable, after which `next_message` returns `None`; control requests still waiting fail with
+    /// `Error::QueryClosed`. `disconnect` closes and also waits for cleanup.
+    pub fn close(&self) {
+        self.runtime.handle.close();
     }
 
     pub async fn stream_input<S>(&self, mut stream: S) -> Result<(), Error>
@@ -488,14 +519,8 @@ fn connection_failure(primary: Error, cleanup: Result<(), Error>) -> Error {
 
 impl ClientRuntime {
     async fn close(mut self) -> Result<(), Error> {
-        self.request_shutdown();
+        self.handle.close();
         self.finish().await
-    }
-
-    fn request_shutdown(&mut self) {
-        if let Some(shutdown) = self.shutdown.take() {
-            let _ = shutdown.send(());
-        }
     }
 
     async fn finish(&mut self) -> Result<(), Error> {
@@ -515,7 +540,7 @@ impl ClientRuntime {
 
 impl Drop for ClientRuntime {
     fn drop(&mut self) {
-        self.request_shutdown();
+        self.handle.close();
     }
 }
 
@@ -990,9 +1015,16 @@ impl ClientHandle {
         self.finish_with(Completion::Run).await
     }
 
+    /// TypeScript `abortController.abort()`: cancels the abort token, which stops the process now and ends the run
+    /// with `Error::Aborted`. Later writes fail with `AbortError("Operation aborted")`.
     pub async fn abort(&self) -> Result<(), Error> {
-        self.aborted.store(true, std::sync::atomic::Ordering::SeqCst);
-        self.enqueue(Command::Abort).await
+        self.abort.cancel();
+        Ok(())
+    }
+
+    /// TypeScript `Query.close()`, from any handle: shuts the process down without waiting. Idempotent.
+    pub fn close(&self) {
+        self.close.fire();
     }
 
     async fn finish_with(&self, completion: Completion) -> Result<(), Error> {
@@ -1024,6 +1056,10 @@ impl ClientHandle {
     }
 
     async fn enqueue(&self, command: Command) -> Result<(), Error> {
+        // TypeScript `write()` checks the abort signal before anything else.
+        if self.abort.is_cancelled() {
+            return Err(crate::AbortError::OPERATION.into());
+        }
         self.send_command(command)
             .await
             .map_err(|_| Error::CommandQueueTimeout)?
@@ -1042,7 +1078,7 @@ impl ClientHandle {
     /// sent afterwards.
     fn stopped_error(&self) -> Error {
         // TypeScript: a write after the abort signal fired throws `AbortError("Operation aborted")`.
-        if self.aborted.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.abort.is_cancelled() {
             crate::AbortError::OPERATION.into()
         } else {
             self.closed.write_error().unwrap_or(Error::DriverStopped)

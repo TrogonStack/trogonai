@@ -267,6 +267,9 @@ pub enum Error {
     },
     #[error("the SDK driver has stopped; receive remaining messages for its terminal error")]
     DriverStopped,
+    /// TypeScript's rejection of a control request still waiting for its answer when the query is closed.
+    #[error("Query closed before response received")]
+    QueryClosed,
     #[error("the client is not initialized")]
     NotInitialized,
     #[error("control request counter exhausted")]

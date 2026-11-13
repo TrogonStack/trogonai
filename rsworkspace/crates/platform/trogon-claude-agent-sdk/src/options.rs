@@ -347,6 +347,10 @@ pub struct ClaudeAgentOptions {
     pub client_app_derivation: crate::ClientAppDerivation,
     pub trace_context: Option<TraceContext>,
     pub stderr_handler: Option<StderrHandler>,
+    /// TypeScript `abortController`. Cancelling it stops the process and ends the run with
+    /// `AbortError("Claude Code process aborted by user")`; a token already cancelled makes `connect` fail with that
+    /// error. `None` uses a fresh token, which `abort()` cancels. Closing the client does not cancel it.
+    pub abort_controller: Option<crate::CancellationToken>,
     pub extra_args: Vec<ExtraArgument>,
     pub script_runtime: ScriptRuntime,
     /// Python's `user`: the CLI runs as this account (Unix only). The name is looked up in `/etc/passwd`; only the

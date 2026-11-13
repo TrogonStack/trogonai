@@ -63,10 +63,15 @@ queued input or `stream_input`, and receive on the owner concurrently. Call
 `finish_input()` when no more user messages will be sent. Reported queue counts
 handle CLIs that coalesce queued sends into a turn.
 
-Call `disconnect().await` to wait for shutdown and receive cleanup errors. Dropping
-the owner requests shutdown even when a handle survives, but does not call or
-await `disconnect()`. Cleanup needs a running Tokio runtime; the child also has a
-`kill_on_drop` fallback.
+`close()` on the client or any `ClientHandle` is TypeScript's `Query.close()`: it
+shuts the process down without waiting and is idempotent. Messages already
+received stay readable before `next_message` returns `None`, and a control
+request still waiting fails with `Error::QueryClosed` ("Query closed before
+response received"); under `ArgvStyle::Python` it runs out its timeout instead,
+as Python's `close()` leaves it. Call `disconnect().await` to close and wait for
+shutdown and cleanup errors. Dropping the owner closes even when a handle
+survives, but does not await cleanup. Cleanup needs a running Tokio runtime; the
+child also has a `kill_on_drop` fallback.
 
 ## Messages and controls
 
@@ -353,7 +358,10 @@ upstream SDKs).
   unsuccessfully after an `is_error` result, the error is `Error::Result`
   (`ResultError`): Python's text always, TypeScript's text when it is non-empty.
   `abort()` stops the process and ends the run with `Error::Aborted`
-  (`AbortError`). Closing follows `limits.shutdown`: TypeScript's ladder by
+  (`AbortError`, "Claude Code process aborted by user"). It cancels
+  `abort_controller`, TypeScript's `abortController`: a caller's token cancelled
+  from anywhere does the same, a token already cancelled fails `connect` with
+  that error, and `close()` leaves it untouched. Closing follows `limits.shutdown`: TypeScript's ladder by
   default (stdin close, 2 seconds, SIGTERM, SIGKILL 5 seconds later without
   waiting), Python's 5/5/5 second ladder, or `Shutdown::Strict`, which reports
   `Error::ShutdownTimeout` and `Error::StderrDrainTimeout`.
@@ -455,10 +463,10 @@ A Windows `.bat` or `.cmd` CLI path starts, as in TypeScript;
 `WindowsBatchCli::Refuse` selects Python's refusal at process start.
 Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L93)
 and [`disconnect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L607)
-on an existing client. Rust intentionally uses an async factory for `connect`
-and consumes the client in `disconnect(self)` to observe cleanup errors. Published
-[TypeScript `0.3.319`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk/v/0.3.319)
-uses `Query` and `WarmQuery` with `close()` instead.
+on an existing client; Rust's `connect` is the async factory that returns the
+connected client, and `disconnect(self)` consumes it, so a second disconnect
+cannot be written rather than being a no-op. TypeScript's `Query.close()` is
+`close()` on the client or a handle.
 
 Options include programmatic agents, model/effort, tool rules, budget, output
 schema, checkpointing, environment, additional directories, resume and fork.

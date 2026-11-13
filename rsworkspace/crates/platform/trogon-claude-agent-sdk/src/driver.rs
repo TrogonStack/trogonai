@@ -50,8 +50,6 @@ pub(crate) enum Command {
         completion: Completion,
         response: oneshot::Sender<Result<(), Error>>,
     },
-    /// TypeScript `abortController.abort()`: stop the process now and end the run with an `AbortError`.
-    Abort,
 }
 
 #[derive(Clone, Copy)]
@@ -228,6 +226,28 @@ impl ControlResponder {
             }
         }
     }
+
+    /// Python `close()` cancels the reader without failing the requests still waiting, so each one runs out its own
+    /// timeout. Without a deadline it waits until the caller stops waiting.
+    fn time_out_at(self, deadline: Option<Instant>) {
+        let operation = self.operation();
+        let (Self::Initialize { mut response, .. } | Self::Control { mut response, .. }) = self;
+        tokio::spawn(async move {
+            let expired = match deadline {
+                Some(deadline) => tokio::select! {
+                    () = sleep_until(deadline) => true,
+                    () = response.closed() => false,
+                },
+                None => {
+                    response.closed().await;
+                    false
+                }
+            };
+            if expired {
+                let _ = response.send(Err(Error::ControlTimeout { operation }));
+            }
+        });
+    }
 }
 
 /// The response a callback writes; `None` when the request stays unanswered.
@@ -312,6 +332,8 @@ where
     shutdown: oneshot::Receiver<()>,
     /// The shutdown signal has been taken, so the receiver must not be polled again.
     shutdown_seen: bool,
+    /// TypeScript `abortController`: once cancelled, the process is stopped and the run ends with an `AbortError`.
+    abort: crate::CancellationToken,
     limits: Limits,
     handler: Option<Arc<dyn ToolPermissionHandler>>,
     pending: HashMap<ControlRequestId, PendingControl>,
@@ -559,6 +581,7 @@ pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
     pub commands: crate::channel::Receiver<Command>,
     pub messages: crate::channel::Sender<Message>,
     pub shutdown: oneshot::Receiver<()>,
+    pub abort: crate::CancellationToken,
     pub terminal: oneshot::Sender<Result<(), Error>>,
     pub transport: T,
     pub initialization: Initialization,
@@ -695,6 +718,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         commands,
         messages,
         shutdown,
+        abort,
         terminal,
         mut transport,
         initialization,
@@ -710,6 +734,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         overflow: VecDeque::new(),
         shutdown,
         shutdown_seen: false,
+        abort,
         limits: options.limits,
         handler: options.permission_handler,
         pending: HashMap::new(),
@@ -805,7 +830,12 @@ where
         let outcome = combine_outcomes(outcome, mirror_cleanup);
         self.flush_overflow().await;
         for (_, pending) in self.pending.drain() {
-            pending.response.send_error(Error::DriverStopped);
+            match (self.shutdown_seen, self.argv_style) {
+                // TypeScript `close()` rejects what is still unanswered with "Query closed before response received".
+                (true, crate::ArgvStyle::TypeScript) => pending.response.send_error(Error::QueryClosed),
+                (true, crate::ArgvStyle::Python) => pending.response.time_out_at(pending.deadline),
+                (false, _) => pending.response.send_error(Error::DriverStopped),
+            }
         }
         self.commands.close();
         drop(self.messages);
@@ -857,6 +887,9 @@ where
                 self.shutdown_seen = true;
                 return Ok(());
             }
+            if self.abort.is_cancelled() {
+                return Err(crate::AbortError::PROCESS.into());
+            }
             if let Some(error) = self.expired_control() {
                 return Err(error);
             }
@@ -883,6 +916,7 @@ where
             let reading = self.overflow.is_empty() && !self.deferred_full();
             tokio::select! {
                 _ = &mut self.shutdown => { self.shutdown_seen = true; return Ok(()); }
+                () = self.abort.cancelled() => return Err(crate::AbortError::PROCESS.into()),
                 ready = self.messages.ready(), if !self.overflow.is_empty() => {
                     if !ready { return Err(Error::DriverStopped); }
                     self.drain_overflow()?;
@@ -1414,7 +1448,6 @@ where
                 self.run_state.input_done = Some(completion);
                 let _ = response.send(Ok(()));
             }
-            Command::Abort => return Err(crate::AbortError::PROCESS.into()),
         }
         Ok(())
     }
@@ -2031,6 +2064,7 @@ where
         let limit = self.limits.write_timeout.map(crate::Timeout::as_duration);
         tokio::select! {
             _ = &mut self.shutdown => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
+            () = self.abort.cancelled() => Err(crate::AbortError::PROCESS.into()),
             result = async { match limit { Some(limit) => timeout(limit, self.transport.write(&text)).await.map_err(|_| Error::WriteTimeout)?, None => self.transport.write(&text).await } } => result,
         }
     }

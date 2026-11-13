@@ -3556,6 +3556,76 @@
         "src/driver.rs",
         "src/wire.rs"
       ]
+    },
+    {
+      "id": "c19-query-close",
+      "concept": "Closing a query while control requests wait for their answers",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 1213,
+        "line_end": 1236,
+        "sha256": "a3bd878a6c883f8abf9b2ac912e9fc60ffe5a5b991612f74088a027986460e10"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "close(){this.cleanup()}cleanup(e){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 1042,
+        "sha256": "efdcd585a0af7c79b727340a896c0cbfb912fc3c3c18ec0c301a14b002e8e90b"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript's close is idempotent: it aborts in-flight callbacks, closes the transport, rejects every control and MCP request still waiting with Query closed before response received, and ends the message stream cleanly. Python's close cancels the read task without failing waiting control requests, so each one runs out its own timeout with Control request timeout: <subtype>, and the buffered messages stay readable."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "close() rejects waiting control requests with Error::QueryClosed by default; ArgvStyle::Python leaves each to its control timeout as Python does. disconnect(self) closes and waits for the process in both styles."
+      },
+      "contracts": [
+        "shutdown_errors::close_rejects_a_waiting_control_like_typescript_and_ends_the_run_cleanly",
+        "shutdown_errors::close_leaves_a_waiting_control_to_its_timeout_like_python"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "c20-abort-controller",
+      "concept": "A caller-supplied abort controller stops the process",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no abort controller; cancellation is the caller's task cancellation."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "this.abortHandler=()=>this.close(),this.abortController.signal.addEventListener(\"abort\",this.abortHandler),this.abortController.signal.aborted)this.close()",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "371a26fbdd0cc592b2f6c2ef953c2f76f621ce36e73a2f879d639530e87e126e"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript listens on abortController (a fresh one by default): aborting it closes the process, an already aborted controller closes it at spawn, an exit while aborted is Claude Code process aborted by user, and a write after it is Operation aborted. Closing the query does not abort the caller's controller."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "shutdown_errors::cancelling_the_abort_controller_stops_the_process_like_typescript",
+        "shutdown_errors::an_abort_controller_cancelled_before_connect_fails_the_connection",
+        "shutdown_errors::abort_cancels_the_supplied_controller"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/options.rs"
+      ]
     }
   ]
 }

@@ -131,7 +131,8 @@
       "rust_api": [
         "Error",
         "AbortError",
-        "ResultError"
+        "ResultError",
+        "ClaudeAgentOptions.abort_controller"
       ],
       "tests": [
         {
@@ -181,10 +182,22 @@
         {
           "path": "tests/shutdown_errors.rs",
           "name": "t14_a_write_after_the_cli_exited_with_an_error_reports_the_upstream_state"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "cancelling_the_abort_controller_stops_the_process_like_typescript"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "an_abort_controller_cancelled_before_connect_fails_the_connection"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "abort_cancels_the_supplied_controller"
         }
       ],
       "status": "supported",
-      "rationale": "Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data."
+      "rationale": "Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data. abort_controller is TypeScript's abortController: cancelling it stops the process and ends the run with Claude Code process aborted by user, a controller cancelled before connect fails the connection, later writes fail with Operation aborted, and abort() cancels the supplied controller; without one a fresh token is used. Python has no abort controller."
     },
     {
       "id": "permission-modes",
@@ -300,7 +313,10 @@
       },
       "rust_api": [
         "ClaudeSdkClient.connect",
-        "ClaudeSdkClient.disconnect"
+        "ClaudeSdkClient.close",
+        "ClientHandle.close",
+        "ClaudeSdkClient.disconnect",
+        "Error.QueryClosed"
       ],
       "tests": [
         {
@@ -310,10 +326,18 @@
         {
           "path": "tests/runtime_adapters.rs",
           "name": "injected_process_runs_protocol_and_closes_input_on_disconnect"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "close_rejects_a_waiting_control_like_typescript_and_ends_the_run_cleanly"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "close_leaves_a_waiting_control_to_its_timeout_like_python"
         }
       ],
-      "status": "rust_difference",
-      "rationale": "Rust follows Python lifecycle names with an async connect factory and consuming async disconnect(self), rather than methods on an existing Python client. TypeScript Query.close is the cleanup counterpart. Memory-process fixtures require initialization before returning an owner and verify the child input is closed on disconnect; named references alone do not prove test execution or native conformance."
+      "status": "supported",
+      "rationale": "connect is Python's connect as an async factory that returns only after initialization is answered. close(&self) on the client or any handle is TypeScript Query.close: idempotent, it closes the transport without aborting the caller's abort controller, already received messages stay readable and the stream then ends cleanly, and a control request still waiting for its answer fails with Query closed before response received under the TypeScript style while the Python style leaves it to run out its own control timeout as Python's close does. disconnect(self) is Python's awaitable disconnect: it closes and waits for the process to stop; consuming the owner makes a second disconnect unrepresentable instead of a no-op."
     },
     {
       "id": "interactive-client",

@@ -92,6 +92,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `client_app_derivation: ClientAppDerivation` | `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` (bundled CLI at 999.0.0 or later; this crate's identity replaces the distribution metadata) | none |
 | `trace_context: Option<TraceContext>` | `TRACEPARENT`, `TRACESTATE` | `TRACEPARENT`, `TRACESTATE` |
 | `stderr_handler: Option<StderrHandler>` | `stderr` callback (lines) | `stderr` callback (chunks) |
+| `abort_controller: Option<CancellationToken>` | not applicable | `abortController` |
 | `extra_args: Vec<ExtraArgument>` | `extra_args` | `extraArgs` |
 | `tools: ToolSet` (`CliDefault`, `Only`, `ClaudeCodePreset`) | `tools` list, empty list or `{type: "preset", preset: "claude_code"}` | `tools` list or preset object |
 | `script_runtime: ScriptRuntime` | not applicable | `executable`, `executableArgs` (a native path runs directly with the arguments first; a path ending in `.js`, `.mjs`, `.ts`, `.tsx` or `.jsx`, matched case-sensitively, runs under the executable) |
@@ -107,7 +108,10 @@ integrity-verified published `0.3.319` declaration archive.
 | `Error::WorkingDirectoryMissing(path)` | `CLIConnectionError` (cwd) | not applicable |
 | `Error::Process { .. }`, `exit_code()`, `typescript_message()` | `ProcessError` | exit-code error text |
 | `Error::Result(ResultError)` | `ResultError` | error result text |
-| `Error::Aborted(AbortError)`, `abort()` | not applicable | `AbortError` |
+| `Error::Aborted(AbortError)`, `abort()` | not applicable | `AbortError`, `abortController.abort()` |
+| `close()` on `ClaudeSdkClient` or `ClientHandle` | `close()` without waiting | `Query.close()` |
+| `disconnect(self)` | `disconnect()` | `close()` plus waiting for the process |
+| `Error::QueryClosed` | a waiting control request runs out its timeout | "Query closed before response received" |
 | `Error::NotReadyForWriting` | `CLIConnectionError` (not ready for writing) | same text |
 | `Error::WriteToTerminatedProcess { exit_code }` | `CLIConnectionError` (terminated process) | same text without the code |
 | `Error::WriteFailed(io::Error)` | `CLIConnectionError` (write failed) | same text |

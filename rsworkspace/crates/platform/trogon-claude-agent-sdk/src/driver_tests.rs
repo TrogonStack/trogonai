@@ -82,6 +82,7 @@ impl DriverFixture {
             overflow: VecDeque::new(),
             shutdown: shutdown_rx,
             shutdown_seen: false,
+            abort: crate::CancellationToken::new(),
             limits: Limits::default(),
             handler,
             message_decoding: crate::MessageDecoding::TypeScript,
