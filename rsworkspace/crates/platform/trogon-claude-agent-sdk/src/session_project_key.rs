@@ -3,9 +3,9 @@ use std::{
     path::{Component, Path},
 };
 
-use crate::adapters::{EnvironmentVariable, SystemEnvironment};
-
 use unicode_normalization::UnicodeNormalization;
+
+use crate::adapters::{EnvironmentVariable, SystemEnvironment};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SessionProjectKey(String);
@@ -198,13 +198,13 @@ pub(crate) fn project_name_with(canonical: &str, config_dir: Option<&str>, name_
 
 /// Upstream `_o` / `Wn(directory)`: [`project_name_with`] over the process environment.
 pub(crate) fn project_name_ts(canonical: &str) -> String {
-    let environment = SystemEnvironment;
-    let config_dir = environment
-        .var_os(OsStr::new("CLAUDE_CONFIG_DIR"))
-        .and_then(|value| value.into_string().ok());
-    let name = environment
-        .var_os(OsStr::new("CLAUDE_CODE_PROJECT_DIR_NAME"))
-        .and_then(|value| value.into_string().ok());
+    let unicode_var = |key: &str| {
+        SystemEnvironment
+            .var_os(OsStr::new(key))
+            .and_then(|value| value.into_string().ok())
+    };
+    let config_dir = unicode_var("CLAUDE_CONFIG_DIR");
+    let name = unicode_var("CLAUDE_CODE_PROJECT_DIR_NAME");
     project_name_with(canonical, config_dir.as_deref(), name.as_deref())
 }
 
