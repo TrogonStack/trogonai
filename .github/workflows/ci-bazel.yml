@@ -63,6 +63,17 @@ jobs:
       - name: Test Bazel targets
         run: mise run --skip-tools github:workflows:ci-bazel:test
 
+      # Bazel skips printing a failing test's output once it passes 1 MiB, so
+      # the full logs are kept where a failure can still be read.
+      - name: Upload failed test logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-testlogs
+          path: bazel-testlogs/**/test.log
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Build Bazel targets
         run: mise run --skip-tools github:workflows:ci-bazel:build
 
