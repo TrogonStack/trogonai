@@ -8,13 +8,13 @@ use std::{
 use tokio::{
     sync::oneshot,
     task::{AbortHandle, JoinHandle, JoinSet},
-    time::{Instant, sleep_until, timeout},
+    time::{Instant, sleep, sleep_until, timeout},
 };
 
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
     PermissionDecision, ProtocolError, StderrTail, ToolPermissionHandler, Transport,
-    constants::TYPESCRIPT_INITIALIZE_TIMEOUT,
+    constants::{self, TYPESCRIPT_INITIALIZE_TIMEOUT},
     wire::{
         self, ControlResponse, Frame, IncomingControl,
         runtime_payload::{
@@ -22,6 +22,9 @@ use crate::{
         },
     },
 };
+
+#[path = "mcp_manifest.rs"]
+mod mcp_manifest;
 
 pub(crate) enum Command {
     /// TypeScript `initialize({first})`: the connect-time request, or `reinitialize()` resending it.
@@ -241,10 +244,31 @@ pub(crate) enum McpTransportEvent {
     Failed { key: String },
 }
 
+/// `pendingMcpResponses`: shared with the manifest capture, whose per-server handshakes register waiters too.
+#[derive(Clone, Default)]
+pub(crate) struct WaiterTable(Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<Result<JsonObject, ()>>>>>);
+
+impl WaiterTable {
+    /// Replacing an entry drops the earlier waiter, which is then never answered.
+    pub(crate) fn insert(&self, key: String, waiter: oneshot::Sender<Result<JsonObject, ()>>) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key, waiter);
+    }
+
+    pub(crate) fn remove(&self, key: &str) -> Option<oneshot::Sender<Result<JsonObject, ()>>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(key)
+    }
+}
+
 /// The TypeScript `Query` state behind `mcp_message`: `pendingMcpResponses`, keyed by the JavaScript text
 /// `${server_name}:${id}`, and the work that feeds it.
 pub(crate) struct McpRouting {
-    waiters: HashMap<String, oneshot::Sender<Result<JsonObject, ()>>>,
+    waiters: WaiterTable,
     tasks: JoinSet<()>,
     outbound: tokio::sync::mpsc::UnboundedSender<McpTransportEvent>,
     inbound: tokio::sync::mpsc::UnboundedReceiver<McpTransportEvent>,
@@ -279,7 +303,7 @@ impl McpRouting {
     pub(crate) fn new() -> Self {
         let (outbound, inbound) = tokio::sync::mpsc::unbounded_channel();
         Self {
-            waiters: HashMap::new(),
+            waiters: WaiterTable::default(),
             tasks: JoinSet::new(),
             outbound,
             inbound,
@@ -327,6 +351,8 @@ where
     hook_callbacks: HashMap<String, HookCallback>,
     sdk_mcp_servers: McpSessions,
     mcp: McpRouting,
+    /// `captureSdkMcpManifests`, in the TypeScript dialect only: Python has no manifest capture.
+    capture_manifests: bool,
     initialize_request: serde_json::Value,
     initialize_expectations: InitializeExpectations,
     initialize_timeout: Option<Duration>,
@@ -702,6 +728,8 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         latest_commands,
     } = input;
     transport.connect().await?;
+    let capture_manifests = options.argv_style == crate::ArgvStyle::TypeScript
+        && options.captures_sdk_mcp_manifests(std::env::var_os("CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS").as_deref());
     let driver = Driver {
         transport,
         input_ended: false,
@@ -725,6 +753,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
             .map(|(name, server)| (name.clone(), server.open_session()))
             .collect(),
         mcp: McpRouting::new(),
+        capture_manifests,
         initialize_request: initialization.request,
         initialize_expectations: initialization.expectations,
         initialize_timeout: initialization.timeout,
@@ -1279,9 +1308,17 @@ where
         match command {
             Command::Initialize { first, response } => {
                 let mut request = self.initialize_request.clone();
-                // TypeScript captures SDK MCP server manifests for the first initialize only.
+                // TypeScript captures SDK MCP server manifests for the first initialize only:
+                // `e && captureSdkMcpManifests === true && sdkMcpServers.size > 0`.
                 if !first && let Some(object) = request.as_object_mut() {
                     object.remove("sdkMcpServerManifests");
+                }
+                if first
+                    && self.capture_manifests
+                    && !self.sdk_mcp_servers.is_empty()
+                    && let Some(manifests) = self.capture_sdk_mcp_manifests().await?
+                {
+                    crate::mcp_routing::insert_manifests(&mut request, manifests);
                 }
                 crate::mcp_routing::trim_changed_manifests(&mut request, &self.mcp.tools_changed);
                 self.mcp.tools_changed.clear();
@@ -1814,6 +1851,82 @@ where
             },
         ))
         .await
+    }
+
+    /// `sdk.mjs` `captureSdkMcpServerManifests`: handshakes every in-process server at once, waiting at most
+    /// `$8` for all of them, while what their transports send is routed as usual.
+    async fn capture_sdk_mcp_manifests(&mut self) -> Result<Option<JsonObject>, Error> {
+        let started = std::time::Instant::now();
+        let mut tasks = JoinSet::new();
+        for (name, session) in &self.sdk_mcp_servers {
+            tasks.spawn(
+                mcp_manifest::Capture {
+                    name: name.as_str().to_owned(),
+                    session: session.clone(),
+                    waiters: self.mcp.waiters.clone(),
+                    outbound: self.mcp.outbound.clone(),
+                }
+                .run(),
+            );
+        }
+        let servers = tasks.len();
+        let mut captured = HashMap::new();
+        let deadline = sleep(constants::MCP_MANIFEST_CAPTURE_DEADLINE);
+        tokio::pin!(deadline);
+        let mut settled = true;
+        loop {
+            tokio::select! {
+                joined = tasks.join_next() => match joined {
+                    None => break,
+                    Some(Ok(Some((name, manifest)))) => {
+                        captured.insert(name, manifest);
+                    }
+                    Some(_) => {}
+                },
+                event = self.mcp.inbound.recv() => match event {
+                    Some(McpTransportEvent::Message { server, message }) => self.route_mcp_message(server, message).await?,
+                    Some(McpTransportEvent::Failed { key }) => {
+                        if let Some(waiter) = self.mcp.waiters.remove(&key) {
+                            let _ = waiter.send(Err(()));
+                        }
+                    }
+                    None => {}
+                },
+                () = &mut deadline => {
+                    settled = false;
+                    break;
+                }
+                _ = &mut self.shutdown => {
+                    self.shutdown_seen = true;
+                    return Err(Error::ShutdownRequested);
+                }
+            }
+        }
+        // `n = true`: replies that come later are ignored, and the drop rule of `route_mcp_message` takes them.
+        tasks.abort_all();
+        let elapsed = started.elapsed().as_millis();
+        if !settled {
+            tracing::warn!(
+                captured = captured.len(),
+                servers,
+                "in-process MCP servers captured within {} ms; the rest will handshake over the control channel",
+                constants::MCP_MANIFEST_CAPTURE_DEADLINE.as_millis()
+            );
+        }
+        if captured.is_empty() {
+            return Ok(None);
+        }
+        let manifests: JsonObject = self
+            .sdk_mcp_servers
+            .keys()
+            .filter_map(|name| {
+                captured
+                    .remove(name.as_str())
+                    .map(|manifest| (name.as_str().to_owned(), serde_json::Value::Object(manifest)))
+            })
+            .collect();
+        tracing::debug!(servers = ?manifests.keys().collect::<Vec<_>>(), elapsed_ms = %elapsed, "SDK MCP manifests captured");
+        Ok(Some(manifests))
     }
 
     /// `sdk.mjs` `sendMcpServerMessageToCli`: a message from a server's transport resolves the waiter under

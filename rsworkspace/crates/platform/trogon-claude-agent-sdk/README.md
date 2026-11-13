@@ -248,6 +248,23 @@ request when the server name or message is missing, and answers an unknown
 server or an undeliverable message with a JSON-RPC error under the message's
 id.
 
+Before the first `initialize` request, TypeScript style captures a manifest for
+each in-process server (`captureSdkMcpServerManifests`), so the CLI need not
+handshake them over the control channel. Each server gets an `initialize`
+request with id `sdk-manifest-capture:initialize` (protocol version
+`2025-11-25`, no capabilities, client `claude-code` `0.3.323`), then a
+`notifications/initialized`, then, when its capabilities include `tools`, a
+`tools/list` with id `sdk-manifest-capture:tools-list`. The manifest is
+`{initializeResult, toolsListResult}`, and `toolsListResult` is left out when
+the result has a `nextCursor`. A server that answers an error, throws or does
+not answer is left out and the CLI handshakes it. All servers run side by side
+under one 250 ms deadline, and a reply after it is dropped. The manifests go in
+`sdkMcpServerManifests` of the `initialize` request. Upstream turns the capture
+off with the `CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS` environment variable and
+has no query option for it; `ClaudeAgentOptions::capture_sdk_mcp_manifests` is
+this crate's own switch and `Some(false)` disables it. Python style has no
+capture.
+
 `set_mcp_servers` is not serialized, as in TypeScript. It swaps in-process
 servers before the request is sent and keeps the session of a server that stays
 registered. Remove a server and re-add it to replace its registry instance. Its
