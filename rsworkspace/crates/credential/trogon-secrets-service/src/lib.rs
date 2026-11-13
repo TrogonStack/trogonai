@@ -42,7 +42,9 @@
 //! the tenant owners, the release policies, the sealing key, and the AppRole.
 //! [`SecretsService`] wires them to NATS, the credential stream, OpenBao, and
 //! the audit stream, and serves releases until it is told to stop. It refuses
-//! to start, with a [`SecretsServiceError`], when it cannot reach any of them.
+//! to start, with a [`SecretsServiceError`], when it cannot reach NATS or the
+//! credential stream, and retries an OpenBao login that is refused with
+//! backoff, out of the release queue group, until OpenBao accepts it.
 //!
 //! # Features
 //!
@@ -67,6 +69,7 @@ mod fixtures;
 #[cfg(any(test, feature = "test-support"))]
 mod in_memory_credential_states;
 mod jetstream_credential_states;
+mod login_retry;
 mod nats_section_wire;
 mod openbao_address;
 mod openbao_address_error;

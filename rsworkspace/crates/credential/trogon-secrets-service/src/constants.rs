@@ -64,3 +64,11 @@ pub(crate) const AUDIT_WRITER_PREFIX: &str = "secrets-service:";
 /// dialing in the background after it, and the service refuses to start if
 /// the credential stream cannot be read over it.
 pub(crate) const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long the service waits after OpenBao first refuses its AppRole login
+/// before it asks again. The wait doubles after each refusal (ADR#0023
+/// Decision 3).
+pub(crate) const OPENBAO_LOGIN_RETRY_INITIAL: Duration = Duration::from_secs(1);
+
+/// The longest the service waits between two AppRole logins OpenBao refused.
+pub(crate) const OPENBAO_LOGIN_RETRY_MAX: Duration = Duration::from_secs(30);

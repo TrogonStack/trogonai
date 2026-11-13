@@ -4,16 +4,19 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::RequestErrorKind;
 use async_nats::jetstream::stream;
 use axum::Router;
+use axum::http::StatusCode;
 use axum::http::header::CONTENT_TYPE;
 use axum::routing::post;
 use bytes::Bytes;
 use nkeys::{KeyPair, XKey};
 use tokio::net::TcpListener;
+use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use trogon_credential_aggregate::{CREDENTIAL_EVENT_SUBJECT_PREFIX, CREDENTIAL_STREAM};
@@ -31,8 +34,8 @@ const SECRET_ID_FILE: &str = "/run/secrets/fake-secret-id";
 const SEED_VARIABLE: &str = "FAKE_SERVICE_XKEY_SEED";
 const APPROLE_LOGIN: &str = "/v1/auth/approle/login";
 const LOGIN_ANSWER: &str = r#"{"auth":{"client_token":"fake-login-token","lease_duration":3600,"renewable":true}}"#;
-/// An address nothing listens on.
-const UNREACHABLE_OPENBAO: &str = "http://127.0.0.1:1";
+/// What a sealed OpenBao answers a login with.
+const SEALED: &str = "fake-sealed";
 /// A NATS server address nothing listens on.
 const UNREACHABLE_NATS: &str = "127.0.0.1:1";
 /// A NATS credentials file no deployment provisioned.
@@ -51,16 +54,36 @@ const SERVING_WITHIN: Duration = Duration::from_secs(10);
 const REFUSED_WITHIN: Duration = Duration::from_secs(30);
 const STOPPED_WITHIN: Duration = Duration::from_secs(10);
 
-/// Answers OpenBao's AppRole login with a token and nothing else.
-async fn fake_openbao() -> (String, JoinHandle<()>) {
+async fn serve_openbao(app: Router) -> (String, JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = format!("http://{}", listener.local_addr().unwrap());
-    let app = Router::new().route(
-        APPROLE_LOGIN,
-        post(|| async { ([(CONTENT_TYPE, "application/json")], LOGIN_ANSWER) }),
-    );
     let serving = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (address, serving)
+}
+
+/// Answers OpenBao's AppRole login with a token and nothing else.
+async fn fake_openbao() -> (String, JoinHandle<()>) {
+    serve_openbao(Router::new().route(
+        APPROLE_LOGIN,
+        post(|| async { ([(CONTENT_TYPE, "application/json")], LOGIN_ANSWER) }),
+    ))
+    .await
+}
+
+/// Refuses every AppRole login the way a sealed OpenBao does, and signals
+/// each attempt on the returned [`Notify`].
+async fn sealed_openbao() -> (String, Arc<Notify>, JoinHandle<()>) {
+    let attempted = Arc::new(Notify::new());
+    let signal = Arc::clone(&attempted);
+    let (address, serving) = serve_openbao(Router::new().route(
+        APPROLE_LOGIN,
+        post(move || {
+            signal.notify_one();
+            async { (StatusCode::SERVICE_UNAVAILABLE, SEALED) }
+        }),
+    ))
+    .await;
+    (address, attempted, serving)
 }
 
 async fn create_credential_stream(server: &JetStreamTestServer) {
@@ -115,6 +138,14 @@ fn files() -> MemFs {
     fs.insert(RELEASE_POLICIES_FILE, RELEASE_POLICIES);
     fs.insert(SECRET_ID_FILE, "fake-secret-id\n");
     fs
+}
+
+/// A release subject any tenant's `billing-runner` could call.
+fn release_subject() -> String {
+    format!(
+        "{}.secrets.v1.service.billing-runner.SecretExchangeService.ResolveForRelease",
+        KeyPair::new_account().public_key()
+    )
 }
 
 fn service(nats: &str, openbao: &str) -> SecretsService {
@@ -192,13 +223,34 @@ async fn a_credential_stream_that_does_not_exist_refuses_to_start() {
 }
 
 #[tokio::test]
-async fn an_openbao_that_cannot_be_reached_refuses_to_start() {
+async fn an_openbao_that_refuses_the_login_keeps_the_service_out_of_the_queue_group_until_it_stops() {
     let server = JetStreamTestServer::start().await;
     create_credential_stream(&server).await;
+    let (openbao, attempted, _openbao) = sealed_openbao().await;
+    let shutdown = CancellationToken::new();
+    let running = tokio::spawn(service(server.address(), &openbao).run(shutdown.clone()));
 
-    let refused = refusal(service(server.address(), UNREACHABLE_OPENBAO)).await;
+    tokio::time::timeout(SERVING_WITHIN, attempted.notified())
+        .await
+        .expect("the service never tried to log in to OpenBao");
+    let unanswered = server
+        .client()
+        .await
+        .request(release_subject(), Bytes::new())
+        .await
+        .expect_err("the service joined the queue group before OpenBao accepted its login");
+    assert_eq!(unanswered.kind(), RequestErrorKind::NoResponders);
+    assert!(
+        !running.is_finished(),
+        "the service gave up instead of retrying the login"
+    );
+    shutdown.cancel();
 
-    assert!(matches!(refused, SecretsServiceError::OpenBaoLogin(_)), "{refused:?}");
+    tokio::time::timeout(STOPPED_WITHIN, running)
+        .await
+        .expect("the service did not stop while it retried the login")
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test]
@@ -209,10 +261,7 @@ async fn the_service_serves_releases_until_it_is_told_to_stop() {
     let shutdown = CancellationToken::new();
     let running = tokio::spawn(service(server.address(), &openbao).run(shutdown.clone()));
     let caller = server.client().await;
-    let subject = format!(
-        "{}.secrets.v1.service.billing-runner.SecretExchangeService.ResolveForRelease",
-        KeyPair::new_account().public_key()
-    );
+    let subject = release_subject();
 
     tokio::time::timeout(SERVING_WITHIN, async {
         loop {

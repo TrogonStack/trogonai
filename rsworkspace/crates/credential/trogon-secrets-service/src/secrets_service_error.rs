@@ -23,9 +23,8 @@ pub enum SecretsServiceError {
         source: GetStreamError,
     },
     #[error(
-        "the service could not log in to the OpenBao {} names with the AppRole {} names",
-        ConfigSetting::OpenBaoAddress,
-        ConfigSetting::OpenBaoRoleId
+        "the OpenBao {} names cannot be used for the AppRole login",
+        ConfigSetting::OpenBaoAddress
     )]
     OpenBaoLogin(#[source] OpenBaoLoginError),
     #[error("the release endpoint stopped serving")]
