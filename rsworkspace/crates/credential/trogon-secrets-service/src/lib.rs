@@ -45,6 +45,8 @@
 //! to start, with a [`SecretsServiceError`], when it cannot reach NATS or the
 //! credential stream, and retries an OpenBao login that is refused with
 //! backoff, out of the release queue group, until OpenBao accepts it.
+//! [`error_chain`] is the one line the binary logs when the service stops on
+//! an error: the error and every cause under it.
 //!
 //! # Features
 //!
@@ -64,6 +66,7 @@ mod credential_state_read;
 mod credential_state_read_error;
 mod denial_reason;
 mod denial_record;
+mod error_chain;
 #[cfg(test)]
 mod fixtures;
 #[cfg(any(test, feature = "test-support"))]
@@ -139,6 +142,7 @@ pub use credential_state_read::CredentialStateRead;
 pub use credential_state_read_error::CredentialStateReadError;
 pub use denial_reason::DenialReason;
 pub use denial_record::DenialRecord;
+pub use error_chain::error_chain;
 #[cfg(any(test, feature = "test-support"))]
 pub use in_memory_credential_states::InMemoryCredentialStates;
 pub use jetstream_credential_states::JetStreamCredentialStates;
