@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use async_nats::jetstream::{self, context, kv};
+use trogon_credential_aggregate::{CredentialEventSubjectResolver, CredentialEventSubjectResolverError};
 use trogon_credential_domain::CredentialKey;
 use trogon_decider_nats::{JetStreamStore, JetStreamStoreBuilder, JetStreamStoreError};
 use trogon_decider_runtime::{
@@ -16,7 +17,6 @@ use uuid::Uuid;
 use super::constants::{CREDENTIAL_NAMESPACE, CREDENTIAL_SNAPSHOT_BUCKET};
 use super::ensure_event_stream::ensure_credential_event_stream;
 use super::ensure_event_stream_error::EnsureCredentialEventStreamError;
-use super::stream::{CredentialEventSubjectResolver, CredentialEventSubjectResolverError};
 
 type CredentialStoreError<Payload = std::convert::Infallible, Type = std::convert::Infallible> =
     JetStreamStoreError<CredentialEventSubjectResolverError, Payload, Type>;

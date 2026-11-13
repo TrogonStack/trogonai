@@ -7,6 +7,10 @@ use testcontainers_modules::testcontainers::{
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,
 };
+use trogon_credential_aggregate::proto::{
+    activated_to_proto, decode_active_state, pending_write_to_proto_state, revoked_to_proto,
+    rotation_requested_to_proto, write_requested_to_proto,
+};
 use trogon_decider_runtime::{
     AppendStreamRequest, AppendStreamResponse, Event, EventEncode, EventId, EventType, Headers, ReadSnapshotRequest,
     ReadSnapshotResponse, ReadStreamResponse, Snapshot, SnapshotRead, SnapshotWrite, StreamEvent, StreamPosition,
@@ -14,10 +18,6 @@ use trogon_decider_runtime::{
 };
 
 use super::*;
-use crate::credential::commands::proto::{
-    activated_to_proto, decode_active_state, pending_write_to_proto_state, revoked_to_proto,
-    rotation_requested_to_proto, write_requested_to_proto,
-};
 use crate::credential_runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialRegistry, RuntimeIntegrationKey, RuntimeIntegrationProjection,
 };

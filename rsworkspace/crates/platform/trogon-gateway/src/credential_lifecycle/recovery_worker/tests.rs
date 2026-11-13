@@ -8,6 +8,11 @@ use async_nats::jetstream::message::StreamMessage;
 use bytes::Bytes;
 use chrono::Utc;
 use time::OffsetDateTime;
+use trogon_credential_aggregate::proto::{
+    activated_to_proto, decode_active_state, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto,
+    revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
+    write_requested_to_proto,
+};
 use trogon_decider_nats::TROGON_EVENT_TYPE;
 use trogon_decider_runtime::{
     AppendStreamRequest, AppendStreamResponse, Event, EventEncode, EventId, EventType, Headers, ReadFrom,
@@ -22,11 +27,6 @@ use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 use uuid::Uuid;
 
 use super::*;
-use crate::credential::commands::proto::{
-    activated_to_proto, decode_active_state, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto,
-    revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
-    write_requested_to_proto,
-};
 use crate::credential_lifecycle::handler::{
     CredentialHandler, CredentialHandlerError, DestroyStoredCredential, PutCredential, RevokeStoredCredential,
     RotateCredential,

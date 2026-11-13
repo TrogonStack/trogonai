@@ -1,9 +1,10 @@
+use trogon_credential_aggregate::CredentialEvolveError;
+use trogon_credential_aggregate::proto::{decode_destroyed_state, decode_write_failed_state, write_requested_to_proto};
 use trogon_credential_domain::{CredentialIdentity, CredentialKey};
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::proto::{decode_destroyed_state, decode_write_failed_state, write_requested_to_proto};
-use super::state::{CredentialDecideError, CredentialEvolveError, ensure_recorded_identity};
+use super::state::{CredentialDecideError, ensure_recorded_identity};
 
 /// Opens a credential's stream, or reopens it after a failed write or a destroy.
 ///
@@ -46,11 +47,11 @@ impl Decider for RequestCredentialWrite {
     }
 
     fn initial_state() -> Self::State {
-        super::state::initial_state()
+        trogon_credential_aggregate::initial_state()
     }
 
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
+        trogon_credential_aggregate::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {

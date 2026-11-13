@@ -1,112 +1,14 @@
-use std::borrow::Cow;
-use std::fmt;
-
 use buffa::{EnumValue, MessageField, ProtoBox};
 use trogon_credential_domain::{
-    CredentialDestroyReason, CredentialDestroyReasonError, CredentialFailureReason, CredentialFailureReasonError,
-    CredentialFingerprint, CredentialFingerprintError, CredentialId, CredentialIdError, CredentialIdentity,
-    CredentialIdentityVersion, CredentialKey, CredentialKind, CredentialMetadata, CredentialOwnerId,
-    CredentialOwnerIdError, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
-    CredentialVersionError, SourceIntegrationId, SourceIntegrationIdError, SourceKind,
+    CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialIdentity,
+    CredentialIdentityVersion, CredentialKey, CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef,
+    CredentialScope, CredentialStatus, CredentialVersion, SourceIntegrationId, SourceKind,
 };
 use trogonai_proto::gateway::credentials::{CredentialEventCase, state_v1, v1};
 
-#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub(crate) enum CredentialProtoDecodeError {
-    #[error("credential field '{field}' is missing")]
-    MissingField { field: CredentialFieldPath },
-    #[error("credential field '{field}' is invalid: {reason}")]
-    InvalidField {
-        field: CredentialFieldPath,
-        #[source]
-        reason: CredentialFieldInvalidError,
-    },
-}
+use crate::{CredentialFieldInvalidError, CredentialFieldPath, CredentialProtoDecodeError, UnspecifiedEnumKind};
 
-#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub(crate) enum CredentialFieldInvalidError {
-    #[error(transparent)]
-    CredentialId(#[from] CredentialIdError),
-    #[error(transparent)]
-    OwnerId(#[from] CredentialOwnerIdError),
-    #[error(transparent)]
-    Fingerprint(#[from] CredentialFingerprintError),
-    #[error(transparent)]
-    FailureReason(#[from] CredentialFailureReasonError),
-    #[error(transparent)]
-    DestroyReason(#[from] CredentialDestroyReasonError),
-    #[error(transparent)]
-    Version(#[from] CredentialVersionError),
-    #[error(transparent)]
-    SourceIntegrationId(#[from] SourceIntegrationIdError),
-    #[error("credential scope key must not be empty")]
-    EmptyScopeKey,
-    #[error("scope key '{scope_key}' does not match source '{source_kind}'")]
-    ScopeKeyMismatch {
-        scope_key: String,
-        source_kind: &'static str,
-    },
-    #[error("unspecified {0}")]
-    UnspecifiedEnum(UnspecifiedEnumKind),
-    #[error("unknown enum value {0}")]
-    UnknownEnumValue(i32),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum UnspecifiedEnumKind {
-    SourceKind,
-    CredentialKind,
-    CredentialIdentityVersion,
-}
-
-impl fmt::Display for UnspecifiedEnumKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::SourceKind => "source kind",
-            Self::CredentialKind => "credential kind",
-            Self::CredentialIdentityVersion => "credential identity version",
-        })
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct CredentialFieldPath(Cow<'static, str>);
-
-impl CredentialFieldPath {
-    pub(crate) fn child(&self, name: &'static str) -> Self {
-        Self(Cow::Owned(format!("{}.{name}", self.0)))
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&'static str> for CredentialFieldPath {
-    fn from(value: &'static str) -> Self {
-        Self(Cow::Borrowed(value))
-    }
-}
-
-impl From<&CredentialFieldPath> for CredentialFieldPath {
-    fn from(value: &CredentialFieldPath) -> Self {
-        value.clone()
-    }
-}
-
-impl PartialEq<&str> for CredentialFieldPath {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-
-impl fmt::Display for CredentialFieldPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-pub(crate) fn identity_to_proto(identity: &CredentialIdentity) -> v1::CredentialIdentity {
+pub fn identity_to_proto(identity: &CredentialIdentity) -> v1::CredentialIdentity {
     v1::CredentialIdentity {
         credential_id: identity.id().to_string(),
         owner_id: identity.owner_id().as_str().to_string(),
@@ -117,7 +19,7 @@ pub(crate) fn identity_to_proto(identity: &CredentialIdentity) -> v1::Credential
     }
 }
 
-pub(crate) fn key_to_proto(key: &CredentialKey) -> v1::CredentialKey {
+pub fn key_to_proto(key: &CredentialKey) -> v1::CredentialKey {
     v1::CredentialKey {
         credential_id: key.credential_id().to_string(),
         owner_id: key.owner_id().as_str().to_string(),
@@ -126,7 +28,7 @@ pub(crate) fn key_to_proto(key: &CredentialKey) -> v1::CredentialKey {
 
 /// Rebuilds the identity a write request recorded. The id is read back as
 /// recorded and never derived again from the slot.
-pub(crate) fn decode_identity(
+pub fn decode_identity(
     field: impl Into<CredentialFieldPath>,
     value: &v1::CredentialIdentity,
 ) -> Result<CredentialIdentity, CredentialProtoDecodeError> {
@@ -140,7 +42,7 @@ pub(crate) fn decode_identity(
     Ok(CredentialIdentity::new(id, scope, kind, version))
 }
 
-pub(crate) fn decode_key(
+pub fn decode_key(
     field: impl Into<CredentialFieldPath>,
     value: &v1::CredentialKey,
 ) -> Result<CredentialKey, CredentialProtoDecodeError> {
@@ -150,7 +52,7 @@ pub(crate) fn decode_key(
     Ok(CredentialKey::new(owner_id, credential_id))
 }
 
-pub(crate) fn decode_version(
+pub fn decode_version(
     field: impl Into<CredentialFieldPath>,
     value: Option<u64>,
 ) -> Result<CredentialVersion, CredentialProtoDecodeError> {
@@ -208,23 +110,20 @@ fn decode_state_ref<P: ProtoBox<v1::CredentialIdentity>>(
     ))
 }
 
-pub(crate) fn write_requested_to_proto(identity: &CredentialIdentity) -> v1::CredentialWriteRequested {
+pub fn write_requested_to_proto(identity: &CredentialIdentity) -> v1::CredentialWriteRequested {
     v1::CredentialWriteRequested {
         identity: MessageField::some(identity_to_proto(identity)),
     }
 }
 
-pub(crate) fn write_failed_to_proto(
-    key: &CredentialKey,
-    reason: &CredentialFailureReason,
-) -> v1::CredentialWriteFailed {
+pub fn write_failed_to_proto(key: &CredentialKey, reason: &CredentialFailureReason) -> v1::CredentialWriteFailed {
     v1::CredentialWriteFailed {
         key: MessageField::some(key_to_proto(key)),
         reason: reason.as_str().to_string(),
     }
 }
 
-pub(crate) fn activated_to_proto(metadata: &CredentialMetadata) -> v1::CredentialActivated {
+pub fn activated_to_proto(metadata: &CredentialMetadata) -> v1::CredentialActivated {
     let credential = metadata.reference();
     v1::CredentialActivated {
         key: MessageField::some(key_to_proto(&credential.key())),
@@ -233,14 +132,14 @@ pub(crate) fn activated_to_proto(metadata: &CredentialMetadata) -> v1::Credentia
     }
 }
 
-pub(crate) fn rotation_requested_to_proto(credential: &CredentialRef) -> v1::CredentialRotationRequested {
+pub fn rotation_requested_to_proto(credential: &CredentialRef) -> v1::CredentialRotationRequested {
     v1::CredentialRotationRequested {
         key: MessageField::some(key_to_proto(&credential.key())),
         version: Some(credential.version().get()),
     }
 }
 
-pub(crate) fn rotation_failed_to_proto(
+pub fn rotation_failed_to_proto(
     credential: &CredentialRef,
     reason: &CredentialFailureReason,
 ) -> v1::CredentialRotationFailed {
@@ -251,7 +150,7 @@ pub(crate) fn rotation_failed_to_proto(
     }
 }
 
-pub(crate) fn rotated_to_proto(previous: &CredentialRef, metadata: &CredentialMetadata) -> v1::CredentialRotated {
+pub fn rotated_to_proto(previous: &CredentialRef, metadata: &CredentialMetadata) -> v1::CredentialRotated {
     let credential = metadata.reference();
     v1::CredentialRotated {
         key: MessageField::some(key_to_proto(&credential.key())),
@@ -261,14 +160,14 @@ pub(crate) fn rotated_to_proto(previous: &CredentialRef, metadata: &CredentialMe
     }
 }
 
-pub(crate) fn revoked_to_proto(credential: &CredentialRef) -> v1::CredentialRevoked {
+pub fn revoked_to_proto(credential: &CredentialRef) -> v1::CredentialRevoked {
     v1::CredentialRevoked {
         key: MessageField::some(key_to_proto(&credential.key())),
         version: Some(credential.version().get()),
     }
 }
 
-pub(crate) fn destroy_requested_to_proto(
+pub fn destroy_requested_to_proto(
     credential: &CredentialRef,
     reason: &CredentialDestroyReason,
 ) -> v1::CredentialDestroyRequested {
@@ -279,14 +178,14 @@ pub(crate) fn destroy_requested_to_proto(
     }
 }
 
-pub(crate) fn destroyed_to_proto(credential: &CredentialRef) -> v1::CredentialDestroyed {
+pub fn destroyed_to_proto(credential: &CredentialRef) -> v1::CredentialDestroyed {
     v1::CredentialDestroyed {
         key: MessageField::some(key_to_proto(&credential.key())),
         version: Some(credential.version().get()),
     }
 }
 
-pub(crate) fn destroy_failed_to_proto(
+pub fn destroy_failed_to_proto(
     credential: &CredentialRef,
     reason: &CredentialFailureReason,
 ) -> v1::CredentialDestroyFailed {
@@ -297,13 +196,13 @@ pub(crate) fn destroy_failed_to_proto(
     }
 }
 
-pub(crate) fn decode_write_requested(
+pub fn decode_write_requested(
     event: &v1::CredentialWriteRequested,
 ) -> Result<CredentialIdentity, CredentialProtoDecodeError> {
     decode_identity_field("identity", &event.identity)
 }
 
-pub(crate) fn decode_write_failed(
+pub fn decode_write_failed(
     event: &v1::CredentialWriteFailed,
 ) -> Result<(CredentialKey, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
@@ -312,7 +211,7 @@ pub(crate) fn decode_write_failed(
     ))
 }
 
-pub(crate) fn decode_activated(
+pub fn decode_activated(
     event: &v1::CredentialActivated,
 ) -> Result<(CredentialKey, CredentialVersion, CredentialFingerprint), CredentialProtoDecodeError> {
     Ok((
@@ -322,13 +221,13 @@ pub(crate) fn decode_activated(
     ))
 }
 
-pub(crate) fn decode_rotation_requested(
+pub fn decode_rotation_requested(
     event: &v1::CredentialRotationRequested,
 ) -> Result<(CredentialKey, CredentialVersion), CredentialProtoDecodeError> {
     Ok((decode_key_field(&event.key)?, decode_version("version", event.version)?))
 }
 
-pub(crate) fn decode_rotation_failed(
+pub fn decode_rotation_failed(
     event: &v1::CredentialRotationFailed,
 ) -> Result<(CredentialKey, CredentialVersion, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
@@ -338,7 +237,7 @@ pub(crate) fn decode_rotation_failed(
     ))
 }
 
-pub(crate) fn decode_rotated(
+pub fn decode_rotated(
     event: &v1::CredentialRotated,
 ) -> Result<
     (
@@ -357,13 +256,13 @@ pub(crate) fn decode_rotated(
     ))
 }
 
-pub(crate) fn decode_revoked(
+pub fn decode_revoked(
     event: &v1::CredentialRevoked,
 ) -> Result<(CredentialKey, CredentialVersion), CredentialProtoDecodeError> {
     Ok((decode_key_field(&event.key)?, decode_version("version", event.version)?))
 }
 
-pub(crate) fn decode_destroy_requested(
+pub fn decode_destroy_requested(
     event: &v1::CredentialDestroyRequested,
 ) -> Result<(CredentialKey, CredentialVersion, CredentialDestroyReason), CredentialProtoDecodeError> {
     Ok((
@@ -373,13 +272,13 @@ pub(crate) fn decode_destroy_requested(
     ))
 }
 
-pub(crate) fn decode_destroyed(
+pub fn decode_destroyed(
     event: &v1::CredentialDestroyed,
 ) -> Result<(CredentialKey, CredentialVersion), CredentialProtoDecodeError> {
     Ok((decode_key_field(&event.key)?, decode_version("version", event.version)?))
 }
 
-pub(crate) fn decode_destroy_failed(
+pub fn decode_destroy_failed(
     event: &v1::CredentialDestroyFailed,
 ) -> Result<(CredentialKey, CredentialVersion, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
@@ -391,7 +290,7 @@ pub(crate) fn decode_destroy_failed(
 
 /// The credential an event names, read off the event itself after the whole
 /// event decodes.
-pub(crate) fn event_key(event: &CredentialEventCase) -> Result<CredentialKey, CredentialProtoDecodeError> {
+pub fn event_key(event: &CredentialEventCase) -> Result<CredentialKey, CredentialProtoDecodeError> {
     match event {
         CredentialEventCase::WriteRequested(inner) => Ok(decode_write_requested(inner)?.key()),
         CredentialEventCase::WriteFailed(inner) => Ok(decode_write_failed(inner)?.0),
@@ -518,19 +417,19 @@ fn decode_identity_version(
     }
 }
 
-pub(crate) fn pending_write_to_proto_state(identity: &CredentialIdentity) -> state_v1::PendingCredentialWriteState {
+pub fn pending_write_to_proto_state(identity: &CredentialIdentity) -> state_v1::PendingCredentialWriteState {
     state_v1::PendingCredentialWriteState {
         identity: MessageField::some(identity_to_proto(identity)),
     }
 }
 
-pub(crate) fn decode_pending_write_state(
+pub fn decode_pending_write_state(
     state: &state_v1::PendingCredentialWriteState,
 ) -> Result<CredentialIdentity, CredentialProtoDecodeError> {
     decode_identity_field("pending_write.identity", &state.identity)
 }
 
-pub(crate) fn active_state_to_proto(
+pub fn active_state_to_proto(
     credential: &CredentialRef,
     fingerprint: &CredentialFingerprint,
     previous_versions: &[CredentialVersion],
@@ -545,7 +444,7 @@ pub(crate) fn active_state_to_proto(
 
 /// The active version as metadata, with every version it replaced. They all
 /// share the one identity the state records.
-pub(crate) fn decode_active_state(
+pub fn decode_active_state(
     field: impl Into<CredentialFieldPath>,
     value: &state_v1::ActiveCredentialState,
 ) -> Result<(CredentialMetadata, Vec<CredentialRef>), CredentialProtoDecodeError> {
@@ -566,13 +465,13 @@ pub(crate) fn decode_active_state(
     ))
 }
 
-pub(crate) fn active_credential_ref(
+pub fn active_credential_ref(
     active: &state_v1::ActiveCredentialState,
 ) -> Result<CredentialRef, CredentialProtoDecodeError> {
     decode_state_ref("active", &active.identity, active.version)
 }
 
-pub(crate) fn rotation_pending_to_proto_state(
+pub fn rotation_pending_to_proto_state(
     active: state_v1::ActiveCredentialState,
 ) -> state_v1::RotationPendingCredentialState {
     state_v1::RotationPendingCredentialState {
@@ -580,7 +479,7 @@ pub(crate) fn rotation_pending_to_proto_state(
     }
 }
 
-pub(crate) fn write_failed_to_proto_state(
+pub fn write_failed_to_proto_state(
     identity: &CredentialIdentity,
     reason: &CredentialFailureReason,
 ) -> state_v1::FailedCredentialWriteState {
@@ -590,7 +489,7 @@ pub(crate) fn write_failed_to_proto_state(
     }
 }
 
-pub(crate) fn decode_write_failed_state(
+pub fn decode_write_failed_state(
     state: &state_v1::FailedCredentialWriteState,
 ) -> Result<(CredentialIdentity, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
@@ -599,20 +498,20 @@ pub(crate) fn decode_write_failed_state(
     ))
 }
 
-pub(crate) fn revoked_to_proto_state(credential: &CredentialRef) -> state_v1::RevokedCredentialState {
+pub fn revoked_to_proto_state(credential: &CredentialRef) -> state_v1::RevokedCredentialState {
     state_v1::RevokedCredentialState {
         identity: MessageField::some(identity_to_proto(credential.identity())),
         version: Some(credential.version().get()),
     }
 }
 
-pub(crate) fn decode_revoked_state(
+pub fn decode_revoked_state(
     state: &state_v1::RevokedCredentialState,
 ) -> Result<CredentialRef, CredentialProtoDecodeError> {
     decode_state_ref("revoked", &state.identity, state.version)
 }
 
-pub(crate) fn destroy_requested_to_proto_state(
+pub fn destroy_requested_to_proto_state(
     credential: &CredentialRef,
     reason: &CredentialDestroyReason,
 ) -> state_v1::DestroyRequestedCredentialState {
@@ -623,7 +522,7 @@ pub(crate) fn destroy_requested_to_proto_state(
     }
 }
 
-pub(crate) fn decode_destroy_requested_state(
+pub fn decode_destroy_requested_state(
     state: &state_v1::DestroyRequestedCredentialState,
 ) -> Result<(CredentialRef, CredentialDestroyReason), CredentialProtoDecodeError> {
     Ok((
@@ -632,20 +531,20 @@ pub(crate) fn decode_destroy_requested_state(
     ))
 }
 
-pub(crate) fn destroyed_to_proto_state(credential: &CredentialRef) -> state_v1::DestroyedCredentialState {
+pub fn destroyed_to_proto_state(credential: &CredentialRef) -> state_v1::DestroyedCredentialState {
     state_v1::DestroyedCredentialState {
         identity: MessageField::some(identity_to_proto(credential.identity())),
         version: Some(credential.version().get()),
     }
 }
 
-pub(crate) fn decode_destroyed_state(
+pub fn decode_destroyed_state(
     state: &state_v1::DestroyedCredentialState,
 ) -> Result<CredentialRef, CredentialProtoDecodeError> {
     decode_state_ref("destroyed", &state.identity, state.version)
 }
 
-pub(crate) fn cleanup_failed_to_proto_state(
+pub fn cleanup_failed_to_proto_state(
     credential: &CredentialRef,
     reason: &CredentialFailureReason,
 ) -> state_v1::CleanupFailedCredentialState {
@@ -656,7 +555,7 @@ pub(crate) fn cleanup_failed_to_proto_state(
     }
 }
 
-pub(crate) fn decode_cleanup_failed_state(
+pub fn decode_cleanup_failed_state(
     state: &state_v1::CleanupFailedCredentialState,
 ) -> Result<(CredentialRef, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
@@ -665,7 +564,7 @@ pub(crate) fn decode_cleanup_failed_state(
     ))
 }
 
-pub(crate) fn decode_message_field<T: Default, P: ProtoBox<T>>(
+pub fn decode_message_field<T: Default, P: ProtoBox<T>>(
     field: impl Into<CredentialFieldPath>,
     value: &MessageField<T, P>,
 ) -> Result<&T, CredentialProtoDecodeError> {
@@ -675,7 +574,7 @@ pub(crate) fn decode_message_field<T: Default, P: ProtoBox<T>>(
         .ok_or(CredentialProtoDecodeError::MissingField { field })
 }
 
-pub(crate) fn decode_credential_id(
+pub fn decode_credential_id(
     field: impl Into<CredentialFieldPath>,
     value: &str,
 ) -> Result<CredentialId, CredentialProtoDecodeError> {
@@ -683,7 +582,7 @@ pub(crate) fn decode_credential_id(
     CredentialId::new(value).map_err(|source| invalid_field(field, source))
 }
 
-pub(crate) fn decode_owner_id(
+pub fn decode_owner_id(
     field: impl Into<CredentialFieldPath>,
     value: &str,
 ) -> Result<CredentialOwnerId, CredentialProtoDecodeError> {
@@ -691,7 +590,7 @@ pub(crate) fn decode_owner_id(
     CredentialOwnerId::new(value).map_err(|source| invalid_field(field, source))
 }
 
-pub(crate) fn decode_scope_key(
+pub fn decode_scope_key(
     owner_id: CredentialOwnerId,
     source: SourceKind,
     field: impl Into<CredentialFieldPath>,
@@ -720,7 +619,7 @@ pub(crate) fn decode_scope_key(
     Ok(CredentialScope::integration(owner_id, source, integration_id))
 }
 
-pub(crate) fn decode_known_enum<T>(
+pub fn decode_known_enum<T>(
     field: impl Into<CredentialFieldPath>,
     value: Option<&EnumValue<T>>,
 ) -> Result<T, CredentialProtoDecodeError>
@@ -734,7 +633,7 @@ where
         .ok_or_else(|| invalid_field(field, CredentialFieldInvalidError::UnknownEnumValue(value.to_i32())))
 }
 
-pub(crate) fn invalid_field(
+pub fn invalid_field(
     field: impl Into<CredentialFieldPath>,
     source: impl Into<CredentialFieldInvalidError>,
 ) -> CredentialProtoDecodeError {
