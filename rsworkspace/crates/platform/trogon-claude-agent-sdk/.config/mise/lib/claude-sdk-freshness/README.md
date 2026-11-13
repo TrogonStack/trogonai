@@ -142,7 +142,9 @@ upstream wire shape and validates nothing:
 - `field?: T` (omitted), `field: T | null` (null) and `field?: T | null` stay distinct;
 - a union of other shapes picks the member that serializes back to the same JSON with
   the fewest undeclared keys (earliest declared on ties, nested unions included),
-  otherwise its own `Unknown` variant holds the raw JSON value;
+  otherwise its own `Unknown` variant holds the raw JSON value. A string-literal property
+  holding a value the declarations do not list counts as a mismatch, so a discriminant
+  picks its own member;
 - numbers use `serde_json::Number`, so integers and floats round-trip exactly.
 
 The `Settings` target also lists `fixtures` in `types.json`. `synthesize_fixtures.mjs` writes

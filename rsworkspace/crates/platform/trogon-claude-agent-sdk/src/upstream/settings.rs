@@ -32,6 +32,11 @@ struct SettingsPolicyHelperWire {
 impl SettingsPolicyHelper {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["path", "timeoutMs", "refreshIntervalMs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsPolicyHelper {
@@ -106,6 +111,11 @@ struct SettingsFileSuggestionWire {
 impl SettingsFileSuggestion {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "command"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["command"])])
+    }
 }
 
 impl Serialize for SettingsFileSuggestion {
@@ -155,6 +165,11 @@ struct SettingsAttributionVariant1Wire {
 impl SettingsAttributionVariant1 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["commit", "pr", "sessionUrl"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsAttributionVariant1 {
@@ -196,7 +211,7 @@ impl SettingsAttribution {
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
         super::support::keep_best(&mut best, super::support::exact::<bool>(value).map(|inner| (0, Self::Bool(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAttributionVariant1>(value).map(|inner| (super::support::unknown_keys(value, SettingsAttributionVariant1::KNOWN_KEYS), Self::Variant1(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAttributionVariant1>(value).map(|inner| (SettingsAttributionVariant1::match_score(value), Self::Variant1(inner))));
         best
     }
 }
@@ -235,6 +250,11 @@ struct SettingsAttributionProjectPolicyWire {
 impl SettingsAttributionProjectPolicy {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["default"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsAttributionProjectPolicy {
@@ -439,6 +459,11 @@ struct SettingsPermissionsWire {
 impl SettingsPermissions {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["allow", "deny", "ask", "defaultMode", "disableBypassPermissionsMode", "blockReadsOutsideWorkingDirectories", "blockWritesOutsideWorkingDirectories", "blockReadsExemptPaths", "workingDirectoriesAsGiven", "disableAutoMode", "denyInsteadOfPrompting", "additionalDirectories"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("defaultMode", &["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"]), ("disableBypassPermissionsMode", &["disable"]), ("disableAutoMode", &["disable"])])
+    }
 }
 
 impl Serialize for SettingsPermissions {
@@ -528,6 +553,11 @@ struct SettingsModelPickerOptionsItemWire {
 impl SettingsModelPickerOptionsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["model", "label", "description", "behavesAs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsModelPickerOptionsItem {
@@ -572,6 +602,11 @@ struct SettingsModelPickerWire {
 impl SettingsModelPicker {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["options", "replaceBuiltInOptions"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsModelPicker {
@@ -619,6 +654,11 @@ struct SettingsModelPricingOverridesValueWire {
 impl SettingsModelPricingOverridesValue {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["input", "output", "cacheRead", "cacheWrite"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsModelPricingOverridesValue {
@@ -662,6 +702,11 @@ struct SettingsModelPricingWire {
 impl SettingsModelPricing {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["multiplier", "overrides"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsModelPricing {
@@ -758,6 +803,11 @@ struct SettingsAllowedMcpServersItemWire {
 impl SettingsAllowedMcpServersItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["serverName", "serverCommand", "serverUrl"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsAllowedMcpServersItem {
@@ -809,6 +859,11 @@ struct SettingsDeniedMcpServersItemWire {
 impl SettingsDeniedMcpServersItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["serverName", "serverCommand", "serverUrl"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsDeniedMcpServersItem {
@@ -995,6 +1050,11 @@ struct SettingsHooksValueItemHooksItemCommandWire {
 impl SettingsHooksValueItemHooksItemCommand {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "command", "args", "if", "shell", "timeout", "onFailure", "statusMessage", "once", "async", "asyncRewake"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["command"]), ("shell", &["bash", "powershell"]), ("onFailure", &["continue", "block"])])
+    }
 }
 
 impl Serialize for SettingsHooksValueItemHooksItemCommand {
@@ -1095,6 +1155,11 @@ struct SettingsHooksValueItemHooksItemPromptWire {
 impl SettingsHooksValueItemHooksItemPrompt {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "prompt", "if", "timeout", "model", "continueOnBlock", "statusMessage", "once"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["prompt"])])
+    }
 }
 
 impl Serialize for SettingsHooksValueItemHooksItemPrompt {
@@ -1191,6 +1256,11 @@ struct SettingsHooksValueItemHooksItemAgentWire {
 impl SettingsHooksValueItemHooksItemAgent {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "prompt", "if", "timeout", "model", "statusMessage", "once"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["agent"])])
+    }
 }
 
 impl Serialize for SettingsHooksValueItemHooksItemAgent {
@@ -1332,6 +1402,11 @@ struct SettingsHooksValueItemHooksItemHttpWire {
 impl SettingsHooksValueItemHooksItemHttp {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "url", "if", "timeout", "onFailure", "headers", "allowedEnvVars", "statusMessage", "once"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["http"]), ("onFailure", &["continue", "block"])])
+    }
 }
 
 impl Serialize for SettingsHooksValueItemHooksItemHttp {
@@ -1431,6 +1506,11 @@ struct SettingsHooksValueItemHooksItemMcpToolWire {
 impl SettingsHooksValueItemHooksItemMcpTool {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "server", "tool", "input", "if", "timeout", "statusMessage", "once"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["mcp_tool"])])
+    }
 }
 
 impl Serialize for SettingsHooksValueItemHooksItemMcpTool {
@@ -1477,11 +1557,11 @@ impl SettingsHooksValueItemHooksItem {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<SettingsHooksValueItemHooksItemCommand>(value).map(|inner| (super::support::unknown_keys(value, SettingsHooksValueItemHooksItemCommand::KNOWN_KEYS), Self::Command(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsHooksValueItemHooksItemPrompt>(value).map(|inner| (super::support::unknown_keys(value, SettingsHooksValueItemHooksItemPrompt::KNOWN_KEYS), Self::Prompt(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsHooksValueItemHooksItemAgent>(value).map(|inner| (super::support::unknown_keys(value, SettingsHooksValueItemHooksItemAgent::KNOWN_KEYS), Self::Agent(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsHooksValueItemHooksItemHttp>(value).map(|inner| (super::support::unknown_keys(value, SettingsHooksValueItemHooksItemHttp::KNOWN_KEYS), Self::Http(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsHooksValueItemHooksItemMcpTool>(value).map(|inner| (super::support::unknown_keys(value, SettingsHooksValueItemHooksItemMcpTool::KNOWN_KEYS), Self::McpTool(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsHooksValueItemHooksItemCommand>(value).map(|inner| (SettingsHooksValueItemHooksItemCommand::match_score(value), Self::Command(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsHooksValueItemHooksItemPrompt>(value).map(|inner| (SettingsHooksValueItemHooksItemPrompt::match_score(value), Self::Prompt(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsHooksValueItemHooksItemAgent>(value).map(|inner| (SettingsHooksValueItemHooksItemAgent::match_score(value), Self::Agent(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsHooksValueItemHooksItemHttp>(value).map(|inner| (SettingsHooksValueItemHooksItemHttp::match_score(value), Self::Http(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsHooksValueItemHooksItemMcpTool>(value).map(|inner| (SettingsHooksValueItemHooksItemMcpTool::match_score(value), Self::McpTool(inner))));
         best
     }
 }
@@ -1523,6 +1603,11 @@ struct SettingsHooksValueItemWire {
 impl SettingsHooksValueItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["matcher", "hooks"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsHooksValueItem {
@@ -1654,6 +1739,11 @@ struct SettingsWorktreeWire {
 impl SettingsWorktree {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["symlinkDirectories", "sparsePaths", "baseRef", "bgIsolation", "location"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("baseRef", &["fresh", "head"]), ("bgIsolation", &["worktree", "none"])])
+    }
 }
 
 impl Serialize for SettingsWorktree {
@@ -1905,6 +1995,11 @@ struct SettingsStatusLineWire {
 impl SettingsStatusLine {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "command", "padding", "refreshInterval", "hideVimModeIndicator"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["command"])])
+    }
 }
 
 impl Serialize for SettingsStatusLine {
@@ -1988,6 +2083,11 @@ struct SettingsFooterLinksRegexesItemVariant1Wire {
 impl SettingsFooterLinksRegexesItemVariant1 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "pattern", "url", "label"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["regex"])])
+    }
 }
 
 impl Serialize for SettingsFooterLinksRegexesItemVariant1 {
@@ -2028,6 +2128,11 @@ struct SettingsFooterLinksRegexesItemVariant2Wire {
 impl SettingsFooterLinksRegexesItemVariant2 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsFooterLinksRegexesItemVariant2 {
@@ -2068,8 +2173,8 @@ impl SettingsFooterLinksRegexesItem {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<SettingsFooterLinksRegexesItemVariant1>(value).map(|inner| (super::support::unknown_keys(value, SettingsFooterLinksRegexesItemVariant1::KNOWN_KEYS), Self::Variant1(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsFooterLinksRegexesItemVariant2>(value).map(|inner| (super::support::unknown_keys(value, SettingsFooterLinksRegexesItemVariant2::KNOWN_KEYS), Self::Variant2(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsFooterLinksRegexesItemVariant1>(value).map(|inner| (SettingsFooterLinksRegexesItemVariant1::match_score(value), Self::Variant1(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsFooterLinksRegexesItemVariant2>(value).map(|inner| (SettingsFooterLinksRegexesItemVariant2::match_score(value), Self::Variant2(inner))));
         best
     }
 }
@@ -2141,6 +2246,11 @@ struct SettingsSubagentStatusLineWire {
 impl SettingsSubagentStatusLine {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "command"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["command"])])
+    }
 }
 
 impl Serialize for SettingsSubagentStatusLine {
@@ -2266,6 +2376,11 @@ struct SettingsExtraKnownMarketplacesValueSourceUrlWire {
 impl SettingsExtraKnownMarketplacesValueSourceUrl {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "headers", "headersHelper"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["url"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceUrl {
@@ -2357,6 +2472,11 @@ struct SettingsExtraKnownMarketplacesValueSourceGithubWire {
 impl SettingsExtraKnownMarketplacesValueSourceGithub {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "repo", "ref", "path", "sparsePaths", "skipLfs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["github"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceGithub {
@@ -2448,6 +2568,11 @@ struct SettingsExtraKnownMarketplacesValueSourceGitWire {
 impl SettingsExtraKnownMarketplacesValueSourceGit {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "ref", "path", "sparsePaths", "skipLfs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["git"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceGit {
@@ -2531,6 +2656,11 @@ struct SettingsExtraKnownMarketplacesValueSourceNpmWire {
 impl SettingsExtraKnownMarketplacesValueSourceNpm {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "package", "version", "registry"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["npm"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceNpm {
@@ -2606,6 +2736,11 @@ struct SettingsExtraKnownMarketplacesValueSourceFileWire {
 impl SettingsExtraKnownMarketplacesValueSourceFile {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "path"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["file"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceFile {
@@ -2681,6 +2816,11 @@ struct SettingsExtraKnownMarketplacesValueSourceDirectoryWire {
 impl SettingsExtraKnownMarketplacesValueSourceDirectory {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "path"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["directory"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceDirectory {
@@ -2753,6 +2893,11 @@ struct SettingsExtraKnownMarketplacesValueSourceSkillsDirWire {
 impl SettingsExtraKnownMarketplacesValueSourceSkillsDir {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["skills-dir"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSkillsDir {
@@ -2829,6 +2974,11 @@ struct SettingsExtraKnownMarketplacesValueSourceHostPatternWire {
 impl SettingsExtraKnownMarketplacesValueSourceHostPattern {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "hostPattern"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["hostPattern"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceHostPattern {
@@ -2905,6 +3055,11 @@ struct SettingsExtraKnownMarketplacesValueSourcePathPatternWire {
 impl SettingsExtraKnownMarketplacesValueSourcePathPattern {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "pathPattern"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["pathPattern"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourcePathPattern {
@@ -3021,6 +3176,11 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpmWire
 impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpm {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "package", "version", "registry"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["npm"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpm {
@@ -3104,6 +3264,11 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrlWire
 impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrl {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["url"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrl {
@@ -3187,6 +3352,11 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithubW
 impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithub {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "repo", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["github"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithub {
@@ -3273,6 +3443,11 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubd
 impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "path", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["git-subdir"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir {
@@ -3352,6 +3527,11 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchive
 impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchive {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "sha256"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["archive"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchive {
@@ -3472,6 +3652,11 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommand
 impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommand {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "command", "timeout", "mode"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["command"]), ("mode", &["copy", "link"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommand {
@@ -3547,6 +3732,11 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsuppo
 impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupported {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "error"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["unsupported"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupported {
@@ -3600,13 +3790,13 @@ impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSource {
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
         super::support::keep_best(&mut best, super::support::exact::<String>(value).map(|inner| (0, Self::Text(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpm>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpm::KNOWN_KEYS), Self::Npm(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrl>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrl::KNOWN_KEYS), Self::Url(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithub>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithub::KNOWN_KEYS), Self::Github(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir::KNOWN_KEYS), Self::GitSubdir(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchive>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchive::KNOWN_KEYS), Self::Archive(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommand>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommand::KNOWN_KEYS), Self::Command(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupported>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupported::KNOWN_KEYS), Self::Unsupported(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpm>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpm::match_score(value), Self::Npm(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrl>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrl::match_score(value), Self::Url(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithub>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithub::match_score(value), Self::Github(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir::match_score(value), Self::GitSubdir(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchive>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchive::match_score(value), Self::Archive(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommand>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommand::match_score(value), Self::Command(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupported>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupported::match_score(value), Self::Unsupported(inner))));
         best
     }
 }
@@ -3668,6 +3858,11 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemWire {
 impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "source", "description", "version", "strict", "engines", "headers", "headersHelper"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItem {
@@ -3716,6 +3911,11 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsOwnerWire {
 impl SettingsExtraKnownMarketplacesValueSourceSettingsOwner {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "email", "url"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsOwner {
@@ -3764,6 +3964,11 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsWire {
 impl SettingsExtraKnownMarketplacesValueSourceSettings {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "name", "plugins", "owner"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["settings"])])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettings {
@@ -3820,16 +4025,16 @@ impl SettingsExtraKnownMarketplacesValueSource {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceUrl>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceUrl::KNOWN_KEYS), Self::Url(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceGithub>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceGithub::KNOWN_KEYS), Self::Github(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceGit>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceGit::KNOWN_KEYS), Self::Git(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceNpm>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceNpm::KNOWN_KEYS), Self::Npm(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceFile>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceFile::KNOWN_KEYS), Self::File(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceDirectory>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceDirectory::KNOWN_KEYS), Self::Directory(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSkillsDir>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceSkillsDir::KNOWN_KEYS), Self::SkillsDir(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceHostPattern>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceHostPattern::KNOWN_KEYS), Self::HostPattern(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourcePathPattern>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourcePathPattern::KNOWN_KEYS), Self::PathPattern(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettings>(value).map(|inner| (super::support::unknown_keys(value, SettingsExtraKnownMarketplacesValueSourceSettings::KNOWN_KEYS), Self::Settings(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceUrl>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceUrl::match_score(value), Self::Url(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceGithub>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceGithub::match_score(value), Self::Github(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceGit>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceGit::match_score(value), Self::Git(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceNpm>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceNpm::match_score(value), Self::Npm(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceFile>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceFile::match_score(value), Self::File(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceDirectory>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceDirectory::match_score(value), Self::Directory(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSkillsDir>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceSkillsDir::match_score(value), Self::SkillsDir(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceHostPattern>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceHostPattern::match_score(value), Self::HostPattern(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourcePathPattern>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourcePathPattern::match_score(value), Self::PathPattern(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsExtraKnownMarketplacesValueSourceSettings>(value).map(|inner| (SettingsExtraKnownMarketplacesValueSourceSettings::match_score(value), Self::Settings(inner))));
         best
     }
 }
@@ -3879,6 +4084,11 @@ struct SettingsExtraKnownMarketplacesValueWire {
 impl SettingsExtraKnownMarketplacesValue {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "installLocation", "autoUpdate", "pluginDigests"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsExtraKnownMarketplacesValue {
@@ -3962,6 +4172,11 @@ struct SettingsAdditionalMarketplacesValueSourceUrlWire {
 impl SettingsAdditionalMarketplacesValueSourceUrl {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "headers", "headersHelper"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["url"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceUrl {
@@ -4053,6 +4268,11 @@ struct SettingsAdditionalMarketplacesValueSourceGithubWire {
 impl SettingsAdditionalMarketplacesValueSourceGithub {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "repo", "ref", "path", "sparsePaths", "skipLfs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["github"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceGithub {
@@ -4144,6 +4364,11 @@ struct SettingsAdditionalMarketplacesValueSourceGitWire {
 impl SettingsAdditionalMarketplacesValueSourceGit {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "ref", "path", "sparsePaths", "skipLfs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["git"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceGit {
@@ -4227,6 +4452,11 @@ struct SettingsAdditionalMarketplacesValueSourceNpmWire {
 impl SettingsAdditionalMarketplacesValueSourceNpm {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "package", "version", "registry"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["npm"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceNpm {
@@ -4302,6 +4532,11 @@ struct SettingsAdditionalMarketplacesValueSourceFileWire {
 impl SettingsAdditionalMarketplacesValueSourceFile {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "path"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["file"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceFile {
@@ -4377,6 +4612,11 @@ struct SettingsAdditionalMarketplacesValueSourceDirectoryWire {
 impl SettingsAdditionalMarketplacesValueSourceDirectory {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "path"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["directory"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceDirectory {
@@ -4449,6 +4689,11 @@ struct SettingsAdditionalMarketplacesValueSourceSkillsDirWire {
 impl SettingsAdditionalMarketplacesValueSourceSkillsDir {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["skills-dir"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSkillsDir {
@@ -4525,6 +4770,11 @@ struct SettingsAdditionalMarketplacesValueSourceHostPatternWire {
 impl SettingsAdditionalMarketplacesValueSourceHostPattern {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "hostPattern"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["hostPattern"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceHostPattern {
@@ -4601,6 +4851,11 @@ struct SettingsAdditionalMarketplacesValueSourcePathPatternWire {
 impl SettingsAdditionalMarketplacesValueSourcePathPattern {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "pathPattern"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["pathPattern"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourcePathPattern {
@@ -4717,6 +4972,11 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpmWire
 impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpm {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "package", "version", "registry"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["npm"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpm {
@@ -4800,6 +5060,11 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrlWire
 impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrl {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["url"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrl {
@@ -4883,6 +5148,11 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithubW
 impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithub {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "repo", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["github"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithub {
@@ -4969,6 +5239,11 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubd
 impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "path", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["git-subdir"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir {
@@ -5048,6 +5323,11 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchive
 impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchive {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "sha256"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["archive"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchive {
@@ -5168,6 +5448,11 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommand
 impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommand {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "command", "timeout", "mode"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["command"]), ("mode", &["copy", "link"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommand {
@@ -5243,6 +5528,11 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsuppo
 impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupported {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "error"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["unsupported"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupported {
@@ -5296,13 +5586,13 @@ impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSource {
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
         super::support::keep_best(&mut best, super::support::exact::<String>(value).map(|inner| (0, Self::Text(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpm>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpm::KNOWN_KEYS), Self::Npm(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrl>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrl::KNOWN_KEYS), Self::Url(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithub>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithub::KNOWN_KEYS), Self::Github(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir::KNOWN_KEYS), Self::GitSubdir(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchive>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchive::KNOWN_KEYS), Self::Archive(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommand>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommand::KNOWN_KEYS), Self::Command(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupported>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupported::KNOWN_KEYS), Self::Unsupported(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpm>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpm::match_score(value), Self::Npm(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrl>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrl::match_score(value), Self::Url(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithub>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithub::match_score(value), Self::Github(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir::match_score(value), Self::GitSubdir(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchive>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchive::match_score(value), Self::Archive(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommand>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommand::match_score(value), Self::Command(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupported>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupported::match_score(value), Self::Unsupported(inner))));
         best
     }
 }
@@ -5364,6 +5654,11 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemWire {
 impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "source", "description", "version", "strict", "engines", "headers", "headersHelper"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItem {
@@ -5412,6 +5707,11 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsOwnerWire {
 impl SettingsAdditionalMarketplacesValueSourceSettingsOwner {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "email", "url"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsOwner {
@@ -5460,6 +5760,11 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsWire {
 impl SettingsAdditionalMarketplacesValueSourceSettings {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "name", "plugins", "owner"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["settings"])])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettings {
@@ -5516,16 +5821,16 @@ impl SettingsAdditionalMarketplacesValueSource {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceUrl>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceUrl::KNOWN_KEYS), Self::Url(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceGithub>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceGithub::KNOWN_KEYS), Self::Github(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceGit>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceGit::KNOWN_KEYS), Self::Git(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceNpm>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceNpm::KNOWN_KEYS), Self::Npm(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceFile>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceFile::KNOWN_KEYS), Self::File(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceDirectory>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceDirectory::KNOWN_KEYS), Self::Directory(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSkillsDir>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceSkillsDir::KNOWN_KEYS), Self::SkillsDir(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceHostPattern>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceHostPattern::KNOWN_KEYS), Self::HostPattern(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourcePathPattern>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourcePathPattern::KNOWN_KEYS), Self::PathPattern(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettings>(value).map(|inner| (super::support::unknown_keys(value, SettingsAdditionalMarketplacesValueSourceSettings::KNOWN_KEYS), Self::Settings(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceUrl>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceUrl::match_score(value), Self::Url(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceGithub>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceGithub::match_score(value), Self::Github(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceGit>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceGit::match_score(value), Self::Git(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceNpm>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceNpm::match_score(value), Self::Npm(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceFile>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceFile::match_score(value), Self::File(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceDirectory>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceDirectory::match_score(value), Self::Directory(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSkillsDir>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceSkillsDir::match_score(value), Self::SkillsDir(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceHostPattern>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceHostPattern::match_score(value), Self::HostPattern(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourcePathPattern>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourcePathPattern::match_score(value), Self::PathPattern(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAdditionalMarketplacesValueSourceSettings>(value).map(|inner| (SettingsAdditionalMarketplacesValueSourceSettings::match_score(value), Self::Settings(inner))));
         best
     }
 }
@@ -5575,6 +5880,11 @@ struct SettingsAdditionalMarketplacesValueWire {
 impl SettingsAdditionalMarketplacesValue {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "installLocation", "autoUpdate", "pluginDigests"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsAdditionalMarketplacesValue {
@@ -5658,6 +5968,11 @@ struct SettingsStrictKnownMarketplacesItemUrlWire {
 impl SettingsStrictKnownMarketplacesItemUrl {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "headers", "headersHelper"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["url"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemUrl {
@@ -5749,6 +6064,11 @@ struct SettingsStrictKnownMarketplacesItemGithubWire {
 impl SettingsStrictKnownMarketplacesItemGithub {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "repo", "ref", "path", "sparsePaths", "skipLfs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["github"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemGithub {
@@ -5840,6 +6160,11 @@ struct SettingsStrictKnownMarketplacesItemGitWire {
 impl SettingsStrictKnownMarketplacesItemGit {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "ref", "path", "sparsePaths", "skipLfs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["git"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemGit {
@@ -5923,6 +6248,11 @@ struct SettingsStrictKnownMarketplacesItemNpmWire {
 impl SettingsStrictKnownMarketplacesItemNpm {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "package", "version", "registry"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["npm"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemNpm {
@@ -5998,6 +6328,11 @@ struct SettingsStrictKnownMarketplacesItemFileWire {
 impl SettingsStrictKnownMarketplacesItemFile {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "path"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["file"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemFile {
@@ -6073,6 +6408,11 @@ struct SettingsStrictKnownMarketplacesItemDirectoryWire {
 impl SettingsStrictKnownMarketplacesItemDirectory {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "path"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["directory"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemDirectory {
@@ -6145,6 +6485,11 @@ struct SettingsStrictKnownMarketplacesItemSkillsDirWire {
 impl SettingsStrictKnownMarketplacesItemSkillsDir {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["skills-dir"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSkillsDir {
@@ -6221,6 +6566,11 @@ struct SettingsStrictKnownMarketplacesItemHostPatternWire {
 impl SettingsStrictKnownMarketplacesItemHostPattern {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "hostPattern"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["hostPattern"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemHostPattern {
@@ -6297,6 +6647,11 @@ struct SettingsStrictKnownMarketplacesItemPathPatternWire {
 impl SettingsStrictKnownMarketplacesItemPathPattern {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "pathPattern"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["pathPattern"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemPathPattern {
@@ -6413,6 +6768,11 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpmWire {
 impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpm {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "package", "version", "registry"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["npm"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpm {
@@ -6496,6 +6856,11 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrlWire {
 impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrl {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["url"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrl {
@@ -6579,6 +6944,11 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithubWire {
 impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithub {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "repo", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["github"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithub {
@@ -6665,6 +7035,11 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdirWire
 impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdir {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "path", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["git-subdir"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdir {
@@ -6744,6 +7119,11 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchiveWire {
 impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchive {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "sha256"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["archive"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchive {
@@ -6864,6 +7244,11 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommandWire {
 impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommand {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "command", "timeout", "mode"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["command"]), ("mode", &["copy", "link"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommand {
@@ -6939,6 +7324,11 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupportedWi
 impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupported {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "error"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["unsupported"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupported {
@@ -6992,13 +7382,13 @@ impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSource {
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
         super::support::keep_best(&mut best, super::support::exact::<String>(value).map(|inner| (0, Self::Text(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpm>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpm::KNOWN_KEYS), Self::Npm(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrl>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrl::KNOWN_KEYS), Self::Url(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithub>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithub::KNOWN_KEYS), Self::Github(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdir>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdir::KNOWN_KEYS), Self::GitSubdir(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchive>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchive::KNOWN_KEYS), Self::Archive(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommand>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommand::KNOWN_KEYS), Self::Command(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupported>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupported::KNOWN_KEYS), Self::Unsupported(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpm>(value).map(|inner| (SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpm::match_score(value), Self::Npm(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrl>(value).map(|inner| (SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrl::match_score(value), Self::Url(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithub>(value).map(|inner| (SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithub::match_score(value), Self::Github(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdir>(value).map(|inner| (SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdir::match_score(value), Self::GitSubdir(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchive>(value).map(|inner| (SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchive::match_score(value), Self::Archive(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommand>(value).map(|inner| (SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommand::match_score(value), Self::Command(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupported>(value).map(|inner| (SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupported::match_score(value), Self::Unsupported(inner))));
         best
     }
 }
@@ -7060,6 +7450,11 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemWire {
 impl SettingsStrictKnownMarketplacesItemSettingsPluginsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "source", "description", "version", "strict", "engines", "headers", "headersHelper"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItem {
@@ -7108,6 +7503,11 @@ struct SettingsStrictKnownMarketplacesItemSettingsOwnerWire {
 impl SettingsStrictKnownMarketplacesItemSettingsOwner {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "email", "url"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsOwner {
@@ -7156,6 +7556,11 @@ struct SettingsStrictKnownMarketplacesItemSettingsWire {
 impl SettingsStrictKnownMarketplacesItemSettings {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "name", "plugins", "owner"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["settings"])])
+    }
 }
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettings {
@@ -7212,16 +7617,16 @@ impl SettingsStrictKnownMarketplacesItem {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemUrl>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemUrl::KNOWN_KEYS), Self::Url(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemGithub>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemGithub::KNOWN_KEYS), Self::Github(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemGit>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemGit::KNOWN_KEYS), Self::Git(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemNpm>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemNpm::KNOWN_KEYS), Self::Npm(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemFile>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemFile::KNOWN_KEYS), Self::File(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemDirectory>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemDirectory::KNOWN_KEYS), Self::Directory(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSkillsDir>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemSkillsDir::KNOWN_KEYS), Self::SkillsDir(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemHostPattern>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemHostPattern::KNOWN_KEYS), Self::HostPattern(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemPathPattern>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemPathPattern::KNOWN_KEYS), Self::PathPattern(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettings>(value).map(|inner| (super::support::unknown_keys(value, SettingsStrictKnownMarketplacesItemSettings::KNOWN_KEYS), Self::Settings(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemUrl>(value).map(|inner| (SettingsStrictKnownMarketplacesItemUrl::match_score(value), Self::Url(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemGithub>(value).map(|inner| (SettingsStrictKnownMarketplacesItemGithub::match_score(value), Self::Github(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemGit>(value).map(|inner| (SettingsStrictKnownMarketplacesItemGit::match_score(value), Self::Git(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemNpm>(value).map(|inner| (SettingsStrictKnownMarketplacesItemNpm::match_score(value), Self::Npm(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemFile>(value).map(|inner| (SettingsStrictKnownMarketplacesItemFile::match_score(value), Self::File(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemDirectory>(value).map(|inner| (SettingsStrictKnownMarketplacesItemDirectory::match_score(value), Self::Directory(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSkillsDir>(value).map(|inner| (SettingsStrictKnownMarketplacesItemSkillsDir::match_score(value), Self::SkillsDir(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemHostPattern>(value).map(|inner| (SettingsStrictKnownMarketplacesItemHostPattern::match_score(value), Self::HostPattern(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemPathPattern>(value).map(|inner| (SettingsStrictKnownMarketplacesItemPathPattern::match_score(value), Self::PathPattern(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsStrictKnownMarketplacesItemSettings>(value).map(|inner| (SettingsStrictKnownMarketplacesItemSettings::match_score(value), Self::Settings(inner))));
         best
     }
 }
@@ -7302,6 +7707,11 @@ struct SettingsAllowedMarketplacesItemUrlWire {
 impl SettingsAllowedMarketplacesItemUrl {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "headers", "headersHelper"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["url"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemUrl {
@@ -7393,6 +7803,11 @@ struct SettingsAllowedMarketplacesItemGithubWire {
 impl SettingsAllowedMarketplacesItemGithub {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "repo", "ref", "path", "sparsePaths", "skipLfs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["github"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemGithub {
@@ -7484,6 +7899,11 @@ struct SettingsAllowedMarketplacesItemGitWire {
 impl SettingsAllowedMarketplacesItemGit {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "ref", "path", "sparsePaths", "skipLfs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["git"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemGit {
@@ -7567,6 +7987,11 @@ struct SettingsAllowedMarketplacesItemNpmWire {
 impl SettingsAllowedMarketplacesItemNpm {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "package", "version", "registry"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["npm"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemNpm {
@@ -7642,6 +8067,11 @@ struct SettingsAllowedMarketplacesItemFileWire {
 impl SettingsAllowedMarketplacesItemFile {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "path"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["file"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemFile {
@@ -7717,6 +8147,11 @@ struct SettingsAllowedMarketplacesItemDirectoryWire {
 impl SettingsAllowedMarketplacesItemDirectory {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "path"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["directory"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemDirectory {
@@ -7789,6 +8224,11 @@ struct SettingsAllowedMarketplacesItemSkillsDirWire {
 impl SettingsAllowedMarketplacesItemSkillsDir {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["skills-dir"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemSkillsDir {
@@ -7865,6 +8305,11 @@ struct SettingsAllowedMarketplacesItemHostPatternWire {
 impl SettingsAllowedMarketplacesItemHostPattern {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "hostPattern"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["hostPattern"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemHostPattern {
@@ -7941,6 +8386,11 @@ struct SettingsAllowedMarketplacesItemPathPatternWire {
 impl SettingsAllowedMarketplacesItemPathPattern {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "pathPattern"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["pathPattern"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemPathPattern {
@@ -8057,6 +8507,11 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpmWire {
 impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpm {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "package", "version", "registry"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["npm"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpm {
@@ -8140,6 +8595,11 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrlWire {
 impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrl {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["url"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrl {
@@ -8223,6 +8683,11 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithubWire {
 impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithub {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "repo", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["github"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithub {
@@ -8309,6 +8774,11 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdirWire {
 impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdir {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "path", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["git-subdir"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdir {
@@ -8388,6 +8858,11 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchiveWire {
 impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchive {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "sha256"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["archive"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchive {
@@ -8508,6 +8983,11 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommandWire {
 impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommand {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "command", "timeout", "mode"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["command"]), ("mode", &["copy", "link"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommand {
@@ -8583,6 +9063,11 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupportedWire {
 impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupported {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "error"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["unsupported"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupported {
@@ -8636,13 +9121,13 @@ impl SettingsAllowedMarketplacesItemSettingsPluginsItemSource {
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
         super::support::keep_best(&mut best, super::support::exact::<String>(value).map(|inner| (0, Self::Text(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpm>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpm::KNOWN_KEYS), Self::Npm(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrl>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrl::KNOWN_KEYS), Self::Url(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithub>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithub::KNOWN_KEYS), Self::Github(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdir>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdir::KNOWN_KEYS), Self::GitSubdir(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchive>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchive::KNOWN_KEYS), Self::Archive(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommand>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommand::KNOWN_KEYS), Self::Command(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupported>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupported::KNOWN_KEYS), Self::Unsupported(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpm>(value).map(|inner| (SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpm::match_score(value), Self::Npm(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrl>(value).map(|inner| (SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrl::match_score(value), Self::Url(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithub>(value).map(|inner| (SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithub::match_score(value), Self::Github(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdir>(value).map(|inner| (SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdir::match_score(value), Self::GitSubdir(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchive>(value).map(|inner| (SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchive::match_score(value), Self::Archive(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommand>(value).map(|inner| (SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommand::match_score(value), Self::Command(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupported>(value).map(|inner| (SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupported::match_score(value), Self::Unsupported(inner))));
         best
     }
 }
@@ -8704,6 +9189,11 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemWire {
 impl SettingsAllowedMarketplacesItemSettingsPluginsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "source", "description", "version", "strict", "engines", "headers", "headersHelper"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItem {
@@ -8752,6 +9242,11 @@ struct SettingsAllowedMarketplacesItemSettingsOwnerWire {
 impl SettingsAllowedMarketplacesItemSettingsOwner {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "email", "url"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsOwner {
@@ -8800,6 +9295,11 @@ struct SettingsAllowedMarketplacesItemSettingsWire {
 impl SettingsAllowedMarketplacesItemSettings {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "name", "plugins", "owner"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["settings"])])
+    }
 }
 
 impl Serialize for SettingsAllowedMarketplacesItemSettings {
@@ -8856,16 +9356,16 @@ impl SettingsAllowedMarketplacesItem {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemUrl>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemUrl::KNOWN_KEYS), Self::Url(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemGithub>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemGithub::KNOWN_KEYS), Self::Github(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemGit>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemGit::KNOWN_KEYS), Self::Git(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemNpm>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemNpm::KNOWN_KEYS), Self::Npm(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemFile>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemFile::KNOWN_KEYS), Self::File(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemDirectory>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemDirectory::KNOWN_KEYS), Self::Directory(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSkillsDir>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemSkillsDir::KNOWN_KEYS), Self::SkillsDir(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemHostPattern>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemHostPattern::KNOWN_KEYS), Self::HostPattern(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemPathPattern>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemPathPattern::KNOWN_KEYS), Self::PathPattern(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettings>(value).map(|inner| (super::support::unknown_keys(value, SettingsAllowedMarketplacesItemSettings::KNOWN_KEYS), Self::Settings(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemUrl>(value).map(|inner| (SettingsAllowedMarketplacesItemUrl::match_score(value), Self::Url(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemGithub>(value).map(|inner| (SettingsAllowedMarketplacesItemGithub::match_score(value), Self::Github(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemGit>(value).map(|inner| (SettingsAllowedMarketplacesItemGit::match_score(value), Self::Git(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemNpm>(value).map(|inner| (SettingsAllowedMarketplacesItemNpm::match_score(value), Self::Npm(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemFile>(value).map(|inner| (SettingsAllowedMarketplacesItemFile::match_score(value), Self::File(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemDirectory>(value).map(|inner| (SettingsAllowedMarketplacesItemDirectory::match_score(value), Self::Directory(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSkillsDir>(value).map(|inner| (SettingsAllowedMarketplacesItemSkillsDir::match_score(value), Self::SkillsDir(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemHostPattern>(value).map(|inner| (SettingsAllowedMarketplacesItemHostPattern::match_score(value), Self::HostPattern(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemPathPattern>(value).map(|inner| (SettingsAllowedMarketplacesItemPathPattern::match_score(value), Self::PathPattern(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsAllowedMarketplacesItemSettings>(value).map(|inner| (SettingsAllowedMarketplacesItemSettings::match_score(value), Self::Settings(inner))));
         best
     }
 }
@@ -8946,6 +9446,11 @@ struct SettingsBlockedMarketplacesItemUrlWire {
 impl SettingsBlockedMarketplacesItemUrl {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "headers", "headersHelper"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["url"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemUrl {
@@ -9037,6 +9542,11 @@ struct SettingsBlockedMarketplacesItemGithubWire {
 impl SettingsBlockedMarketplacesItemGithub {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "repo", "ref", "path", "sparsePaths", "skipLfs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["github"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemGithub {
@@ -9128,6 +9638,11 @@ struct SettingsBlockedMarketplacesItemGitWire {
 impl SettingsBlockedMarketplacesItemGit {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "ref", "path", "sparsePaths", "skipLfs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["git"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemGit {
@@ -9211,6 +9726,11 @@ struct SettingsBlockedMarketplacesItemNpmWire {
 impl SettingsBlockedMarketplacesItemNpm {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "package", "version", "registry"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["npm"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemNpm {
@@ -9286,6 +9806,11 @@ struct SettingsBlockedMarketplacesItemFileWire {
 impl SettingsBlockedMarketplacesItemFile {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "path"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["file"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemFile {
@@ -9361,6 +9886,11 @@ struct SettingsBlockedMarketplacesItemDirectoryWire {
 impl SettingsBlockedMarketplacesItemDirectory {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "path"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["directory"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemDirectory {
@@ -9433,6 +9963,11 @@ struct SettingsBlockedMarketplacesItemSkillsDirWire {
 impl SettingsBlockedMarketplacesItemSkillsDir {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["skills-dir"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemSkillsDir {
@@ -9509,6 +10044,11 @@ struct SettingsBlockedMarketplacesItemHostPatternWire {
 impl SettingsBlockedMarketplacesItemHostPattern {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "hostPattern"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["hostPattern"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemHostPattern {
@@ -9585,6 +10125,11 @@ struct SettingsBlockedMarketplacesItemPathPatternWire {
 impl SettingsBlockedMarketplacesItemPathPattern {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "pathPattern"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["pathPattern"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemPathPattern {
@@ -9701,6 +10246,11 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpmWire {
 impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpm {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "package", "version", "registry"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["npm"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpm {
@@ -9784,6 +10334,11 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrlWire {
 impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrl {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["url"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrl {
@@ -9867,6 +10422,11 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithubWire {
 impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithub {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "repo", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["github"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithub {
@@ -9953,6 +10513,11 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdirWire {
 impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdir {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "path", "ref", "sha"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["git-subdir"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdir {
@@ -10032,6 +10597,11 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchiveWire {
 impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchive {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "url", "sha256"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["archive"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchive {
@@ -10152,6 +10722,11 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommandWire {
 impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommand {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "command", "timeout", "mode"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["command"]), ("mode", &["copy", "link"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommand {
@@ -10227,6 +10802,11 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupportedWire {
 impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupported {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "error"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["unsupported"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupported {
@@ -10280,13 +10860,13 @@ impl SettingsBlockedMarketplacesItemSettingsPluginsItemSource {
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
         super::support::keep_best(&mut best, super::support::exact::<String>(value).map(|inner| (0, Self::Text(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpm>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpm::KNOWN_KEYS), Self::Npm(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrl>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrl::KNOWN_KEYS), Self::Url(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithub>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithub::KNOWN_KEYS), Self::Github(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdir>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdir::KNOWN_KEYS), Self::GitSubdir(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchive>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchive::KNOWN_KEYS), Self::Archive(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommand>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommand::KNOWN_KEYS), Self::Command(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupported>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupported::KNOWN_KEYS), Self::Unsupported(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpm>(value).map(|inner| (SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpm::match_score(value), Self::Npm(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrl>(value).map(|inner| (SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrl::match_score(value), Self::Url(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithub>(value).map(|inner| (SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithub::match_score(value), Self::Github(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdir>(value).map(|inner| (SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdir::match_score(value), Self::GitSubdir(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchive>(value).map(|inner| (SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchive::match_score(value), Self::Archive(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommand>(value).map(|inner| (SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommand::match_score(value), Self::Command(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupported>(value).map(|inner| (SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupported::match_score(value), Self::Unsupported(inner))));
         best
     }
 }
@@ -10348,6 +10928,11 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemWire {
 impl SettingsBlockedMarketplacesItemSettingsPluginsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "source", "description", "version", "strict", "engines", "headers", "headersHelper"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItem {
@@ -10396,6 +10981,11 @@ struct SettingsBlockedMarketplacesItemSettingsOwnerWire {
 impl SettingsBlockedMarketplacesItemSettingsOwner {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "email", "url"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsOwner {
@@ -10444,6 +11034,11 @@ struct SettingsBlockedMarketplacesItemSettingsWire {
 impl SettingsBlockedMarketplacesItemSettings {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["source", "name", "plugins", "owner"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("source", &["settings"])])
+    }
 }
 
 impl Serialize for SettingsBlockedMarketplacesItemSettings {
@@ -10500,16 +11095,16 @@ impl SettingsBlockedMarketplacesItem {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemUrl>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemUrl::KNOWN_KEYS), Self::Url(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemGithub>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemGithub::KNOWN_KEYS), Self::Github(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemGit>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemGit::KNOWN_KEYS), Self::Git(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemNpm>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemNpm::KNOWN_KEYS), Self::Npm(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemFile>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemFile::KNOWN_KEYS), Self::File(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemDirectory>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemDirectory::KNOWN_KEYS), Self::Directory(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSkillsDir>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemSkillsDir::KNOWN_KEYS), Self::SkillsDir(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemHostPattern>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemHostPattern::KNOWN_KEYS), Self::HostPattern(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemPathPattern>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemPathPattern::KNOWN_KEYS), Self::PathPattern(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettings>(value).map(|inner| (super::support::unknown_keys(value, SettingsBlockedMarketplacesItemSettings::KNOWN_KEYS), Self::Settings(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemUrl>(value).map(|inner| (SettingsBlockedMarketplacesItemUrl::match_score(value), Self::Url(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemGithub>(value).map(|inner| (SettingsBlockedMarketplacesItemGithub::match_score(value), Self::Github(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemGit>(value).map(|inner| (SettingsBlockedMarketplacesItemGit::match_score(value), Self::Git(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemNpm>(value).map(|inner| (SettingsBlockedMarketplacesItemNpm::match_score(value), Self::Npm(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemFile>(value).map(|inner| (SettingsBlockedMarketplacesItemFile::match_score(value), Self::File(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemDirectory>(value).map(|inner| (SettingsBlockedMarketplacesItemDirectory::match_score(value), Self::Directory(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSkillsDir>(value).map(|inner| (SettingsBlockedMarketplacesItemSkillsDir::match_score(value), Self::SkillsDir(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemHostPattern>(value).map(|inner| (SettingsBlockedMarketplacesItemHostPattern::match_score(value), Self::HostPattern(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemPathPattern>(value).map(|inner| (SettingsBlockedMarketplacesItemPathPattern::match_score(value), Self::PathPattern(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsBlockedMarketplacesItemSettings>(value).map(|inner| (SettingsBlockedMarketplacesItemSettings::match_score(value), Self::Settings(inner))));
         best
     }
 }
@@ -10806,6 +11401,11 @@ struct SettingsSandboxNetworkTlsTerminateWire {
 impl SettingsSandboxNetworkTlsTerminate {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["caCertPath", "caKeyPath"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsSandboxNetworkTlsTerminate {
@@ -10887,6 +11487,11 @@ struct SettingsSandboxNetworkWire {
 impl SettingsSandboxNetwork {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["allowedDomains", "deniedDomains", "strictAllowlist", "allowManagedDomainsOnly", "allowUnixSockets", "allowAllUnixSockets", "allowLocalBinding", "allowMachLookup", "httpProxyPort", "socksProxyPort", "tlsTerminate"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsSandboxNetwork {
@@ -10948,6 +11553,11 @@ struct SettingsSandboxFilesystemWire {
 impl SettingsSandboxFilesystem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["allowWrite", "denyWrite", "denyRead", "allowRead", "allowManagedReadPathsOnly", "disabled"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsSandboxFilesystem {
@@ -11126,6 +11736,11 @@ struct SettingsSandboxCredentialsFilesItemWire {
 impl SettingsSandboxCredentialsFilesItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["path", "mode", "extract", "onExtractNoMatch", "decode", "maskClaims", "maskDuplicates", "injectHosts"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("mode", &["deny", "mask"]), ("onExtractNoMatch", &["warn", "deny", "error"]), ("decode", &["jwt"])])
+    }
 }
 
 impl Serialize for SettingsSandboxCredentialsFilesItem {
@@ -11300,6 +11915,11 @@ struct SettingsSandboxCredentialsEnvVarsItemWire {
 impl SettingsSandboxCredentialsEnvVarsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "mode", "extract", "onExtractNoMatch", "decode", "maskClaims", "injectHosts"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("mode", &["deny", "mask"]), ("onExtractNoMatch", &["warn", "deny", "error"]), ("decode", &["jwt"])])
+    }
 }
 
 impl Serialize for SettingsSandboxCredentialsEnvVarsItem {
@@ -11349,6 +11969,11 @@ struct SettingsSandboxCredentialsAwsPairsItemWire {
 impl SettingsSandboxCredentialsAwsPairsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["accessKeyIdVar", "secretAccessKeyVar", "sessionTokenVar"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsSandboxCredentialsAwsPairsItem {
@@ -11509,6 +12134,11 @@ struct SettingsSandboxCredentialsSigv4Wire {
 impl SettingsSandboxCredentialsSigv4 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["streaming", "presigned", "sigv4a"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("streaming", &["deny", "passthrough"]), ("presigned", &["deny", "passthrough"]), ("sigv4a", &["deny", "passthrough"])])
+    }
 }
 
 impl Serialize for SettingsSandboxCredentialsSigv4 {
@@ -11566,6 +12196,11 @@ struct SettingsSandboxCredentialsWire {
 impl SettingsSandboxCredentials {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["files", "envVars", "allowPlaintextInject", "awsPairs", "sigv4"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsSandboxCredentials {
@@ -11608,6 +12243,11 @@ struct SettingsSandboxRipgrepWire {
 impl SettingsSandboxRipgrep {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["command", "args"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsSandboxRipgrep {
@@ -11705,6 +12345,11 @@ struct SettingsSandboxWire {
 impl SettingsSandbox {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["enabled", "failIfUnavailable", "autoAllowBashIfSandboxed", "allowUnsandboxedCommands", "network", "filesystem", "credentials", "ignoreViolations", "enableWeakerNestedSandbox", "allowNestedUserNamespaces", "enableWeakerNetworkIsolation", "allowAppleEvents", "excludedCommands", "ripgrep", "bwrapPath", "socatPath"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsSandbox {
@@ -11824,6 +12469,11 @@ struct SettingsSpinnerVerbsWire {
 impl SettingsSpinnerVerbs {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["mode", "verbs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("mode", &["append", "replace"])])
+    }
 }
 
 impl Serialize for SettingsSpinnerVerbs {
@@ -11914,6 +12564,11 @@ struct SettingsSpinnerTipsOverrideWire {
 impl SettingsSpinnerTipsOverride {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["excludeDefault", "tips", "tipsFile", "label"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsSpinnerTipsOverride {
@@ -11967,6 +12622,11 @@ struct SettingsSpellcheckWire {
 impl SettingsSpellcheck {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["enabled", "checker", "language", "color"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsSpellcheck {
@@ -12350,6 +13010,11 @@ struct SettingsModelSettingsValueWire {
 impl SettingsModelSettingsValue {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["effortLevel", "maxEffortLevel", "autoCompactWindow"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("effortLevel", &["low", "medium", "high", "xhigh"]), ("maxEffortLevel", &["low", "medium", "high", "xhigh", "max"])])
+    }
 }
 
 impl Serialize for SettingsModelSettingsValue {
@@ -12575,6 +13240,11 @@ struct SettingsPluginConfigsValueVariant1Wire {
 impl SettingsPluginConfigsValueVariant1 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["mcpServers", "options"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsPluginConfigsValueVariant1 {
@@ -12615,7 +13285,7 @@ impl SettingsPluginConfigsValue {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<SettingsPluginConfigsValueVariant1>(value).map(|inner| (super::support::unknown_keys(value, SettingsPluginConfigsValueVariant1::KNOWN_KEYS), Self::Variant1(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SettingsPluginConfigsValueVariant1>(value).map(|inner| (SettingsPluginConfigsValueVariant1::match_score(value), Self::Variant1(inner))));
         super::support::keep_best(&mut best, super::support::exact::<serde_json::Map<String, serde_json::Value>>(value).map(|inner| (super::support::unknown_keys(value, &[]), Self::Map(inner))));
         best
     }
@@ -12655,6 +13325,11 @@ struct SettingsRemoteWire {
 impl SettingsRemote {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["defaultEnvironmentId"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsRemote {
@@ -12818,6 +13493,11 @@ struct SettingsVoiceWire {
 impl SettingsVoice {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["enabled", "mode", "autoSubmit"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("mode", &["hold", "tap"])])
+    }
 }
 
 impl Serialize for SettingsVoice {
@@ -12859,6 +13539,11 @@ struct SettingsAllowedChannelPluginsItemWire {
 impl SettingsAllowedChannelPluginsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["marketplace", "plugin"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsAllowedChannelPluginsItem {
@@ -12951,6 +13636,11 @@ struct SettingsSshConfigsItemWire {
 impl SettingsSshConfigsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["id", "name", "sshHost", "sshPort", "sshIdentityFile", "startDirectory"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsSshConfigsItem {
@@ -13262,6 +13952,11 @@ struct SettingsAutoModeWire {
 impl SettingsAutoMode {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["allow", "soft_deny", "hard_deny", "environment", "classifyAllShell"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SettingsAutoMode {
@@ -14102,6 +14797,11 @@ struct SettingsWire {
 impl Settings {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["$schema", "apiKeyHelper", "proxyAuthHelper", "awsCredentialExport", "awsAuthRefresh", "gcpAuthRefresh", "processWrapper", "policyHelper", "fileSuggestion", "respectGitignore", "cleanupPeriodDays", "desktopSessionCleanupPeriodDays", "syncClaudeAiSkills", "syncClaudeAiPlugins", "skillListingMaxDescChars", "skillListingBudgetFraction", "wslInheritsWindowsSettings", "env", "attribution", "attributionProject", "attributionProjectPolicy", "includeCoAuthoredBy", "includeGitInstructions", "permissions", "model", "fallbackModel", "availableModels", "enforceAvailableModels", "availableModelsMatch", "deniedModels", "modelOverrides", "modelPicker", "modelPricing", "enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers", "disableClaudeAiConnectors", "skillOverrides", "disableBundledSkills", "managedMcpServers", "allowedMcpServers", "deniedMcpServers", "hooks", "worktree", "disableAllHooks", "disableReplyCheck", "disableAgentView", "disableRemoteControl", "disableWorkflows", "disableArtifact", "enableArtifact", "enableWorkflows", "workflowSizeGuideline", "workflowKeywordTriggerEnabled", "disableSkillShellExecution", "disableWindowsBashCommandSplit", "defaultShell", "bashEditDiffEnabled", "bashOutputMaxChars", "taskOutputMaxChars", "respondToBashCommands", "allowManagedHooksOnly", "allowedHttpHookUrls", "httpHookAllowedEnvVars", "allowManagedPermissionRulesOnly", "allowManagedMcpServersOnly", "allowAllClaudeAiMcps", "allowClaudeInChromeWithManagedMcp", "strictPluginOnlyCustomization", "statusLine", "prUrlTemplate", "footerLinksRegexes", "subagentStatusLine", "enabledPlugins", "prependPlugins", "appendPlugins", "extraKnownMarketplaces", "additionalMarketplaces", "strictKnownMarketplaces", "allowedMarketplaces", "blockedMarketplaces", "disableCommandPluginSources", "disableSideloadFlags", "pluginSuggestionMarketplaces", "forceLoginMethod", "forceLoginGatewayUrl", "gatewayInternalNetworks", "parentSettingsBehavior", "managedSourcesBehavior", "forceLoginOrgUUID", "allowedProviders", "forceRemoteSettingsRefresh", "otelHeadersHelper", "outputStyle", "viewMode", "language", "skipWebFetchPreflight", "sandbox", "feedbackSurveyRate", "feedbackDrafts", "spinnerTipsEnabled", "spinnerVerbs", "spinnerTipsOverride", "syntaxHighlightingDisabled", "maxProseWidth", "spellcheck", "terminalTitleFromRename", "promptCacheTtl", "subagentPromptCacheTtl", "alwaysThinkingEnabled", "effortLevel", "maxEffortLevel", "modelSettings", "ultracode", "autoCompactWindow", "advisorModel", "fastMode", "fastModePerSessionOptIn", "promptSuggestionEnabled", "emojiCompletionEnabled", "showClearContextOnPlanAccept", "askUserQuestionTimeout", "dialogExpiry", "agent", "companyAnnouncements", "pluginConfigs", "remote", "autoUpdatesChannel", "minimumVersion", "requiredMinimumVersion", "requiredMaximumVersion", "plansDirectory", "tui", "voice", "channelsEnabled", "allowedChannelPlugins", "prefersReducedMotion", "timeFormat", "timeZone", "autoMemoryEnabled", "autoMemoryDirectory", "autoDreamEnabled", "showThinkingSummaries", "skipDangerousModePermissionPrompt", "disableAutoMode", "sshConfigs", "sshHostCommands", "claudeMd", "claudeMdExcludes", "pluginTrustMessage", "theme", "editorMode", "keybindingFlavor", "vimInsertModeRemaps", "verbose", "preferredNotifChannel", "autoCompactEnabled", "precomputeCompactionEnabled", "idleCompaction", "switchModelsOnFlag", "autoContinueAtUsageLimit", "autoScrollEnabled", "wheelScrollAccelerationEnabled", "fileCheckpointingEnabled", "showTurnDuration", "showMessageTimestamps", "terminalProgressBarEnabled", "todoFeatureEnabled", "teammateMode", "remoteControlAtStartup", "isolatePeerMachines", "daemonColdStart", "crossSessionInbound", "autoUploadSessions", "inputNeededNotifEnabled", "agentPushNotifEnabled", "skipAutoPermissionPrompt", "useAutoModeDuringPlan", "autoMode", "disableDeepLinkRegistration", "voiceEnabled", "defaultView"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("availableModelsMatch", &["prefix", "exact"]), ("workflowSizeGuideline", &["unrestricted", "small", "medium", "large"]), ("defaultShell", &["bash", "powershell"]), ("forceLoginMethod", &["claudeai", "console", "gateway"]), ("parentSettingsBehavior", &["first-wins", "merge"]), ("managedSourcesBehavior", &["first-wins", "merge"]), ("viewMode", &["default", "verbose", "focus"]), ("feedbackDrafts", &["notify", "quiet", "off"]), ("promptCacheTtl", &["5m", "1h"]), ("subagentPromptCacheTtl", &["5m", "1h"]), ("effortLevel", &["low", "medium", "high", "xhigh"]), ("maxEffortLevel", &["low", "medium", "high", "xhigh", "max"]), ("askUserQuestionTimeout", &["60s", "5m", "10m", "never"]), ("dialogExpiry", &["60s", "5m", "10m", "never"]), ("autoUpdatesChannel", &["latest", "stable", "rc"]), ("tui", &["default", "fullscreen"]), ("disableAutoMode", &["disable"]), ("editorMode", &["normal", "vim"]), ("keybindingFlavor", &["classic", "readline"]), ("preferredNotifChannel", &["auto", "iterm2", "terminal_bell", "iterm2_with_bell", "kitty", "ghostty", "notifications_disabled"]), ("teammateMode", &["auto", "tmux", "iterm2", "in-process"]), ("daemonColdStart", &["transient", "ask"]), ("crossSessionInbound", &["accept", "hold", "refuse"]), ("disableDeepLinkRegistration", &["disable"]), ("defaultView", &["chat", "transcript"])])
+    }
 }
 
 impl Serialize for Settings {

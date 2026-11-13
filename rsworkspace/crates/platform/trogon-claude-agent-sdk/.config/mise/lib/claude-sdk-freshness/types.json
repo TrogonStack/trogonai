@@ -290,6 +290,22 @@
           ]
         }
       }
+    },
+    {
+      "source": "sdk.d.ts",
+      "output": "src/upstream/settings_resolution.rs",
+      "extern": {
+        "Settings": "super::settings::Settings"
+      },
+      "roots": [
+        "ResolvedSettings",
+        "ProvenanceEntry",
+        "PolicySettingsOrigin",
+        "ResolvedSettingSource",
+        "ResolveSettingsOptions",
+        "SDKSettingsParseError",
+        "SettingSource"
+      ]
     }
   ]
 }

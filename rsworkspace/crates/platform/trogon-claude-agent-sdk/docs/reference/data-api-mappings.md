@@ -90,3 +90,5 @@ integrity-verified published `0.3.319` declaration archive.
 | --- | --- | --- |
 | `Settings` (generated, all 182 declared keys plus unknown keys) | no type; the `settings` option is a string | `Settings` |
 | `SettingsInput::{Path, Json, Inline}` | `settings` string, path or JSON by braces | `Options.settings: string \| Settings` |
+| `SandboxSettings`, `SandboxNetworkConfig`, `SandboxFilesystemConfig`, `SandboxCredentialsConfig`, `SandboxIgnoreViolations` (aliases of the generated `Settings.sandbox` types) | `SandboxSettings`, `SandboxNetworkConfig`, `SandboxIgnoreViolations` TypedDicts (subset of the keys) | `SandboxSettings` and its parts |
+| `ResolvedSettings`, `ProvenanceEntry`, `ResolvedSettingSource`, `PolicySettingsOrigin`, `ResolveSettingsOptions`, `SDKSettingsParseError` | no type | same names |
