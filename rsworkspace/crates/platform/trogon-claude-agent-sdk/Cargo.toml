@@ -21,6 +21,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tokio-util = { workspace = true, features = ["rt"] }
+reqwest = { workspace = true }
 jsonschema = { workspace = true }
 url = { workspace = true }
 regex = "=1.12.3"
