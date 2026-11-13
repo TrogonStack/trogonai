@@ -1,0 +1,6 @@
+{"type":"user","uuid":"id-2","parentUuid":null,"sessionId":"id-7","timestamp":"t1","message":{"role":"user","content":"one"},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"u1"}}
+{"type":"assistant","uuid":"id-3","parentUuid":"id-2","sessionId":"id-7","timestamp":"t2","message":{"role":"assistant","content":"two"},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"a1"}}
+{"type":"system","subtype":"compact_boundary","uuid":"id-4","parentUuid":null,"logicalParentUuid":"id-3","sessionId":"id-7","timestamp":"t3","compactMetadata":{"trigger":"auto","durationMs":7,"postTokens":5,"preservedSegment":{"headUuid":"id-2","anchorUuid":"id-4","tailUuid":"id-3"}},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"cb"}}
+{"type":"user","uuid":"id-5","parentUuid":"id-4","sessionId":"id-7","timestamp":"t4","message":{"role":"user","content":"three"},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"u2"}}
+{"type":"assistant","uuid":"id-6","parentUuid":"id-5","sessionId":"id-7","timestamp":"2023-11-14T22:13:20.123Z","message":{"role":"assistant","content":"four"},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"a2"}}
+{"type":"custom-title","sessionId":"id-7","customTitle":"Derived (fork)","uuid":"id-8","timestamp":"2023-11-14T22:13:20.123Z"}

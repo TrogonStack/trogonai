@@ -37,6 +37,9 @@ jobs:
       - name: Verify extractors and report-only behavior without upstream credentials
         run: mise run --skip-tools github:workflows:claude-sdk-freshness:test
 
+      - name: Verify generated types match the pinned upstream declarations
+        run: mise run --skip-tools github:workflows:claude-sdk-freshness:types
+
   check:
     if: github.event_name != 'pull_request'
     needs: tests
