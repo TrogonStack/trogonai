@@ -21,8 +21,8 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     JsonObject, SdkSessionInfo, SessionId, SummaryDialect,
-    session_project_key::{canonicalize_lenient, sanitize_path},
-    session_prompt::{entry_first_prompt, iso_to_epoch_ms},
+    session_project_key::{canonicalize_lenient, platform_nfc, sanitize_path},
+    session_prompt::{PromptMode, entry_first_prompt_with, iso_to_epoch_ms},
     session_transcript::MessagePage,
 };
 
@@ -186,7 +186,7 @@ impl SessionFiles {
         if let Some(dir) = self.find_project_dir(canonical) {
             candidates.push((dir, canonical.to_owned()));
         }
-        for worktree in worktree_paths(canonical) {
+        for worktree in worktree_paths(canonical, SummaryDialect::Python) {
             if worktree == canonical {
                 continue;
             }
@@ -200,7 +200,7 @@ impl SessionFiles {
     fn sessions_for_project(&self, directory: &Path, include_worktrees: bool) -> Vec<SdkSessionInfo> {
         let canonical = canonicalize_lenient(directory);
         let worktrees = if include_worktrees {
-            worktree_paths(&canonical)
+            worktree_paths(&canonical, SummaryDialect::Python)
         } else {
             Vec::new()
         };
@@ -456,6 +456,11 @@ pub(crate) fn extract_first_prompt_from_head(head: &str) -> String {
 }
 
 pub(crate) fn extract_first_prompt_from_head_with(head: &str, dialect: SummaryDialect) -> String {
+    extract_first_prompt_from_head_mode(head, dialect, PromptMode::Stored)
+}
+
+/// Upstream `Ug`: the head scan, with `mode` choosing whether a plugin prompt is shown as its label.
+pub(crate) fn extract_first_prompt_from_head_mode(head: &str, dialect: SummaryDialect, mode: PromptMode) -> String {
     let mut command_fallback: Option<String> = None;
     for line in head.split('\n') {
         if !(line.contains("\"type\":\"user\"") || line.contains("\"type\": \"user\"")) {
@@ -472,7 +477,7 @@ pub(crate) fn extract_first_prompt_from_head_with(head: &str, dialect: SummaryDi
         let Ok(Value::Object(entry)) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        if let Some(prompt) = entry_first_prompt(dialect, &entry, &mut command_fallback) {
+        if let Some(prompt) = entry_first_prompt_with(dialect, mode, &entry, &mut command_fallback) {
             return prompt;
         }
     }
@@ -532,7 +537,7 @@ pub(crate) fn parse_session_info_from_lite(
 
 /// Runs `git worktree list --porcelain` in `cwd` with upstream's five second limit. Empty when git is missing or
 /// `cwd` is not in a repository.
-pub(crate) fn worktree_paths(cwd: &str) -> Vec<String> {
+pub(crate) fn worktree_paths(cwd: &str, dialect: SummaryDialect) -> Vec<String> {
     let Ok(mut child) = Command::new("git")
         .args([
             "-c",
@@ -580,7 +585,7 @@ pub(crate) fn worktree_paths(cwd: &str) -> Vec<String> {
     output
         .split('\n')
         .filter_map(|line| line.strip_prefix("worktree "))
-        .map(|path| path.nfc().collect())
+        .map(|path| platform_nfc(path, dialect))
         .collect()
 }
 

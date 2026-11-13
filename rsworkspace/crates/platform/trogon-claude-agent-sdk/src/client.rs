@@ -9,8 +9,19 @@ use tokio::{
 use crate::{
     ClaudeAgentOptions, ControlOperation, Error, JsonObject, Message, Prompt, ProtocolError,
     driver::{self, Command, Completion},
+    process_transport::{Closed, ProcessSpawn, ProcessTransport},
     wire::runtime_payload::RequestPayload,
 };
+
+struct StartInput<T, F: crate::adapters::SessionFileSystem> {
+    options: ClaudeAgentOptions,
+    session: Option<crate::SessionRuntime<F>>,
+    transport: T,
+    initialization: driver::Initialization,
+    version_check: Option<String>,
+    closed: Closed,
+    process_id: Option<u32>,
+}
 
 /// Owns one Claude Code subprocess. Keep consuming messages while a turn runs.
 pub struct ClaudeSdkClient {
@@ -33,7 +44,7 @@ pub struct ClientHandle {
     commands: mpsc::Sender<Command>,
     timeout: std::time::Duration,
     aborted: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    closed: driver::Closed,
+    closed: Closed,
 }
 
 fn capture_inherited<E: crate::adapters::EnvironmentVariable>(environment: &E) -> crate::environment_plan::Inherited {
@@ -106,59 +117,174 @@ impl ClaudeSdkClient {
             .clone()
             .or(discovered)
             .unwrap_or_else(|| "claude".into());
-        let session = if let Some(store_options) = &options.session_store {
-            let mut store_options = store_options.clone();
-            if let Some((_, directory)) = options
-                .env
-                .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case("CLAUDE_CONFIG_DIR"))
-            {
-                let directory = std::path::PathBuf::from(directory.expose());
-                if store_options
-                    .config_directory
-                    .as_ref()
-                    .is_some_and(|configured| configured != &directory)
-                {
-                    tracing::warn!(
-                        "the subprocess CLAUDE_CONFIG_DIR differs from the session store configuration directory; using the subprocess value so transcript mirror frames are not dropped"
-                    );
-                }
-                store_options.config_directory = Some(directory);
-            }
-            let resume = match &options.resume {
-                Some(session) => crate::StoreResume::Session(session.clone()),
-                None if options.continue_conversation == crate::ContinueConversation::Yes => {
-                    if !store_options.store.supports(crate::SessionStoreOperation::List) {
-                        return Err(Error::ContinueRequiresListSessions);
-                    }
-                    crate::StoreResume::Latest
-                }
-                None => crate::StoreResume::None,
-            };
-            let cwd = match options.cwd.clone() {
-                Some(cwd) => cwd,
-                None => adapters.environment.current_dir().map_err(Error::Io)?,
-            };
-            // The CLI must run in the directory the session project key was derived from.
-            options.cwd = Some(cwd.clone());
-            let runtime = crate::SessionRuntime::prepare_with_adapters(crate::SessionPreparationOptions {
-                store_options: &store_options,
-                resume,
-                cwd: &cwd,
-                subprocess_environment: &options.env,
-                environment: &adapters.environment,
-                process: &adapters.process,
-                filesystem: adapters.filesystem,
-            })
-            .await?;
-            if let Some(session_id) = &runtime.resume_session_id {
-                options.resume = Some(session_id.clone());
-                options.continue_conversation = crate::ContinueConversation::No;
-            }
-            Some(runtime)
-        } else {
-            None
+        let session = Self::prepare_session(
+            &mut options,
+            &adapters.environment,
+            &adapters.process,
+            adapters.filesystem,
+            true,
+        )
+        .await?;
+        let initialization = driver::Initialization::new(&options)?;
+        let closed = Closed::default();
+        let transport = ProcessTransport::spawn(ProcessSpawn {
+            options: &options,
+            cli_path: cli_path.clone(),
+            inherited: &inherited,
+            process: &adapters.process,
+            config_dir: session.as_ref().and_then(|session| session.config_dir.as_deref()),
+            closed: closed.clone(),
+        })?;
+        let version_check = (!crate::version_check::skip_requested(
+            inherited
+                .get(std::ffi::OsStr::new("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"))
+                .map(|v| v.as_os_str()),
+        ))
+        .then(|| cli_path.display().to_string());
+        let process_id = transport.process_id();
+        Self::start(StartInput {
+            options,
+            session,
+            transport,
+            initialization,
+            version_check,
+            closed,
+            process_id,
+        })
+        .await
+    }
+
+    /// Connects through a caller-supplied [`Transport`], Python's `ClaudeSDKClient(transport=...)`.
+    ///
+    /// Like upstream, the SDK does not discover or spawn a CLI, does not build its argument list or environment,
+    /// and does not materialize a store-backed resume for a custom transport. A configured session store still
+    /// mirrors the transcript frames the transport yields.
+    pub async fn connect_with_transport<T: crate::Transport>(
+        options: ClaudeAgentOptions,
+        transport: T,
+    ) -> Result<Self, Error> {
+        let adapters: crate::adapters::RuntimeAdapters = crate::adapters::RuntimeAdapters::default();
+        Self::connect_with_transport_and_adapters(options, transport, adapters).await
+    }
+
+    /// [`ClaudeSdkClient::connect_with_transport`] with caller-supplied adapters for the session store mirror.
+    pub async fn connect_with_transport_and_adapters<T, E, P, F>(
+        mut options: ClaudeAgentOptions,
+        transport: T,
+        adapters: crate::adapters::RuntimeAdapters<E, P, F>,
+    ) -> Result<Self, Error>
+    where
+        T: crate::Transport,
+        E: crate::adapters::EnvironmentVariable
+            + crate::adapters::CurrentDirectory<Error = std::io::Error>
+            + crate::adapters::TemporaryDirectory,
+        P: crate::adapters::SpawnProcess<Error = std::io::Error>,
+        F: crate::adapters::SessionFileSystem,
+    {
+        let session = Self::prepare_session(
+            &mut options,
+            &adapters.environment,
+            &adapters.process,
+            adapters.filesystem,
+            false,
+        )
+        .await?;
+        let initialization = driver::Initialization::new(&options)?;
+        Self::start(StartInput {
+            options,
+            session,
+            transport,
+            initialization,
+            version_check: None,
+            closed: Closed::default(),
+            process_id: None,
+        })
+        .await
+    }
+
+    /// Python `validate_session_store_options` plus `materialize_resume_session`. The materialization is skipped
+    /// for a custom transport, because the materialized options never reach it.
+    async fn prepare_session<E, P, F>(
+        options: &mut ClaudeAgentOptions,
+        environment: &E,
+        process: &P,
+        filesystem: F,
+        materialize: bool,
+    ) -> Result<Option<crate::SessionRuntime<F>>, Error>
+    where
+        E: crate::adapters::EnvironmentVariable
+            + crate::adapters::CurrentDirectory<Error = std::io::Error>
+            + crate::adapters::TemporaryDirectory,
+        P: crate::adapters::SpawnProcess<Error = std::io::Error>,
+        F: crate::adapters::SessionFileSystem,
+    {
+        let Some(store_options) = &options.session_store else {
+            return Ok(None);
         };
+        let mut store_options = store_options.clone();
+        if let Some((_, directory)) = options
+            .env
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case("CLAUDE_CONFIG_DIR"))
+        {
+            let directory = std::path::PathBuf::from(directory.expose());
+            if store_options
+                .config_directory
+                .as_ref()
+                .is_some_and(|configured| configured != &directory)
+            {
+                tracing::warn!(
+                    "the subprocess CLAUDE_CONFIG_DIR differs from the session store configuration directory; using the subprocess value so transcript mirror frames are not dropped"
+                );
+            }
+            store_options.config_directory = Some(directory);
+        }
+        let resume = match &options.resume {
+            _ if !materialize => crate::StoreResume::None,
+            Some(session) => crate::StoreResume::Session(session.clone()),
+            None if options.continue_conversation == crate::ContinueConversation::Yes => {
+                if !store_options.store.supports(crate::SessionStoreOperation::List) {
+                    return Err(Error::ContinueRequiresListSessions);
+                }
+                crate::StoreResume::Latest
+            }
+            None => crate::StoreResume::None,
+        };
+        let cwd = match options.cwd.clone() {
+            Some(cwd) => cwd,
+            None => environment.current_dir().map_err(Error::Io)?,
+        };
+        // The CLI must run in the directory the session project key was derived from.
+        options.cwd = Some(cwd.clone());
+        let runtime = crate::SessionRuntime::prepare_with_adapters(crate::SessionPreparationOptions {
+            store_options: &store_options,
+            resume,
+            cwd: &cwd,
+            subprocess_environment: &options.env,
+            environment,
+            process,
+            filesystem,
+        })
+        .await?;
+        if let Some(session_id) = &runtime.resume_session_id {
+            options.resume = Some(session_id.clone());
+            options.continue_conversation = crate::ContinueConversation::No;
+        }
+        Ok(Some(runtime))
+    }
+
+    async fn start<T: crate::Transport, F: crate::adapters::SessionFileSystem>(
+        input: StartInput<T, F>,
+    ) -> Result<Self, Error> {
+        let StartInput {
+            options,
+            session,
+            transport,
+            initialization,
+            version_check,
+            closed,
+            process_id,
+        } = input;
         let (command_tx, command_rx) = mpsc::channel(options.limits.command_queue_capacity.get());
         let (message_tx, message_rx) = mpsc::channel(options.limits.message_queue_capacity.get());
         let (terminal_tx, terminal_rx) = oneshot::channel();
@@ -167,20 +293,20 @@ impl ClaudeSdkClient {
             commands: command_tx,
             timeout: options.limits.control_timeout.as_duration(),
             aborted: std::sync::Arc::default(),
-            closed: driver::Closed::default(),
+            closed,
         };
-        let (process_id, driver) = driver::spawn(driver::SpawnOptions {
+        let driver = driver::spawn(driver::SpawnOptions {
             options,
             session,
             commands: command_rx,
             messages: message_tx,
             shutdown: shutdown_rx,
             terminal: terminal_tx,
-            process: &adapters.process,
-            cli_path,
-            inherited,
-            closed: handle.closed.clone(),
-        })?;
+            transport,
+            initialization,
+            version_check,
+        })
+        .await?;
         let mut runtime = ClientRuntime {
             handle,
             messages: message_rx,
@@ -358,7 +484,7 @@ impl ClientHandle {
     pub async fn send_input(&self, input: crate::UserInput) -> Result<(), Error> {
         let (response, receiver) = oneshot::channel();
         self.enqueue(Command::Prompt { input, response }).await?;
-        receiver.await.map_err(|_| Error::DriverStopped)?
+        receiver.await.map_err(|_| self.stopped_error())?
     }
 
     pub async fn interrupt(&self) -> Result<crate::InterruptReceipt, Error> {
@@ -514,8 +640,15 @@ impl ClientHandle {
 
     async fn finish_with(&self, completion: Completion) -> Result<(), Error> {
         let (response, receiver) = oneshot::channel();
-        self.enqueue(Command::FinishInput { completion, response }).await?;
-        receiver.await.map_err(|_| Error::DriverStopped)?
+        let command = Command::FinishInput { completion, response };
+        match timeout(self.timeout, self.commands.send(command)).await {
+            Err(_) => Err(Error::CommandQueueTimeout),
+            // Upstream `endInput()` (TypeScript) and `end_input()` (Python) only close stdin and never fail, so ending
+            // the input of a run that already stopped is a no-op; the run's own error surfaces from the message
+            // stream.
+            Ok(Err(_)) => Ok(()),
+            Ok(Ok(())) => receiver.await.unwrap_or(Ok(())),
+        }
     }
 
     async fn control(&self, operation: ControlOperation, request: serde_json::Value) -> Result<JsonObject, Error> {
@@ -526,21 +659,26 @@ impl ClientHandle {
             response,
         })
         .await?;
-        receiver.await.map_err(|_| Error::DriverStopped)?
+        receiver.await.map_err(|_| self.stopped_error())?
     }
 
     async fn enqueue(&self, command: Command) -> Result<(), Error> {
         timeout(self.timeout, self.commands.send(command))
             .await
             .map_err(|_| Error::CommandQueueTimeout)?
-            .map_err(|_| {
-                // TypeScript: a write after the abort signal fired throws `AbortError("Operation aborted")`.
-                if self.aborted.load(std::sync::atomic::Ordering::SeqCst) {
-                    crate::AbortError::OPERATION.into()
-                } else {
-                    self.closed.write_error().unwrap_or(Error::DriverStopped)
-                }
-            })
+            .map_err(|_| self.stopped_error())
+    }
+
+    /// The error for a write that the stopped driver did not (or could not) accept. The driver records how the
+    /// process ended before it drops its queue, so a command still buffered when it stopped gets the same error as one
+    /// sent afterwards.
+    fn stopped_error(&self) -> Error {
+        // TypeScript: a write after the abort signal fired throws `AbortError("Operation aborted")`.
+        if self.aborted.load(std::sync::atomic::Ordering::SeqCst) {
+            crate::AbortError::OPERATION.into()
+        } else {
+            self.closed.write_error().unwrap_or(Error::DriverStopped)
+        }
     }
 }
 
@@ -612,8 +750,36 @@ where
     F: crate::adapters::SessionFileSystem,
 {
     let client = ClaudeSdkClient::connect_with_adapters(options, adapters).await?;
+    start_query(client, prompt.into(), completion).await
+}
+
+/// Python `query(prompt, transport=...)`.
+pub async fn query_with_transport<T: crate::Transport>(
+    prompt: impl Into<crate::UserInput>,
+    options: ClaudeAgentOptions,
+    transport: T,
+) -> Result<Query, Error> {
+    let client = ClaudeSdkClient::connect_with_transport(options, transport).await?;
+    start_query(client, prompt.into(), Completion::Run).await
+}
+
+/// [`query_with_transport`] that ends after the first result.
+pub async fn query_turn_with_transport<T: crate::Transport>(
+    prompt: impl Into<crate::UserInput>,
+    options: ClaudeAgentOptions,
+    transport: T,
+) -> Result<Query, Error> {
+    let client = ClaudeSdkClient::connect_with_transport(options, transport).await?;
+    start_query(client, prompt.into(), Completion::Turn).await
+}
+
+async fn start_query(
+    client: ClaudeSdkClient,
+    prompt: crate::UserInput,
+    completion: Completion,
+) -> Result<Query, Error> {
     let startup = async {
-        client.send_input(prompt.into()).await?;
+        client.send_input(prompt).await?;
         client.runtime.handle.finish_with(completion).await
     }
     .await;

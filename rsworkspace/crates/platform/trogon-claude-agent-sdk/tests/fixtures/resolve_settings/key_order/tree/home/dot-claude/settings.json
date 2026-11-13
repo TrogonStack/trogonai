@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read"
+    ]
+  },
+  "model": "m",
+  "env": {
+    "Z": "1",
+    "A": "2"
+  }
+}

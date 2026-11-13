@@ -2263,6 +2263,70 @@
       "rust": [
         "src/driver.rs"
       ]
+    },
+    {
+      "id": "s31-bundled-cli-python-lookup",
+      "concept": "Bundled Claude Code executable beside the Python package",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 316,
+        "line_end": 329,
+        "sha256": "f161f93044d567459ac107e9071547b615df8d87b9951c0f812dcbdd0aa4d0c8"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves a platform package instead of a bundled directory."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Python checks <package>/_bundled/claude (claude.exe on Windows) before any other discovery and accepts it only when it exists and is a file."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "A Rust crate ships no binary and has no package directory, so find_bundled_cli takes the directory that holds _bundled from the caller and is not part of connect's discovery."
+      },
+      "contracts": [
+        "bundled_cli::bundled_cli_is_a_file_under_the_bundled_directory"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "s32-native-cli-platform-package",
+      "concept": "Native executable from the platform optional dependency package",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources bundle the binary in the wheel and never resolve npm packages."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function vJ(e,t={})",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 397,
+        "sha256": "2b219e3c500fbe50d5c65bcede1f6a5789bc3023186ee5b23262df358c4d33e1"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript resolves <package>-<platform>-<arch>/claude (claude.exe on win32) through Node module resolution, tries the musl variant first on musl Linux and the glibc one first otherwise, uses a dedicated linux-<arch>-android package for Android, skips a candidate whose resolution throws or whose file is missing, and fails with a message naming the platform when none is found."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Node module resolution is a ResolveNodeModule adapter with a default that searches the same relative node_modules, NODE_PATH and home or prefix directories. Musl is read from the compile target because a Rust process has no Node process report."
+      },
+      "contracts": [
+        "bundled_cli::linux_orders_the_libc_variants_by_preference",
+        "bundled_cli::other_platforms_have_one_package_and_only_windows_adds_exe",
+        "bundled_cli::a_resolved_path_must_exist_and_later_candidates_are_tried",
+        "bundled_cli::a_miss_names_the_platform_and_the_upstream_remedy",
+        "bundled_cli::lookup_directories_follow_node_order",
+        "bundled_cli::lookup_resolves_the_nearest_file_to_its_canonical_path"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
     }
   ]
 }

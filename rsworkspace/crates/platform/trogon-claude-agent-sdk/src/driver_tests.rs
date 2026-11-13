@@ -1,182 +1,56 @@
 use std::{
-    process::Stdio,
     sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
 };
-use tokio::io::DuplexStream;
 
 use super::*;
-use crate::framing::drain_stderr;
-use crate::{
-    ToolPermissionRequest, ToolSet,
-    adapters::{SpawnProcess, TokioProcessSpawner},
-};
+use crate::{ToolPermissionRequest, ToolSet, environment_plan::Inherited, process_transport::command};
 
-/// The far ends of the pipes a driver under test owns.
-struct ProcessHarness {
-    stdin: DuplexStream,
-    _stdout: DuplexStream,
-    _stderr: DuplexStream,
+/// A transport the test scripts: documents the driver writes arrive on `written`, and objects sent on
+/// `incoming` are what the driver reads.
+struct ScriptedTransport {
+    written: mpsc::UnboundedSender<String>,
+    incoming: mpsc::UnboundedReceiver<JsonObject>,
+    ready: bool,
 }
 
-struct ProcessPipes {
-    child: tokio::process::Child,
-    stdin: DuplexStream,
-    stdout: DuplexStream,
-    stderr: DuplexStream,
+impl Transport for ScriptedTransport {
+    async fn connect(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn write(&mut self, data: &str) -> Result<(), Error> {
+        self.written.send(data.to_owned()).map_err(|_| Error::DriverStopped)
+    }
+
+    async fn read_message(&mut self) -> Result<Option<JsonObject>, Error> {
+        Ok(self.incoming.recv().await)
+    }
+
+    async fn close(&mut self) -> Result<(), Error> {
+        self.ready = false;
+        Ok(())
+    }
+
+    fn is_ready(&self) -> bool {
+        self.ready
+    }
+
+    async fn end_input(&mut self) -> Result<(), Error> {
+        self.ready = false;
+        Ok(())
+    }
 }
 
-/// Spawns a real short-lived child for the driver to own and pairs it with
-/// in-memory pipes the test controls.
-fn process() -> Result<(ProcessPipes, ProcessHarness), Box<dyn std::error::Error>> {
-    let mut command = ProcessCommand::new(std::env::current_exe()?);
-    command
-        .arg("--list")
-        // The driver kills this child, possibly while it writes its coverage profile at exit, which
-        // leaves a corrupt profile that fails the merge. The profile is discarded.
-        .env("LLVM_PROFILE_FILE", "/dev/null")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let child = TokioProcessSpawner.spawn(&mut command)?;
-    let (stdin, input) = tokio::io::duplex(65536);
-    let (output, stdout) = tokio::io::duplex(65536);
-    let (error, stderr) = tokio::io::duplex(65536);
-    Ok((
-        ProcessPipes {
-            child,
-            stdin,
-            stdout,
-            stderr,
-        },
-        ProcessHarness {
-            stdin: input,
-            _stdout: output,
-            _stderr: error,
-        },
-    ))
-}
-
-#[tokio::test(start_paused = true)]
-async fn stale_permission_completion_cannot_remove_replacement() -> Result<(), Box<dyn std::error::Error>> {
-    let (
-        ProcessPipes {
-            child,
-            stdin,
-            stdout,
-            stderr,
-        },
-        mut harness,
-    ) = process()?;
-    let (_command_tx, command_rx) = mpsc::channel(4);
-    let (message_tx, _message_rx) = mpsc::channel(4);
-    let (_shutdown_tx, shutdown_rx) = oneshot::channel();
-    let calls = Arc::new(AtomicUsize::new(0));
-    let handler = move |_: ToolPermissionRequest| {
-        let call = calls.fetch_add(1, Ordering::SeqCst);
-        async move {
-            if call == 0 {
-                PermissionDecision::allow()
-            } else {
-                pending::<PermissionDecision>().await
-            }
-        }
-    };
-    let mut driver = Driver::<_, _, crate::adapters::NativeFileSystem> {
-        child,
-        stdin: Some(stdin),
-        frames: FrameReader::new(stdout, 1024),
-        stderr: tokio::spawn(drain_stderr(stderr, 1024)),
-        commands: command_rx,
-        messages: message_tx,
-        shutdown: shutdown_rx,
-        limits: Limits::default(),
-        handler: Some(Arc::new(handler)),
-        pending: HashMap::new(),
-        callbacks: JoinSet::new(),
-        callback_handles: HashMap::new(),
-        callback_signals: HashMap::new(),
-        hook_callbacks: HashMap::new(),
-        sdk_mcp_servers: BTreeMap::new(),
-        pending_mcp: None,
-        initialize_request: RequestPayload::Initialize {
-            hooks: None,
-            agents: None,
-            supported_dialog_kinds: None,
-            system_prompt: None,
-            append_system_prompt: None,
-        }
-        .to_value()?,
-        blocking_hooks: false,
-        version_check: None,
-        elicitation_handler: None,
-        user_dialog_handler: None,
-        dialog_kinds: HashSet::new(),
-        session: None,
-        mirror_flush: None,
-        deferred_messages: VecDeque::new(),
-        next_id: 0,
-        state: State::Idle,
-        run_state: RunState::default(),
-        argv_style: crate::ArgvStyle::TypeScript,
-        last_error_result: None,
-        closed: Default::default(),
-    };
-    let id = ControlRequestId::from("reused-id");
-    let permission = || -> Result<IncomingControl, ProtocolError> {
-        match wire::parse_frame(br#"{"type":"control_request","request_id":"reused-id","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{}}}"#)? {
-            Frame::ControlRequest { request, .. } => Ok(request),
-            _ => Err(ProtocolError::DuplicateControlRequest),
-        }
-    };
-    driver
-        .frame(Frame::ControlRequest {
-            id: id.clone(),
-            request: permission()?,
-        })
-        .await?;
-    timeout(Duration::from_secs(1), async {
-        while !driver.callback_handles.get(&id).is_some_and(AbortHandle::is_finished) {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await?;
-    driver.frame(Frame::Cancel { id: id.clone() }).await?;
-    driver
-        .frame(Frame::ControlRequest {
-            id: id.clone(),
-            request: permission()?,
-        })
-        .await?;
-    let started = Instant::now();
-    let outcome = timeout(Duration::from_millis(100), driver.event_loop()).await;
-    let elapsed = started.elapsed();
-    let replacement_retained = driver.callback_handles.contains_key(&id);
-    driver.callbacks.abort_all();
-    driver.stdin.take();
-    driver.child.start_kill()?;
-    driver.child.wait().await?;
-    driver.stderr.abort();
-    let mut written = Vec::new();
-    timeout(
-        Duration::from_secs(1),
-        tokio::io::AsyncReadExt::read_to_end(&mut harness.stdin, &mut written),
-    )
-    .await??;
-    assert!(
-        replacement_retained,
-        "a stale allow completion removed the replacement callback"
-    );
-    assert!(outcome.is_err(), "a stale completion emitted a response to the child");
-    assert!(written.is_empty(), "a stale completion wrote a response to the child");
-    assert!(elapsed >= Duration::from_millis(100));
-    assert!(elapsed <= Duration::from_millis(101));
-    Ok(())
+/// The far end of the scripted transport a driver under test owns.
+struct Harness {
+    written: mpsc::UnboundedReceiver<String>,
+    _incoming: mpsc::UnboundedSender<JsonObject>,
 }
 
 struct DriverFixture {
-    driver: Driver<DuplexStream, DuplexStream, crate::adapters::NativeFileSystem>,
-    harness: ProcessHarness,
+    driver: Driver<ScriptedTransport, crate::adapters::NativeFileSystem>,
+    harness: Harness,
     commands: mpsc::Sender<Command>,
     messages: mpsc::Receiver<Message>,
     shutdown: oneshot::Sender<()>,
@@ -184,28 +58,27 @@ struct DriverFixture {
 
 impl DriverFixture {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let (
-            ProcessPipes {
-                child,
-                stdin,
-                stdout,
-                stderr,
-            },
-            harness,
-        ) = process()?;
+        Self::with_handler(None)
+    }
+
+    fn with_handler(handler: Option<Arc<dyn ToolPermissionHandler>>) -> Result<Self, Box<dyn std::error::Error>> {
+        let (written_tx, written) = mpsc::unbounded_channel();
+        let (incoming_tx, incoming) = mpsc::unbounded_channel();
         let (commands, command_rx) = mpsc::channel(4);
         let (message_tx, messages) = mpsc::channel(4);
         let (shutdown, shutdown_rx) = oneshot::channel();
         let driver = Driver {
-            child,
-            stdin: Some(stdin),
-            frames: FrameReader::new(stdout, 1024),
-            stderr: tokio::spawn(drain_stderr(stderr, 1024)),
+            transport: ScriptedTransport {
+                written: written_tx,
+                incoming,
+                ready: true,
+            },
+            input_ended: false,
             commands: command_rx,
             messages: message_tx,
             shutdown: shutdown_rx,
             limits: Limits::default(),
-            handler: None,
+            handler,
             pending: HashMap::new(),
             callbacks: JoinSet::new(),
             callback_handles: HashMap::new(),
@@ -234,11 +107,13 @@ impl DriverFixture {
             run_state: RunState::default(),
             argv_style: crate::ArgvStyle::TypeScript,
             last_error_result: None,
-            closed: Default::default(),
         };
         Ok(Self {
             driver,
-            harness,
+            harness: Harness {
+                written,
+                _incoming: incoming_tx,
+            },
             commands,
             messages,
             shutdown,
@@ -247,19 +122,76 @@ impl DriverFixture {
 
     async fn finish(mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.driver.callbacks.abort_all();
-        self.driver.stdin.take();
-        self.driver.child.start_kill()?;
-        self.driver.child.wait().await?;
-        self.driver.stderr.abort();
-        let mut bytes = Vec::new();
-        timeout(
-            Duration::from_secs(1),
-            tokio::io::AsyncReadExt::read_to_end(&mut self.harness.stdin, &mut bytes),
-        )
-        .await??;
-        assert!(bytes.is_empty(), "a defensive operation wrote to the process");
+        self.driver.end_input().await;
+        self.driver.transport.close().await?;
+        drop(self.driver);
+        assert!(
+            self.harness.written.recv().await.is_none(),
+            "a defensive operation wrote to the transport"
+        );
         Ok(())
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn stale_permission_completion_cannot_remove_replacement() -> Result<(), Box<dyn std::error::Error>> {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handler = move |_: ToolPermissionRequest| {
+        let call = calls.fetch_add(1, Ordering::SeqCst);
+        async move {
+            if call == 0 {
+                PermissionDecision::allow()
+            } else {
+                pending::<PermissionDecision>().await
+            }
+        }
+    };
+    let mut fixture = DriverFixture::with_handler(Some(Arc::new(handler)))?;
+    let id = ControlRequestId::from("reused-id");
+    let permission = || -> Result<IncomingControl, ProtocolError> {
+        match wire::parse_frame(br#"{"type":"control_request","request_id":"reused-id","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{}}}"#)? {
+            Frame::ControlRequest { request, .. } => Ok(request),
+            _ => Err(ProtocolError::DuplicateControlRequest),
+        }
+    };
+    fixture
+        .driver
+        .frame(Frame::ControlRequest {
+            id: id.clone(),
+            request: permission()?,
+        })
+        .await?;
+    timeout(Duration::from_secs(1), async {
+        while !fixture
+            .driver
+            .callback_handles
+            .get(&id)
+            .is_some_and(AbortHandle::is_finished)
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    fixture.driver.frame(Frame::Cancel { id: id.clone() }).await?;
+    fixture
+        .driver
+        .frame(Frame::ControlRequest {
+            id: id.clone(),
+            request: permission()?,
+        })
+        .await?;
+    let started = Instant::now();
+    let outcome = timeout(Duration::from_millis(100), fixture.driver.event_loop()).await;
+    let elapsed = started.elapsed();
+    let replacement_retained = fixture.driver.callback_handles.contains_key(&id);
+    assert!(
+        replacement_retained,
+        "a stale allow completion removed the replacement callback"
+    );
+    assert!(outcome.is_err(), "a stale completion emitted a response to the CLI");
+    assert!(elapsed >= Duration::from_millis(100));
+    assert!(elapsed <= Duration::from_millis(101));
+    fixture.finish().await
 }
 
 #[tokio::test(start_paused = true)]

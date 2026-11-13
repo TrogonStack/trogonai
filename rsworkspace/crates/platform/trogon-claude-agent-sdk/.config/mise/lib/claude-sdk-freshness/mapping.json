@@ -66,7 +66,12 @@
       "rust_api": [
         "ClaudeAgentOptions.cli_path",
         "ClaudeAgentOptions.cwd",
-        "ClaudeAgentOptions.model"
+        "ClaudeAgentOptions.model",
+        "find_bundled_cli",
+        "find_native_cli",
+        "ResolveNodeModule",
+        "NodeModuleLookup",
+        "NativePackageTarget"
       ],
       "tests": [
         {
@@ -80,10 +85,18 @@
         {
           "path": "tests/runtime_adapters.rs",
           "name": "injected_process_runs_protocol_and_closes_input_on_disconnect"
+        },
+        {
+          "name": "bundled_cli_is_a_file_under_the_bundled_directory",
+          "path": "tests/bundled_cli.rs"
+        },
+        {
+          "name": "linux_orders_the_libc_variants_by_preference",
+          "path": "tests/bundled_cli.rs"
         }
       ],
       "status": "supported",
-      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity."
+      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity. The bundled executable lookups (Python _bundled directory, TypeScript platform packages with musl and Windows or arm variants) are caller-driven helpers in find_bundled_cli and find_native_cli; they are not part of connect's discovery."
     },
     {
       "id": "process-errors-and-shutdown",
@@ -1835,9 +1848,14 @@
         "adapters::RuntimeAdapters",
         "adapters::SpawnProcess",
         "adapters::TokioProcessSpawner",
+        "Transport",
         "ClaudeSdkClient::connect_with_adapters",
+        "ClaudeSdkClient::connect_with_transport",
+        "ClaudeSdkClient::connect_with_transport_and_adapters",
         "query_with_adapters",
-        "query_turn_with_adapters"
+        "query_turn_with_adapters",
+        "query_with_transport",
+        "query_turn_with_transport"
       ],
       "tests": [
         {
@@ -1859,10 +1877,46 @@
         {
           "path": "tests/runtime_adapters.rs",
           "name": "dropping_owner_shuts_down_even_when_command_handle_survives"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_custom_transport_drives_a_full_session_through_the_trait"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_the_end_of_the_message_stream_ends_the_run"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_transport_error_from_connect_is_returned_unchanged"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_transport_error_from_read_ends_the_run_and_kills_the_peer"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_write_error_from_the_transport_reaches_the_caller"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_an_abort_kills_the_transport_before_closing_it"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "q01_query_with_a_transport_writes_the_prompt_after_initialize_and_ends_input"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "q01_a_one_turn_query_stops_after_the_first_result"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirror"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust supports statically dispatched process creation (the spawner returns the tokio child unchanged) while the shared driver owns protocol initialization and cleanup. Python Transport and the TypeScript spawn callback have different contracts; equivalent arbitrary transport and platform behavior remain unverified."
+      "status": "supported",
+      "rationale": "The public Transport trait is Python's Transport (connect, write, read_message in place of read_messages, close, is_ready, end_input) with a provided kill for TypeScript's abort. ClaudeSdkClient::connect_with_transport, query_with_transport and query_turn_with_transport inject one; the subprocess implementation is the default and the SpawnProcess adapter stays TypeScript's spawnClaudeCodeProcess. A custom transport gets no CLI discovery, argument list or store-backed resume materialization (the mirror still runs), as upstream."
     },
     {
       "id": "browser-entrypoint",
@@ -2129,6 +2183,113 @@
       ],
       "status": "supported",
       "rationale": "The result, option and error shapes of resolveSettings are generated from the pinned declarations and keep unknown keys and unlisted source names. The resolveSettings function itself is mapped separately. Python has no equivalent types."
+    },
+    {
+      "id": "settings-resolution-functions",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "resolveSettings",
+            "filterEscalatingDefaultMode",
+            "core.resolveSettings",
+            "core.filterEscalatingDefaultMode"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "resolve_settings",
+        "resolve_settings_with",
+        "filter_escalating_default_mode",
+        "ResolveSettingsError",
+        "adapters::SettingsHost",
+        "adapters::NativeHost",
+        "adapters::ExecuteFile"
+      ],
+      "tests": [
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "cascade_merges_in_precedence_order_with_array_union_and_recursion"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "sources_list_each_non_empty_source_low_to_high"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "empty_setting_sources_skip_every_filesystem_source"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "explicit_cwd_selects_the_project_files"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "config_dir_variable_moves_the_user_file"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "invalid_and_non_object_files_are_skipped_without_failing"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "managed_file_wins_and_reports_its_origin"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "managed_drop_ins_merge_in_code_unit_order_after_the_base_file"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "unreadable_managed_file_reports_did_not_load"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "remote_policy_outranks_the_managed_file"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "parent_managed_settings_contribute_only_restrictive_keys"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "plist_policy_is_read_with_plutil_on_macos"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "registry_policy_is_read_with_reg_on_windows"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "a_busy_registry_read_is_reported_but_a_missing_key_is_not"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "wsl_without_the_inherit_flag_ignores_the_windows_side"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "wsl_with_the_inherit_flag_reads_the_windows_side_first"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "escalating_default_mode_from_a_project_source_is_dropped"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "accept_edits_from_a_local_source_survives_but_not_from_a_project_source"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "default_mode_set_by_a_user_source_is_kept"
+        },
+        {
+          "path": "tests/resolve_settings_differential.rs",
+          "name": "rust_matches_the_pinned_typescript_resolver_byte_for_byte"
+        }
+      ],
+      "status": "partial",
+      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 19 fixture trees (mise run claude-sdk:resolve-diff). Partial until the listed gaps close: schema value normalization (invalid rule drops, catch defaults) and nested key order, pre-parse key aliases, managedSourcesBehavior merge mode, cloud and org mode, the git-ignored cwd check and the MDM re-read throttle. Python has no equivalent."
     }
   ]
 }

@@ -11,6 +11,7 @@ mod agent_definition;
 mod agent_name;
 mod argv;
 mod builtin_tool_name;
+mod bundled_cli;
 mod cli_discovery;
 mod cli_path;
 mod client;
@@ -43,6 +44,7 @@ mod permission;
 mod permission_mode;
 mod permission_update;
 mod process_options;
+mod process_transport;
 mod prompt;
 mod queue_capacity;
 mod run_as;
@@ -54,6 +56,7 @@ mod session_entry;
 mod session_error;
 mod session_files;
 mod session_files_ts;
+mod session_fork_ts;
 mod session_id;
 mod session_info;
 mod session_key;
@@ -61,6 +64,7 @@ mod session_messages_ts;
 mod session_mutations;
 mod session_path_component;
 mod session_precompact;
+mod session_probe_ts;
 mod session_project_key;
 mod session_prompt;
 mod session_reader;
@@ -72,6 +76,14 @@ mod session_summary;
 mod session_transcript;
 mod setting_source;
 mod settings_input;
+mod settings_resolve;
+mod settings_resolve_env;
+mod settings_resolve_parent;
+mod settings_resolve_platform;
+mod settings_resolve_policy;
+mod settings_resolve_sources;
+mod settings_resolve_tier;
+mod settings_resolve_values;
 mod settings_sandbox;
 mod stderr_tail;
 mod summary_dialect;
@@ -81,6 +93,7 @@ mod tool_name;
 mod tool_rule;
 mod tool_use_id;
 mod transcript_mirror;
+mod transport;
 mod usd_budget;
 mod user_input;
 mod version_check;
@@ -89,10 +102,15 @@ mod wire;
 pub use agent_definition::{AgentDefinition, AgentExecution, AgentMcpServerSpec};
 pub use agent_name::AgentName;
 pub use builtin_tool_name::BuiltinToolName;
+pub use bundled_cli::{
+    NativeCliNotFoundError, NativePackageTarget, NodeModuleLookup, NodeModuleNotFoundError, ResolveNodeModule,
+    find_bundled_cli, find_native_cli,
+};
 pub use cli_discovery::CliNotFoundError;
 pub use cli_path::CliPathError;
 pub use client::{
-    ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_with_adapters,
+    ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_turn_with_transport,
+    query_with_adapters, query_with_transport,
 };
 pub use client_app::{format_client_app, normalize_client_app};
 pub use config_value::ConfigValue;
@@ -163,7 +181,8 @@ pub use session_info::SdkSessionInfo;
 pub use session_key::{SessionKey, SessionKeyError};
 pub use session_messages_ts::{ChainAlgorithm, MessageOptions, MessagesError};
 pub use session_mutations::{
-    ForkSessionResult, JsonEscaping, SessionMutationError, delete_session, fork_session, rename_session, tag_session,
+    ForkAlgorithm, ForkSessionResult, JsonEscaping, SessionMutationError, delete_session, fork_session, rename_session,
+    tag_session,
 };
 pub use session_project_key::{
     SessionProjectKey, SessionProjectKeyError, project_key_for_directory, project_key_for_directory_in,
@@ -187,6 +206,9 @@ pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_ent
 pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
 pub use settings_input::SettingsInput;
+pub use settings_resolve::{
+    ResolveSettingsError, filter_escalating_default_mode, resolve_settings, resolve_settings_with,
+};
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };
@@ -199,6 +221,7 @@ pub use tool_name::ToolName;
 pub use tool_rule::ToolRule;
 pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
+pub use transport::Transport;
 pub use upstream::settings::Settings;
 pub use upstream::settings_resolution::{
     PolicySettingsOrigin, ProvenanceEntry, ResolveSettingsOptions, ResolvedSettingSource, ResolvedSettings,
