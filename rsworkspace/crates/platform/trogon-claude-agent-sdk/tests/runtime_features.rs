@@ -30,8 +30,8 @@ fn options(mode: &str) -> Result<ClaudeAgentOptions, Box<dyn StdError>> {
         model: Some(format!("fixture:{mode}").into()),
         ..ClaudeAgentOptions::default()
     };
-    options.limits.control_timeout = Timeout::new(Duration::from_secs(2))?;
-    options.limits.shutdown_timeout = Timeout::new(Duration::from_millis(200))?;
+    options.limits.control_timeout = Some(Timeout::new(Duration::from_secs(2)));
+    options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(Timeout::new(Duration::from_millis(200)));
     // The runtime force-kills the fixture on shutdown, possibly while it is writing its coverage
     // profile at exit, which leaves a corrupt profile. The fixture runs no crate code, so its
     // profile is discarded.
@@ -461,7 +461,7 @@ async fn undeclared_dialog_does_not_invoke_or_settle_a_handler() -> TestResult {
 
 async fn undeclared_dialog_with_pending_callback(mode: &str) -> TestResult {
     let mut options = options(mode)?;
-    options.limits.max_pending_controls = QueueCapacity::new(1)?;
+    options.limits.max_incoming_callbacks = Some(QueueCapacity::new(1)?);
     options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| {
         std::future::pending::<PermissionDecision>()
     }));

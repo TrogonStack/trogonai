@@ -306,6 +306,27 @@
         "SDKSettingsParseError",
         "SettingSource"
       ]
+    },
+    {
+      "source": "sdk.d.ts",
+      "output": "src/upstream/messages.rs",
+      "foreign": {
+        "UUID": "string",
+        "BetaMessage": "object",
+        "MessageParam": "object",
+        "BetaRawMessageStreamEvent": "object",
+        "NonNullableUsage": "object"
+      },
+      "tagged": {
+        "SDKMessage": [
+          "type",
+          "subtype",
+          "isReplay"
+        ]
+      },
+      "roots": [
+        "SDKMessage"
+      ]
     }
   ]
 }

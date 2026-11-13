@@ -55,7 +55,7 @@ fn python_plugins_are_two_token_flags_and_ignore_the_delivery() {
 }
 
 fn tokens(options: &ClaudeAgentOptions) -> Vec<String> {
-    build(options)
+    build(options, None)
         .unwrap_or_default()
         .iter()
         .map(|token| token.to_string_lossy().into_owned())

@@ -186,7 +186,7 @@ fn result(text: &str) -> Value {
 
 fn options() -> Result<ClaudeAgentOptions, Box<dyn StdError>> {
     let mut options = ClaudeAgentOptions::default();
-    options.limits.control_timeout = Timeout::new(Duration::from_secs(5))?;
+    options.limits.control_timeout = Some(Timeout::new(Duration::from_secs(5)));
     Ok(options)
 }
 

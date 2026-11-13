@@ -108,17 +108,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::thread::sleep(Duration::from_secs(30));
         return Ok(());
     }
-    if mode == "init-malformed" {
-        emit(
-            json!({"type":"control_response","response":{"subtype":"success","request_id":initialize_id,"response":42}}),
-        )?;
-        std::thread::sleep(Duration::from_secs(30));
-        return Ok(());
-    }
     let initialization = if mode == "hook" {
         json!({"hooks_applied":true,"hook_on_failure_supported":true,"claude_code_version":"2.1.319"})
     } else if mode == "hook-not-applied" {
         json!({"hooks_applied":false,"hook_on_failure_supported":true})
+    } else if mode == "init-malformed" {
+        json!(42)
     } else if mode == "init-malformed-known" {
         json!({"models":"invalid"})
     } else if mode == "connection-info" {

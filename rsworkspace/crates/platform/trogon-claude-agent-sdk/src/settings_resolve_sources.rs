@@ -3,14 +3,13 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use serde_json::Value;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     adapters::{CurrentDirectory, EnvironmentVariable, ReadFile},
     constants::{LOCAL_SETTINGS_FILE, PROJECT_SETTINGS_FILE, USER_SETTINGS_FILE},
+    settings_read::read_document,
     settings_resolve_values::SettingsMap,
-    settings_schema::schema,
 };
 
 /// `path.resolve` for one segment: absolute as is, relative against `base`, then lexically normalized.
@@ -86,17 +85,5 @@ pub(crate) fn resolve_cwd<H: CurrentDirectory<Error = io::Error>>(
 /// Reads one settings file; a missing, unreadable, non-object or invalid file yields nothing.
 pub(crate) fn read_settings_file<H: ReadFile<Error = io::Error>>(host: &H, path: &Path) -> Option<SettingsMap> {
     let bytes = host.read_file(path).ok()?;
-    let text = String::from_utf8_lossy(&bytes);
-    if is_blank(&text) {
-        return Some(SettingsMap::new());
-    }
-    match serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(&text)).ok()? {
-        Value::Object(map) => schema()?.parse_document(&map),
-        _ => None,
-    }
-}
-
-/// `String.prototype.trim() === ""`: JavaScript counts the byte order mark as white space.
-fn is_blank(text: &str) -> bool {
-    text.chars().all(|c| c.is_whitespace() || c == '\u{feff}')
+    read_document(&String::from_utf8_lossy(&bytes))
 }

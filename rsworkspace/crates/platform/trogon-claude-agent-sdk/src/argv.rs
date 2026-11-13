@@ -3,12 +3,13 @@
 //! `typescript` follows `sdk.mjs` (0.3.323) and `python` follows `subprocess_cli.py` (0.2.181). Both are pure
 //! functions of the options so golden tests can pin the exact tokens.
 
-use std::ffi::OsString;
+use std::{ffi::OsString, path::Path};
 
 use crate::{
-    ClaudeAgentOptions, Customizations, Error, ExtraArgument, PartialMessages, ProtocolError, SessionPersistence,
-    SystemPrompt, ToolSet,
+    ClaudeAgentOptions, Customizations, DangerousPermissionSkip, DebugOutput, Error, ExtraArgument, HookEvents,
+    OptionError, PartialMessages, ProtocolError, SessionPersistence, SystemPrompt, ThinkingConfig, ToolSet,
     process_options::ArgvStyle,
+    skills::python_repr,
     wire::runtime_payload::{EmbeddedMcpPayload, McpConfigPayload},
 };
 
@@ -41,11 +42,54 @@ pub(crate) fn request_await_initialize(options: &mut ClaudeAgentOptions) {
     }
 }
 
-pub(crate) fn build(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
+/// `derived_debug_file` is the TypeScript default debug file, which only a native spawn derives.
+pub(crate) fn build(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -> Result<Vec<OsString>, Error> {
+    crate::shadow_warning::reject_handler_with_tool_name(options)?;
     match options.argv_style {
-        ArgvStyle::TypeScript => typescript(options),
+        ArgvStyle::TypeScript => typescript(options, derived_debug_file),
         ArgvStyle::Python => python(options),
     }
+}
+
+/// Python `_reject_windows_cmd_metacharacters`: on Windows, a value that carries a `cmd.exe` metacharacter or a
+/// line break never reaches the command line.
+pub(crate) fn reject_windows_metacharacters(name: &str, value: &str, windows: bool) -> Result<(), OptionError> {
+    if !windows {
+        return Ok(());
+    }
+    let mut bad: Vec<char> = value
+        .chars()
+        .filter(|c| crate::constants::WINDOWS_CMD_METACHARACTERS.contains(*c) || matches!(c, '\r' | '\n'))
+        .collect();
+    bad.sort_unstable();
+    bad.dedup();
+    if bad.is_empty() {
+        return Ok(());
+    }
+    let listed: Vec<String> = bad.iter().map(|c| python_repr(&c.to_string())).collect();
+    Err(OptionError::new(format!(
+        "{name} value {} contains characters that are unsafe to pass on a Windows command line: [{}]",
+        python_repr(value),
+        listed.join(", ")
+    )))
+}
+
+/// Python rejects Windows metacharacters in the four values an application commonly takes from outside.
+fn reject_windows_values(options: &ClaudeAgentOptions) -> Result<(), OptionError> {
+    let windows = cfg!(windows);
+    if let Some(session) = &options.resume {
+        reject_windows_metacharacters("resume", session.as_str(), windows)?;
+    }
+    if let Some(session) = options.session_id.as_ref().filter(|id| !id.as_str().is_empty()) {
+        reject_windows_metacharacters("session_id", session.as_str(), windows)?;
+    }
+    if let Some(at) = options.resume_session_at.as_deref().filter(|at| !at.is_empty()) {
+        reject_windows_metacharacters("resume_session_at", at, windows)?;
+    }
+    if let Some(turn) = options.resume_drops_turn.as_deref() {
+        reject_windows_metacharacters("resume_drops_turn", turn, windows)?;
+    }
+    Ok(())
 }
 
 fn joined<I, S>(items: I) -> String
@@ -110,7 +154,47 @@ fn equals(arguments: &mut Vec<OsString>, flag: &str, value: impl AsRef<std::ffi:
     arguments.push(token);
 }
 
-fn typescript(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
+fn typescript_thinking(a: &mut Vec<OsString>, options: &ClaudeAgentOptions) {
+    // `maxThinkingTokens` only applies when `thinking` is absent: zero disables, any other value is a budget.
+    let thinking = options.thinking.or(match options.max_thinking_tokens {
+        Some(0) => Some(ThinkingConfig::Disabled),
+        Some(budget) => Some(ThinkingConfig::Enabled {
+            budget_tokens: Some(budget),
+            display: None,
+        }),
+        None => None,
+    });
+    let Some(thinking) = thinking else {
+        return;
+    };
+    let display = match thinking {
+        ThinkingConfig::Enabled {
+            budget_tokens: Some(budget),
+            display,
+        } => {
+            equals(a, "--max-thinking-tokens", budget.to_string());
+            display
+        }
+        ThinkingConfig::Enabled {
+            budget_tokens: None,
+            display,
+        }
+        | ThinkingConfig::Adaptive { display } => {
+            a.push("--thinking=adaptive".into());
+            display
+        }
+        ThinkingConfig::Disabled => {
+            a.push("--thinking=disabled".into());
+            None
+        }
+    };
+    if let Some(display) = display {
+        equals(a, "--thinking-display", display.as_str());
+    }
+}
+
+fn typescript(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -> Result<Vec<OsString>, Error> {
+    let allowed_tools = crate::skills::effective_allowed_tools(options)?;
     let mut a: Vec<OsString> = [
         "--output-format",
         "stream-json",
@@ -120,6 +204,7 @@ fn typescript(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     ]
     .map(OsString::from)
     .into();
+    typescript_thinking(&mut a, options);
     if let Some(effort) = options.effort {
         equals(&mut a, "--effort", effort.as_str());
     }
@@ -129,11 +214,21 @@ fn typescript(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     if let Some(budget) = &options.max_budget_usd {
         equals(&mut a, "--max-budget-usd", budget.get().to_string());
     }
+    if let Some(budget) = options.task_budget {
+        equals(&mut a, "--task-budget", budget.total.to_string());
+    }
     if let Some(model) = &options.model {
         equals(&mut a, "--model", model.as_str());
     }
     if let Some(agent) = &options.agent {
         equals(&mut a, "--agent", agent.as_str());
+    }
+    if !options.betas.is_empty() {
+        equals(
+            &mut a,
+            "--betas",
+            joined(options.betas.iter().map(|beta| beta.as_str())),
+        );
     }
     if let Some(schema) = &options.output_schema {
         equals(
@@ -142,8 +237,28 @@ fn typescript(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
             serde_json::Value::Object(schema.as_json().clone()).to_string(),
         );
     }
+    let debug_file = options.debug_file.as_ref().filter(|file| !file.as_os_str().is_empty());
+    if let Some(file) = debug_file {
+        equals(&mut a, "--debug-file", file);
+    } else if options.debug == DebugOutput::On {
+        a.push("--debug".into());
+    }
+    if debug_file.is_none()
+        && let Some(file) = derived_debug_file
+    {
+        equals(&mut a, "--debug-file", file);
+    }
     if options.permission_handler.is_some() {
         a.push("--permission-prompt-tool=stdio".into());
+    } else if let Some(name) = options
+        .permission_prompt_tool_name
+        .as_deref()
+        .filter(|name| !name.is_empty())
+    {
+        equals(&mut a, "--permission-prompt-tool", name);
+    }
+    if let Some(prompts) = options.permission_prompts {
+        equals(&mut a, "--permission-prompts", prompts.as_str());
     }
     if options.continue_conversation == crate::ContinueConversation::Yes {
         a.push("--continue".into());
@@ -151,12 +266,11 @@ fn typescript(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     if let Some(session) = &options.resume {
         equals(&mut a, "--resume", session.to_string());
     }
-    if !options.allowed_tools.is_empty() {
-        equals(
-            &mut a,
-            "--allowedTools",
-            joined(options.allowed_tools.iter().map(|r| r.as_str())),
-        );
+    for channel in &options.channels {
+        equals(&mut a, "--channels", channel);
+    }
+    if !allowed_tools.is_empty() {
+        equals(&mut a, "--allowedTools", joined(&allowed_tools));
     }
     if !options.disallowed_tools.is_empty() {
         equals(
@@ -180,11 +294,37 @@ fn typescript(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     if let Some(mode) = options.permission_mode.as_ref() {
         equals(&mut a, "--permission-mode", mode.as_str());
     }
+    if options.allow_dangerously_skip_permissions == DangerousPermissionSkip::Allow {
+        a.push("--allow-dangerously-skip-permissions".into());
+    }
+    if let Some(fallback) = options
+        .fallback_model
+        .as_ref()
+        .filter(|model| !model.as_str().is_empty())
+    {
+        if options
+            .model
+            .as_ref()
+            .is_some_and(|model| !model.as_str().is_empty() && model.as_str() == fallback.as_str())
+        {
+            return Err(OptionError::new(
+                "Fallback model cannot be the same as the main model. Please specify a different model for fallbackModel option.",
+            )
+            .into());
+        }
+        equals(&mut a, "--fallback-model", fallback.as_str());
+    }
+    if options.include_hook_events == HookEvents::Include {
+        a.push("--include-hook-events".into());
+    }
     if options.partial_messages == PartialMessages::Include {
         a.push("--include-partial-messages".into());
     }
     if options.session_store.is_some() {
         a.push("--session-mirror".into());
+    }
+    if let Some(root) = &options.project_config_root {
+        equals(&mut a, "--project-config-root", root);
     }
     for directory in &options.additional_directories {
         equals(&mut a, "--add-dir", directory);
@@ -204,6 +344,15 @@ fn typescript(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     if options.fork_session == crate::SessionFork::Fork {
         a.push("--fork-session".into());
     }
+    if let Some(at) = options.resume_session_at.as_deref().filter(|at| !at.is_empty()) {
+        equals(&mut a, "--resume-session-at", at);
+    }
+    if let Some(turn) = options.resume_drops_turn.as_deref() {
+        equals(&mut a, "--resume-drops-turn", turn);
+    }
+    if let Some(session) = options.session_id.as_ref().filter(|id| !id.as_str().is_empty()) {
+        equals(&mut a, "--session-id", session.as_str());
+    }
     if options.session_persistence == SessionPersistence::Disabled {
         a.push("--no-session-persistence".into());
     }
@@ -214,7 +363,44 @@ fn typescript(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     Ok(a)
 }
 
+fn python_thinking(a: &mut Vec<OsString>, options: &ClaudeAgentOptions) -> Result<(), Error> {
+    // `thinking` takes precedence over the deprecated `max_thinking_tokens`.
+    let Some(thinking) = options.thinking else {
+        if let Some(budget) = options.max_thinking_tokens {
+            a.push("--max-thinking-tokens".into());
+            a.push(budget.to_string().into());
+        }
+        return Ok(());
+    };
+    let display = match thinking {
+        ThinkingConfig::Adaptive { display } => {
+            a.push("--thinking".into());
+            a.push("adaptive".into());
+            display
+        }
+        ThinkingConfig::Enabled { budget_tokens, display } => {
+            // Python's `budget_tokens` is a required key, so its absence is a `KeyError` upstream.
+            let budget = budget_tokens.ok_or_else(|| OptionError::new("'budget_tokens'"))?;
+            a.push("--max-thinking-tokens".into());
+            a.push(budget.to_string().into());
+            display
+        }
+        ThinkingConfig::Disabled => {
+            a.push("--thinking".into());
+            a.push("disabled".into());
+            None
+        }
+    };
+    if let Some(display) = display {
+        a.push("--thinking-display".into());
+        a.push(display.as_str().into());
+    }
+    Ok(())
+}
+
 fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
+    let allowed_tools = crate::skills::effective_allowed_tools(options)?;
+    let setting_sources = crate::skills::effective_setting_sources(options);
     let mut a: Vec<OsString> = ["--output-format", "stream-json", "--verbose"]
         .map(OsString::from)
         .into();
@@ -237,9 +423,9 @@ fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
         a.push("--tools".into());
         a.push(joined(tools.iter().map(|t| t.as_str())).into());
     }
-    if !options.allowed_tools.is_empty() {
+    if !allowed_tools.is_empty() {
         a.push("--allowedTools".into());
-        a.push(joined(options.allowed_tools.iter().map(|r| r.as_str())).into());
+        a.push(joined(&allowed_tools).into());
     }
     if let Some(turns) = options.max_turns {
         a.push("--max-turns".into());
@@ -253,6 +439,10 @@ fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
         a.push("--disallowedTools".into());
         a.push(joined(options.disallowed_tools.iter().map(|r| r.as_str())).into());
     }
+    if let Some(budget) = options.task_budget {
+        a.push("--task-budget".into());
+        a.push(budget.total.to_string().into());
+    }
     if let Some(model) = &options.model {
         a.push("--model".into());
         a.push(model.as_str().into());
@@ -261,9 +451,29 @@ fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
         a.push("--agent".into());
         a.push(agent.as_str().into());
     }
+    if let Some(fallback) = options
+        .fallback_model
+        .as_ref()
+        .filter(|model| !model.as_str().is_empty())
+    {
+        a.push("--fallback-model".into());
+        a.push(fallback.as_str().into());
+    }
+    if !options.betas.is_empty() {
+        a.push("--betas".into());
+        a.push(joined(options.betas.iter().map(|beta| beta.as_str())).into());
+    }
+    // Python routes a `can_use_tool` callback through `permission_prompt_tool_name="stdio"`.
     if options.permission_handler.is_some() {
         a.push("--permission-prompt-tool".into());
         a.push("stdio".into());
+    } else if let Some(name) = options
+        .permission_prompt_tool_name
+        .as_deref()
+        .filter(|name| !name.is_empty())
+    {
+        a.push("--permission-prompt-tool".into());
+        a.push(name.into());
     }
     if let Some(mode) = options.permission_mode.as_ref() {
         a.push("--permission-mode".into());
@@ -272,8 +482,12 @@ fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     if options.continue_conversation == crate::ContinueConversation::Yes {
         a.push("--continue".into());
     }
+    reject_windows_values(options)?;
     if let Some(session) = &options.resume {
         equals(&mut a, "--resume", session.to_string());
+    }
+    if let Some(session) = options.session_id.as_ref().filter(|id| !id.as_str().is_empty()) {
+        equals(&mut a, "--session-id", session.as_str());
     }
     for directory in &options.additional_directories {
         a.push("--add-dir".into());
@@ -286,17 +500,26 @@ fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     if options.partial_messages == PartialMessages::Include {
         a.push("--include-partial-messages".into());
     }
+    if options.include_hook_events == HookEvents::Include {
+        a.push("--include-hook-events".into());
+    }
     if options.mcp_discovery == crate::McpDiscovery::Disabled {
         a.push("--strict-mcp-config".into());
     }
     if options.fork_session == crate::SessionFork::Fork {
         a.push("--fork-session".into());
     }
+    if let Some(at) = options.resume_session_at.as_deref().filter(|at| !at.is_empty()) {
+        equals(&mut a, "--resume-session-at", at);
+    }
+    if let Some(turn) = options.resume_drops_turn.as_deref() {
+        equals(&mut a, "--resume-drops-turn", turn);
+    }
     if options.session_store.is_some() {
         a.push("--session-mirror".into());
     }
-    if let Some(sources) = &options.setting_sources {
-        equals(&mut a, "--setting-sources", joined(sources.iter().map(|s| s.as_str())));
+    if let Some(sources) = &setting_sources {
+        equals(&mut a, "--setting-sources", joined(sources));
     }
     for plugin in &options.plugins {
         a.push("--plugin-dir".into());
@@ -309,6 +532,7 @@ fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
         a.push("--bare".into());
     }
     push_extra(&mut a, &options.extra_args);
+    python_thinking(&mut a, options)?;
     if let Some(effort) = options.effort {
         a.push("--effort".into());
         a.push(effort.as_str().into());
@@ -322,5 +546,7 @@ fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     Ok(a)
 }
 
+#[cfg(test)]
+mod runtime_tests;
 #[cfg(test)]
 mod tests;

@@ -192,6 +192,8 @@
         "kind": "upstream"
       },
       "contracts": [
+        "golden_initialize::hooks_applied_false_only_matters_for_blocking_hooks",
+        "golden_initialize::hooks_that_were_not_applied_are_refused",
         "runtime_features::s06_continue_hooks_tolerate_a_session_that_did_not_apply_them"
       ],
       "rust": [
@@ -1174,7 +1176,9 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "golden_initialize::blocking_hooks_need_on_failure_support"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1199,17 +1203,22 @@
       },
       "upstream": {
         "verdict": "disagree",
-        "behavior": "Python times out after 60 s by default. TypeScript waits until the response arrives, the abort signal fires, or the query closes."
+        "behavior": "Python times out after 60 s with \"Control request timeout: {subtype}\". TypeScript waits until the response arrives, the abort signal fires, or the query closes; its only initialize deadline is 660000 ms, armed when a hook is set to block on failure or managed settings are sent."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "A CLI that never answers would otherwise hang the session; a bounded wait turns that into a typed error."
+        "kind": "follow-typescript",
+        "reason": "Limits::control_timeout is None by default and InitializeTimeout::TypeScript arms 660 s only for blocking hooks or managed settings, failing with InitializeNotConfirmed or ManagedSettingsNotConfirmed and TypeScript's text. Limits::python() selects the 60 s wait, Python's message and the CLAUDE_CODE_STREAM_CLOSE_TIMEOUT initialize wait."
       },
       "contracts": [
-        "subprocess::missing_control_reply_times_out"
+        "upstream_defaults::m06_a_control_request_has_no_deadline_by_default",
+        "subprocess::missing_control_reply_times_out",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
+        "error_contracts::control_timeout_diagnostics_identify_each_wire_operation"
       ],
       "rust": [
-        "src/driver.rs"
+        "src/driver.rs",
+        "src/options.rs",
+        "src/error.rs"
       ]
     },
     {
@@ -1262,17 +1271,20 @@
       },
       "upstream": {
         "verdict": "disagree",
-        "behavior": "Python rejects a message over max_buffer_size (1 MiB default). TypeScript reads lines with node:readline and no length limit."
+        "behavior": "Python rejects a line over max_buffer_size (1 MiB by default) with \"JSON message exceeded maximum buffer size of {N} bytes\". TypeScript reads lines with node:readline and no length limit."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "An unbounded line lets a misbehaving CLI exhaust memory; the limit is configurable for large messages."
+        "kind": "follow-typescript",
+        "reason": "Limits::max_buffer_size is None by default; Limits::python() sets Python's 1 MiB cap with its message."
       },
       "contracts": [
-        "subprocess::oversized_frame_is_rejected"
+        "upstream_defaults::m08_a_long_stdout_line_is_not_capped_by_default",
+        "subprocess::oversized_frame_is_rejected",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values"
       ],
       "rust": [
-        "src/framing.rs"
+        "src/framing.rs",
+        "src/options.rs"
       ]
     },
     {
@@ -1472,15 +1484,20 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "No queue capacity setting exists upstream."
+        "behavior": "No queue capacity setting exists upstream. Rust queues are unbounded unless a caller opts into a bound, and an opted-in QueueCapacity still rejects zero and values past the semaphore permit limit."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounded channels need a nonzero capacity within the semaphore permit limit."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "queue_capacity::unsupported_queue_capacities_fail_before_any_channel_is_created",
+        "subprocess::queue_capacity_rejects_values_that_would_panic"
+      ],
       "rust": [
-        "src/queue_capacity.rs"
+        "src/queue_capacity.rs",
+        "src/options.rs",
+        "src/channel.rs"
       ]
     },
     {
@@ -1496,15 +1513,19 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Timeouts are not range-checked upstream."
+        "behavior": "Timeouts are not range-checked upstream. Timeout::new accepts any duration and a deadline past the clock's range never fires; Timeout::checked keeps the Zero and TooLarge errors for callers that want them."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A zero or multi-day timeout is a configuration error that would fire instantly or never."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "timeout::timeouts_preserve_exact_durations_and_documented_defaults",
+        "timeout::checked_timeouts_reject_values_outside_the_supported_range",
+        "subprocess::timeout_rejects_values_that_would_overflow_an_instant"
+      ],
       "rust": [
-        "src/timeout.rs"
+        "src/timeout.rs",
+        "src/driver.rs"
       ]
     },
     {
@@ -1574,18 +1595,24 @@
         "reason": "The pinned Python sources have no equivalent bound."
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "Write buffer full, data queued",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 20,
+        "sha256": "3552af2a2a90275dbeb0d74220bcc3fa5434a3a40db6430e0a87d293e6a53a0c"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Writes to the CLI are not time-bounded upstream."
+        "behavior": "Writes to the CLI are not time-bounded upstream; TypeScript only logs when the stdin buffer is full. Rust waits for the write unless Limits::write_timeout is set, which fails a stalled write with WriteTimeout."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A stalled CLI stdin must not block the driver forever."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1603,63 +1630,89 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "No client command queue exists upstream."
+        "behavior": "No client command queue exists upstream. Rust's command queue is unbounded and never times out unless Limits::command_queue_capacity is set; Limits::command_queue_timeout then bounds the wait for room with CommandQueueTimeout."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "The client talks to the driver task through a bounded queue that must not block callers forever."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk"
+      ],
       "rust": [
-        "src/client.rs"
+        "src/client.rs",
+        "src/options.rs"
       ]
     },
     {
       "id": "r07-shutdown-timeouts",
       "concept": "Shutdown and stderr drain timeouts",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 984,
+        "line_end": 1001,
+        "sha256": "9bb7f137932cc2b23021e173f33cbc3a492fbfee80838fb81a53da41c6e19a4b"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "setTimeout((s,i)=>{if(s.exitCode!==null||s.signalCode!=null){i();return}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 260,
+        "sha256": "209549c22a7d8d37a4a9c579f04edbccd85ec665f1cd91bcb495cd5fcc3cb3a6"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "Shutdown waits are not bounded the same way upstream."
+        "verdict": "disagree",
+        "behavior": "TypeScript closes stdin, waits 2000 ms, sends SIGTERM (none on Windows) and SIGKILL 5000 ms later without waiting, gives stderr 200 ms after the exit, and never reports an error. Python waits 5 s, terminates, waits 5 s, kills and waits 5 s, suppressing every error."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Teardown must finish even when the CLI or its stderr pipe stalls."
+        "kind": "follow-typescript",
+        "reason": "Shutdown::TypeScript is the default; Limits::python() selects Shutdown::Python, and Shutdown::Strict keeps ShutdownTimeout and StderrDrainTimeout as an opt-in."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::r07_the_default_shutdown_stops_a_stuck_cli_without_an_error",
+        "runtime_failure_contracts::a_stderr_pipe_that_stays_open_after_the_cli_exits_fails_a_clean_shutdown",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values"
+      ],
       "rust": [
-        "src/driver.rs"
+        "src/process_transport.rs",
+        "src/options.rs"
       ]
     },
     {
       "id": "r08-stderr-tail",
       "concept": "Retained stderr tail size",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 1112,
+        "line_end": 1117,
+        "sha256": "a8816ec72691df050861d24afbb94d2fea668ce53b8327211005ccb5f067ea80"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "var qet=2000,iD=2048",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 10,
+        "span_after": 80,
+        "sha256": "1a15a69741457ccd5a781e68e1e1b87b1b7afca87787f2397b365204019dc8e5"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "No retained stderr tail bound exists upstream."
+        "verdict": "disagree",
+        "behavior": "TypeScript keeps the last 2048 UTF-16 code units of stderr and appends them, trimmed, to the process error. Python keeps no stderr and reports \"Check stderr output for details\"."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Only a 64 KiB tail is kept for error reports so a chatty CLI cannot grow memory."
+        "kind": "follow-typescript",
+        "reason": "Limits::stderr_tail defaults to TypeScript's 2048 units; Limits::python() sets it to 0. TypeScript's secret redaction of the tail is not ported."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::r08_a_process_error_keeps_the_last_2048_stderr_units_trimmed",
+        "subprocess::process_failure_preserves_status_and_bounded_stderr",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values"
+      ],
       "rust": [
-        "src/framing.rs"
+        "src/framing.rs",
+        "src/process_transport.rs"
       ]
     },
     {
@@ -1675,13 +1728,14 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream request ids are random strings that never run out."
+        "behavior": "Upstream request ids are random strings that never run out. The Rust counter wraps by default so ids never run out either; RequestIdExhaustion::Fail keeps RequestIdExhausted as an opt-in."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Rust uses a counter for request ids, which needs a defined overflow outcome."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1699,13 +1753,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream awaits initialization implicitly and has no typed closed-input error."
+        "behavior": "Upstream holds writes until initialize is sent and writes input sent after the caller ended its stream. Rust writes such input by default; InputAfterFinish::Reject keeps InputClosed as an opt-in. NotInitialized is only reachable from inside the driver, because the client returns only after initialize succeeds."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Typed errors replace implicit waits so misuse is visible to callers."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::s15_input_sent_during_a_turn_is_written_and_closed_input_stays_recoverable"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1723,13 +1779,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Outstanding control requests are unbounded upstream."
+        "behavior": "Outstanding control requests are unbounded upstream. Limits::max_pending_controls is opt-in and fails the excess request with TooManyControls."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds memory held by pending requests against an unresponsive CLI."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::pending_controls_and_mcp_replacements_reject_overlapping_admission"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1747,13 +1805,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Inbound callbacks are unbounded upstream."
+        "behavior": "Inbound callbacks are unbounded upstream. Limits::max_incoming_callbacks is opt-in and answers the excess request with an error response."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds concurrent callback tasks a misbehaving CLI can start."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::callback_capacity_is_bounded_and_cancellation_preserves_control_progress"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1762,24 +1822,37 @@
       "id": "r13-message-queue-full",
       "concept": "Deferred message queue capacity",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 234,
+        "line_end": 236,
+        "sha256": "7c9ac5bf77dc1a597c5a087de0e9e0351c1c5c509a6887d5f908f1b2032ddddf"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "class bf{returned;queue=[]",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 160,
+        "sha256": "63f388d228d03c99a41bca634d5296a0b3fa63cc9fdc8f89c23b3eba8f088328"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "Upstream message buffers are unbounded."
+        "verdict": "disagree",
+        "behavior": "TypeScript queues messages in an unbounded array and keeps reading stdout. Python buffers 100 messages and then stops reading until the caller takes one."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds memory when the caller stops reading messages."
+        "kind": "follow-typescript",
+        "reason": "MessageBuffer::Unbounded is the default; Limits::python() selects MessageBuffer::Backpressure(100), and MessageBuffer::FailWhenFull keeps MessageQueueFull as an opt-in."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
+        "subprocess::consumer_lag_fails_with_a_bounded_queue"
+      ],
       "rust": [
-        "src/driver.rs"
+        "src/driver.rs",
+        "src/options.rs",
+        "src/channel.rs"
       ]
     },
     {
@@ -1795,13 +1868,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Tracked tasks are unbounded upstream."
+        "behavior": "Tracked tasks are unbounded upstream. Limits::max_tracked_tasks is opt-in and fails the run with TooManyTasks."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Caps tracked task ids at 256 so task notifications cannot grow memory without bound."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::background_task_ledger_rejects_new_tasks_at_its_limit_but_accepts_duplicates"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1819,13 +1894,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Queued prompts are unbounded upstream."
+        "behavior": "Queued prompts are unbounded upstream. Limits::max_queued_inputs is opt-in and fails with TooManyInputs."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds queued turns held by the driver."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::a_second_input_beyond_the_queue_capacity_is_rejected_without_ending_the_session"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1834,24 +1911,36 @@
       "id": "r16-duplicate-control-request",
       "concept": "Inbound control_request with a duplicate id",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 406,
+        "line_end": 415,
+        "sha256": "e8dbe4a0fc1de782e6919998a31878abcb47d3336197e3e77093967fa85d4558"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "Duplicate delivery of in-flight request",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 80,
+        "sha256": "9f3cf0c8d6df7cc9cc52c4aba9bfd235c1ba91422f69b79196a1b83b71bcff58"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "Duplicate inbound request ids are not detected upstream."
+        "verdict": "disagree",
+        "behavior": "TypeScript skips an inbound request whose id is still in flight, with a debug log and no response. Python runs both handlers and both answer."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Two callbacks answering one id would send conflicting responses."
+        "kind": "follow-typescript",
+        "reason": "DuplicateControlRequests::Skip is the default; Limits::python() selects RunBoth, and DuplicateControlRequests::Fail keeps DuplicateControlRequest as an opt-in."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
+        "runtime_failure_contracts::duplicate_callback_request_id_is_a_terminal_protocol_error"
+      ],
       "rust": [
-        "src/driver.rs"
+        "src/driver.rs",
+        "src/options.rs"
       ]
     },
     {
@@ -2222,13 +2311,16 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "The TypeScript type declares matcher as an optional string, so null is outside the declared shape. Omitting the key sends only values the type allows."
+        "reason": "TypeScript is the default dialect and declares matcher as an optional string, so the key is omitted; ArgvStyle::Python sends null."
       },
       "contracts": [
+        "golden_initialize::python_initialize_matches_claude_agent_sdk_bytes",
+        "golden_initialize::typescript_initialize_matches_sdk_mjs_bytes",
         "value_contracts::callback_configuration_debug_reports_structure_without_callback_or_input_details"
       ],
       "rust": [
-        "src/hooks.rs"
+        "src/hooks.rs",
+        "src/driver.rs"
       ]
     },
     {
@@ -2258,7 +2350,7 @@
         "reason": "An answer from this client would pre-empt another client that can show the dialog, and an error would end the dialog for the user. The session continues without a response."
       },
       "contracts": [
-        "runtime_failure_contracts::a_declared_dialog_without_a_handler_does_not_emit_a_response"
+        "runtime_failure_contracts::a_dialog_without_a_handler_does_not_emit_a_response"
       ],
       "rust": [
         "src/driver.rs"
@@ -2383,6 +2475,211 @@
       ],
       "rust": [
         "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "c01-control-request-id",
+      "concept": "Outbound control request id and envelope",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 747,
+        "line_end": 762,
+        "sha256": "7b02cd99c9821a3741be6008b03d0b477e9a69fb23aecb51c27705531085e76a"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Math.random().toString(36).substring(2,15)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 110,
+        "sha256": "2c2f70cfcf0d75924c28128f165c53fbf3cd9b11697eb0235efa6cab9a27057f"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript sends Math.random().toString(36).substring(2,15) with no counter, in a compact envelope that starts with request_id. Python sends req_{counter}_{8 hex digits} in an envelope that starts with type, written by json.dumps with spaced separators and ASCII escapes."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; ArgvStyle::Python selects the Python id, envelope order and json.dumps spelling."
+      },
+      "contracts": [
+        "golden_initialize::typescript_initialize_matches_sdk_mjs_bytes",
+        "golden_initialize::python_initialize_matches_claude_agent_sdk_bytes"
+      ],
+      "rust": [
+        "src/control_request_id.rs",
+        "src/python_json.rs",
+        "src/wire.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c02-initialize-request-shape",
+      "concept": "Initialize request fields and hook matcher entries",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 323,
+        "line_end": 366,
+        "sha256": "1c36c551c0c9e5af6bce39f1a81b87977fba2a297cbe857a4cf1bfc28198e403"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "return{subtype:\"initialize\",hooks:this.initHooksPayload",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 260,
+        "sha256": "5e1983e7fc99426c5ff8ed331262241f62ce7e61197afb37cdf09e660e973e0c"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript omits hooks when none are configured, omits an unset matcher, and sends jsonSchema, systemPrompt, appendSystemPrompt and supportedDialogKinds in the request. Python sends hooks null when none are configured, matcher null when unset, and none of those prompt or schema fields. Both skip events with no matchers and keep matchers with no callbacks."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; ArgvStyle::Python sends the Python request."
+      },
+      "contracts": [
+        "golden_initialize::typescript_initialize_matches_sdk_mjs_bytes",
+        "golden_initialize::typescript_default_initialize_matches_sdk_mjs_bytes",
+        "golden_initialize::python_initialize_matches_claude_agent_sdk_bytes",
+        "golden_initialize::python_default_initialize_sends_null_hooks"
+      ],
+      "rust": [
+        "src/runtime_payload.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c03-initialize-response-shape",
+      "concept": "Initialize response that is not the documented object",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 775,
+        "line_end": 776,
+        "sha256": "d4047a01b9417c32f423a868962aee98be1962429a8424894bf1d21bdc9454e7"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "let o=(await n).response;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 40,
+        "sha256": "5d9207ade7d9edb5297d958c59e3c93a0fd9ec75d620ce60f87a99f138c6d3bb"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Neither SDK validates the initialize response. TypeScript keeps any value as the initialization result; Python replaces anything but an object with an empty object."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; ArgvStyle::Python reads a non-object as an empty object. Typed fields of an unexpected type read as absent and the response stays available unchanged."
+      },
+      "contracts": [
+        "golden_initialize::a_non_object_initialize_response_is_kept_in_typescript_and_empty_in_python",
+        "subprocess::malformed_initialization_is_accepted_like_upstream"
+      ],
+      "rust": [
+        "src/control.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c04-dialog-kinds-without-handler",
+      "concept": "supportedDialogKinds without onUserDialog",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no user dialog support."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "supportedDialogKinds requires an onUserDialog",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 190,
+        "sha256": "0898e963617c279f4e698a9b87b4bb55f648717877528d674105dafc57153db7"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript refuses non-empty dialog kinds without a handler before the session starts."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_initialize::dialog_kinds_without_a_handler_are_refused_before_initialize"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "c05-managed-settings-and-plugins-confirmation",
+      "concept": "Initialize response for managed settings and plugins sent in initialize",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not send managed settings or plugins in initialize."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "managedSettingsDelivery 'initialize', so the session",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 560,
+        "sha256": "dd689a81664a9ef77652475577ec0b913cee9fefc7cfc642577ca9d577ba9f67"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript ends the session when managed settings were sent and managed_settings_applied is not true, and logs a warning when plugins were sent and plugins_applied is not true."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "s35-message-decoding",
+      "concept": "Messages that are unknown, malformed or missing required keys",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/message_parser.py",
+        "line_start": 50,
+        "line_end": 395,
+        "sha256": "593c3682c27254290fab6957b7bf100bd6c6a1e314df5347de708c464d3594e5"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "e.type===\"keep_alive\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 140,
+        "sha256": "cb2a0debf83466596fd658d07a531814c2d32532eb58d6e23bdb585f24f35b70"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript yields every message the CLI writes without validating it, consuming only keep_alive and host-only session_state_changed. Python parse_message raises MessageParseError with a KeyError text for a known message missing a key it reads, skips unknown message types and skips content blocks of kinds it does not parse."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default and never loses a message, so newer CLI shapes still reach the caller. MessageDecoding::Python reproduces parse_message, error texts included, for callers that need Python's outcome."
+      },
+      "contracts": [
+        "message_decoding::typescript_decoding_yields_what_the_pinned_typescript_query_yields",
+        "message_decoding::python_decoding_yields_what_the_pinned_python_query_yields"
+      ],
+      "rust": [
+        "src/message_decode.rs",
+        "src/message_decode/python.rs",
+        "src/driver.rs"
       ]
     }
   ]

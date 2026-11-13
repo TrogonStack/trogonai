@@ -17,9 +17,10 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
-    JsonObject, MessagePage, SdkSessionInfo, SessionEntry, SessionFiles, SessionId, SessionKey, SessionKeyError,
-    SessionMessage, SessionMutationError, SessionProjectKey, SessionProjectKeyError, SessionStore, SessionStoreError,
-    SessionStoreOperation, SessionSubpath, SummaryDialect, project_key_for_directory,
+    ChainAlgorithm, JsonObject, MessageOptions, MessagePage, SdkSessionInfo, SessionEntry, SessionFiles, SessionId,
+    SessionKey, SessionKeyError, SessionMessage, SessionMutationError, SessionProjectKey, SessionProjectKeyError,
+    SessionStore, SessionStoreError, SessionStoreOperation, SessionSubpath, SummaryDialect,
+    project_key_for_directory_in,
     session_files::{
         LiteSessionFile, extract_first_prompt_from_head, parse_session_info_from_lite, read_agent_metadata_sidecar,
         sort_page, valid_uuid,
@@ -45,6 +46,18 @@ pub enum SessionStoreHelperError {
     Key(#[from] SessionKeyError),
     #[error("session store implements no {0}; it cannot serve this helper")]
     UnsupportedStore(&'static str),
+    /// TypeScript `listSessions` on a store with neither `listSessionSummaries` nor `listSessions`.
+    #[error(
+        "sessionStore.listSessions is not implemented -- cannot list sessions. Provide a store with a listSessions() method."
+    )]
+    ListNotImplemented,
+    /// TypeScript `listSubagents` on a store without `listSubkeys`.
+    #[error(
+        "sessionStore.listSubkeys is not implemented -- cannot list subagents. Provide a store with a listSubkeys() method."
+    )]
+    ListSubkeysNotImplemented,
+    #[error(transparent)]
+    Messages(#[from] crate::MessagesError),
     #[error("session file I/O failed")]
     Io(#[source] std::io::Error),
     #[error("session transcript line is not valid JSON")]
@@ -71,6 +84,9 @@ pub struct ImportOptions {
     pub include_subagents: bool,
     /// Entries per `append`; zero means the default of 500.
     pub batch_size: usize,
+    /// Whose import rules apply: TypeScript keys the session by the project directory it names, Python by the name of
+    /// the on-disk project directory the session was found in.
+    pub dialect: SummaryDialect,
 }
 
 impl Default for ImportOptions {
@@ -79,13 +95,15 @@ impl Default for ImportOptions {
             directory: None,
             include_subagents: true,
             batch_size: DEFAULT_IMPORT_BATCH,
+            dialect: SummaryDialect::TypeScript,
         }
     }
 }
 
 fn project_key(directory: Option<&Path>) -> Result<SessionProjectKey, SessionStoreHelperError> {
-    Ok(project_key_for_directory(
+    Ok(project_key_for_directory_in(
         directory.filter(|d| !d.as_os_str().is_empty()),
+        SummaryDialect::Python,
     )?)
 }
 
@@ -94,19 +112,19 @@ fn project_path(directory: Option<&Path>) -> String {
         directory
             .filter(|d| !d.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new(".")),
-        crate::SummaryDialect::TypeScript,
+        crate::SummaryDialect::Python,
     )
 }
 
-fn main_key(project: SessionProjectKey, session_id: &str) -> Result<SessionKey, SessionStoreHelperError> {
+pub(crate) fn main_key(project: SessionProjectKey, session_id: &str) -> Result<SessionKey, SessionStoreHelperError> {
     Ok(SessionKey::new(project, SessionId::from(session_id))?)
 }
 
-fn invalid_session(session_id: &str) -> SessionStoreHelperError {
+pub(crate) fn invalid_session(session_id: &str) -> SessionStoreHelperError {
     SessionMutationError::InvalidSessionId(session_id.to_owned()).into()
 }
 
-fn not_found(session_id: &str) -> SessionStoreHelperError {
+pub(crate) fn not_found(session_id: &str) -> SessionStoreHelperError {
     SessionMutationError::NotFound {
         session_id: session_id.to_owned(),
         directory: None,
@@ -137,7 +155,7 @@ fn entries_to_jsonl(entries: &[SessionEntry]) -> String {
 }
 
 /// Upstream `_jsonl_to_lite`: the same head and tail slices the disk path would read.
-fn jsonl_to_lite(jsonl: &str, mtime: u64) -> LiteSessionFile {
+pub(crate) fn jsonl_to_lite(jsonl: &str, mtime: u64) -> LiteSessionFile {
     let bytes = jsonl.as_bytes();
     let size = bytes.len();
     let window = LITE_READ_BUF_SIZE as usize;
@@ -252,7 +270,7 @@ impl Slot {
 
 /// Lists sessions from a store, newest first. Uses the store's summary sidecars when it has them, gap-filling stale
 /// or missing ones from `load`, and otherwise loads each session (sixteen at a time).
-pub async fn list_sessions_from_store(
+async fn py_list_sessions_from_store(
     store: &(impl SessionStore + ?Sized),
     options: &StoreListOptions,
 ) -> Result<Vec<SdkSessionInfo>, SessionStoreHelperError> {
@@ -357,7 +375,7 @@ pub async fn list_sessions_from_store(
 
 /// Reads one session's metadata from a store; `None` for an invalid id, a missing session, a sidechain or a session
 /// without a summary.
-pub async fn get_session_info_from_store(
+async fn py_get_session_info_from_store(
     store: &(impl SessionStore + ?Sized),
     session_id: &str,
     directory: Option<&Path>,
@@ -380,7 +398,7 @@ pub async fn get_session_info_from_store(
 }
 
 /// Reads a session's conversation from a store; empty for an invalid id or a missing session.
-pub async fn get_session_messages_from_store(
+async fn py_get_session_messages_from_store(
     store: &(impl SessionStore + ?Sized),
     session_id: &str,
     directory: Option<&Path>,
@@ -395,7 +413,7 @@ pub async fn get_session_messages_from_store(
 }
 
 /// Lists subagent ids from the store's subkeys; the store must implement `list_subkeys`.
-pub async fn list_subagents_from_store(
+async fn py_list_subagents_from_store(
     store: &(impl SessionStore + ?Sized),
     session_id: &str,
     directory: Option<&Path>,
@@ -424,7 +442,7 @@ pub async fn list_subagents_from_store(
 }
 
 /// Reads a subagent's conversation from a store. Parent ids come from the subagent's last `agent_metadata` entry.
-pub async fn get_subagent_messages_from_store(
+async fn py_get_subagent_messages_from_store(
     store: &(impl SessionStore + ?Sized),
     session_id: &str,
     agent_id: &str,
@@ -487,7 +505,7 @@ fn metadata_entry(fields: [(&str, Value); 3]) -> SessionEntry {
 }
 
 /// Renames a session by appending a `custom-title` entry to the store.
-pub async fn rename_session_via_store(
+async fn py_rename_session_via_store(
     store: &(impl SessionStore + ?Sized),
     session_id: &str,
     title: &str,
@@ -511,7 +529,7 @@ pub async fn rename_session_via_store(
 }
 
 /// Tags a session by appending a `tag` entry to the store; `None` clears the tag.
-pub async fn tag_session_via_store(
+async fn py_tag_session_via_store(
     store: &(impl SessionStore + ?Sized),
     session_id: &str,
     tag: Option<&str>,
@@ -541,7 +559,7 @@ pub async fn tag_session_via_store(
 }
 
 /// Deletes a session from the store; a no-op for stores without `delete`, which suits append-only backends.
-pub async fn delete_session_via_store(
+async fn py_delete_session_via_store(
     store: &(impl SessionStore + ?Sized),
     session_id: &str,
     directory: Option<&Path>,
@@ -581,7 +599,7 @@ fn derive_title_from_entries(entries: &[SessionEntry]) -> Option<String> {
 }
 
 /// Forks a stored session into a new session under the same project key, remapping every uuid.
-pub async fn fork_session_via_store(
+async fn py_fork_session_via_store(
     store: &(impl SessionStore + ?Sized),
     session_id: &str,
     directory: Option<&Path>,
@@ -642,7 +660,7 @@ pub async fn fork_session_via_store(
 /// Replays a local transcript, and optionally its subagent transcripts and metadata sidecars, into a store. The
 /// destination project key is the name of the on-disk project directory the session was found in, so an imported
 /// session is indistinguishable from a mirrored one.
-pub async fn import_session_to_store(
+async fn py_import_session_to_store(
     files: &SessionFiles,
     session_id: &str,
     store: &(impl SessionStore + ?Sized),
@@ -746,4 +764,251 @@ fn collect_jsonl_files(base: &Path) -> Vec<PathBuf> {
         }
     }
     files
+}
+
+/// Lists sessions from a store, newest first, by the rules of `options.summary_dialect`.
+pub async fn list_sessions_from_store(
+    store: &(impl SessionStore + ?Sized),
+    options: &StoreListOptions,
+) -> Result<Vec<SdkSessionInfo>, SessionStoreHelperError> {
+    match options.summary_dialect {
+        SummaryDialect::TypeScript => crate::session_store_ts::list_sessions(store, options).await,
+        SummaryDialect::Python => py_list_sessions_from_store(store, options).await,
+    }
+}
+
+/// Reads one session's metadata from a store with the TypeScript rules.
+pub async fn get_session_info_from_store(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    directory: Option<&Path>,
+) -> Result<Option<SdkSessionInfo>, SessionStoreHelperError> {
+    get_session_info_from_store_with(store, session_id, directory, SummaryDialect::TypeScript).await
+}
+
+/// [`get_session_info_from_store`] with a selectable upstream rule set.
+pub async fn get_session_info_from_store_with(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    directory: Option<&Path>,
+    dialect: SummaryDialect,
+) -> Result<Option<SdkSessionInfo>, SessionStoreHelperError> {
+    match dialect {
+        SummaryDialect::TypeScript => crate::session_store_ts::get_session_info(store, session_id, directory).await,
+        SummaryDialect::Python => py_get_session_info_from_store(store, session_id, directory).await,
+    }
+}
+
+/// Reads a session's conversation from a store with the TypeScript rules.
+pub async fn get_session_messages_from_store(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    directory: Option<&Path>,
+    page: MessagePage,
+) -> Result<Vec<SessionMessage>, SessionStoreHelperError> {
+    let options = MessageOptions {
+        page,
+        ..MessageOptions::default()
+    };
+    get_session_messages_from_store_with(store, session_id, directory, &options).await
+}
+
+/// [`get_session_messages_from_store`] with a selectable upstream rule set and system-message inclusion.
+pub async fn get_session_messages_from_store_with(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    directory: Option<&Path>,
+    options: &MessageOptions,
+) -> Result<Vec<SessionMessage>, SessionStoreHelperError> {
+    match options.algorithm {
+        ChainAlgorithm::TypeScript => {
+            crate::session_store_ts::get_session_messages(
+                store,
+                session_id,
+                directory,
+                options.include_system_messages,
+                options.page,
+            )
+            .await
+        }
+        ChainAlgorithm::Python => py_get_session_messages_from_store(store, session_id, directory, options.page).await,
+    }
+}
+
+/// Lists subagent ids from the store's subkeys with the TypeScript rules; the store must implement `list_subkeys`.
+pub async fn list_subagents_from_store(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    directory: Option<&Path>,
+) -> Result<Vec<String>, SessionStoreHelperError> {
+    crate::session_store_ts::list_subagents(store, session_id, directory).await
+}
+
+/// [`list_subagents_from_store`] with a selectable upstream rule set.
+pub async fn list_subagents_from_store_with(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    directory: Option<&Path>,
+    dialect: SummaryDialect,
+) -> Result<Vec<String>, SessionStoreHelperError> {
+    match dialect {
+        SummaryDialect::TypeScript => list_subagents_from_store(store, session_id, directory).await,
+        SummaryDialect::Python => py_list_subagents_from_store(store, session_id, directory).await,
+    }
+}
+
+/// Reads a subagent's conversation from a store with the TypeScript rules.
+pub async fn get_subagent_messages_from_store(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    agent_id: &str,
+    directory: Option<&Path>,
+    page: MessagePage,
+) -> Result<Vec<SessionMessage>, SessionStoreHelperError> {
+    get_subagent_messages_from_store_with(store, session_id, agent_id, directory, page, ChainAlgorithm::TypeScript)
+        .await
+}
+
+/// [`get_subagent_messages_from_store`] with a selectable upstream rule set.
+pub async fn get_subagent_messages_from_store_with(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    agent_id: &str,
+    directory: Option<&Path>,
+    page: MessagePage,
+    algorithm: ChainAlgorithm,
+) -> Result<Vec<SessionMessage>, SessionStoreHelperError> {
+    match algorithm {
+        ChainAlgorithm::TypeScript => {
+            crate::session_store_ts::get_subagent_messages(store, session_id, agent_id, directory, page).await
+        }
+        ChainAlgorithm::Python => {
+            py_get_subagent_messages_from_store(store, session_id, agent_id, directory, page).await
+        }
+    }
+}
+
+/// Renames a session by appending a `custom-title` entry to the store, with the TypeScript rules.
+pub async fn rename_session_via_store(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    title: &str,
+    directory: Option<&Path>,
+) -> Result<(), SessionStoreHelperError> {
+    rename_session_via_store_with(store, session_id, title, directory, SummaryDialect::TypeScript).await
+}
+
+/// [`rename_session_via_store`] with a selectable upstream rule set.
+pub async fn rename_session_via_store_with(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    title: &str,
+    directory: Option<&Path>,
+    dialect: SummaryDialect,
+) -> Result<(), SessionStoreHelperError> {
+    match dialect {
+        SummaryDialect::TypeScript => {
+            crate::session_store_ts::rename_session(store, session_id, title, directory).await
+        }
+        SummaryDialect::Python => py_rename_session_via_store(store, session_id, title, directory).await,
+    }
+}
+
+/// Tags a session by appending a `tag` entry to the store, with the TypeScript rules; `None` clears the tag.
+pub async fn tag_session_via_store(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    tag: Option<&str>,
+    directory: Option<&Path>,
+) -> Result<(), SessionStoreHelperError> {
+    tag_session_via_store_with(store, session_id, tag, directory, SummaryDialect::TypeScript).await
+}
+
+/// [`tag_session_via_store`] with a selectable upstream rule set.
+pub async fn tag_session_via_store_with(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    tag: Option<&str>,
+    directory: Option<&Path>,
+    dialect: SummaryDialect,
+) -> Result<(), SessionStoreHelperError> {
+    match dialect {
+        SummaryDialect::TypeScript => crate::session_store_ts::tag_session(store, session_id, tag, directory).await,
+        SummaryDialect::Python => py_tag_session_via_store(store, session_id, tag, directory).await,
+    }
+}
+
+/// Deletes a session from the store, with the TypeScript rules; a no-op for stores without `delete`, which suits
+/// append-only backends.
+pub async fn delete_session_via_store(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    directory: Option<&Path>,
+) -> Result<(), SessionStoreHelperError> {
+    delete_session_via_store_with(store, session_id, directory, SummaryDialect::TypeScript).await
+}
+
+/// [`delete_session_via_store`] with a selectable upstream rule set.
+pub async fn delete_session_via_store_with(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    directory: Option<&Path>,
+    dialect: SummaryDialect,
+) -> Result<(), SessionStoreHelperError> {
+    match dialect {
+        SummaryDialect::TypeScript => crate::session_store_ts::delete_session(store, session_id, directory).await,
+        SummaryDialect::Python => py_delete_session_via_store(store, session_id, directory).await,
+    }
+}
+
+/// Forks a stored session into a new session under the same project key, with the TypeScript algorithm.
+pub async fn fork_session_via_store(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    directory: Option<&Path>,
+    up_to_message_id: Option<&str>,
+    title: Option<&str>,
+) -> Result<crate::ForkSessionResult, SessionStoreHelperError> {
+    fork_session_via_store_with(
+        store,
+        session_id,
+        directory,
+        up_to_message_id,
+        title,
+        crate::ForkAlgorithm::TypeScript,
+    )
+    .await
+}
+
+/// [`fork_session_via_store`] with a selectable upstream algorithm.
+pub async fn fork_session_via_store_with(
+    store: &(impl SessionStore + ?Sized),
+    session_id: &str,
+    directory: Option<&Path>,
+    up_to_message_id: Option<&str>,
+    title: Option<&str>,
+    algorithm: crate::ForkAlgorithm,
+) -> Result<crate::ForkSessionResult, SessionStoreHelperError> {
+    match algorithm {
+        crate::ForkAlgorithm::TypeScript => {
+            crate::session_store_ts::fork_session(store, session_id, directory, up_to_message_id, title).await
+        }
+        crate::ForkAlgorithm::Python => {
+            py_fork_session_via_store(store, session_id, directory, up_to_message_id, title).await
+        }
+    }
+}
+
+/// Replays a local transcript, and optionally its subagent transcripts and metadata sidecars, into a store, by the
+/// rules of `options.dialect`.
+pub async fn import_session_to_store(
+    files: &SessionFiles,
+    session_id: &str,
+    store: &(impl SessionStore + ?Sized),
+    options: &ImportOptions,
+) -> Result<(), SessionStoreHelperError> {
+    match options.dialect {
+        SummaryDialect::TypeScript => crate::session_store_ts::import_session(files, session_id, store, options).await,
+        SummaryDialect::Python => py_import_session_to_store(files, session_id, store, options).await,
+    }
 }

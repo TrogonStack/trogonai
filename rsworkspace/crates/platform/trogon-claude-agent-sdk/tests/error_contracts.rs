@@ -40,7 +40,7 @@ fn control_timeout_diagnostics_identify_each_wire_operation() {
         (ControlOperation::McpSetServers, "mcp_set_servers"),
     ] {
         let error = Error::ControlTimeout { operation };
-        assert_eq!(error.to_string(), format!("the {name} control request timed out"));
+        assert_eq!(error.to_string(), format!("Control request timeout: {name}"));
         assert!(error.source().is_none());
     }
 }
@@ -67,7 +67,7 @@ fn protocol_failures_retain_typed_sources_and_safe_context() -> TestResult {
         let typed = match &error {
             ProtocolError::Json(_) => source.is::<serde_json::Error>(),
             ProtocolError::PermissionUpdate(_) => source.is::<trogon_claude_agent_sdk::PermissionUpdateError>(),
-            ProtocolError::DuplicateControlRequest => false,
+            ProtocolError::DuplicateControlRequest | ProtocolError::InvalidMessage(_) => false,
         };
         assert!(typed);
         let outer = Error::from(error);
@@ -75,6 +75,9 @@ fn protocol_failures_retain_typed_sources_and_safe_context() -> TestResult {
     }
     let error = ProtocolError::DuplicateControlRequest;
     assert_eq!(error.to_string(), "duplicate incoming control request ID");
+    assert!(error.source().is_none());
+    let error = ProtocolError::InvalidMessage("Message missing 'type' field".to_owned());
+    assert_eq!(error.to_string(), "Message missing 'type' field");
     assert!(error.source().is_none());
     Ok(())
 }

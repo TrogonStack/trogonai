@@ -731,7 +731,11 @@
       "rust_api": [
         "ClaudeSdkClient.connection_info",
         "ConnectionInfo",
-        "ConnectionInfo.as_json"
+        "ConnectionInfo.from_json",
+        "ConnectionInfo.as_json",
+        "FeatureSupport",
+        "ArgvStyle",
+        "Error.typescript_message"
       ],
       "tests": [
         {
@@ -740,11 +744,51 @@
         },
         {
           "path": "tests/subprocess.rs",
-          "name": "malformed_initialization_is_rejected"
+          "name": "malformed_initialization_is_accepted_like_upstream"
+        },
+        {
+          "path": "tests/control_values.rs",
+          "name": "connection_info_defaults_omitted_fields_and_reads_malformed_ones_as_absent"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "typescript_initialize_matches_sdk_mjs_bytes"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "typescript_default_initialize_matches_sdk_mjs_bytes"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "python_initialize_matches_claude_agent_sdk_bytes"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "python_default_initialize_sends_null_hooks"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "dialog_kinds_without_a_handler_are_refused_before_initialize"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "blocking_hooks_need_on_failure_support"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "hooks_that_were_not_applied_are_refused"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "hooks_applied_false_only_matters_for_blocking_hooks"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "a_non_object_initialize_response_is_kept_in_typescript_and_empty_in_python"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust exposes a cached, typed connection snapshot with capability flags and lossless raw metadata; not every upstream convenience projection is modeled."
+      "status": "supported",
+      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning."
     },
     {
       "id": "budget",
@@ -1540,16 +1584,29 @@
       "rust_api": [
         "AssistantMessage",
         "ResultMessage",
-        "MessageOrigin"
+        "MessageOrigin",
+        "Message.raw",
+        "AssistantMessage.to_sdk_message",
+        "ResultMessage.to_sdk_message",
+        "upstream::messages::SDKAssistantMessage",
+        "upstream::messages::SDKResultMessage"
       ],
       "tests": [
         {
           "path": "tests/subprocess.rs",
           "name": "known_message_metadata_survives_decoding"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "typescript_decoding_yields_what_the_pinned_typescript_query_yields"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "python_decoding_yields_what_the_pinned_python_query_yields"
         }
       ],
-      "status": "partial",
-      "rationale": "Known identity/origin/stop/terminal/model-usage/permission metadata and extension fields survive decoding. Nested usage/denial payloads remain JSON, with no claim of identical upstream type modeling."
+      "status": "supported",
+      "rationale": "Every message keeps its exact wire object in raw, and to_sdk_message returns the generated upstream::messages type for it, so identity, origin, stop, terminal, model usage, permission denial and nested usage fields are typed as sdk.d.ts declares them. The corpus goldens from the pinned TypeScript and Python query() pin both views."
     },
     {
       "id": "future-messages",
@@ -1575,22 +1632,37 @@
         }
       },
       "rust_api": [
-        "Message",
-        "SystemMessage",
-        "StreamEvent"
+        "Message.Unknown",
+        "ContentBlock.Unknown",
+        "Message.to_sdk_message",
+        "upstream::messages::SDKMessage",
+        "MessageDecoding",
+        "ClaudeAgentOptions.message_decoding"
       ],
       "tests": [
         {
           "path": "src/wire_tests.rs",
-          "name": "future_informational_messages_are_preserved"
+          "name": "future_informational_messages_are_yielded_by_typescript_and_skipped_by_python"
         },
         {
           "path": "src/wire_tests.rs",
-          "name": "malformed_known_content_does_not_become_unknown"
+          "name": "a_known_message_missing_a_required_key_is_yielded_by_typescript_and_rejected_by_python"
+        },
+        {
+          "path": "src/wire_tests.rs",
+          "name": "a_block_rust_cannot_type_stays_in_the_message"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "typescript_decoding_yields_what_the_pinned_typescript_query_yields"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "python_decoding_yields_what_the_pinned_python_query_yields"
         }
       ],
-      "status": "rust_difference",
-      "rationale": "Rust has explicit unknown informational/content variants and typed malformed-known errors. JSON retention preserves data but does not automatically implement newly added behavior."
+      "status": "supported",
+      "rationale": "MessageDecoding::TypeScript, the default, yields every message the pinned TypeScript query() yields, unknown types and shapes Rust cannot type included, as Message::Unknown with the raw object, and consumes keep_alive. MessageDecoding::Python skips unknown types and raises the KeyError and type errors Python parse_message raises, with its texts."
     },
     {
       "id": "isolation-defaults",
@@ -1736,7 +1808,15 @@
         "tag_session_via_store",
         "delete_session_via_store",
         "fork_session_via_store",
-        "import_session_to_store"
+        "import_session_to_store",
+        "get_session_info_from_store_with",
+        "get_session_messages_from_store_with",
+        "list_subagents_from_store_with",
+        "get_subagent_messages_from_store_with",
+        "rename_session_via_store_with",
+        "tag_session_via_store_with",
+        "delete_session_via_store_with",
+        "fork_session_via_store_with"
       ],
       "tests": [
         {
@@ -1770,42 +1850,55 @@
         {
           "path": "tests/session_mutations.rs",
           "name": "rename_appends_a_title_that_listing_reads_back"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "ts_import_keys_the_session_by_the_directory_and_lets_the_sidecar_type_win"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "ts_subagent_listing_names_the_missing_capability"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "ts_listing_pages_before_dropping_sidechains"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "ts_rename_trims_like_javascript_and_stamps_milliseconds"
+        },
+        {
+          "path": "tests/session_files_ts.rs",
+          "name": "ts_title_precedence_is_tail_custom_then_sidecar_then_head_then_ai"
+        },
+        {
+          "path": "src/session_store_oracle_tests.rs",
+          "name": "js_key_order_matches_json_stringify"
+        },
+        {
+          "path": "src/session_store_oracle_tests.rs",
+          "name": "project_name_with_matches_the_bundle"
         }
       ],
-      "status": "partial",
-      "rationale": "All eleven session functions are exposed in both forms: filesystem (SessionFiles methods and free functions, Python semantics plus the TypeScript newest-first tie-break by session id) and store-backed (the *_from_store readers, *_via_store mutations and import_session_to_store). Store listing uses summary sidecars with gap-fill and degrades to per-session loads, and project keys follow the TypeScript sanitization the mirror uses. Known differences: JSON key order of forked entries follows serde_json; Rust writes raw UTF-8 where Python json.dumps escapes non-ASCII; store keys use the TypeScript path sanitization (Python differs only for non-BMP paths over 200 characters); custom stores must override SessionStore::supports to opt in to optional operations. TypeScript-only behaviors are not replicated: includeSystemMessages, includeProgrammatic, continued-in sessions, custom-title sidecars, worktree ownership checks, the TypeScript chain and relink algorithm, and the TypeScript store-backed listSessions. Core storage operations are mapped separately."
+      "status": "supported",
+      "rationale": "All eleven session functions are exposed in both forms: filesystem (SessionFiles methods and free functions) and store-backed (the *_from_store readers, *_via_store mutations and import_session_to_store). Each takes the TypeScript or Python dialect, TypeScript by default: the *_with store helpers and the TypeScript filesystem readers reproduce includeSystemMessages, includeProgrammatic, continued-in sessions, custom-title sidecars, worktree ownership checks, the chain and relink algorithm and the store-backed listSessions, checked against fixtures generated from the pinned bundle. Forked entries keep JSON.stringify key order, the Python dialect escapes non-ASCII as json.dumps does, and custom stores declare optional operations through SessionStore::supports. Core storage operations are mapped separately."
     },
     {
       "id": "advanced-native-options",
       "upstream": {
         "python": {
           "symbols": [
-            "ClaudeAgentOptions.fallback_model",
-            "ClaudeAgentOptions.betas",
             "ClaudeAgentOptions.settings",
-            "ClaudeAgentOptions.skills",
-            "ClaudeAgentOptions.sandbox",
-            "ClaudeAgentOptions.thinking",
-            "ClaudeAgentOptions.task_budget"
+            "ClaudeAgentOptions.sandbox"
           ],
           "prefixes": []
         },
         "typescript": {
           "symbols": [
-            "Options.fallbackModel",
-            "Options.betas",
             "Options.settings",
-            "Options.skills",
             "Options.sandbox",
-            "Options.thinking",
-            "Options.taskBudget",
-            "core.Options.fallbackModel",
-            "core.Options.betas",
             "core.Options.settings",
-            "core.Options.skills",
-            "core.Options.sandbox",
-            "core.Options.thinking",
-            "core.Options.taskBudget"
+            "core.Options.sandbox"
           ],
           "prefixes": []
         }
@@ -1813,7 +1906,146 @@
       "rust_api": [],
       "tests": [],
       "status": "deferred",
-      "rationale": "Fallback/beta/custom settings/skills/sandbox/thinking/task-budget conveniences require individual Rust design and behavioral evidence; they are not enabled by aggregate configuration support."
+      "rationale": "Custom settings and sandbox conveniences, and the settings, managed settings, flag settings and updateSettings surfaces, require individual Rust design and behavioral evidence; they are not enabled by aggregate configuration support."
+    },
+    {
+      "id": "runtime-options",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.fallback_model",
+            "ClaudeAgentOptions.betas",
+            "ClaudeAgentOptions.skills",
+            "ClaudeAgentOptions.thinking",
+            "ClaudeAgentOptions.max_thinking_tokens",
+            "ClaudeAgentOptions.task_budget",
+            "ClaudeAgentOptions.permission_prompt_tool_name",
+            "ClaudeAgentOptions.include_hook_events",
+            "ClaudeAgentOptions.session_id",
+            "ClaudeAgentOptions.resume_session_at",
+            "ClaudeAgentOptions.resume_drops_turn"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.fallbackModel",
+            "core.Options.fallbackModel",
+            "Options.betas",
+            "core.Options.betas",
+            "Options.skills",
+            "core.Options.skills",
+            "Options.thinking",
+            "core.Options.thinking",
+            "Options.maxThinkingTokens",
+            "core.Options.maxThinkingTokens",
+            "Options.taskBudget",
+            "core.Options.taskBudget",
+            "Options.debug",
+            "core.Options.debug",
+            "Options.debugFile",
+            "core.Options.debugFile",
+            "Options.permissionPromptToolName",
+            "core.Options.permissionPromptToolName",
+            "Options.permissionPrompts",
+            "core.Options.permissionPrompts",
+            "Options.includeHookEvents",
+            "core.Options.includeHookEvents",
+            "Options.sessionId",
+            "core.Options.sessionId",
+            "Options.resumeSessionAt",
+            "core.Options.resumeSessionAt",
+            "Options.resumeDropsTurn",
+            "core.Options.resumeDropsTurn",
+            "Options.allowDangerouslySkipPermissions",
+            "core.Options.allowDangerouslySkipPermissions",
+            "Options.projectConfigRoot",
+            "core.Options.projectConfigRoot"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.thinking",
+        "ClaudeAgentOptions.max_thinking_tokens",
+        "ClaudeAgentOptions.task_budget",
+        "ClaudeAgentOptions.betas",
+        "ClaudeAgentOptions.fallback_model",
+        "ClaudeAgentOptions.permission_prompt_tool_name",
+        "ClaudeAgentOptions.permission_prompts",
+        "ClaudeAgentOptions.channels",
+        "ClaudeAgentOptions.debug",
+        "ClaudeAgentOptions.debug_file",
+        "ClaudeAgentOptions.include_hook_events",
+        "ClaudeAgentOptions.session_id",
+        "ClaudeAgentOptions.resume_session_at",
+        "ClaudeAgentOptions.resume_drops_turn",
+        "ClaudeAgentOptions.allow_dangerously_skip_permissions",
+        "ClaudeAgentOptions.project_config_root",
+        "ClaudeAgentOptions.skills",
+        "ThinkingConfig",
+        "ThinkingDisplay",
+        "TaskBudget",
+        "SdkBeta",
+        "PermissionPrompts",
+        "HookEvents",
+        "DangerousPermissionSkip",
+        "DebugOutput",
+        "Skills",
+        "OptionError"
+      ],
+      "tests": [
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "typescript_orders_every_runtime_option_like_sdk_mjs"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "python_orders_every_runtime_option_like_subprocess_cli"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "typescript_thinking_forms"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "python_thinking_forms"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "typescript_debug_flags"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "a_callback_with_a_prompt_tool_name_is_rejected_with_each_dialects_text"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "typescript_rejects_a_fallback_model_equal_to_the_model"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "windows_metacharacters_are_listed_sorted_with_python_reprs"
+        },
+        {
+          "path": "src/skills/tests.rs",
+          "name": "python_defaults_the_setting_sources_only_when_skills_are_set"
+        },
+        {
+          "path": "src/skills/tests.rs",
+          "name": "only_an_explicit_list_reaches_the_initialize_request"
+        },
+        {
+          "path": "src/shadow_warning/tests.rs",
+          "name": "bypass_permissions_is_reported_with_each_dialects_text"
+        },
+        {
+          "path": "src/debug_file/tests.rs",
+          "name": "a_truthy_variable_selects_the_debug_directory_of_the_config_dir"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Exact argv, in the upstream order of each dialect. TypeScript uses --flag=value; Python uses two tokens except --resume, --session-id, --resume-session-at, --resume-drops-turn and --setting-sources. thinking wins over max_thinking_tokens; TypeScript sends maxThinkingTokens 0 as --thinking=disabled and an enabled config without a budget as --thinking=adaptive, while Python rejects it with the upstream KeyError text. The callback and permission_prompt_tool_name are mutually exclusive with dialect-specific text; the callback otherwise selects --permission-prompt-tool stdio. TypeScript refuses a fallback model equal to the model; Python does not. The TypeScript-only options permission_prompts, channels, debug, debug_file, allow_dangerously_skip_permissions and project_config_root are ignored by the Python dialect. The derived per-process debug file is added for connect() in the TypeScript dialect when no debug_file is set. skills appends Skill or Skill(name) to the allowed tools (TypeScript dedupes against the caller list only, Python against the growing list), Python defaults --setting-sources=user,project, and an explicit list also reaches the initialize request. The Python Windows metacharacter check applies to the resume and session options. The can-use-tool shadow advisory goes through tracing in both dialects. TypeScript surrogate and non-string skill name checks are unreachable because Rust strings are valid Unicode; channels has no declaration in the TypeScript types and follows the bundle."
     },
     {
       "id": "plugins",
@@ -2039,7 +2271,9 @@
         }
       },
       "rust_api": [
-        "UserMessage.tool_use_result"
+        "UserMessage.tool_use_result",
+        "UserMessage.tool_use_result_object",
+        "UserMessage.to_sdk_message"
       ],
       "tests": [
         {
@@ -2049,10 +2283,18 @@
         {
           "path": "tests/subprocess.rs",
           "name": "compatibility_user_tool_result_retains_all_json_kinds"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "typescript_decoding_yields_what_the_pinned_typescript_query_yields"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "python_decoding_yields_what_the_pinned_python_query_yields"
         }
       ],
-      "status": "rust_difference",
-      "rationale": "Rust retains JSON null, boolean, number, string, array and object tool results, with omission distinct from explicit null. Python annotates an optional dictionary; TypeScript unknown is broader than JSON. Public scripted-process regressions prove Rust wire retention, not native upstream runtime conformance."
+      "status": "supported",
+      "rationale": "tool_use_result keeps any JSON value with omission distinct from null, which is what both pinned SDKs pass through on the wire; tool_use_result_object gives the dictionary view Python annotates. The goldens include list and null results."
     },
     {
       "id": "partial-event-envelope-metadata",
@@ -2072,16 +2314,27 @@
         }
       },
       "rust_api": [
-        "StreamEvent.additional_fields"
+        "StreamEvent.additional_fields",
+        "StreamEvent.raw",
+        "StreamEvent.to_sdk_message",
+        "upstream::messages::SDKPartialAssistantMessage"
       ],
       "tests": [
         {
           "path": "tests/subprocess.rs",
           "name": "compatibility_stream_event_retains_outer_metadata_separately"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "typescript_decoding_yields_what_the_pinned_typescript_query_yields"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "python_decoding_yields_what_the_pinned_python_query_yields"
         }
       ],
-      "status": "partial",
-      "rationale": "Timing, user-message correlation, resume reason and future envelope metadata survive Rust wire decoding in additional_fields, separately from event. Values remain raw JSON rather than typed upstream fields; retention does not implement their behavior or prove native runtime parity."
+      "status": "supported",
+      "rationale": "StreamEvent.to_sdk_message types ttft_ms, user_message_uuid, user_message_uuids and resume_reason as sdk.d.ts declares them, raw keeps the exact envelope, and the goldens pin the stream_event corpus against both pinned SDKs."
     },
     {
       "id": "settings-types",
@@ -2335,7 +2588,7 @@
         }
       ],
       "status": "partial",
-      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 19 fixture trees (mise run claude-sdk:resolve-diff). Partial until the listed gaps close: schema value normalization (invalid rule drops, catch defaults) and nested key order, pre-parse key aliases, managedSourcesBehavior merge mode, cloud and org mode, the git-ignored cwd check and the MDM re-read throttle. Python has no equivalent."
+      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 41 fixture trees (mise run claude-sdk:resolve-diff), including the read path of normal settings files (pre-parse sanitizers, managed-only key removal, document key order). Partial until the listed gaps close: the policy-tolerant schema for managed settings (catch substitutions and entry salvage), managedSourcesBehavior merge mode, cloud and org mode, the git-ignored cwd check, the MDM re-read throttle, and the JavaScript rendering of integers above 2^53. Python has no equivalent."
     }
   ]
 }

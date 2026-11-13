@@ -167,6 +167,63 @@ class GenerateTypesTests(unittest.TestCase):
         self.assertIn("pub enum All {", output)
         self.assertNotIn("pub enum Result", output)
 
+    def generate_from(self, declarations: str, roots: list[str], **extra) -> subprocess.CompletedProcess:
+        out = tempfile.TemporaryDirectory()
+        self.addCleanup(out.cleanup)
+        result = self.run_generator(self.package(declarations), self.config(roots, **extra), Path(out.name))
+        result.output = (Path(out.name) / "generated.rs").read_text(encoding="utf-8") if result.returncode == 0 else ""
+        return result
+
+    TAGGED = '''
+import type { Foreign } from "other";
+export type Kind = "unknown" | "known" | null;
+export interface Base { type: "base"; payload: Foreign; kind: Kind }
+export interface Sub { type: "system"; subtype: "init"; first: Base["payload"]; maybe?: string }
+export interface Replay { type: "system"; subtype: "init"; isReplay: true; first: string }
+export interface Other { type: "system"; subtype: "other" | "more"; size: Sub["maybe"] }
+export type Message = Base | Sub | Replay | Other;
+'''
+
+    def test_foreign_types_take_the_configured_wire_shape(self):
+        result = self.generate_from(self.TAGGED, ["Message"], foreign={"Foreign": "object"}, tagged={"Message": ["type", "subtype", "isReplay"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pub payload: serde_json::Map<String, serde_json::Value>,", result.output)
+        self.assertNotIn("pub struct Foreign", result.output)
+
+    def test_indexed_access_resolves_to_the_named_property(self):
+        result = self.generate_from(self.TAGGED, ["Message"], foreign={"Foreign": "string"}, tagged={"Message": ["type", "subtype", "isReplay"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pub first: String,", result.output)
+        # An optional property read through an index can be absent, so it is nullable.
+        self.assertIn("pub size: Option<String>,", result.output)
+
+    def test_nullable_aliases_and_a_listed_unknown_value_keep_the_fallback_variant(self):
+        result = self.generate_from(self.TAGGED, ["Message"], foreign={"Foreign": "string"}, tagged={"Message": ["type", "subtype", "isReplay"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pub type Kind = Option<KindValue>;", result.output)
+        self.assertIn("    UnknownValue,", result.output)
+        self.assertIn('Self::UnknownValue => "unknown",', result.output)
+        self.assertIn("Unknown(String),", result.output)
+
+    def test_tagged_unions_dispatch_on_literal_tags_before_shape(self):
+        result = self.generate_from(self.TAGGED, ["Message"], foreign={"Foreign": "string"}, tagged={"Message": ["type", "subtype", "isReplay"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = result.output
+        self.assertIn('pub const TAGS: &\'static [&\'static str] = &["type", "subtype", "isReplay"];', output)
+        self.assertIn('super::support::tag_str(value, "type", &["system"]) && super::support::tag_str(value, "subtype", &["init"]) && super::support::tag_bool(value, "isReplay", &[true])', output)
+        self.assertIn('super::support::tag_str(value, "subtype", &["other", "more"])', output)
+        self.assertIn("super::support::keep_most_specific(&mut best, 3,", output)
+        self.assertIn("None => Self::Unknown(value),", output)
+
+    def test_tagged_unions_reject_members_that_pin_no_tag(self):
+        declarations = self.TAGGED + "export type Loose = Base | { other: string };\n"
+        result = self.generate_from(declarations, ["Loose"], foreign={"Foreign": "string"}, tagged={"Loose": ["type"]})
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must list named members only", result.stderr)
+        result = self.generate_from(self.TAGGED, ["Message"], foreign={"Foreign": "unsupported"})
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unsupported shape", result.stderr)
+
     def test_unsupported_declarations_fail_instead_of_guessing(self):
         for declarations in ("export interface Bad { run(): void }", "export type Bad = Foo<string>;", "export interface Bad { x: Missing }"):
             out = tempfile.TemporaryDirectory()

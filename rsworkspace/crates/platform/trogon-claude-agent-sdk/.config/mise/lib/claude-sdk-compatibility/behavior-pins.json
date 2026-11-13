@@ -9,6 +9,11 @@
         "sha256": "1582188cfc10ce1eb3892a6e7c6d5639cdb0cca5e9e6ef1a1f5ebf68b75a072b",
         "bytes": 28105
       },
+      "src/claude_agent_sdk/_internal/message_parser.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/message_parser.py",
+        "sha256": "febb1aee19e47e03433d89cd4b1f8c5636950e206df77e4f4ca2738b0c900393",
+        "bytes": 16797
+      },
       "src/claude_agent_sdk/_internal/query.py": {
         "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/query.py",
         "sha256": "e7d9d31d070d55e1f6d94a6b4331ef22ccd8742282e0823e1564aa1c382c8f4c",

@@ -302,13 +302,41 @@ pub(crate) fn parse_entries(content: &[u8]) -> (Vec<JsonObject>, HashMap<String,
         let Ok(Value::Object(parsed)) = serde_json::from_str::<Value>(&text) else {
             continue;
         };
-        let entry = fold_voice_call(parsed);
-        if is_transcript_entry(&entry) {
-            entries.push(entry.clone());
-        }
-        delivered.observe(&entry);
+        collect_entry(&mut entries, &mut delivered, parsed);
     }
     (entries, delivered.finish())
+}
+
+/// `vz` over a store's entries: the same pass as [`parse_entries`], without the line parsing.
+pub(crate) fn entries_from_objects(
+    objects: impl IntoIterator<Item = JsonObject>,
+) -> (Vec<JsonObject>, HashMap<String, usize>) {
+    let mut entries = Vec::new();
+    let mut delivered = Delivered::default();
+    for object in objects {
+        if let Value::Object(object) = crate::session_fork_ts::js_ordered(Value::Object(object)) {
+            collect_entry(&mut entries, &mut delivered, object);
+        }
+    }
+    (entries, delivered.finish())
+}
+
+fn collect_entry(entries: &mut Vec<JsonObject>, delivered: &mut Delivered, parsed: JsonObject) {
+    let entry = fold_voice_call(parsed);
+    if is_transcript_entry(&entry) {
+        entries.push(entry.clone());
+    }
+    delivered.observe(&entry);
+}
+
+/// `kz` after the entries are read: rebuild the conversation and page it.
+pub(crate) fn session_messages_from_objects(
+    objects: impl IntoIterator<Item = JsonObject>,
+    include_system: bool,
+    page: MessagePage,
+) -> Result<Vec<SessionMessage>, MessagesError> {
+    let (entries, delivered) = entries_from_objects(objects);
+    Ok(page.apply(messages_from_entries(&entries, &delivered, include_system)?))
 }
 
 fn tool_ids(entry: &JsonObject, block_type: &str, key: &str) -> Vec<String> {

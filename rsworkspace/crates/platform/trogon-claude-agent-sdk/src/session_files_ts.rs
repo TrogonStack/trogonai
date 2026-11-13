@@ -26,7 +26,7 @@ use crate::{
         unescape_json_string, valid_uuid, worktree_paths,
     },
     session_probe_ts::{blocks_probe, is_network_or_device_path},
-    session_project_key::{canonicalize_lenient_in, hyphenate, platform_nfc, sanitize_path},
+    session_project_key::{canonicalize_lenient_in, hyphenate, platform_nfc, project_name_ts, sanitize_path},
     session_prompt::{entry_first_prompt, iso_to_epoch_ms, js_trim},
 };
 
@@ -607,11 +607,19 @@ impl SessionFiles {
     /// was cut at 200 characters may have been hashed differently by another client, so directories with the same
     /// prefix count when one of their transcripts was recorded in `path`.
     pub(crate) fn project_dirs_for_ts(&self, path: &str) -> Vec<PathBuf> {
-        let sanitized = sanitize_path(path, SummaryDialect::TypeScript);
+        let sanitized = project_name_ts(path);
         let exact = self.projects_dir().join(&sanitized);
         let mut found = Vec::new();
         if exact.is_dir() {
             found.push(exact.clone());
+        }
+        let hashed = sanitize_path(path, SummaryDialect::TypeScript);
+        if hashed != sanitized {
+            let other = self.projects_dir().join(&hashed);
+            if other.is_dir() {
+                found.push(other);
+            }
+            return found;
         }
         if sanitized.len() <= MAX_SANITIZED_LENGTH {
             return found;
@@ -669,7 +677,7 @@ impl SessionFiles {
         let mut named: Vec<(String, String, Option<String>)> = worktrees
             .iter()
             .map(|path| {
-                let exact = fold_name(&sanitize_path(path, SummaryDialect::TypeScript));
+                let exact = fold_name(&project_name_ts(path));
                 let truncated = (exact.len() > MAX_SANITIZED_LENGTH).then(|| exact[..MAX_SANITIZED_LENGTH].to_owned());
                 (path.clone(), exact, truncated)
             })

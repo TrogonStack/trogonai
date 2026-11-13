@@ -166,6 +166,21 @@ offline regression suite (`claude-sdk:test`) covers the generator itself. Bumpin
 baseline version requires updating `types.json` and regenerating in the same change.
 Generated files are marked `linguist-generated` and excluded from `rustfmt`.
 
+## Message decoding goldens
+
+`message_decoding_oracle.mjs` and `message_decoding_oracle.py` replay each message in
+`tests/fixtures/message_decoding/cases.json` through the pinned TypeScript and Python
+`query()`, each behind a stub CLI that answers `initialize` and writes the one message.
+`message_decoding_goldens.py` writes what each yielded or raised to `expected.json`.
+
+```sh
+mise run claude-sdk:message-goldens          # regenerate expected.json
+mise run claude-sdk:message-goldens --check  # fail when expected.json differs
+```
+
+The task needs Node and a Python with `venv`; it installs the pinned Python package's
+dependencies into a temporary virtual environment.
+
 ## Scheduled issue reporting
 
 [The workflow](../../../../../../../../.github/workflows/claude-sdk-freshness.yml) follows the

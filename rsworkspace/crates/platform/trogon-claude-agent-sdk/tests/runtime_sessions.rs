@@ -24,13 +24,13 @@ fn options(mode: &str) -> Result<ClaudeAgentOptions, Box<dyn StdError>> {
         model: Some(format!("fixture:{mode}").into()),
         ..ClaudeAgentOptions::default()
     };
-    options.limits.control_timeout = Timeout::new(Duration::from_secs(2))?;
-    options.limits.shutdown_timeout = Timeout::new(Duration::from_millis(200))?;
+    options.limits.control_timeout = Some(Timeout::new(Duration::from_secs(2)));
+    options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(Timeout::new(Duration::from_millis(200)));
     // The runtime force-kills the fixture on shutdown, possibly while it is writing its coverage
     // profile at exit, which leaves a corrupt profile. The fixture runs no crate code, so its
     // profile is discarded.
     options.env.insert("LLVM_PROFILE_FILE".into(), "/dev/null".into());
-    options.limits.run_end_timeout = Timeout::new(Duration::from_secs(2))?;
+    options.limits.run_end_timeout = Timeout::new(Duration::from_secs(2));
     Ok(options)
 }
 
@@ -135,8 +135,8 @@ fn store_options(
     let mut options = SessionStoreOptions::from(store);
     options.config_directory = Some(directory.to_path_buf());
     options.project_key = Some(SessionProjectKey::new("fixture-project")?);
-    options.limits.append_timeout = Timeout::new(Duration::from_secs(3))?;
-    options.limits.flush_timeout = Timeout::new(Duration::from_secs(3))?;
+    options.limits.append_timeout = Timeout::new(Duration::from_secs(3));
+    options.limits.flush_timeout = Timeout::new(Duration::from_secs(3));
     Ok(options)
 }
 

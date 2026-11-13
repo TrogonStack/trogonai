@@ -70,10 +70,14 @@ await `disconnect()`. Cleanup needs a running Tokio runtime; the child also has 
 
 ## Messages and controls
 
-Known messages retain identity, origin, stop/terminal reasons, usage, permission
-denials and additional fields when reported. Nested upstream usage and denial
-payloads remain JSON. Unknown informational messages and content blocks remain
-explicit variants; malformed known fields cause typed protocol errors.
+Every message keeps the object the CLI wrote (`Message::raw`), and
+`Message::to_sdk_message` types it as the TypeScript `SDKMessage` generated from
+the pinned declarations. `message_decoding` picks the upstream decoder:
+`MessageDecoding::TypeScript` (the default) yields every message, unknown types
+and shapes Rust cannot type included as `Message::Unknown`; `MessageDecoding::Python`
+skips unknown types and raises `Error::MessageParse` with Python's text for a known
+message missing a key. Goldens from both pinned SDKs pin the two modes; see
+[Message data](docs/reference/message-data.md#decoding).
 
 `Message::Result` and `HookOutput::Sync` box their payloads to keep enum values
 compact when another dependency enables `serde_json`'s `preserve_order` feature.
@@ -83,7 +87,14 @@ Pattern matching exposes the same fields through the box.
 `connection_info()` borrows the cached `ConnectionInfo` from that handshake,
 including support flags and additional metadata. Reading it is non-fallible and
 sends no protocol messages; `ConnectionInfo::as_json()` retains the original
-response, including omitted or explicitly null fields.
+response, including omitted or explicitly null fields. Like both upstream SDKs,
+the response is not validated: a known field of an unexpected type reads as
+absent, and under `ArgvStyle::Python` a response that is not an object reads as
+`{}`. The initialize checks follow `sdk.mjs` in its order: blocking hooks need
+`hook_on_failure_supported`, then `hooks_applied` must not be `false`, then sent
+managed settings need `managed_settings_applied`; plugins that were not
+confirmed only log a warning. Non-empty `supported_dialog_kinds` without a
+`user_dialog_handler` is refused before the CLI starts.
 The handle provides interrupt receipts, model and permission changes, rewind,
 MCP status/reconnect/toggle/replacement, context usage and task controls. Legacy
 interrupt replies remain distinct from reported empty queues. Newer controls
@@ -94,7 +105,8 @@ depend on installed CLI support.
 `ToolPermissionHandler` receives request/tool identities, suggestions, MCP
 provenance and prompt context, plus a cancellation signal. Typed allow decisions
 can replace input and update permission rules. Absent handlers deny host
-permission requests; timeout denies, and cancellation suppresses a late reply.
+permission requests; an opted-in `limits.callback_timeout` denies, and cancellation
+suppresses a late reply.
 The CLI can authorize tools through its own permission mode or rules before
 consulting the host.
 Suggestions keep unknown destinations, behaviors and update types verbatim, so
@@ -171,8 +183,16 @@ order when building CLI arguments.
 
 ### Process launch
 
-The launch contract is pinned by `tests/golden_argv_env.rs` (argv, environment and
-the stdin `initialize` bytes).
+The launch contract is pinned by `tests/golden_argv_env.rs` (argv and environment)
+and `tests/golden_initialize.rs` (the stdin `initialize` bytes, captured from both
+upstream SDKs).
+
+- Control requests follow the dialect. `ArgvStyle::TypeScript` sends
+  `{"request_id":...,"type":"control_request","request":...}` with the id
+  `Math.random().toString(36).substring(2,15)` produces. `ArgvStyle::Python`
+  sends `{"type": "control_request", "request_id": "req_N_xxxxxxxx", ...}` and
+  writes every stdin line the way `json.dumps` does (spaced separators, `\uXXXX`
+  escapes for non-ASCII, Python float spelling).
 
 - `ArgvStyle::TypeScript` (default) emits TypeScript `0.3.323` argv: `--flag=value`
   spelling, upstream flag order, and the system prompt inside the `initialize`
@@ -227,8 +247,10 @@ the stdin `initialize` bytes).
   unsuccessfully after an `is_error` result, the error is `Error::Result`
   (`ResultError`): Python's text always, TypeScript's text when it is non-empty.
   `abort()` stops the process and ends the run with `Error::Aborted`
-  (`AbortError`). Closing escalates stdin close, SIGTERM, SIGKILL, each waiting
-  `limits.shutdown_timeout`.
+  (`AbortError`). Closing follows `limits.shutdown`: TypeScript's ladder by
+  default (stdin close, 2 seconds, SIGTERM, SIGKILL 5 seconds later without
+  waiting), Python's 5/5/5 second ladder, or `Shutdown::Strict`, which reports
+  `Error::ShutdownTimeout` and `Error::StderrDrainTimeout`.
 - Writes fail with distinct errors in upstream's order: `Error::NotReadyForWriting`
   after stdin is closed (and, in the TypeScript style, after the process exited,
   where the exit event clears `ready`), `Error::WriteToTerminatedProcess` after an
@@ -237,8 +259,9 @@ the stdin `initialize` bytes).
 - Non-JSON stdout: `ArgvStyle::TypeScript` skips every undecodable line. Python
   style skips lines that do not start with `{` and fails on a corrupt line with
   `Error::JsonDecode` (the line and the original error), except that a corrupt
-  unterminated tail at end of file is dropped. A JSON line that is not a valid
-  message is `Error::MessageParse`, carrying the raw object.
+  unterminated tail at end of file is dropped. With `MessageDecoding::Python`, a
+  known message missing a key Python reads is `Error::MessageParse`, carrying the
+  raw object.
 - `ArgvStyle::TypeScript` appends `--await-initialize` through extra arguments
   when `connect` resumes or continues without `cli_path` and without `sdk-url`,
   as `sdk.mjs` does for its resolved executable. Python never sends it.
@@ -246,11 +269,11 @@ the stdin `initialize` bytes).
   resolved with libc `getpwnam_r`, so NSS sources apply, an unknown name fails
   with `getpwnam(): name not found: '<name>'`, and only the uid changes, Unix
   only); `run_as_uid` is the numeric form.
-- The inbound line limit `max_frame_bytes` exists only in `ArgvStyle::Python`
-  (`max_buffer_size`): a longer line, counted in characters without its
+- The inbound line limit `limits.max_buffer_size` is unset by default, as
+  TypeScript keeps every line; `Limits::python()` sets Python's 1 MiB
+  (`max_buffer_size`). A longer line, counted in characters without its
   newline, is `Error::JsonDecode` with the line `JSON message exceeded maximum
   buffer size of N bytes` and `JsonDecodeSourceError::BufferExceeded`.
-  TypeScript keeps every line.
 - In `ArgvStyle::TypeScript`, `end_input` leaves the transport ready, so a later
   write is dropped without an error, as `endInput` does; `close` ends that.
 - `plugins` and `plugin_delivery` map `plugins` and `pluginDelivery`: TypeScript
@@ -270,8 +293,22 @@ the stdin `initialize` bytes).
 - Not expressible: the `Cannot write to terminated process` and `exited with error` write
   branches are unreachable upstream because the `exit` event clears readiness
   first. `cli_path` or `PATH` discovery is the Rust equivalent.
-- Deferred to other tracks: remote `--sdk-url` transports and the thinking,
-  betas and task-budget options.
+- Runtime options map `thinking`, `maxThinkingTokens`, `taskBudget`, `betas`,
+  `fallbackModel`, `permissionPromptToolName`, `includeHookEvents`, `sessionId`,
+  `resumeSessionAt`, `resumeDropsTurn` and `skills` in both dialects with the
+  upstream flag order. `permission_prompts`, `channels`, `debug`, `debug_file`,
+  `allow_dangerously_skip_permissions` and `project_config_root` exist only in
+  TypeScript and are ignored by `ArgvStyle::Python`. In TypeScript `connect`
+  also adds the derived per-process `--debug-file` when none is set. `skills`
+  appends `Skill` or `Skill(name)` to the allowed tools, Python also defaults
+  `--setting-sources=user,project`, and an explicit list reaches the
+  `initialize` request. A callback together with `permission_prompt_tool_name`
+  is refused, TypeScript refuses a fallback model equal to the model, and
+  Python refuses an enabled thinking config without a budget. The shadow
+  advisory for `bypassPermissions` or allowed tools is reported through
+  `tracing`.
+- Deferred to other tracks: remote `--sdk-url` transports. Settings, managed
+  settings, sandbox, flag settings and `updateSettings` are not covered.
 
 Model strings and paths are stored without extra identifier restrictions.
 `env` values are `ConfigValue`s, which convert from strings as `Sensitive`;
@@ -300,11 +337,17 @@ caller order and duplicates. MCP discovery is disabled unless selected through
 `McpDiscovery::CliDefault`. `Customizations::Bare` disables further CLI
 customizations when supported.
 
-Frames, stderr, queues and outstanding controls have configurable bounds. A full
-message queue produces `Error::MessageQueueFull`; control handling progresses
-independently of message consumption. Stderr debug output omits its contents.
-`QueueCapacity` validates Tokio's range; positive `Timeout` values are bounded
-at 24 hours.
+`Limits::default()` matches the TypeScript SDK: no stdout line cap, the last
+2048 UTF-16 units of stderr kept for process errors, unbounded queues, no
+control, write or callback timeout, and an initialize deadline of 660 seconds
+only when a hook is set to block on failure. `Limits::python()` selects the
+Python SDK's values: a 1 MiB line cap, a 60 second control wait, a 100 message
+buffer that stops reading stdout while full, and its initialize wait and
+shutdown ladder. Every other bound (pending controls, inbound callbacks, tracked
+tasks, queued inputs, a failing message queue, command queue room) is opt-in and
+keeps its typed error. Stderr debug output omits its contents. `QueueCapacity`
+validates Tokio's range; `Timeout::checked` rejects zero and values past 24
+hours.
 
 ## Settings
 

@@ -47,6 +47,9 @@ pub enum ProtocolError {
     PermissionUpdate(#[from] crate::PermissionUpdateError),
     #[error("duplicate incoming control request ID")]
     DuplicateControlRequest,
+    /// A message Python `parse_message` rejects, with its error text.
+    #[error("{0}")]
+    InvalidMessage(String),
 }
 
 #[derive(thiserror::Error)]
@@ -107,6 +110,9 @@ pub enum Error {
     /// Python `CLIJSONDecodeError`.
     #[error(transparent)]
     JsonDecode(#[from] JsonDecodeError),
+    /// An option the upstream SDK rejects before it starts the CLI.
+    #[error(transparent)]
+    Option(#[from] crate::OptionError),
     /// Python `MessageParseError`.
     #[error(transparent)]
     MessageParse(#[from] MessageParseError),
@@ -133,10 +139,29 @@ pub enum Error {
     InputClosed,
     #[error("too many queued user inputs")]
     TooManyInputs,
-    #[error("blocking hooks require capability support from Claude Code")]
+    /// A hook set to block on failure, and the initialize response did not report `hook_on_failure_supported`.
+    /// `Display` is Python's text, `typescript_message` TypeScript's.
+    #[error(
+        "The process answering initialize does not honor on_failure on hook matchers, so a hook that fails would not block. Update Claude Code if it is old, or remove on_failure=\"block\" from your hooks."
+    )]
     BlockingHooksUnsupported,
-    #[error("configured hooks were not registered by Claude Code")]
+    /// A hook set to block on failure, and the initialize response reported `hooks_applied: false`. `Display` is
+    /// Python's text, `typescript_message` TypeScript's.
+    #[error(
+        "This session was already running and did not register your hooks, so a hook set to on_failure=\"block\" would never run. Start a new session, or remove on_failure=\"block\" from your hooks."
+    )]
     HooksNotApplied,
+    /// TypeScript: the initialize request carried `managedSettings` and the response did not report
+    /// `managed_settings_applied: true`.
+    #[error(
+        "Claude Code did not confirm the managed settings sent with managedSettingsDelivery 'initialize', so the session was ended and no further prompt was sent. For a cloud session, use 'argv', because it does not read this delivery. Otherwise check that no wrapper changes the launch flags or the initialize request."
+    )]
+    ManagedSettingsNotApplied,
+    /// TypeScript `supportedDialogKinds` without `onUserDialog`.
+    #[error(
+        "supportedDialogKinds requires an onUserDialog callback -- declaring dialog kinds without a handler would park dialogs nothing can answer. Provide onUserDialog, or omit supportedDialogKinds."
+    )]
+    DialogKindsWithoutHandler,
     #[error("SDK configuration could not be encoded")]
     InvalidConfiguration,
     #[error("file checkpointing is not yet supported with a session store")]
@@ -147,8 +172,22 @@ pub enum Error {
     McpUpdateInProgress,
     #[error("an MCP server name is configured as both external and embedded")]
     DuplicateMcpServer,
-    #[error("the {operation} control request timed out")]
+    /// Python's text for a control request that went unanswered for the configured wait.
+    #[error("Control request timeout: {operation}")]
     ControlTimeout { operation: ControlOperation },
+    /// TypeScript's text when initialize goes unanswered while a hook is set to block on failure.
+    #[error(
+        "Claude Code did not answer initialize, so a hook set to onFailure: \"block\" could not be confirmed and the prompt was not sent. Check the connection and start a new session."
+    )]
+    InitializeNotConfirmed,
+    /// TypeScript's text when initialize goes unanswered after carrying managed settings and no hook blocks.
+    #[error(
+        "Claude Code did not answer initialize, so the managed settings could not be confirmed and the prompt was not sent. Start a new session."
+    )]
+    ManagedSettingsNotConfirmed,
+    /// Python's `int()` error for a `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` that is not an integer.
+    #[error("invalid literal for int() with base 10: {literal}")]
+    InvalidStreamCloseTimeout { literal: String },
     #[error("the {operation} control request was rejected")]
     ControlRejected {
         operation: ControlOperation,
@@ -214,8 +253,21 @@ impl Error {
     /// TypeScript's text for an unsuccessful exit: `Claude Code process exited with code N. stderr: <tail>` or
     /// `Claude Code process terminated by signal SIG<NAME>`, with the stderr tail appended when it is not blank.
     pub fn typescript_message(&self) -> Option<String> {
-        if matches!(self, Self::WriteToTerminatedProcess { .. }) {
-            return Some("Cannot write to terminated process".to_owned());
+        match self {
+            Self::WriteToTerminatedProcess { .. } => return Some("Cannot write to terminated process".to_owned()),
+            Self::BlockingHooksUnsupported => {
+                return Some(
+                    "The process answering initialize does not honor onFailure on hook matchers, so a hook that fails would not block. Update Claude Code if it is old, or remove onFailure: \"block\" from your hooks."
+                        .to_owned(),
+                );
+            }
+            Self::HooksNotApplied => {
+                return Some(
+                    "This session was already running and did not register your hooks, so a hook set to onFailure: \"block\" would never run. Start a new session, or remove onFailure: \"block\" from your hooks."
+                        .to_owned(),
+                );
+            }
+            _ => {}
         }
         let Self::Process { status, stderr } = self else {
             return None;
