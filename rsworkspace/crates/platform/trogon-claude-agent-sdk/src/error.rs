@@ -418,6 +418,14 @@ impl JsonDecodeError {
         }
     }
 
+    /// Python `CLIJSONDecodeError.__init__(line, original_error)` for a parser failure.
+    pub fn from_line(line: &str, original_error: serde_json::Error) -> Self {
+        Self {
+            line: line.to_owned(),
+            original_error: JsonDecodeSourceError::Json(original_error),
+        }
+    }
+
     /// The offending line, complete.
     pub fn line(&self) -> &str {
         &self.line
@@ -497,6 +505,18 @@ impl ResultError {
         }
     }
 
+    /// Python `ResultError.__init__(message, data, exit_code)`: `data` is optional and anything but an object
+    /// is treated as empty.
+    pub fn from_python(message: &str, data: Option<JsonObject>, exit_code: Option<i32>) -> Self {
+        Self::new(message.to_owned(), data.unwrap_or_default(), exit_code)
+    }
+
+    /// `str()` of the Python exception: the message followed by the exit code, as `ProcessError.__init__` builds
+    /// it (a `ResultError` carries no stderr).
+    pub fn python_text(&self) -> String {
+        python_process_error_text(&self.message, self.exit_code, None)
+    }
+
     /// `Claude Code returned an error result: <text>`.
     pub fn message(&self) -> &str {
         &self.message
@@ -534,6 +554,29 @@ impl ResultError {
 
     pub fn session_id(&self) -> Option<&str> {
         self.data.get("session_id").and_then(serde_json::Value::as_str)
+    }
+}
+
+/// Python `CLINotFoundError.__init__(message, cli_path)`: the message (default `Claude Code not found`), then
+/// `: <cli_path>` when the path is non-empty.
+pub fn python_cli_not_found_text(message: Option<&str>, cli_path: Option<&str>) -> String {
+    let message = message.unwrap_or("Claude Code not found");
+    match cli_path {
+        Some(path) if !path.is_empty() => format!("{message}: {path}"),
+        _ => message.to_owned(),
+    }
+}
+
+/// Python `ProcessError.__init__(message, exit_code, stderr)`: the exit code is appended when given (zero
+/// included) and a non-empty stderr goes on its own line.
+pub fn python_process_error_text(message: &str, exit_code: Option<i32>, stderr: Option<&str>) -> String {
+    let mut text = message.to_owned();
+    if let Some(code) = exit_code {
+        text = format!("{text} (exit code: {code})");
+    }
+    match stderr {
+        Some(output) if !output.is_empty() => format!("{text}\nError output: {output}"),
+        _ => text,
     }
 }
 
@@ -613,3 +656,7 @@ pub(crate) fn error_result_data(result: &crate::ResultMessage) -> JsonObject {
     }
     data
 }
+
+#[cfg(test)]
+#[path = "error_tests.rs"]
+mod tests;

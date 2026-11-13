@@ -3908,6 +3908,576 @@
       ],
       "status": "supported",
       "rationale": "Argv tokens and order, the dash rule, extraArgs dictionary semantics (duplicate keys collapse, TypeScript lists integer keys first), the tools preset, empty agent and resume, stderr delivery (raw decoder chunks for TypeScript, trimmed lines for Python), max_buffer_size including zero, client_app precedence and the sessionStore with persistSession false refusal are pinned against goldens captured from the real sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 driving a recording stand-in for the CLI. user resolves the name with getpwnam and switches only the real and effective uid with setreuid in a pre_exec hook, as CPython does; debug_stderr is an accepted no-op."
+    },
+    {
+      "id": "python-thinking-config",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ThinkingConfig",
+            "ThinkingConfigAdaptive",
+            "ThinkingConfigAdaptive.display",
+            "ThinkingConfigAdaptive.type",
+            "ThinkingConfigDisabled",
+            "ThinkingConfigDisabled.type",
+            "ThinkingConfigEnabled",
+            "ThinkingConfigEnabled.budget_tokens",
+            "ThinkingConfigEnabled.display",
+            "ThinkingConfigEnabled.type"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ThinkingConfig",
+        "ThinkingDisplay"
+      ],
+      "tests": [
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "typescript_thinking_forms"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "python_thinking_forms"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The adaptive, enabled and disabled thinking shapes reach the argv in each SDK's spelling, with the display option on the two shapes that take one."
+    },
+    {
+      "id": "python-task-budget",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "TaskBudget",
+            "TaskBudget.total"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "TaskBudget"
+      ],
+      "tests": [
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "typescript_orders_every_runtime_option_like_sdk_mjs"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "python_orders_every_runtime_option_like_subprocess_cli"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The total token budget is sent as the task budget argument in both orderings."
+    },
+    {
+      "id": "python-sandbox-settings",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "SandboxIgnoreViolations",
+            "SandboxNetworkConfig",
+            "SandboxNetworkConfig.allowAllUnixSockets",
+            "SandboxNetworkConfig.allowLocalBinding",
+            "SandboxNetworkConfig.allowMachLookup",
+            "SandboxNetworkConfig.allowManagedDomainsOnly",
+            "SandboxNetworkConfig.allowUnixSockets",
+            "SandboxNetworkConfig.allowedDomains",
+            "SandboxNetworkConfig.deniedDomains",
+            "SandboxNetworkConfig.httpProxyPort",
+            "SandboxNetworkConfig.socksProxyPort",
+            "SandboxSettings",
+            "SandboxSettings.allowUnsandboxedCommands",
+            "SandboxSettings.autoAllowBashIfSandboxed",
+            "SandboxSettings.enableWeakerNestedSandbox",
+            "SandboxSettings.enabled",
+            "SandboxSettings.excludedCommands",
+            "SandboxSettings.ignoreViolations",
+            "SandboxSettings.network"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SandboxSettings",
+        "SandboxNetworkConfig",
+        "SandboxIgnoreViolations"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "python_sandbox_dicts_map_byte_for_byte_onto_the_typed_sandbox"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "python_replaces_the_sandbox_key_and_dumps_with_json_dumps_bytes"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Python sandbox dictionaries map onto the typed sandbox settings and replace the settings sandbox key with json.dumps bytes."
+    },
+    {
+      "id": "python-mcp-server-configs",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "McpSdkServerConfig.instance",
+            "McpSdkServerConfig.name",
+            "McpSdkServerConfig.type",
+            "types.McpClaudeAIProxyServerConfig",
+            "types.McpClaudeAIProxyServerConfig.id",
+            "types.McpClaudeAIProxyServerConfig.type",
+            "types.McpClaudeAIProxyServerConfig.url",
+            "types.McpHttpServerConfig",
+            "types.McpHttpServerConfig.headers",
+            "types.McpHttpServerConfig.type",
+            "types.McpHttpServerConfig.url",
+            "types.McpSSEServerConfig",
+            "types.McpSSEServerConfig.headers",
+            "types.McpSSEServerConfig.type",
+            "types.McpSSEServerConfig.url",
+            "types.McpServer",
+            "types.McpStdioServerConfig",
+            "types.McpStdioServerConfig.args",
+            "types.McpStdioServerConfig.command",
+            "types.McpStdioServerConfig.env",
+            "types.McpStdioServerConfig.type"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "McpServerOptions",
+        "McpRemoteServerOptions",
+        "McpStdioServerOptions",
+        "McpSdkServerOptions",
+        "McpServerDialect"
+      ],
+      "tests": [
+        {
+          "path": "tests/golden_argv_env.rs",
+          "name": "python_mcp_config_matches_upstream_bytes"
+        },
+        {
+          "path": "tests/golden_argv_env.rs",
+          "name": "typescript_mcp_config_matches_upstream_bytes"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Stdio, SSE, HTTP and in-process server options encode to the exact mcp config bytes of each SDK."
+    },
+    {
+      "id": "python-mcp-status",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "McpServerConnectionStatus",
+            "McpServerInfo",
+            "McpServerInfo.name",
+            "McpServerInfo.version",
+            "McpServerStatus",
+            "McpServerStatus.config",
+            "McpServerStatus.error",
+            "McpServerStatus.name",
+            "McpServerStatus.scope",
+            "McpServerStatus.serverInfo",
+            "McpServerStatus.status",
+            "McpServerStatus.tools",
+            "McpServerStatusConfig",
+            "McpStatusResponse",
+            "McpStatusResponse.mcpServers",
+            "McpToolAnnotations",
+            "McpToolAnnotations.destructive",
+            "McpToolAnnotations.openWorld",
+            "McpToolAnnotations.readOnly",
+            "McpToolInfo",
+            "McpToolInfo.annotations",
+            "McpToolInfo.description",
+            "McpToolInfo.name",
+            "types.McpSdkServerConfigStatus",
+            "types.McpSdkServerConfigStatus.name",
+            "types.McpSdkServerConfigStatus.type"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "McpStatusResponse",
+        "upstream::control::McpServerStatus"
+      ],
+      "tests": [
+        {
+          "path": "tests/control_values.rs",
+          "name": "mcp_status_types_every_python_server_key"
+        },
+        {
+          "path": "tests/control_values.rs",
+          "name": "control_responses_keep_extension_fields"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The status reply decodes into typed server entries carrying every key the Python TypedDicts declare."
+    },
+    {
+      "id": "python-context-usage",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ContextUsageCategory",
+            "ContextUsageCategory.color",
+            "ContextUsageCategory.isDeferred",
+            "ContextUsageCategory.name",
+            "ContextUsageCategory.tokens",
+            "ContextUsageResponse",
+            "ContextUsageResponse.agents",
+            "ContextUsageResponse.apiUsage",
+            "ContextUsageResponse.autoCompactThreshold",
+            "ContextUsageResponse.categories",
+            "ContextUsageResponse.deferredBuiltinTools",
+            "ContextUsageResponse.gridRows",
+            "ContextUsageResponse.isAutoCompactEnabled",
+            "ContextUsageResponse.maxTokens",
+            "ContextUsageResponse.mcpTools",
+            "ContextUsageResponse.memoryFiles",
+            "ContextUsageResponse.messageBreakdown",
+            "ContextUsageResponse.model",
+            "ContextUsageResponse.percentage",
+            "ContextUsageResponse.rawMaxTokens",
+            "ContextUsageResponse.skills",
+            "ContextUsageResponse.slashCommands",
+            "ContextUsageResponse.systemPromptSections",
+            "ContextUsageResponse.systemTools",
+            "ContextUsageResponse.totalTokens"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ContextUsageResponse",
+        "ContextUsageCategory"
+      ],
+      "tests": [
+        {
+          "path": "tests/control_values.rs",
+          "name": "context_usage_types_every_python_key"
+        },
+        {
+          "path": "tests/control_values.rs",
+          "name": "control_responses_keep_extension_fields"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Every key the Python response declares is typed, and undeclared keys stay in additional_fields."
+    },
+    {
+      "id": "python-session-info",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "SDKSessionInfo",
+            "SDKSessionInfo.created_at",
+            "SDKSessionInfo.custom_title",
+            "SDKSessionInfo.cwd",
+            "SDKSessionInfo.file_size",
+            "SDKSessionInfo.first_prompt",
+            "SDKSessionInfo.git_branch",
+            "SDKSessionInfo.last_modified",
+            "SDKSessionInfo.session_id",
+            "SDKSessionInfo.summary",
+            "SDKSessionInfo.tag"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SdkSessionInfo"
+      ],
+      "tests": [
+        {
+          "path": "tests/session_files.rs",
+          "name": "listing_reads_metadata_from_head_and_tail_and_orders_newest_first"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "info_and_messages_read_back_from_the_store"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Session metadata is read from files and from a store into the same typed info."
+    },
+    {
+      "id": "python-session-store-entries",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "SessionStoreEntry",
+            "SessionStoreEntry.timestamp",
+            "SessionStoreEntry.type",
+            "SessionStoreEntry.uuid",
+            "SessionStoreFlushMode",
+            "SessionStoreListEntry",
+            "SessionStoreListEntry.mtime",
+            "SessionStoreListEntry.session_id"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SessionEntry",
+        "SessionListEntry",
+        "SessionStoreFlush"
+      ],
+      "tests": [
+        {
+          "path": "tests/session_values.rs",
+          "name": "entries_expose_their_opaque_object_and_known_fields"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "list_uses_summaries_with_pagination"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "eager_flush_appends_every_frame_without_waiting_for_a_flush"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Store entries, listing rows and the flush mode have typed Rust forms exercised through the store helpers."
+    },
+    {
+      "id": "python-transport",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "Transport.close",
+            "Transport.connect",
+            "Transport.end_input",
+            "Transport.is_ready",
+            "Transport.read_messages",
+            "Transport.write"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "Transport"
+      ],
+      "tests": [
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_custom_transport_drives_a_full_session_through_the_trait"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The transport trait answers connect, write, read, close, is_ready and end_input and drives a whole session."
+    },
+    {
+      "id": "python-sdk-mcp-tool",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "SdkMcpTool.annotations",
+            "SdkMcpTool.description",
+            "SdkMcpTool.handler",
+            "SdkMcpTool.input_schema",
+            "SdkMcpTool.name",
+            "ToolAnnotations",
+            "ToolAnnotations.__init__",
+            "ToolAnnotations.maxResultSizeChars"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SdkTool",
+        "SdkToolOptions"
+      ],
+      "tests": [
+        {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "python_dialect_answers_like_create_sdk_mcp_server"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Tool name, description, schema, handler and annotations are replayed against the Python server answers."
+    },
+    {
+      "id": "python-system-prompt-forms",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "types.SystemPromptCustom",
+            "types.SystemPromptCustom.prompt",
+            "types.SystemPromptCustom.snapshot",
+            "types.SystemPromptCustom.type",
+            "types.SystemPromptFile",
+            "types.SystemPromptFile.path",
+            "types.SystemPromptFile.type",
+            "types.SystemPromptPreset",
+            "types.SystemPromptPreset.append",
+            "types.SystemPromptPreset.exclude_dynamic_sections",
+            "types.SystemPromptPreset.preset",
+            "types.SystemPromptPreset.snapshot",
+            "types.SystemPromptPreset.type",
+            "types.ToolsPreset",
+            "types.ToolsPreset.preset",
+            "types.ToolsPreset.type"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SystemPrompt",
+        "CustomPrompt",
+        "PresetPrompt",
+        "ToolSet"
+      ],
+      "tests": [
+        {
+          "path": "src/system_prompt_tests.rs",
+          "name": "custom_object_carries_its_snapshot_in_both_dialects"
+        },
+        {
+          "path": "src/system_prompt_tests.rs",
+          "name": "python_argv_follows_the_command_builder"
+        },
+        {
+          "path": "src/system_prompt_tests.rs",
+          "name": "a_prompt_file_is_refused_in_the_typescript_dialect"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "typescript_core_options_match_the_upstream_argv"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Custom, file and preset prompts and the tools preset reach the argv in each dialect."
+    },
+    {
+      "id": "python-permission-values",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "types.PermissionBehavior",
+            "types.PermissionRuleValue",
+            "types.PermissionRuleValue.rule_content",
+            "types.PermissionRuleValue.tool_name",
+            "types.PermissionUpdateDestination"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "PermissionBehavior",
+        "PermissionRuleValue",
+        "PermissionUpdateDestination"
+      ],
+      "tests": [
+        {
+          "path": "tests/permission_values.rs",
+          "name": "permission_update_destinations_and_behaviors_use_camel_case_and_lowercase"
+        },
+        {
+          "path": "tests/permission_values.rs",
+          "name": "every_permission_update_kind_round_trips_through_its_wire_form"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Destinations, behaviors and rule values round-trip through the permission update wire form."
+    },
+    {
+      "id": "python-error-constructors",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "CLIJSONDecodeError",
+            "CLIJSONDecodeError.__init__",
+            "CLINotFoundError.__init__",
+            "ClaudeSDKError",
+            "ProcessError.__init__",
+            "ResultError.__init__"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "Error",
+        "JsonDecodeError",
+        "ResultError",
+        "python_cli_not_found_text",
+        "python_process_error_text"
+      ],
+      "tests": [
+        {
+          "path": "src/error_tests.rs",
+          "name": "cli_not_found_text_matches_the_python_constructor"
+        },
+        {
+          "path": "src/error_tests.rs",
+          "name": "process_error_text_matches_the_python_constructor"
+        },
+        {
+          "path": "src/error_tests.rs",
+          "name": "result_error_text_and_fields_match_the_python_constructor"
+        },
+        {
+          "path": "src/error_tests.rs",
+          "name": "json_decode_text_matches_the_python_constructor"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Constructor texts are asserted against strings recorded from the Python error classes."
+    },
+    {
+      "id": "python-module-imports",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "modules.__init__.py.imports",
+            "modules._errors.py.imports",
+            "modules._internal/session_import.py.imports",
+            "modules._internal/session_mutations.py.imports",
+            "modules._internal/session_store.py.imports",
+            "modules._internal/session_summary.py.imports",
+            "modules._internal/sessions.py.imports",
+            "modules._internal/transcript_mirror_batcher.py.imports",
+            "modules._internal/transport/__init__.py.imports",
+            "modules._version.py.imports",
+            "modules.client.py.imports",
+            "modules.query.py.imports",
+            "modules.types.py.imports"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeSdkClient",
+        "query",
+        "Transport",
+        "SessionStore"
+      ],
+      "tests": [
+        {
+          "path": "tests/python_module_imports.rs",
+          "name": "errors_module_imports_reach_the_error_types"
+        },
+        {
+          "path": "tests/python_module_imports.rs",
+          "name": "package_imports_reach_the_crate_root"
+        },
+        {
+          "path": "tests/python_module_imports.rs",
+          "name": "session_module_imports_reach_the_session_types"
+        },
+        {
+          "path": "tests/python_module_imports.rs",
+          "name": "query_and_client_module_imports_reach_the_runtime_types"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The first-party names each Python module imports are reachable from the crate root."
     }
   ]
 }

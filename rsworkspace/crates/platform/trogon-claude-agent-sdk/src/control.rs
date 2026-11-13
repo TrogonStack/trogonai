@@ -161,7 +161,7 @@ pub struct RewindFilesResult {
 #[derive(Clone, Debug, Deserialize)]
 pub struct McpStatusResponse {
     #[serde(rename = "mcpServers")]
-    pub mcp_servers: Vec<JsonObject>,
+    pub mcp_servers: Vec<crate::upstream::control::McpServerStatus>,
     #[serde(flatten)]
     pub additional_fields: JsonObject,
 }
@@ -189,6 +189,19 @@ pub struct ContextUsageResponse {
     pub is_auto_compact_enabled: bool,
     pub memory_files: Vec<JsonObject>,
     pub mcp_tools: Vec<JsonObject>,
+    /// Python `agents`: agent definitions with `agentType`, `source` and token counts.
+    pub agents: Option<Vec<JsonObject>>,
+    /// Python `gridRows`: the visual grid the CLI context display draws.
+    pub grid_rows: Option<Vec<Vec<JsonObject>>>,
+    pub auto_compact_threshold: Option<u64>,
+    pub deferred_builtin_tools: Option<Vec<JsonObject>>,
+    pub system_tools: Option<Vec<JsonObject>>,
+    pub system_prompt_sections: Option<Vec<JsonObject>>,
+    pub slash_commands: Option<JsonObject>,
+    pub skills: Option<JsonObject>,
+    pub message_breakdown: Option<JsonObject>,
+    /// Python `apiUsage`; `null` and an absent key both read as `None`.
+    pub api_usage: Option<JsonObject>,
     #[serde(flatten)]
     pub additional_fields: JsonObject,
 }
