@@ -111,48 +111,48 @@ impl ToolOutputSchemas {
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
         super::support::keep_best(&mut best, AgentOutput::best_match(value).map(|(score, inner)| (score, Self::AgentOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<BashOutput>(value).map(|inner| (super::support::unknown_keys(value, BashOutput::KNOWN_KEYS), Self::BashOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ExitPlanModeOutput>(value).map(|inner| (super::support::unknown_keys(value, ExitPlanModeOutput::KNOWN_KEYS), Self::ExitPlanModeOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<FileEditOutput>(value).map(|inner| (super::support::unknown_keys(value, FileEditOutput::KNOWN_KEYS), Self::FileEditOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<BashOutput>(value).map(|inner| (BashOutput::match_score(value), Self::BashOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ExitPlanModeOutput>(value).map(|inner| (ExitPlanModeOutput::match_score(value), Self::ExitPlanModeOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileEditOutput>(value).map(|inner| (FileEditOutput::match_score(value), Self::FileEditOutput(inner))));
         super::support::keep_best(&mut best, FileReadOutput::best_match(value).map(|(score, inner)| (score, Self::FileReadOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<FileWriteOutput>(value).map(|inner| (super::support::unknown_keys(value, FileWriteOutput::KNOWN_KEYS), Self::FileWriteOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<GlobOutput>(value).map(|inner| (super::support::unknown_keys(value, GlobOutput::KNOWN_KEYS), Self::GlobOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<GrepOutput>(value).map(|inner| (super::support::unknown_keys(value, GrepOutput::KNOWN_KEYS), Self::GrepOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<TaskStopOutput>(value).map(|inner| (super::support::unknown_keys(value, TaskStopOutput::KNOWN_KEYS), Self::TaskStopOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileWriteOutput>(value).map(|inner| (FileWriteOutput::match_score(value), Self::FileWriteOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<GlobOutput>(value).map(|inner| (GlobOutput::match_score(value), Self::GlobOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<GrepOutput>(value).map(|inner| (GrepOutput::match_score(value), Self::GrepOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskStopOutput>(value).map(|inner| (TaskStopOutput::match_score(value), Self::TaskStopOutput(inner))));
         super::support::keep_best(&mut best, super::support::exact::<ListMcpResourcesOutput>(value).map(|inner| (0, Self::ListMcpResourcesOutput(inner))));
         super::support::keep_best(&mut best, super::support::exact::<RefreshMcpToolsOutput>(value).map(|inner| (0, Self::RefreshMcpToolsOutput(inner))));
         super::support::keep_best(&mut best, McpOutput::best_match(value).map(|(score, inner)| (score, Self::McpOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<NotebookEditOutput>(value).map(|inner| (super::support::unknown_keys(value, NotebookEditOutput::KNOWN_KEYS), Self::NotebookEditOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ReadMcpResourceDirOutput>(value).map(|inner| (super::support::unknown_keys(value, ReadMcpResourceDirOutput::KNOWN_KEYS), Self::ReadMcpResourceDirOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ReadMcpResourceOutput>(value).map(|inner| (super::support::unknown_keys(value, ReadMcpResourceOutput::KNOWN_KEYS), Self::ReadMcpResourceOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ReportFindingsOutput>(value).map(|inner| (super::support::unknown_keys(value, ReportFindingsOutput::KNOWN_KEYS), Self::ReportFindingsOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<TodoWriteOutput>(value).map(|inner| (super::support::unknown_keys(value, TodoWriteOutput::KNOWN_KEYS), Self::TodoWriteOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<WebFetchOutput>(value).map(|inner| (super::support::unknown_keys(value, WebFetchOutput::KNOWN_KEYS), Self::WebFetchOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<WebSearchOutput>(value).map(|inner| (super::support::unknown_keys(value, WebSearchOutput::KNOWN_KEYS), Self::WebSearchOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<AskUserQuestionOutput>(value).map(|inner| (super::support::unknown_keys(value, AskUserQuestionOutput::KNOWN_KEYS), Self::AskUserQuestionOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<SendFeedbackOutput>(value).map(|inner| (super::support::unknown_keys(value, SendFeedbackOutput::KNOWN_KEYS), Self::SendFeedbackOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<EnterWorktreeOutput>(value).map(|inner| (super::support::unknown_keys(value, EnterWorktreeOutput::KNOWN_KEYS), Self::EnterWorktreeOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ExitWorktreeOutput>(value).map(|inner| (super::support::unknown_keys(value, ExitWorktreeOutput::KNOWN_KEYS), Self::ExitWorktreeOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<TaskCreateOutput>(value).map(|inner| (super::support::unknown_keys(value, TaskCreateOutput::KNOWN_KEYS), Self::TaskCreateOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<TaskGetOutput>(value).map(|inner| (super::support::unknown_keys(value, TaskGetOutput::KNOWN_KEYS), Self::TaskGetOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<TaskUpdateOutput>(value).map(|inner| (super::support::unknown_keys(value, TaskUpdateOutput::KNOWN_KEYS), Self::TaskUpdateOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<TaskListOutput>(value).map(|inner| (super::support::unknown_keys(value, TaskListOutput::KNOWN_KEYS), Self::TaskListOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<NotebookEditOutput>(value).map(|inner| (NotebookEditOutput::match_score(value), Self::NotebookEditOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReadMcpResourceDirOutput>(value).map(|inner| (ReadMcpResourceDirOutput::match_score(value), Self::ReadMcpResourceDirOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReadMcpResourceOutput>(value).map(|inner| (ReadMcpResourceOutput::match_score(value), Self::ReadMcpResourceOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReportFindingsOutput>(value).map(|inner| (ReportFindingsOutput::match_score(value), Self::ReportFindingsOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TodoWriteOutput>(value).map(|inner| (TodoWriteOutput::match_score(value), Self::TodoWriteOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<WebFetchOutput>(value).map(|inner| (WebFetchOutput::match_score(value), Self::WebFetchOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<WebSearchOutput>(value).map(|inner| (WebSearchOutput::match_score(value), Self::WebSearchOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<AskUserQuestionOutput>(value).map(|inner| (AskUserQuestionOutput::match_score(value), Self::AskUserQuestionOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SendFeedbackOutput>(value).map(|inner| (SendFeedbackOutput::match_score(value), Self::SendFeedbackOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<EnterWorktreeOutput>(value).map(|inner| (EnterWorktreeOutput::match_score(value), Self::EnterWorktreeOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ExitWorktreeOutput>(value).map(|inner| (ExitWorktreeOutput::match_score(value), Self::ExitWorktreeOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskCreateOutput>(value).map(|inner| (TaskCreateOutput::match_score(value), Self::TaskCreateOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskGetOutput>(value).map(|inner| (TaskGetOutput::match_score(value), Self::TaskGetOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskUpdateOutput>(value).map(|inner| (TaskUpdateOutput::match_score(value), Self::TaskUpdateOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskListOutput>(value).map(|inner| (TaskListOutput::match_score(value), Self::TaskListOutput(inner))));
         super::support::keep_best(&mut best, ArtifactOutput::best_match(value).map(|(score, inner)| (score, Self::ArtifactOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<RemoteTriggerOutput>(value).map(|inner| (super::support::unknown_keys(value, RemoteTriggerOutput::KNOWN_KEYS), Self::RemoteTriggerOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ShowOnboardingRolePickerOutput>(value).map(|inner| (super::support::unknown_keys(value, ShowOnboardingRolePickerOutput::KNOWN_KEYS), Self::ShowOnboardingRolePickerOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<OfferChromeSetupOutput>(value).map(|inner| (super::support::unknown_keys(value, OfferChromeSetupOutput::KNOWN_KEYS), Self::OfferChromeSetupOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ReadNotificationsOutput>(value).map(|inner| (super::support::unknown_keys(value, ReadNotificationsOutput::KNOWN_KEYS), Self::ReadNotificationsOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ScheduleWakeupOutput>(value).map(|inner| (super::support::unknown_keys(value, ScheduleWakeupOutput::KNOWN_KEYS), Self::ScheduleWakeupOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<MonitorOutput>(value).map(|inner| (super::support::unknown_keys(value, MonitorOutput::KNOWN_KEYS), Self::MonitorOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ProposeSkillsOutput>(value).map(|inner| (super::support::unknown_keys(value, ProposeSkillsOutput::KNOWN_KEYS), Self::ProposeSkillsOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ProposeGoalOutput>(value).map(|inner| (super::support::unknown_keys(value, ProposeGoalOutput::KNOWN_KEYS), Self::ProposeGoalOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<EnterPlanModeOutput>(value).map(|inner| (super::support::unknown_keys(value, EnterPlanModeOutput::KNOWN_KEYS), Self::EnterPlanModeOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<WorkflowOutput>(value).map(|inner| (super::support::unknown_keys(value, WorkflowOutput::KNOWN_KEYS), Self::WorkflowOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<CronCreateOutput>(value).map(|inner| (super::support::unknown_keys(value, CronCreateOutput::KNOWN_KEYS), Self::CronCreateOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<CronDeleteOutput>(value).map(|inner| (super::support::unknown_keys(value, CronDeleteOutput::KNOWN_KEYS), Self::CronDeleteOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<CronListOutput>(value).map(|inner| (super::support::unknown_keys(value, CronListOutput::KNOWN_KEYS), Self::CronListOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<PushNotificationOutput>(value).map(|inner| (super::support::unknown_keys(value, PushNotificationOutput::KNOWN_KEYS), Self::PushNotificationOutput(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ClaudeDesignOutput>(value).map(|inner| (super::support::unknown_keys(value, ClaudeDesignOutput::KNOWN_KEYS), Self::ClaudeDesignOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<RemoteTriggerOutput>(value).map(|inner| (RemoteTriggerOutput::match_score(value), Self::RemoteTriggerOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ShowOnboardingRolePickerOutput>(value).map(|inner| (ShowOnboardingRolePickerOutput::match_score(value), Self::ShowOnboardingRolePickerOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<OfferChromeSetupOutput>(value).map(|inner| (OfferChromeSetupOutput::match_score(value), Self::OfferChromeSetupOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReadNotificationsOutput>(value).map(|inner| (ReadNotificationsOutput::match_score(value), Self::ReadNotificationsOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ScheduleWakeupOutput>(value).map(|inner| (ScheduleWakeupOutput::match_score(value), Self::ScheduleWakeupOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<MonitorOutput>(value).map(|inner| (MonitorOutput::match_score(value), Self::MonitorOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProposeSkillsOutput>(value).map(|inner| (ProposeSkillsOutput::match_score(value), Self::ProposeSkillsOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProposeGoalOutput>(value).map(|inner| (ProposeGoalOutput::match_score(value), Self::ProposeGoalOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<EnterPlanModeOutput>(value).map(|inner| (EnterPlanModeOutput::match_score(value), Self::EnterPlanModeOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<WorkflowOutput>(value).map(|inner| (WorkflowOutput::match_score(value), Self::WorkflowOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<CronCreateOutput>(value).map(|inner| (CronCreateOutput::match_score(value), Self::CronCreateOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<CronDeleteOutput>(value).map(|inner| (CronDeleteOutput::match_score(value), Self::CronDeleteOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<CronListOutput>(value).map(|inner| (CronListOutput::match_score(value), Self::CronListOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<PushNotificationOutput>(value).map(|inner| (PushNotificationOutput::match_score(value), Self::PushNotificationOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ClaudeDesignOutput>(value).map(|inner| (ClaudeDesignOutput::match_score(value), Self::ClaudeDesignOutput(inner))));
         super::support::keep_best(&mut best, ProjectsOutput::best_match(value).map(|(score, inner)| (score, Self::ProjectsOutput(inner))));
         best
     }
@@ -228,6 +228,11 @@ struct AgentOutputCompletedContentItemWire {
 impl AgentOutputCompletedContentItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "text", "citations"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["text"])])
+    }
 }
 
 impl Serialize for AgentOutputCompletedContentItem {
@@ -269,6 +274,11 @@ struct AgentOutputCompletedUsageServerToolUseWire {
 impl AgentOutputCompletedUsageServerToolUse {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["web_search_requests", "web_fetch_requests"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for AgentOutputCompletedUsageServerToolUse {
@@ -310,6 +320,11 @@ struct AgentOutputCompletedUsageCacheCreationWire {
 impl AgentOutputCompletedUsageCacheCreation {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["ephemeral_1h_input_tokens", "ephemeral_5m_input_tokens"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for AgentOutputCompletedUsageCacheCreation {
@@ -350,6 +365,11 @@ struct AgentOutputCompletedUsageOutputTokensDetailsWire {
 impl AgentOutputCompletedUsageOutputTokensDetails {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["thinking_tokens"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for AgentOutputCompletedUsageOutputTokensDetails {
@@ -421,6 +441,11 @@ struct AgentOutputCompletedUsageWire {
 impl AgentOutputCompletedUsage {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "server_tool_use", "service_tier", "cache_creation", "inference_geo", "speed", "iterations", "output_tokens_details", "fallback_credit"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for AgentOutputCompletedUsage {
@@ -482,6 +507,11 @@ struct AgentOutputCompletedToolStatsWire {
 impl AgentOutputCompletedToolStats {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["readCount", "searchCount", "bashCount", "editFileCount", "linesAdded", "linesRemoved", "otherToolCount", "frameCount"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for AgentOutputCompletedToolStats {
@@ -593,6 +623,11 @@ struct AgentOutputCompletedWire {
 impl AgentOutputCompleted {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["agentId", "agentType", "content", "resolvedModel", "modelsUsed", "totalToolUseCount", "totalDurationMs", "totalTokens", "usage", "toolsUsed", "toolStats", "status", "prompt", "worktreePath", "worktreeBranch"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["completed"])])
+    }
 }
 
 impl Serialize for AgentOutputCompleted {
@@ -694,6 +729,11 @@ struct AgentOutputAsyncLaunchedWire {
 impl AgentOutputAsyncLaunched {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["status", "isAsync", "agentId", "description", "resolvedModel", "modelsUsed", "prompt", "outputFile", "canReadOutputFile"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["async_launched"])])
+    }
 }
 
 impl Serialize for AgentOutputAsyncLaunched {
@@ -784,6 +824,11 @@ struct AgentOutputRemoteLaunchedWire {
 impl AgentOutputRemoteLaunched {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["status", "taskId", "sessionUrl", "description", "prompt", "outputFile"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["remote_launched"])])
+    }
 }
 
 impl Serialize for AgentOutputRemoteLaunched {
@@ -826,9 +871,9 @@ impl AgentOutput {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<AgentOutputCompleted>(value).map(|inner| (super::support::unknown_keys(value, AgentOutputCompleted::KNOWN_KEYS), Self::Completed(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<AgentOutputAsyncLaunched>(value).map(|inner| (super::support::unknown_keys(value, AgentOutputAsyncLaunched::KNOWN_KEYS), Self::AsyncLaunched(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<AgentOutputRemoteLaunched>(value).map(|inner| (super::support::unknown_keys(value, AgentOutputRemoteLaunched::KNOWN_KEYS), Self::RemoteLaunched(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<AgentOutputCompleted>(value).map(|inner| (AgentOutputCompleted::match_score(value), Self::Completed(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<AgentOutputAsyncLaunched>(value).map(|inner| (AgentOutputAsyncLaunched::match_score(value), Self::AsyncLaunched(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<AgentOutputRemoteLaunched>(value).map(|inner| (AgentOutputRemoteLaunched::match_score(value), Self::RemoteLaunched(inner))));
         best
     }
 }
@@ -911,6 +956,11 @@ struct BashOutputGitOperationCommitWire {
 impl BashOutputGitOperationCommit {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["sha", "kind", "branch"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("kind", &["committed", "amended", "cherry-picked"])])
+    }
 }
 
 impl Serialize for BashOutputGitOperationCommit {
@@ -950,6 +1000,11 @@ struct BashOutputGitOperationPushWire {
 impl BashOutputGitOperationPush {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["branch"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for BashOutputGitOperationPush {
@@ -1028,6 +1083,11 @@ struct BashOutputGitOperationBranchWire {
 impl BashOutputGitOperationBranch {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["ref", "action"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("action", &["merged", "rebased"])])
+    }
 }
 
 impl Serialize for BashOutputGitOperationBranch {
@@ -1141,6 +1201,11 @@ struct BashOutputGitOperationPrWire {
 impl BashOutputGitOperationPr {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["number", "url", "action"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("action", &["created", "edited", "merged", "commented", "closed", "reopened", "ready", "draft", "auto-merge-enabled", "auto-merge-disabled"])])
+    }
 }
 
 impl Serialize for BashOutputGitOperationPr {
@@ -1190,6 +1255,11 @@ struct BashOutputGitOperationWire {
 impl BashOutputGitOperation {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["commit", "push", "branch", "pr"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for BashOutputGitOperation {
@@ -1304,6 +1374,11 @@ struct BashOutputWire {
 impl BashOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["stdout", "stderr", "rawOutputPath", "interrupted", "isImage", "backgroundTaskId", "backgroundedByUser", "timedOutAfterMs", "backgroundCwdHint", "backgroundEndsWithFinalResponse", "backgroundWakesOwner", "dangerouslyDisableSandbox", "returnCodeInterpretation", "noOutputExpected", "structuredContent", "persistedOutputPath", "persistedOutputSize", "staleReadFileStateHint", "ghRateLimitHint", "gitOperation"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for BashOutput {
@@ -1368,6 +1443,11 @@ struct ExitPlanModeOutputWire {
 impl ExitPlanModeOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["plan", "isAgent", "filePath", "hasTaskTool", "planWasEdited", "awaitingLeaderApproval", "requestId"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ExitPlanModeOutput {
@@ -1419,6 +1499,11 @@ struct FileEditOutputStructuredPatchItemWire {
 impl FileEditOutputStructuredPatchItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["oldStart", "oldLines", "newStart", "newLines", "lines"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for FileEditOutputStructuredPatchItem {
@@ -1509,6 +1594,11 @@ struct FileEditOutputGitDiffWire {
 impl FileEditOutputGitDiff {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["filename", "status", "additions", "deletions", "changes", "patch", "repository"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["modified", "added"])])
+    }
 }
 
 impl Serialize for FileEditOutputGitDiff {
@@ -1581,6 +1671,11 @@ struct FileEditOutputWire {
 impl FileEditOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["filePath", "oldString", "newString", "originalFile", "structuredPatch", "userModified", "replaceAll", "gitDiff", "staged"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for FileEditOutput {
@@ -1674,6 +1769,11 @@ struct FileReadOutputTextFileWire {
 impl FileReadOutputTextFile {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["filePath", "content", "numLines", "startLine", "totalLines", "truncatedByTokenCap"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for FileReadOutputTextFile {
@@ -1715,6 +1815,11 @@ struct FileReadOutputTextArtifactReadWire {
 impl FileReadOutputTextArtifactRead {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["slug", "ver"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for FileReadOutputTextArtifactRead {
@@ -1760,6 +1865,11 @@ struct FileReadOutputTextWire {
 impl FileReadOutputText {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "file", "artifactRead"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["text"])])
+    }
 }
 
 impl Serialize for FileReadOutputText {
@@ -1891,6 +2001,11 @@ struct FileReadOutputImageFileDimensionsWire {
 impl FileReadOutputImageFileDimensions {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["originalWidth", "originalHeight", "displayWidth", "displayHeight"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for FileReadOutputImageFileDimensions {
@@ -1942,6 +2057,11 @@ struct FileReadOutputImageFileWire {
 impl FileReadOutputImageFile {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["base64", "type", "originalSize", "dimensions"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["image/jpeg", "image/png", "image/gif", "image/webp"])])
+    }
 }
 
 impl Serialize for FileReadOutputImageFile {
@@ -1983,6 +2103,11 @@ struct FileReadOutputImageWire {
 impl FileReadOutputImage {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "file"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["image"])])
+    }
 }
 
 impl Serialize for FileReadOutputImage {
@@ -2060,6 +2185,11 @@ struct FileReadOutputNotebookFileWire {
 impl FileReadOutputNotebookFile {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["filePath", "cells"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for FileReadOutputNotebookFile {
@@ -2101,6 +2231,11 @@ struct FileReadOutputNotebookWire {
 impl FileReadOutputNotebook {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "file"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["notebook"])])
+    }
 }
 
 impl Serialize for FileReadOutputNotebook {
@@ -2182,6 +2317,11 @@ struct FileReadOutputPdfFileWire {
 impl FileReadOutputPdfFile {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["filePath", "base64", "originalSize"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for FileReadOutputPdfFile {
@@ -2223,6 +2363,11 @@ struct FileReadOutputPdfWire {
 impl FileReadOutputPdf {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "file"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["pdf"])])
+    }
 }
 
 impl Serialize for FileReadOutputPdf {
@@ -2308,6 +2453,11 @@ struct FileReadOutputPartsFileWire {
 impl FileReadOutputPartsFile {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["filePath", "originalSize", "count", "outputDir"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for FileReadOutputPartsFile {
@@ -2401,6 +2551,11 @@ struct FileReadOutputPartsPagesItemWire {
 impl FileReadOutputPartsPagesItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["base64", "mediaType", "error"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("mediaType", &["image/jpeg", "image/png", "image/gif", "image/webp"])])
+    }
 }
 
 impl Serialize for FileReadOutputPartsPagesItem {
@@ -2450,6 +2605,11 @@ struct FileReadOutputPartsWire {
 impl FileReadOutputParts {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "file", "firstPage", "pages"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["parts"])])
+    }
 }
 
 impl Serialize for FileReadOutputParts {
@@ -2496,11 +2656,11 @@ impl FileReadOutput {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputText>(value).map(|inner| (super::support::unknown_keys(value, FileReadOutputText::KNOWN_KEYS), Self::Text(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputImage>(value).map(|inner| (super::support::unknown_keys(value, FileReadOutputImage::KNOWN_KEYS), Self::Image(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputNotebook>(value).map(|inner| (super::support::unknown_keys(value, FileReadOutputNotebook::KNOWN_KEYS), Self::Notebook(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputPdf>(value).map(|inner| (super::support::unknown_keys(value, FileReadOutputPdf::KNOWN_KEYS), Self::Pdf(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputParts>(value).map(|inner| (super::support::unknown_keys(value, FileReadOutputParts::KNOWN_KEYS), Self::Parts(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputText>(value).map(|inner| (FileReadOutputText::match_score(value), Self::Text(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputImage>(value).map(|inner| (FileReadOutputImage::match_score(value), Self::Image(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputNotebook>(value).map(|inner| (FileReadOutputNotebook::match_score(value), Self::Notebook(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputPdf>(value).map(|inner| (FileReadOutputPdf::match_score(value), Self::Pdf(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputParts>(value).map(|inner| (FileReadOutputParts::match_score(value), Self::Parts(inner))));
         best
     }
 }
@@ -2586,6 +2746,11 @@ struct FileWriteOutputStructuredPatchItemWire {
 impl FileWriteOutputStructuredPatchItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["oldStart", "oldLines", "newStart", "newLines", "lines"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for FileWriteOutputStructuredPatchItem {
@@ -2676,6 +2841,11 @@ struct FileWriteOutputGitDiffWire {
 impl FileWriteOutputGitDiff {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["filename", "status", "additions", "deletions", "changes", "patch", "repository"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["modified", "added"])])
+    }
 }
 
 impl Serialize for FileWriteOutputGitDiff {
@@ -2742,6 +2912,11 @@ struct FileWriteOutputWire {
 impl FileWriteOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "filePath", "content", "structuredPatch", "originalFile", "gitDiff", "userModified", "staged"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["create", "update"])])
+    }
 }
 
 impl Serialize for FileWriteOutput {
@@ -2805,6 +2980,11 @@ struct GlobOutputWire {
 impl GlobOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["durationMs", "numFiles", "filenames", "truncated", "totalMatches", "countIsComplete", "timedOut"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for GlobOutput {
@@ -2915,6 +3095,11 @@ struct GrepOutputWire {
 impl GrepOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["mode", "numFiles", "filenames", "content", "numLines", "numMatches", "totalFiles", "totalLines", "appliedLimit", "appliedOffset", "timedOut"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("mode", &["content", "files_with_matches", "count"])])
+    }
 }
 
 impl Serialize for GrepOutput {
@@ -2965,6 +3150,11 @@ struct TaskStopOutputWire {
 impl TaskStopOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["message", "task_id", "task_type", "command"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for TaskStopOutput {
@@ -3019,6 +3209,11 @@ struct ListMcpResourcesOutputItemWire {
 impl ListMcpResourcesOutputItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["uri", "name", "mimeType", "description", "server"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ListMcpResourcesOutputItem {
@@ -3121,6 +3316,11 @@ struct RefreshMcpToolsOutputItemWire {
 impl RefreshMcpToolsOutputItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["server", "status", "toolCount", "added", "removed", "error"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["refreshed", "error", "not_connected"])])
+    }
 }
 
 impl Serialize for RefreshMcpToolsOutputItem {
@@ -3162,6 +3362,11 @@ struct McpOutputListItemWire {
 impl McpOutputListItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for McpOutputListItem {
@@ -3312,6 +3517,11 @@ struct NotebookEditOutputWire {
 impl NotebookEditOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["new_source", "old_source", "cell_id", "cell_type", "language", "edit_mode", "error", "notebook_path", "original_file", "updated_file"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("cell_type", &["code", "markdown"])])
+    }
 }
 
 impl Serialize for NotebookEditOutput {
@@ -3359,6 +3569,11 @@ struct ReadMcpResourceDirOutputResourcesItemWire {
 impl ReadMcpResourceDirOutputResourcesItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["uri", "name", "mimeType"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ReadMcpResourceDirOutputResourcesItem {
@@ -3403,6 +3618,11 @@ struct ReadMcpResourceDirOutputWire {
 impl ReadMcpResourceDirOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["resources", "error"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ReadMcpResourceDirOutput {
@@ -3455,6 +3675,11 @@ struct ReadMcpResourceOutputContentsItemWire {
 impl ReadMcpResourceOutputContentsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["uri", "mimeType", "text", "blobSavedTo"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ReadMcpResourceOutputContentsItem {
@@ -3498,6 +3723,11 @@ struct ReadMcpResourceOutputWire {
 impl ReadMcpResourceOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["contents", "error"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ReadMcpResourceOutput {
@@ -3691,6 +3921,11 @@ struct ReportFindingsOutputFindingsItemWire {
 impl ReportFindingsOutputFindingsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["file", "line", "summary", "short_summary", "failure_scenario", "category", "verdict", "outcome"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("verdict", &["CONFIRMED", "PLAUSIBLE"]), ("outcome", &["fixed", "skipped", "no_change_needed"])])
+    }
 }
 
 impl Serialize for ReportFindingsOutputFindingsItem {
@@ -3738,6 +3973,11 @@ struct ReportFindingsOutputWire {
 impl ReportFindingsOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["count", "level", "findings"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("level", &["low", "medium", "high", "xhigh", "max"])])
+    }
 }
 
 impl Serialize for ReportFindingsOutput {
@@ -3823,6 +4063,11 @@ struct TodoWriteOutputOldTodosItemWire {
 impl TodoWriteOutputOldTodosItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["content", "status", "activeForm"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["pending", "in_progress", "completed"])])
+    }
 }
 
 impl Serialize for TodoWriteOutputOldTodosItem {
@@ -3908,6 +4153,11 @@ struct TodoWriteOutputNewTodosItemWire {
 impl TodoWriteOutputNewTodosItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["content", "status", "activeForm"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["pending", "in_progress", "completed"])])
+    }
 }
 
 impl Serialize for TodoWriteOutputNewTodosItem {
@@ -3953,6 +4203,11 @@ struct TodoWriteOutputWire {
 impl TodoWriteOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["oldTodos", "newTodos"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for TodoWriteOutput {
@@ -3998,6 +4253,11 @@ struct WebFetchOutputArtifactReadWire {
 impl WebFetchOutputArtifactRead {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["slug", "ver", "seeded"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for WebFetchOutputArtifactRead {
@@ -4058,6 +4318,11 @@ struct WebFetchOutputWire {
 impl WebFetchOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["bytes", "code", "codeText", "result", "durationMs", "url", "artifactRead"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for WebFetchOutput {
@@ -4105,6 +4370,11 @@ struct WebSearchOutputResultsItemVariant1ContentItemWire {
 impl WebSearchOutputResultsItemVariant1ContentItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["title", "url", "snippet"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for WebSearchOutputResultsItemVariant1ContentItem {
@@ -4148,6 +4418,11 @@ struct WebSearchOutputResultsItemVariant1Wire {
 impl WebSearchOutputResultsItemVariant1 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["tool_use_id", "content"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for WebSearchOutputResultsItemVariant1 {
@@ -4188,7 +4463,7 @@ impl WebSearchOutputResultsItem {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<WebSearchOutputResultsItemVariant1>(value).map(|inner| (super::support::unknown_keys(value, WebSearchOutputResultsItemVariant1::KNOWN_KEYS), Self::Variant1(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<WebSearchOutputResultsItemVariant1>(value).map(|inner| (WebSearchOutputResultsItemVariant1::match_score(value), Self::Variant1(inner))));
         super::support::keep_best(&mut best, super::support::exact::<String>(value).map(|inner| (0, Self::Text(inner))));
         best
     }
@@ -4238,6 +4513,11 @@ struct WebSearchOutputWire {
 impl WebSearchOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["query", "results", "durationSeconds", "searchCount"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for WebSearchOutput {
@@ -4285,6 +4565,11 @@ struct AskUserQuestionOutputQuestionsItemOptionsItemWire {
 impl AskUserQuestionOutputQuestionsItemOptionsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["label", "description", "preview"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for AskUserQuestionOutputQuestionsItemOptionsItem {
@@ -4335,6 +4620,11 @@ struct AskUserQuestionOutputQuestionsItemWire {
 impl AskUserQuestionOutputQuestionsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["question", "header", "options", "multiSelect"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for AskUserQuestionOutputQuestionsItem {
@@ -4425,6 +4715,11 @@ struct AskUserQuestionOutputAnnotationsValueWire {
 impl AskUserQuestionOutputAnnotationsValue {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["preview", "notes", "unanswered"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("unanswered", &["skipped", "replied_in_chat", "dismissed"])])
+    }
 }
 
 impl Serialize for AskUserQuestionOutputAnnotationsValue {
@@ -4480,6 +4775,11 @@ struct AskUserQuestionOutputWire {
 impl AskUserQuestionOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["questions", "answers", "response", "annotations", "afkTimeoutMs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for AskUserQuestionOutput {
@@ -4521,6 +4821,11 @@ struct SendFeedbackOutputWire {
 impl SendFeedbackOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["success", "message"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for SendFeedbackOutput {
@@ -4566,6 +4871,11 @@ struct EnterWorktreeOutputWire {
 impl EnterWorktreeOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["worktreePath", "worktreeBranch", "message"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for EnterWorktreeOutput {
@@ -4662,6 +4972,11 @@ struct ExitWorktreeOutputWire {
 impl ExitWorktreeOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["action", "originalCwd", "worktreePath", "worktreeBranch", "tmuxSessionName", "discardedFiles", "discardedCommits", "message"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("action", &["keep", "remove"])])
+    }
 }
 
 impl Serialize for ExitWorktreeOutput {
@@ -4707,6 +5022,11 @@ struct TaskCreateOutputTaskWire {
 impl TaskCreateOutputTask {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["id", "subject", "description"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for TaskCreateOutputTask {
@@ -4746,6 +5066,11 @@ struct TaskCreateOutputWire {
 impl TaskCreateOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["task"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for TaskCreateOutput {
@@ -4837,6 +5162,11 @@ struct TaskGetOutputTaskWire {
 impl TaskGetOutputTask {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["id", "subject", "description", "status", "blocks", "blockedBy"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["pending", "in_progress", "completed"])])
+    }
 }
 
 impl Serialize for TaskGetOutputTask {
@@ -4877,6 +5207,11 @@ struct TaskGetOutputWire {
 impl TaskGetOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["task"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for TaskGetOutput {
@@ -4918,6 +5253,11 @@ struct TaskUpdateOutputStatusChangeWire {
 impl TaskUpdateOutputStatusChange {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["from", "to"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for TaskUpdateOutputStatusChange {
@@ -4969,6 +5309,11 @@ struct TaskUpdateOutputWire {
 impl TaskUpdateOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["success", "taskId", "updatedFields", "error", "statusChange"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for TaskUpdateOutput {
@@ -5059,6 +5404,11 @@ struct TaskListOutputTasksItemWire {
 impl TaskListOutputTasksItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["id", "subject", "status", "owner", "blockedBy"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["pending", "in_progress", "completed"])])
+    }
 }
 
 impl Serialize for TaskListOutputTasksItem {
@@ -5098,6 +5448,11 @@ struct TaskListOutputWire {
 impl TaskListOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["tasks"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for TaskListOutput {
@@ -5149,6 +5504,11 @@ struct ArtifactOutputVariant1StoredWire {
 impl ArtifactOutputVariant1Stored {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["contract", "preferredContract", "capabilities", "carried", "read"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant1Stored {
@@ -5247,6 +5607,11 @@ struct ArtifactOutputVariant1Wire {
 impl ArtifactOutputVariant1 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url", "path", "artifact_id", "title", "version", "capabilities", "stored", "warnings", "publishesRemaining", "publishesResetAt", "contract", "updated", "owned", "icon", "faviconSent", "iconDropped", "audience", "seq", "unchanged", "liveSubscription", "pinned"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant1 {
@@ -5391,6 +5756,11 @@ struct ArtifactOutputVariant2ArtifactsItemWire {
 impl ArtifactOutputVariant2ArtifactsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["title", "url", "favicon", "updatedAt", "rel", "external", "role", "outsidersMayHaveWritten", "pinned"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("rel", &["mine", "shared"]), ("role", &["editor", "commenter", "reader", "viewer"])])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant2ArtifactsItem {
@@ -5488,6 +5858,11 @@ struct ArtifactOutputVariant2Wire {
 impl ArtifactOutputVariant2 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["artifacts", "truncated", "total", "total_at_least", "next_page_token", "pins_enabled", "scope", "external_listed"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("scope", &["shared", "all"])])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant2 {
@@ -5542,6 +5917,11 @@ struct ArtifactOutputVariant3ReadWire {
 impl ArtifactOutputVariant3Read {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url", "bytes", "code", "codeText", "result", "durationMs", "title"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant3Read {
@@ -5587,6 +5967,11 @@ struct ArtifactOutputVariant3ArtifactReadWire {
 impl ArtifactOutputVariant3ArtifactRead {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["slug", "ver", "seeded"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant3ArtifactRead {
@@ -5632,6 +6017,11 @@ struct ArtifactOutputVariant3Wire {
 impl ArtifactOutputVariant3 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["read", "owned", "artifactRead"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant3 {
@@ -5711,6 +6101,11 @@ struct ArtifactOutputVariant4WatchWire {
 impl ArtifactOutputVariant4Watch {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url", "watching", "outcome", "reason", "durable_skip_reason", "task_id", "since", "token_expires_at", "rail", "trigger_id", "durable_since", "status", "detail", "note", "events"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant4Watch {
@@ -5750,6 +6145,11 @@ struct ArtifactOutputVariant4Wire {
 impl ArtifactOutputVariant4 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["watch"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant4 {
@@ -5791,6 +6191,11 @@ struct ArtifactOutputVariant5UnwatchWire {
 impl ArtifactOutputVariant5Unwatch {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url", "was_watching"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant5Unwatch {
@@ -5830,6 +6235,11 @@ struct ArtifactOutputVariant5Wire {
 impl ArtifactOutputVariant5 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["unwatch"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant5 {
@@ -5885,6 +6295,11 @@ struct ArtifactOutputVariant6WatchesItemVariant1Wire {
 impl ArtifactOutputVariant6WatchesItemVariant1 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url", "task_id", "since", "explicit", "connected", "connecting", "token_expires_at", "armed_via"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant6WatchesItemVariant1 {
@@ -5969,6 +6384,11 @@ struct ArtifactOutputVariant6WatchesItemVariant2Wire {
 impl ArtifactOutputVariant6WatchesItemVariant2 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url", "rail", "trigger_id", "since", "events", "restored"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("rail", &["durable_wake"])])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant6WatchesItemVariant2 {
@@ -6054,6 +6474,11 @@ struct ArtifactOutputVariant6WatchesItemVariant3Wire {
 impl ArtifactOutputVariant6WatchesItemVariant3 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url", "rail", "since", "explicit", "armed_via", "stop_kind"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("rail", &["live_stopped"])])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant6WatchesItemVariant3 {
@@ -6096,9 +6521,9 @@ impl ArtifactOutputVariant6WatchesItem {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6WatchesItemVariant1>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant6WatchesItemVariant1::KNOWN_KEYS), Self::Variant1(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6WatchesItemVariant2>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant6WatchesItemVariant2::KNOWN_KEYS), Self::Variant2(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6WatchesItemVariant3>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant6WatchesItemVariant3::KNOWN_KEYS), Self::Variant3(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6WatchesItemVariant1>(value).map(|inner| (ArtifactOutputVariant6WatchesItemVariant1::match_score(value), Self::Variant1(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6WatchesItemVariant2>(value).map(|inner| (ArtifactOutputVariant6WatchesItemVariant2::match_score(value), Self::Variant2(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6WatchesItemVariant3>(value).map(|inner| (ArtifactOutputVariant6WatchesItemVariant3::match_score(value), Self::Variant3(inner))));
         best
     }
 }
@@ -6167,6 +6592,11 @@ struct ArtifactOutputVariant6ArmsItemWire {
 impl ArtifactOutputVariant6ArmsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url", "rail", "state", "reconnect", "failures", "max_failures", "next_in_s", "last_failure", "reason", "detail", "server_message", "at"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant6ArmsItem {
@@ -6212,6 +6642,11 @@ struct ArtifactOutputVariant6Wire {
 impl ArtifactOutputVariant6 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["watches", "filter_url", "arms"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant6 {
@@ -6251,6 +6686,11 @@ struct ArtifactOutputVariant7WrittenWire {
 impl ArtifactOutputVariant7Written {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant7Written {
@@ -6301,6 +6741,11 @@ struct ArtifactOutputVariant7AssetUploadWire {
 impl ArtifactOutputVariant7AssetUpload {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["id", "url", "size_bytes", "content_type", "sha256", "file_name"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant7AssetUpload {
@@ -6346,6 +6791,11 @@ struct ArtifactOutputVariant7Wire {
 impl ArtifactOutputVariant7 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["written", "owned", "asset_upload"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant7 {
@@ -6385,6 +6835,11 @@ struct ArtifactOutputVariant8WrittenWire {
 impl ArtifactOutputVariant8Written {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant8Written {
@@ -6472,6 +6927,11 @@ struct ArtifactOutputVariant8AssetUploadsResultsItemUploadedWire {
 impl ArtifactOutputVariant8AssetUploadsResultsItemUploaded {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["file_path", "status", "id", "url", "size_bytes", "content_type", "sha256", "file_name"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["uploaded"])])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant8AssetUploadsResultsItemUploaded {
@@ -6557,6 +7017,11 @@ struct ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttemptedWire {
 impl ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["file_path", "status", "reason", "message", "may_be_stored"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["failed", "not_attempted"])])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted {
@@ -6597,8 +7062,8 @@ impl ArtifactOutputVariant8AssetUploadsResultsItem {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant8AssetUploadsResultsItemUploaded>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant8AssetUploadsResultsItemUploaded::KNOWN_KEYS), Self::Uploaded(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted::KNOWN_KEYS), Self::FailedOrNotAttempted(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant8AssetUploadsResultsItemUploaded>(value).map(|inner| (ArtifactOutputVariant8AssetUploadsResultsItemUploaded::match_score(value), Self::Uploaded(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted>(value).map(|inner| (ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted::match_score(value), Self::FailedOrNotAttempted(inner))));
         best
     }
 }
@@ -6637,6 +7102,11 @@ struct ArtifactOutputVariant8AssetUploadsWire {
 impl ArtifactOutputVariant8AssetUploads {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url", "results"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant8AssetUploads {
@@ -6682,6 +7152,11 @@ struct ArtifactOutputVariant8Wire {
 impl ArtifactOutputVariant8 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["written", "owned", "asset_uploads"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant8 {
@@ -6732,6 +7207,11 @@ struct ArtifactOutputVariant9AssetListAssetsItemWire {
 impl ArtifactOutputVariant9AssetListAssetsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["id", "url", "content_type", "size_bytes", "sha256", "created_at"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant9AssetListAssetsItem {
@@ -6777,6 +7257,11 @@ struct ArtifactOutputVariant9AssetListUsageWire {
 impl ArtifactOutputVariant9AssetListUsage {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["files", "bytes", "max_files", "max_bytes"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant9AssetListUsage {
@@ -6829,6 +7314,11 @@ struct ArtifactOutputVariant9AssetListWire {
 impl ArtifactOutputVariant9AssetList {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url", "assets", "usage", "next", "cowritten", "outside_writer"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant9AssetList {
@@ -6868,6 +7358,11 @@ struct ArtifactOutputVariant9Wire {
 impl ArtifactOutputVariant9 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["asset_list"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant9 {
@@ -6927,6 +7422,11 @@ struct ArtifactOutputVariant10AssetReadWire {
 impl ArtifactOutputVariant10AssetRead {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["id", "path", "size_bytes", "content_type", "sha256", "cowritten", "outside_writer", "public_read", "foreign"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant10AssetRead {
@@ -6966,6 +7466,11 @@ struct ArtifactOutputVariant10Wire {
 impl ArtifactOutputVariant10 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["asset_read"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant10 {
@@ -7005,6 +7510,11 @@ struct ArtifactOutputVariant11WrittenWire {
 impl ArtifactOutputVariant11Written {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["url"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant11Written {
@@ -7046,6 +7556,11 @@ struct ArtifactOutputVariant11AssetDeleteWire {
 impl ArtifactOutputVariant11AssetDelete {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["id", "deleted"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant11AssetDelete {
@@ -7091,6 +7606,11 @@ struct ArtifactOutputVariant11Wire {
 impl ArtifactOutputVariant11 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["written", "owned", "asset_delete"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant11 {
@@ -7174,6 +7694,11 @@ struct ArtifactOutputVariant12PinWire {
 impl ArtifactOutputVariant12Pin {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["action", "url", "pinned", "title"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("action", &["pin", "unpin"])])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant12Pin {
@@ -7213,6 +7738,11 @@ struct ArtifactOutputVariant12Wire {
 impl ArtifactOutputVariant12 {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["pin"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ArtifactOutputVariant12 {
@@ -7273,18 +7803,18 @@ impl ArtifactOutput {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant1>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant1::KNOWN_KEYS), Self::Variant1(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant2>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant2::KNOWN_KEYS), Self::Variant2(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant3>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant3::KNOWN_KEYS), Self::Variant3(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant4>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant4::KNOWN_KEYS), Self::Variant4(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant5>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant5::KNOWN_KEYS), Self::Variant5(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant6::KNOWN_KEYS), Self::Variant6(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant7>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant7::KNOWN_KEYS), Self::Variant7(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant8>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant8::KNOWN_KEYS), Self::Variant8(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant9>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant9::KNOWN_KEYS), Self::Variant9(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant10>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant10::KNOWN_KEYS), Self::Variant10(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant11>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant11::KNOWN_KEYS), Self::Variant11(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant12>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant12::KNOWN_KEYS), Self::Variant12(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant1>(value).map(|inner| (ArtifactOutputVariant1::match_score(value), Self::Variant1(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant2>(value).map(|inner| (ArtifactOutputVariant2::match_score(value), Self::Variant2(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant3>(value).map(|inner| (ArtifactOutputVariant3::match_score(value), Self::Variant3(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant4>(value).map(|inner| (ArtifactOutputVariant4::match_score(value), Self::Variant4(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant5>(value).map(|inner| (ArtifactOutputVariant5::match_score(value), Self::Variant5(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6>(value).map(|inner| (ArtifactOutputVariant6::match_score(value), Self::Variant6(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant7>(value).map(|inner| (ArtifactOutputVariant7::match_score(value), Self::Variant7(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant8>(value).map(|inner| (ArtifactOutputVariant8::match_score(value), Self::Variant8(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant9>(value).map(|inner| (ArtifactOutputVariant9::match_score(value), Self::Variant9(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant10>(value).map(|inner| (ArtifactOutputVariant10::match_score(value), Self::Variant10(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant11>(value).map(|inner| (ArtifactOutputVariant11::match_score(value), Self::Variant11(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant12>(value).map(|inner| (ArtifactOutputVariant12::match_score(value), Self::Variant12(inner))));
         best
     }
 }
@@ -7326,6 +7856,11 @@ struct RemoteTriggerOutputWire {
 impl RemoteTriggerOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["status", "json", "summary"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for RemoteTriggerOutput {
@@ -7369,6 +7904,11 @@ struct ShowOnboardingRolePickerOutputWire {
 impl ShowOnboardingRolePickerOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["role", "dismissed"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ShowOnboardingRolePickerOutput {
@@ -7449,6 +7989,11 @@ struct OfferChromeSetupOutputWire {
 impl OfferChromeSetupOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["outcome"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("outcome", &["connected", "not_now", "no_attempt_yet"])])
+    }
 }
 
 impl Serialize for OfferChromeSetupOutput {
@@ -7502,6 +8047,11 @@ struct ReadNotificationsOutputNotificationsItemWire {
 impl ReadNotificationsOutputNotificationsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["notification_id", "origin", "queued_at", "content", "arrived_at"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ReadNotificationsOutputNotificationsItem {
@@ -7548,6 +8098,11 @@ struct ReadNotificationsOutputWire {
 impl ReadNotificationsOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["notifications", "remaining", "read_at"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ReadNotificationsOutput {
@@ -7605,6 +8160,11 @@ struct ScheduleWakeupOutputWire {
 impl ScheduleWakeupOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["scheduledFor", "clampedDelaySeconds", "wasClamped", "stopped", "cancelledWakeups"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ScheduleWakeupOutput {
@@ -7654,6 +8214,11 @@ struct MonitorOutputWire {
 impl MonitorOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["taskId", "timeoutMs", "persistent"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for MonitorOutput {
@@ -7695,6 +8260,11 @@ struct ProposeSkillsOutputWire {
 impl ProposeSkillsOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["proposalCount"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ProposeSkillsOutput {
@@ -7739,6 +8309,11 @@ struct ProposeGoalOutputWire {
 impl ProposeGoalOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["condition", "askUser"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ProposeGoalOutput {
@@ -7779,6 +8354,11 @@ struct EnterPlanModeOutputWire {
 impl EnterPlanModeOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["message"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for EnterPlanModeOutput {
@@ -7930,6 +8510,11 @@ struct WorkflowOutputWire {
 impl WorkflowOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["status", "taskId", "taskType", "workflowName", "runId", "summary", "transcriptDir", "scriptPath", "sessionUrl", "warning", "error"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("status", &["async_launched", "remote_launched"]), ("taskType", &["local_workflow", "remote_agent"])])
+    }
 }
 
 impl Serialize for WorkflowOutput {
@@ -7981,6 +8566,11 @@ struct CronCreateOutputWire {
 impl CronCreateOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["id", "humanSchedule", "recurring", "durable", "nextFireAt"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for CronCreateOutput {
@@ -8023,6 +8613,11 @@ struct CronDeleteOutputWire {
 impl CronDeleteOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["id", "endedLoopWakeup"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for CronDeleteOutput {
@@ -8079,6 +8674,11 @@ struct CronListOutputJobsItemWire {
 impl CronListOutputJobsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["id", "cron", "humanSchedule", "prompt", "recurring", "durable", "nextFireAt"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for CronListOutputJobsItem {
@@ -8118,6 +8718,11 @@ struct CronListOutputWire {
 impl CronListOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["jobs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for CronListOutput {
@@ -8211,6 +8816,11 @@ struct PushNotificationOutputWire {
 impl PushNotificationOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["message", "pushSent", "localSent", "disabledReason", "sentAt"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("disabledReason", &["config_off", "user_present", "no_transport"])])
+    }
 }
 
 impl Serialize for PushNotificationOutput {
@@ -8255,6 +8865,11 @@ struct ClaudeDesignOutputWire {
 impl ClaudeDesignOutput {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["operation", "content", "isError"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ClaudeDesignOutput {
@@ -8330,6 +8945,11 @@ struct ProjectsOutputProjectInfoDocsItemWire {
 impl ProjectsOutputProjectInfoDocsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["path", "created_at"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectInfoDocsItem {
@@ -8374,6 +8994,11 @@ struct ProjectsOutputProjectInfoFilesItemWire {
 impl ProjectsOutputProjectInfoFilesItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["path", "file_kind", "created_at"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectInfoFilesItem {
@@ -8416,6 +9041,11 @@ struct ProjectsOutputProjectInfoSyncSourcesItemWire {
 impl ProjectsOutputProjectInfoSyncSourcesItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["type", "config"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectInfoSyncSourcesItem {
@@ -8457,6 +9087,11 @@ struct ProjectsOutputProjectInfoKnowledgeWire {
 impl ProjectsOutputProjectInfoKnowledge {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["knowledge_size", "max_knowledge_size"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectInfoKnowledge {
@@ -8518,6 +9153,11 @@ struct ProjectsOutputProjectInfoWire {
 impl ProjectsOutputProjectInfo {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "local_file", "name", "description", "instructions", "docs", "files", "sync_sources", "knowledge"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("method", &["project_info"])])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectInfo {
@@ -8607,6 +9247,11 @@ struct ProjectsOutputProjectReadWire {
 impl ProjectsOutputProjectRead {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "path", "file_kind", "content", "local_file", "created_at"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("method", &["project_read"])])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectRead {
@@ -8692,6 +9337,11 @@ struct ProjectsOutputProjectSearchHitsItemWire {
 impl ProjectsOutputProjectSearchHitsItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["name", "doc_uuid", "text", "image_attached", "page"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectSearchHitsItem {
@@ -8742,6 +9392,11 @@ struct ProjectsOutputProjectSearchWire {
 impl ProjectsOutputProjectSearch {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "rag", "hits", "docs"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("method", &["project_search"])])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectSearch {
@@ -8829,6 +9484,11 @@ struct ProjectsOutputProjectWriteWire {
 impl ProjectsOutputProjectWrite {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "path", "doc_uuid", "replaced", "present_to_user", "local_path"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("method", &["project_write"])])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectWrite {
@@ -8908,6 +9568,11 @@ struct ProjectsOutputProjectDeleteWire {
 impl ProjectsOutputProjectDelete {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "path", "deleted"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("method", &["project_delete"])])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectDelete {
@@ -8987,6 +9652,11 @@ struct ProjectsOutputProjectMemoryListFilesItemWire {
 impl ProjectsOutputProjectMemoryListFilesItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["path", "size_bytes", "updated_at", "truncated"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectMemoryListFilesItem {
@@ -9033,6 +9703,11 @@ struct ProjectsOutputProjectMemoryListWire {
 impl ProjectsOutputProjectMemoryList {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "files", "truncated"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("method", &["project_memory_list"])])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectMemoryList {
@@ -9123,6 +9798,11 @@ struct ProjectsOutputProjectMemoryReadWire {
 impl ProjectsOutputProjectMemoryRead {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "path", "content", "local_file", "size_bytes", "updated_at", "truncated"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("method", &["project_memory_read"])])
+    }
 }
 
 impl Serialize for ProjectsOutputProjectMemoryRead {
@@ -9173,13 +9853,13 @@ impl ProjectsOutput {
     /// undeclared keys, earliest declared on ties, or `None` when no member matches.
     pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
         let mut best: Option<(usize, Self)> = None;
-        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectInfo>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectInfo::KNOWN_KEYS), Self::ProjectInfo(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectRead>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectRead::KNOWN_KEYS), Self::ProjectRead(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectSearch>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectSearch::KNOWN_KEYS), Self::ProjectSearch(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectWrite>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectWrite::KNOWN_KEYS), Self::ProjectWrite(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectDelete>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectDelete::KNOWN_KEYS), Self::ProjectDelete(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectMemoryList>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectMemoryList::KNOWN_KEYS), Self::ProjectMemoryList(inner))));
-        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectMemoryRead>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectMemoryRead::KNOWN_KEYS), Self::ProjectMemoryRead(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectInfo>(value).map(|inner| (ProjectsOutputProjectInfo::match_score(value), Self::ProjectInfo(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectRead>(value).map(|inner| (ProjectsOutputProjectRead::match_score(value), Self::ProjectRead(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectSearch>(value).map(|inner| (ProjectsOutputProjectSearch::match_score(value), Self::ProjectSearch(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectWrite>(value).map(|inner| (ProjectsOutputProjectWrite::match_score(value), Self::ProjectWrite(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectDelete>(value).map(|inner| (ProjectsOutputProjectDelete::match_score(value), Self::ProjectDelete(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectMemoryList>(value).map(|inner| (ProjectsOutputProjectMemoryList::match_score(value), Self::ProjectMemoryList(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectMemoryRead>(value).map(|inner| (ProjectsOutputProjectMemoryRead::match_score(value), Self::ProjectMemoryRead(inner))));
         best
     }
 }

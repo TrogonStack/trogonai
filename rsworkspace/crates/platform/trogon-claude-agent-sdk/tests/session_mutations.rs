@@ -169,7 +169,7 @@ fn fork_remaps_uuids_skips_progress_and_titles_the_copy() -> TestResult {
 
     let messages = f
         .files
-        .get_session_messages(forked.as_str(), None, MessagePage::default());
+        .get_session_messages(forked.as_str(), None, MessagePage::default())?;
     assert_eq!(messages.len(), 3);
     let listed = f.files.list_sessions(&ListSessionsOptions::default());
     assert_eq!(listed.len(), 2);

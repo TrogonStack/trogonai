@@ -32,3 +32,23 @@ pub mod tool_inputs;
     reason = "Generated code mirrors upstream names and keeps a private serde mirror of each struct."
 )]
 pub mod tool_outputs;
+
+#[rustfmt::skip]
+#[allow(
+    dead_code,
+    missing_docs,
+    clippy::enum_variant_names,
+    clippy::large_enum_variant,
+    reason = "Generated code mirrors upstream names and keeps a private serde mirror of each struct."
+)]
+pub mod settings;
+
+#[rustfmt::skip]
+#[allow(
+    dead_code,
+    missing_docs,
+    clippy::enum_variant_names,
+    clippy::large_enum_variant,
+    reason = "Generated code mirrors upstream names and keeps a private serde mirror of each struct."
+)]
+pub mod settings_resolution;

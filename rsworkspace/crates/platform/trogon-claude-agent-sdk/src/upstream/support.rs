@@ -71,6 +71,22 @@ pub(super) fn unknown_keys(value: &serde_json::Value, known: &[&str]) -> usize {
         .map_or(0, |map| map.keys().filter(|key| !known.contains(&key.as_str())).count())
 }
 
+/// The number of the listed string-literal properties of `value` that hold a string the
+/// declarations do not list.
+pub(super) fn unlisted_literals(value: &serde_json::Value, literals: &[(&str, &[&str])]) -> usize {
+    let Some(map) = value.as_object() else {
+        return 0;
+    };
+    literals
+        .iter()
+        .filter(|(key, allowed)| {
+            map.get(*key)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|text| !allowed.contains(&text))
+        })
+        .count()
+}
+
 /// Keeps the candidate with the fewest unknown keys; the earliest declared wins ties.
 pub(super) fn keep_best<T>(best: &mut Option<(usize, T)>, candidate: Option<(usize, T)>) {
     if let Some((score, value)) = candidate

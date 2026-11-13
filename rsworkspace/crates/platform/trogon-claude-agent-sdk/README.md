@@ -261,6 +261,16 @@ independently of message consumption. Stderr debug output omits its contents.
 `QueueCapacity` validates Tokio's range; positive `Timeout` values are bounded
 at 24 hours.
 
+## Settings
+
+`Settings` is generated from the pinned TypeScript declarations: every declared key is a
+typed field, and keys it does not declare are kept in order. `Settings::from_json` then
+`to_json` reproduces the input byte for byte. `SettingsInput` names the three forms the
+`--settings` value takes: `Path`, `Json` and `Inline(Settings)`. Nothing is validated.
+`SandboxSettings` and its parts, `ResolvedSettings`, `ProvenanceEntry`, `ResolvedSettingSource`,
+`PolicySettingsOrigin`, `ResolveSettingsOptions` and `SDKSettingsParseError` carry the upstream
+names; Python sandbox dicts decode and encode through the sandbox types unchanged.
+
 ## External session stores
 
 Set `session_store` to a `SessionStoreOptions`. Implement `SessionStore` for a
