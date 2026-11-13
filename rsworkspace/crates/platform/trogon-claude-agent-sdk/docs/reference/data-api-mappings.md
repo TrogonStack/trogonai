@@ -174,6 +174,7 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 | Rust | Python | TypeScript |
 | --- | --- | --- |
 | `Message` (`raw()`, `to_sdk_message()`) | `Message` union | `SDKMessage` (generated as `upstream::messages::SDKMessage`, every member plus `Unknown`) |
+| `Message::to_active_goal_message()` | no type; `parse_message` skips it | `SDKActiveGoalMessage` (generated as `upstream::messages::SDKActiveGoalMessage`) |
 | `MessageDecoding::{TypeScript, Python}`, `ClaudeAgentOptions::message_decoding` | `parse_message` | `query()` message stream |
 | `Message::RateLimit(RateLimitEvent)`, `RateLimitInfo` | `RateLimitEvent`, `RateLimitInfo` | `SDKRateLimitEvent` |
 | `Message::ConversationReset(ConversationResetMessage)` | `ConversationResetMessage` | `SDKConversationResetMessage` |

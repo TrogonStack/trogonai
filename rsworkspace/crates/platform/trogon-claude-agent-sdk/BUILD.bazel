@@ -215,6 +215,9 @@ workspace_crate(
         "upstream_hooks": {
             "compile_data": glob(["tests/fixtures/*.json"]),
         },
+        "upstream_messages": {
+            "compile_data": glob(["tests/fixtures/*.json"]),
+        },
         "upstream_settings": {
             "compile_data": glob(["tests/fixtures/*.json"]),
         },

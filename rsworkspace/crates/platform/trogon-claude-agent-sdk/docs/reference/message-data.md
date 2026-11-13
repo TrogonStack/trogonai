@@ -119,7 +119,9 @@ Every message keeps the object the CLI wrote in `raw`, so no field is dropped.
 from `upstream::messages`, which covers every member the pinned sdk.d.ts
 declares; encoding that value gives back `raw`. The per-struct
 `to_sdk_message` methods return the matching member, or None when the message
-does not match its shape exactly.
+does not match its shape exactly. TypeScript `query()` also yields the
+`active_goal` message, which sdk.d.ts declares outside the `SDKMessage` union;
+`Message::to_active_goal_message` types it as `SDKActiveGoalMessage`.
 
 ## Decoding
 

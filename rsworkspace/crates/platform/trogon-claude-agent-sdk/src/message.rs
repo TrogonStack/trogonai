@@ -31,7 +31,7 @@ pub enum Message {
     /// A message of a type without a Rust struct above, or a known message whose values do not fit its struct.
     /// `kind` is the `type` (empty when it is absent or not a string), `data` the message without its `type` key
     /// and `raw` the message as written. [`Message::to_sdk_message`] still types every message the pinned
-    /// TypeScript declarations list.
+    /// TypeScript declarations list, and [`Message::to_active_goal_message`] the `active_goal` message.
     Unknown {
         kind: String,
         data: JsonObject,
@@ -59,6 +59,16 @@ impl Message {
     /// reproduces [`Message::raw`].
     pub fn to_sdk_message(&self) -> ts::SDKMessage {
         sdk_message(self.raw())
+    }
+
+    /// The message typed as TypeScript `SDKActiveGoalMessage`, which the TypeScript `query()` yields next to the
+    /// `SDKMessage` members, or `None` when it is not an `active_goal` message of that exact shape. Encoding the
+    /// result reproduces [`Message::raw`].
+    pub fn to_active_goal_message(&self) -> Option<ts::SDKActiveGoalMessage> {
+        match self {
+            Self::Unknown { kind, raw, .. } if kind == "active_goal" => exact(raw),
+            _ => None,
+        }
     }
 }
 

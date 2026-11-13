@@ -276,6 +276,32 @@ export declare const BAD: readonly [1, 2];
         fixtures = json.loads((Path(out.name) / "fixtures.json").read_text(encoding="utf-8"))
         self.assertEqual(fixtures, {"Event": [{"id": "text", "agent": "text", "kind": "event", "size": 3}]})
 
+    def test_fixture_synthesis_samples_foreign_names_and_indexed_access(self):
+        declarations = '''
+import type { Outside } from "elsewhere";
+export interface Holder { mode: "a" | "b"; count: number }
+export interface Carrier { id: ID; body: Outside; part: Outside["part"]; mode: Holder["mode"] }
+'''
+        out = tempfile.TemporaryDirectory()
+        self.addCleanup(out.cleanup)
+        config = self.config(
+            ["Carrier"],
+            foreign={"ID": "string", "Outside": "object"},
+            fixtures={"output": "fixtures.json", "roots": ["Carrier"]},
+        )
+        result = subprocess.run(
+            ["node", str(LIB / "synthesize_fixtures.mjs"), "--typescript-package", str(self.package(declarations)), "--config", str(config), "--out-root", out.name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fixtures = json.loads((Path(out.name) / "fixtures.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            fixtures,
+            {"Carrier": [{"id": "text", "body": {"foreign": "object"}, "part": {"any": ["thing", None]}, "mode": "a"}]},
+        )
+
     def test_unsupported_declarations_fail_instead_of_guessing(self):
         for declarations in ("export interface Bad { run(): void }", "export type Bad = Foo<string>;", "export interface Bad { x: Missing }"):
             out = tempfile.TemporaryDirectory()
