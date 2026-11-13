@@ -74,6 +74,9 @@ async fn concurrent_provisioners_both_succeed() {
 async fn refuses_a_weakened_stream_and_leaves_it_as_it_found_it() {
     let server = JetStreamTestServer::start().await;
     let js = server.jetstream().await;
+    // Keep file storage nonempty while AUDIT is deleted and recreated: NATS
+    // removes an empty account directory asynchronously after stream deletion.
+    js.create_stream(AuditStream::Checkpoint.config(one())).await.unwrap();
     type Weaken = fn(&mut Config);
     let cases: [(&str, Weaken, AuditStreamMismatchError); 6] = [
         (
