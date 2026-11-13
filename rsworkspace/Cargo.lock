@@ -7883,6 +7883,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-secrets-service"
+version = "0.1.0"
+dependencies = [
+ "buffa",
+ "nkeys",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "trogon-credential-aggregate",
+ "trogon-credential-domain",
+ "trogon-secret-store",
+ "trogon-std",
+ "trogonai-proto",
+]
+
+[[package]]
 name = "trogon-semconv"
 version = "0.1.0"
 dependencies = [
