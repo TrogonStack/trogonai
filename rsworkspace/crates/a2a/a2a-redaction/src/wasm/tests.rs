@@ -7,12 +7,11 @@ use super::*;
 use crate::signed_bundle::{Ed25519Signature, Sha256Digest, sign_bundle_digest};
 use a2a::types::{PartContent, Role};
 
-fn fixture_path() -> &'static Path {
-    Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/identity_redact_part.wasm"
-    ))
-}
+// Embedded so the tests do not depend on the source tree being present at runtime.
+const FIXTURE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/identity_redact_part.wasm"
+));
 
 fn write_signed_bundle(dir: &Path, skill: &str, signing_key: &SigningKey, manifest_bytes: &[u8], wasm_bytes: &[u8]) {
     fs::write(dir.join(format!("{skill}.wasm")), wasm_bytes).expect("write wasm");
@@ -139,7 +138,7 @@ fn preload_without_signing_pubkey_skips_sig_file() {
     let temp = tempfile::tempdir().expect("tempdir");
     let skill = "fixture";
     let manifest = br#"{"json_path":"$.x"}"#;
-    let wasm = fs::read(fixture_path()).expect("read fixture");
+    let wasm = FIXTURE.to_vec();
     fs::write(temp.path().join(format!("{skill}.wasm")), &wasm).expect("write wasm");
     fs::write(temp.path().join(format!("{skill}.manifest.json")), manifest).expect("write manifest");
 
@@ -153,7 +152,7 @@ fn preload_with_signing_pubkey_requires_valid_sig() {
     let temp = tempfile::tempdir().expect("tempdir");
     let skill = "fixture";
     let manifest = br#"{"json_path":"$.x"}"#;
-    let wasm = fs::read(fixture_path()).expect("read fixture");
+    let wasm = FIXTURE.to_vec();
     let signing_key = SigningKey::from_bytes(&[9u8; 32]);
     let pubkey = Ed25519PublicKey::from_bytes(*signing_key.verifying_key().as_bytes());
     write_signed_bundle(temp.path(), skill, &signing_key, manifest, &wasm);
@@ -168,7 +167,7 @@ fn preload_with_signing_pubkey_rejects_missing_sig() {
     let temp = tempfile::tempdir().expect("tempdir");
     let skill = "fixture";
     let manifest = br#"{"json_path":"$.x"}"#;
-    let wasm = fs::read(fixture_path()).expect("read fixture");
+    let wasm = FIXTURE.to_vec();
     fs::write(temp.path().join(format!("{skill}.wasm")), &wasm).expect("write wasm");
     fs::write(temp.path().join(format!("{skill}.manifest.json")), manifest).expect("write manifest");
 
@@ -189,7 +188,7 @@ fn preload_with_signing_pubkey_rejects_tampered_wasm() {
     let temp = tempfile::tempdir().expect("tempdir");
     let skill = "fixture";
     let manifest = br#"{"json_path":"$.x"}"#;
-    let wasm = fs::read(fixture_path()).expect("read fixture");
+    let wasm = FIXTURE.to_vec();
     let signing_key = SigningKey::from_bytes(&[13u8; 32]);
     write_signed_bundle(temp.path(), skill, &signing_key, manifest, &wasm);
 
@@ -229,7 +228,7 @@ fn register_skill_wasm_refused_when_signing_pubkey_configured() {
     let signing_key = SigningKey::from_bytes(&[19u8; 32]);
     let pubkey = Ed25519PublicKey::from_bytes(*signing_key.verifying_key().as_bytes());
     let host = WasmRedactorHost::new_with_signing_pubkey(WasmBundlePath::new(temp.path()), Some(pubkey)).expect("host");
-    let wasm = fs::read(fixture_path()).expect("read fixture");
+    let wasm = FIXTURE.to_vec();
     let err = host
         .register_skill_wasm(SkillId::new("anything").expect("valid"), &wasm)
         .expect_err("must refuse bypass when signing pubkey configured");
@@ -261,7 +260,7 @@ fn register_skill_bundle_file_delegates_to_preload() {
     let temp = tempfile::tempdir().expect("tempdir");
     let skill = "fixture";
     let manifest = br#"{"json_path":"$.x"}"#;
-    let wasm = fs::read(fixture_path()).expect("read fixture");
+    let wasm = FIXTURE.to_vec();
     fs::write(temp.path().join(format!("{skill}.wasm")), &wasm).expect("write wasm");
     fs::write(temp.path().join(format!("{skill}.manifest.json")), manifest).expect("write manifest");
 
@@ -287,7 +286,7 @@ fn register_skill_wasm_rejects_invalid_wasm_bytes() {
 fn preload_skill_bundle_fails_when_manifest_missing() {
     let temp = tempfile::tempdir().expect("tempdir");
     let skill = "fixture";
-    let wasm = fs::read(fixture_path()).expect("read fixture");
+    let wasm = FIXTURE.to_vec();
     fs::write(temp.path().join(format!("{skill}.wasm")), &wasm).expect("write wasm");
     // Intentionally omit the manifest file.
 
