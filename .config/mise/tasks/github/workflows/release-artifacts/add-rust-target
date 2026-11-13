@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Add the TARGET Rust target for a native release build"
+set -euo pipefail
+
+: "${TARGET:?TARGET is required}"
+
+exec rustup target add "$TARGET"

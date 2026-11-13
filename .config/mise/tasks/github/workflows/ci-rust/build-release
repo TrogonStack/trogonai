@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Build rsworkspace in release mode"
+#MISE dir="rsworkspace"
+set -euo pipefail
+
+exec cargo build --release

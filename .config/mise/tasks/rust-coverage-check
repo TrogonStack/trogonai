@@ -13,7 +13,7 @@ if [[ ! -f "$baseline" ]]; then
 fi
 
 echo "Running Rust tests with the CI coverage task..."
-mise run github-actions:rust-coverage
+mise run rust:coverage
 
 echo ""
 cd "$root"

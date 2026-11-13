@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Validate every generated SPIRE Kubernetes resource"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+# Exact versions instead of the project toolset keep this gate on the versions
+# the workflow installs, independent of what the shared config pins.
+exec mise exec python@3.14.5 kubeconform@0.8.0 -- python3 devops/kubernetes/spire/check_schemas.py

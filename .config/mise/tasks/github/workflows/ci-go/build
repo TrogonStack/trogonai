@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Build the Go workspace"
+#MISE depends=["build:go"]
+set -euo pipefail

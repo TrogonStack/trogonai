@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Test a2a-gateway with default features"
+#MISE dir="rsworkspace"
+set -euo pipefail
+
+exec cargo test -p a2a-gateway

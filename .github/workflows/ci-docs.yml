@@ -8,6 +8,7 @@ on:
     paths:
       - 'docs/**'
       - '.github/workflows/ci-docs.yml'
+      - '.config/mise/tasks/github/workflows/ci-docs/**'
 
 concurrency:
   group: ci-docs-${{ github.ref }}
@@ -38,12 +39,16 @@ jobs:
           cache: pnpm
           cache-dependency-path: docs/pnpm-lock.yaml
 
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-        working-directory: docs
+        run: mise run --skip-tools github:workflows:ci-docs:install
 
       - name: Build docs
-        run: pnpm docs:build
-        working-directory: docs
+        run: mise run --skip-tools github:workflows:ci-docs:build
         env:
           DOCS_BASE: ${{ vars.DOCS_BASE || format('/{0}/', github.event.repository.name) }}

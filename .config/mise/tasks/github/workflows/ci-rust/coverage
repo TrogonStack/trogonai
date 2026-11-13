@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Run rsworkspace tests with coverage into rsworkspace/coverage.xml"
+#MISE depends=["rust:coverage"]
+set -euo pipefail

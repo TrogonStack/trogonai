@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Write the pinned buf version to GITHUB_OUTPUT for buf-action"
+set -euo pipefail
+
+: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+
+echo "version=$(buf --version)" >>"$GITHUB_OUTPUT"

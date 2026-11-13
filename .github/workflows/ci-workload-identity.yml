@@ -13,6 +13,7 @@ on:
       - '.config/mise/config.toml'
       - '.config/mise/mise.lock'
       - '.github/workflows/ci-workload-identity.yml'
+      - '.config/mise/tasks/github/workflows/ci-workload-identity/**'
 
 concurrency:
   group: ci-workload-identity-${{ github.ref }}
@@ -48,10 +49,10 @@ jobs:
           add_shims_to_path: false
 
       - name: Test deployment security and release refusal
-        run: mise exec python@3.14.5 -- python3 -m unittest discover -s devops/kubernetes/spire -p 'test_*.py'
+        run: mise run --skip-tools github:workflows:ci-workload-identity:test-deployment
 
       - name: Test generated admission expressions without cached results
-        run: mise exec go@1.27.3 python@3.14.5 -- python3 devops/kubernetes/spire/check_policies.py
+        run: mise run --skip-tools github:workflows:ci-workload-identity:check-policies
 
       - name: Validate every generated Kubernetes resource
-        run: mise exec python@3.14.5 kubeconform@0.8.0 -- python3 devops/kubernetes/spire/check_schemas.py
+        run: mise run --skip-tools github:workflows:ci-workload-identity:check-schemas

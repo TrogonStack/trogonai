@@ -60,10 +60,10 @@ jobs:
           dylint-toolchain-dir: rsworkspace/dylints/trogonai_dylint
 
       - name: Enforce crate licenses
-        run: mise run --skip-tools github-actions:enforce-cargo-license
+        run: mise run --skip-tools github:workflows:ci-rust:enforce-cargo-license
 
       - name: Enforce TLS policy (ADR#0015)
-        run: mise run --skip-tools rust:tls-policy
+        run: mise run --skip-tools github:workflows:ci-rust:tls-policy
 
       - name: Cache dependencies
         id: rust-cache
@@ -74,31 +74,27 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Summarize Rust cache
-        run: echo "rust-cache exact key match for lint (partial restore reports false) = ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        run: mise run --skip-tools github:workflows:ci-rust:rust-cache-summary
         env:
           CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
-        working-directory: rsworkspace
+        run: mise run --skip-tools github:workflows:ci-rust:fmt
 
       - name: Test repo Rust policy lints
-        run: mise run github-actions:dylint-tests
+        run: mise run github:workflows:ci-rust:dylint-tests
 
       - name: Run repo Rust policy lints
-        run: mise run --skip-tools github-actions:rust-dylint
+        run: mise run --skip-tools github:workflows:ci-rust:rust-dylint
 
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features
-        working-directory: rsworkspace
+        run: mise run --skip-tools github:workflows:ci-rust:clippy
 
       - name: Run clippy (a2a-gateway, default features)
-        run: cargo clippy -p a2a-gateway --all-targets
-        working-directory: rsworkspace
+        run: mise run --skip-tools github:workflows:ci-rust:clippy-a2a-gateway
 
       - name: Run clippy (a2a-gateway, spicedb)
-        run: cargo clippy -p a2a-gateway --all-targets --features spicedb
-        working-directory: rsworkspace
+        run: mise run --skip-tools github:workflows:ci-rust:clippy-a2a-gateway-spicedb
 
   test:
     needs: changes
@@ -133,7 +129,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Summarize Rust cache
-        run: echo "rust-cache exact key match for test (partial restore reports false) = ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        run: mise run --skip-tools github:workflows:ci-rust:rust-cache-summary
         env:
           CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
@@ -143,16 +139,16 @@ jobs:
           tool: cargo-llvm-cov,nextest
 
       - name: Install Rust coverage toolchain
-        run: rustup toolchain install nightly-2026-04-16 --profile minimal --component llvm-tools-preview --target wasm32-unknown-unknown
+        run: mise run --skip-tools github:workflows:ci-rust:coverage-toolchain
 
       - name: Build decider components for sim fixtures
-        run: mise run artifacts:wasm-components
+        run: mise run github:workflows:ci-rust:wasm-components
 
       - name: Test gateway bootstrap identity
-        run: sh devops/docker/compose/services/nats/gateway-env.test.sh
+        run: mise run --skip-tools github:workflows:ci-rust:gateway-env-test
 
       - name: Run tests with coverage
-        run: mise run --skip-tools github-actions:rust-coverage
+        run: mise run --skip-tools github:workflows:ci-rust:coverage
         env:
           NEXTEST_PROFILE: ci
           # actions/checkout stamps every file with checkout time, so mtime
@@ -183,8 +179,7 @@ jobs:
 
       - name: Prepare nested test targets for cache cleanup
         if: always()
-        # rust-cache v2.9.2 traverses both paths, but trybuild creates only one.
-        run: mkdir -p rsworkspace/target/tests/{target,trybuild}
+        run: mise run --skip-tools github:workflows:ci-rust:test-targets
 
   build:
     needs: changes
@@ -210,13 +205,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Summarize Rust cache
-        run: echo "rust-cache exact key match for build (partial restore reports false) = ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        run: mise run --skip-tools github:workflows:ci-rust:rust-cache-summary
         env:
           CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
       - name: Build release
-        run: cargo build --release
-        working-directory: rsworkspace
+        run: mise run --skip-tools github:workflows:ci-rust:build-release
 
   wasm-decider:
     needs: changes
@@ -244,35 +238,31 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Summarize Rust cache
-        run: echo "rust-cache exact key match for wasm-decider (partial restore reports false) = ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+        run: mise run --skip-tools github:workflows:ci-rust:rust-cache-summary
         env:
           CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
       - name: Build decider components
-        run: mise run artifacts:wasm-components
+        run: mise run github:workflows:ci-rust:wasm-components
 
       - name: Assert zero imports and validate
-        run: mise run github-actions:wasm-validate
+        run: mise run github:workflows:ci-rust:wasm-validate
 
       - name: Run decider-test suites
-        run: mise run github-actions:decider-test-suites
+        run: mise run github:workflows:ci-rust:decider-test-suites
 
       # decider-test-suites already runs the stable compile_fail check.
       - name: Run documentation tests
-        run: cargo test --doc
-        working-directory: rsworkspace
+        run: mise run --skip-tools github:workflows:ci-rust:doc-tests
 
       - name: Test a2a-gateway (default features)
-        run: cargo test -p a2a-gateway
-        working-directory: rsworkspace
+        run: mise run --skip-tools github:workflows:ci-rust:test-a2a-gateway
 
       - name: Run wasm decider runtime tests
-        run: cargo test -p trogon-decider-wasm-runtime
-        working-directory: rsworkspace
+        run: mise run --skip-tools github:workflows:ci-rust:test-decider-wasm-runtime
 
       - name: Run trogon-decider-nats live JetStream tests
-        run: cargo test -p trogon-decider-nats
-        working-directory: rsworkspace
+        run: mise run --skip-tools github:workflows:ci-rust:test-decider-nats
 
   result:
     # Job names like lint and build repeat across workflows, and a skipped job
@@ -283,17 +273,19 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
       - name: Check Rust jobs
         env:
           SELECTION_RESULT: ${{ needs.changes.result }}
           SELECTED: ${{ needs.changes.outputs.rust }}
           JOB_RESULTS: ${{ needs.lint.result }} ${{ needs.test.result }} ${{ needs.build.result }} ${{ needs.wasm-decider.result }}
-        # A cancelled run also skips jobs, so a skip only passes when selection
-        # succeeded and found nothing to check.
-        run: |
-          for result in $JOB_RESULTS; do
-            if [ "$result" = success ]; then continue; fi
-            if [ "$result" = skipped ] && [ "$SELECTION_RESULT" = success ] && [ "$SELECTED" != true ]; then continue; fi
-            echo "::error::Rust jobs ended with $JOB_RESULTS after selection ended with $SELECTION_RESULT"
-            exit 1
-          done
+        run: mise run --skip-tools github:workflows:ci-rust:result

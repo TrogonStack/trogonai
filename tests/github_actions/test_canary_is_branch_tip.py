@@ -7,7 +7,7 @@ import unittest
 
 TASK = (
     Path(__file__).resolve().parents[2]
-    / ".config/mise/tasks/github-actions/canary-is-branch-tip"
+    / ".config/mise/tasks/github/workflows/canary-container-images/canary-is-branch-tip"
 )
 CURRENT_SHA = "a" * 40
 NEWER_SHA = "b" * 40

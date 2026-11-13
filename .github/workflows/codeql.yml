@@ -60,15 +60,20 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
       - name: Check CodeQL analysis
         env:
           SELECTION_RESULT: ${{ needs.changes.result }}
-          SELECTED_LANGUAGES: ${{ needs.changes.outputs.changes }}
-          ANALYZE_RESULT: ${{ needs.analyze.result }}
-        # A cancelled run also skips analysis, so a skip only passes when
-        # selection succeeded and found no languages to analyze.
-        run: |
-          if [ "$ANALYZE_RESULT" = success ]; then exit 0; fi
-          if [ "$ANALYZE_RESULT" = skipped ] && [ "$SELECTION_RESULT" = success ] && [ "$SELECTED_LANGUAGES" = '[]' ]; then exit 0; fi
-          echo "::error::CodeQL analysis ended with $ANALYZE_RESULT after language selection ended with $SELECTION_RESULT"
-          exit 1
+          SELECTED: ${{ needs.changes.outputs.changes != '[]' }}
+          JOB_RESULTS: ${{ needs.analyze.result }}
+        run: mise run --skip-tools github:workflows:codeql:result
