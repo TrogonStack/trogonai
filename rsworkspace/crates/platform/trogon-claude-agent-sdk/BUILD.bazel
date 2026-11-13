@@ -97,7 +97,10 @@ workspace_crate(
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
         "golden_inbound_control": {
-            "compile_data": glob(["tests/support/*.rs"]),
+            "compile_data": glob([
+                "tests/fixtures/permission_suggestions/*.json",
+                "tests/support/*.rs",
+            ]),
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },

@@ -274,7 +274,7 @@ pub(crate) enum CallbackResponse<'a, T> {
 pub(crate) enum PermissionResponsePayload<'a> {
     Allow {
         #[serde(rename = "updatedInput", skip_serializing_if = "Option::is_none")]
-        updated_input: Option<JsonObject>,
+        updated_input: Option<Value>,
         #[serde(rename = "updatedPermissions", skip_serializing_if = "Option::is_none")]
         updated_permissions: Option<Vec<Value>>,
         #[serde(rename = "decisionClassification", skip_serializing_if = "Option::is_none")]

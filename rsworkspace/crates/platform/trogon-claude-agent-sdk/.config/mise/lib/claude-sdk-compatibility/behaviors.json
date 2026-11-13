@@ -934,15 +934,18 @@
         "behavior": "Python decodes every suggestion, so a structurally broken one (a missing type, rules that are not a list) or a missing tool_name raises inside the control handler, which answers that request with an error response while the session continues. TypeScript forwards the raw suggestions to canUseTool without decoding them, so nothing fails."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "A typed suggestion cannot represent a broken object, so the request is answered with an error response instead of reaching the callback, and neither the session nor other requests are affected."
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect and hands every field to the callback as sent, keeping broken suggestions as PermissionUpdate::Unknown; ArgvStyle::Python reproduces claude_agent_sdk's from_dict errors and the order it raises them in."
       },
       "contracts": [
+        "golden_inbound_control::permission_suggestions_reach_each_dialect_like_its_sdk",
         "permission_values::structurally_malformed_permission_updates_are_rejected",
-        "runtime_failure_contracts::malformed_permission_requests_get_an_error_response_and_the_session_continues"
+        "runtime_failure_contracts::malformed_permission_requests_reach_typescript_and_get_python_error_responses"
       ],
       "rust": [
         "src/driver.rs",
+        "src/permission.rs",
+        "src/permission_suggestions.rs",
         "src/permission_update.rs",
         "src/wire.rs"
       ]

@@ -1078,10 +1078,7 @@ async fn callback_capacity_is_bounded_and_cancellation_preserves_control_progres
             json!({"subtype":"can_use_tool","tool_name":"Read","input":{}}),
             busy.clone(),
         ),
-        (
-            json!({"subtype":"can_use_tool","input":{}}),
-            json!({"subtype":"error","request_id":"excess","error":"Malformed SDK permission request"}),
-        ),
+        (json!({"subtype":"can_use_tool","input":{}}), busy.clone()),
         (
             json!({"subtype":"hook_callback","callback_id":"missing","input":{}}),
             json!({"subtype":"error","request_id":"excess","error":"No hook callback found for ID: missing"}),
@@ -1221,51 +1218,80 @@ async fn unknown_permission_suggestion_values_reach_the_callback_and_round_trip(
     Ok(())
 }
 
+/// `sdk.mjs` hands broken suggestions and a missing `tool_name` to `canUseTool` as sent; `claude_agent_sdk`
+/// answers each with the message of the exception `from_dict` or the missing key raises. Either way the session
+/// goes on.
 #[tokio::test]
-async fn malformed_permission_requests_get_an_error_response_and_the_session_continues() -> TestResult {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let counted = calls.clone();
-    let mut configured = options()?;
-    configured.permission_handler = Some(Arc::new(move |_: ToolPermissionRequest| {
-        counted.fetch_add(1, Ordering::SeqCst);
-        async { PermissionDecision::allow() }
-    }));
-    let (mut client, mut cli) = connect(configured).await?;
-    for (index, malformed) in [
-        json!({"subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[{"destination":"session"}]}),
-        json!({"subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[
-            {"type":"addRules","rules":{},"behavior":"allow","destination":"session"}
-        ]}),
-        json!({"subtype":"can_use_tool","input":{}}),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let id = format!("malformed-{index}");
-        cli.send(json!({"type":"control_request","request_id":id,"request":malformed}))
-            .await?;
-        let response = cli.read().await?;
-        assert_eq!(response["response"]["subtype"], "error");
-        assert_eq!(response["response"]["request_id"], id);
-    }
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    cli.send(json!({"type":"control_request","request_id":"valid","request":{
-        "subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[{"type":"future","destination":"x"}]
-    }}))
-    .await?;
-    let response = cli.read().await?;
-    assert_eq!(response["response"]["subtype"], "success");
-    assert_eq!(response["response"]["response"]["behavior"], "allow");
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-    cli.send(result()).await?;
-    loop {
-        match client.next_message().await? {
-            Some(Message::Result(_)) => break,
-            Some(_) => {}
-            None => return Err("session ended before the result".into()),
+async fn malformed_permission_requests_reach_typescript_and_get_python_error_responses() -> TestResult {
+    let malformed = [
+        (
+            json!({"subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[{"destination":"session"}]}),
+            "'type'",
+        ),
+        (
+            json!({"subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[
+                {"type":"addRules","rules":{"a":1},"behavior":"allow","destination":"session"}
+            ]}),
+            "string indices must be integers, not 'str'",
+        ),
+        (json!({"subtype":"can_use_tool","input":{}}), "'tool_name'"),
+    ];
+    for style in [ArgvStyle::TypeScript, ArgvStyle::Python] {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let counted = calls.clone();
+        let mut configured = options()?;
+        configured.argv_style = style;
+        configured.permission_handler = Some(Arc::new(move |request: ToolPermissionRequest| {
+            counted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(Value::Object(request.raw_request));
+            async { PermissionDecision::allow() }
+        }));
+        let (mut client, mut cli) = connect(configured).await?;
+        for (index, (request, error)) in malformed.iter().enumerate() {
+            let id = format!("malformed-{index}");
+            cli.send(json!({"type":"control_request","request_id":id,"request":request}))
+                .await?;
+            let response = cli.read().await?;
+            assert_eq!(response["response"]["request_id"], id);
+            if style == ArgvStyle::TypeScript {
+                assert_eq!(response["response"]["subtype"], "success");
+                assert_eq!(response["response"]["response"]["behavior"], "allow");
+            } else {
+                assert_eq!(response["response"]["subtype"], "error");
+                assert_eq!(response["response"]["error"], *error);
+            }
         }
+        let seen = calls.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        if style == ArgvStyle::TypeScript {
+            let mut expected = malformed.iter().map(|(request, _)| request.clone()).collect::<Vec<_>>();
+            for request in &mut expected {
+                if let Some(request) = request.as_object_mut() {
+                    request.remove("subtype");
+                }
+            }
+            assert_eq!(seen, expected);
+        } else {
+            assert!(seen.is_empty());
+        }
+        cli.send(json!({"type":"control_request","request_id":"valid","request":{
+            "subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[{"type":"future","destination":"x"}]
+        }}))
+        .await?;
+        let response = cli.read().await?;
+        assert_eq!(response["response"]["subtype"], "success");
+        assert_eq!(response["response"]["response"]["behavior"], "allow");
+        cli.send(result()).await?;
+        loop {
+            match client.next_message().await? {
+                Some(Message::Result(_)) => break,
+                Some(_) => {}
+                None => return Err("session ended before the result".into()),
+            }
+        }
+        cli.disconnect(client).await?;
     }
-    cli.disconnect(client).await?;
     Ok(())
 }
 

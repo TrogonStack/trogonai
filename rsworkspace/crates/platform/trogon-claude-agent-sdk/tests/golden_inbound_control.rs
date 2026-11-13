@@ -711,3 +711,89 @@ async fn every_dialog_kind_reaches_the_handler_and_a_null_answer_writes_nothing(
     );
     Ok(())
 }
+
+/// One `can_use_tool` request per broken or odd `permission_suggestions` shape, with the line `sdk.mjs` and
+/// `claude_agent_sdk` each answered it with. Both callbacks echo the suggestions they were given.
+const SUGGESTION_GOLDENS: &str = include_str!("fixtures/permission_suggestions/goldens.json");
+
+/// What a typed decision can echo of the suggestions `sdk.mjs` hands over as sent: absent ones, or an array of
+/// objects, each kept verbatim.
+fn typescript_echo(raw: &JsonObject) -> Option<Option<Vec<PermissionUpdate>>> {
+    match raw.get("permission_suggestions") {
+        None => Some(None),
+        Some(Value::Array(entries)) => entries
+            .iter()
+            .map(|entry| entry.as_object().cloned().map(PermissionUpdate::Unknown))
+            .collect::<Option<Vec<_>>>()
+            .map(Some),
+        Some(_) => None,
+    }
+}
+
+#[tokio::test]
+async fn permission_suggestions_reach_each_dialect_like_its_sdk() -> TestResult {
+    let goldens: Value = serde_json::from_str(SUGGESTION_GOLDENS)?;
+    let cases = goldens["cases"].as_array().ok_or("the goldens have no cases")?;
+    for style in [ArgvStyle::TypeScript, ArgvStyle::Python] {
+        let typescript = style == ArgvStyle::TypeScript;
+        let seen = Arc::new(Mutex::new(BTreeMap::new()));
+        let recorded = Arc::clone(&seen);
+        let mut configured = options(style);
+        configured.permission_handler = Some(Arc::new(move |request: ToolPermissionRequest| {
+            let echo = if typescript {
+                typescript_echo(&request.raw_request).flatten()
+            } else {
+                Some(request.suggestions.clone())
+            };
+            if let Ok(mut recorded) = recorded.lock() {
+                recorded.insert(
+                    request.request_id.as_str().to_owned(),
+                    Value::Object(request.raw_request.clone()),
+                );
+            }
+            async move {
+                PermissionDecision::Allow {
+                    updated_input: None,
+                    updated_permissions: echo,
+                    decision_classification: None,
+                }
+            }
+        }));
+        let steps = cases
+            .iter()
+            .map(|case| request(case["request_id"].as_str().unwrap_or_default(), case["request"].clone()))
+            .collect();
+        let mut answered = BTreeMap::new();
+        for line in run(configured, steps, cases.len()).await? {
+            let frame: Value = serde_json::from_str(&line)?;
+            let id = frame["response"]["request_id"]
+                .as_str()
+                .ok_or("a response without an id")?;
+            answered.insert(id.to_owned(), line);
+        }
+        assert_eq!(answered.len(), cases.len());
+        let seen = seen.lock().map_err(|_| "lock poisoned")?.clone();
+        for case in cases {
+            let name = &case["name"];
+            let id = case["request_id"].as_str().ok_or("a case without an id")?;
+            let line = answered.get(id).ok_or("a request was not answered")?;
+            if !typescript {
+                assert_eq!(Some(line.as_str()), case["python"].as_str(), "{name}");
+                continue;
+            }
+            let mut sent = case["request"].clone();
+            let sent_fields = sent.as_object_mut().ok_or("a request that is not an object")?;
+            sent_fields.remove("subtype");
+            assert_eq!(seen.get(id), Some(&sent), "{name}");
+            let mut expected: Value = serde_json::from_str(case["typescript"].as_str().ok_or("no TypeScript line")?)?;
+            if typescript_echo(sent.as_object().ok_or("a request that is not an object")?).is_none() {
+                // The callback returned the raw value; a typed decision leaves it out instead.
+                if let Some(response) = expected["response"]["response"].as_object_mut() {
+                    response.remove("updatedPermissions");
+                }
+            }
+            assert_eq!(serde_json::from_str::<Value>(line)?, expected, "{name}");
+        }
+    }
+    Ok(())
+}
