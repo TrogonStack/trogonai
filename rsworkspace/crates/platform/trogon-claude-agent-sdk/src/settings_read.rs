@@ -6,6 +6,8 @@ use serde_json::{Map, Value};
 
 use crate::{
     session_prompt::js_trim,
+    settings_dialect::SettingsDialect,
+    settings_numbers::normalize_numbers,
     settings_read_hooks::{declares_guard_hooks_outside_hooks, sanitize_hooks},
     settings_read_spec::ReadSpec,
     settings_resolve_values::SettingsMap,
@@ -14,8 +16,8 @@ use crate::{
 };
 
 /// Reads one settings document. `None` stands for a file that does not load: invalid JSON, not an
-/// object, a fatal sanitizer finding, or a schema failure.
-pub(crate) fn read_document(text: &str) -> Option<SettingsMap> {
+/// object, a fatal sanitizer finding, or a schema failure. `dialect` picks the number semantics of the parse.
+pub(crate) fn read_document(text: &str, dialect: SettingsDialect) -> Option<SettingsMap> {
     if js_trim(text).is_empty() {
         return Some(SettingsMap::new());
     }
@@ -25,7 +27,7 @@ pub(crate) fn read_document(text: &str) -> Option<SettingsMap> {
         return None;
     };
     for entry in document.values_mut() {
-        canonical_numbers(entry);
+        normalize_numbers(entry, dialect);
     }
     let schema = schema()?;
     let spec = schema.read_spec();
@@ -250,23 +252,6 @@ fn filter_mcp_lists(document: &mut Map<String, Value>, schema: &SettingsSchema, 
                 document.shift_remove(key);
             }
         }
-    }
-}
-
-/// `JSON.parse` yields doubles: whole numbers within the exact range print as integers.
-fn canonical_numbers(value: &mut Value) {
-    match value {
-        Value::Number(number) if !number.is_i64() && !number.is_u64() => {
-            if let Some(float) = number.as_f64()
-                && float.fract() == 0.0
-                && float.abs() < 9_007_199_254_740_992.0
-            {
-                *value = Value::from(float as i64);
-            }
-        }
-        Value::Array(items) => items.iter_mut().for_each(canonical_numbers),
-        Value::Object(entries) => entries.values_mut().for_each(canonical_numbers),
-        _ => {}
     }
 }
 
