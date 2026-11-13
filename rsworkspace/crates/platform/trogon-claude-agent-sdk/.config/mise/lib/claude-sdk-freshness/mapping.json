@@ -2129,6 +2129,113 @@
       ],
       "status": "supported",
       "rationale": "The result, option and error shapes of resolveSettings are generated from the pinned declarations and keep unknown keys and unlisted source names. The resolveSettings function itself is mapped separately. Python has no equivalent types."
+    },
+    {
+      "id": "settings-resolution-functions",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "resolveSettings",
+            "filterEscalatingDefaultMode",
+            "core.resolveSettings",
+            "core.filterEscalatingDefaultMode"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "resolve_settings",
+        "resolve_settings_with",
+        "filter_escalating_default_mode",
+        "ResolveSettingsError",
+        "adapters::SettingsHost",
+        "adapters::NativeHost",
+        "adapters::ExecuteFile"
+      ],
+      "tests": [
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "cascade_merges_in_precedence_order_with_array_union_and_recursion"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "sources_list_each_non_empty_source_low_to_high"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "empty_setting_sources_skip_every_filesystem_source"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "explicit_cwd_selects_the_project_files"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "config_dir_variable_moves_the_user_file"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "invalid_and_non_object_files_are_skipped_without_failing"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "managed_file_wins_and_reports_its_origin"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "managed_drop_ins_merge_in_code_unit_order_after_the_base_file"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "unreadable_managed_file_reports_did_not_load"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "remote_policy_outranks_the_managed_file"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "parent_managed_settings_contribute_only_restrictive_keys"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "plist_policy_is_read_with_plutil_on_macos"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "registry_policy_is_read_with_reg_on_windows"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "a_busy_registry_read_is_reported_but_a_missing_key_is_not"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "wsl_without_the_inherit_flag_ignores_the_windows_side"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "wsl_with_the_inherit_flag_reads_the_windows_side_first"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "escalating_default_mode_from_a_project_source_is_dropped"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "accept_edits_from_a_local_source_survives_but_not_from_a_project_source"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "default_mode_set_by_a_user_source_is_kept"
+        },
+        {
+          "path": "tests/resolve_settings_differential.rs",
+          "name": "rust_matches_the_pinned_typescript_resolver_byte_for_byte"
+        }
+      ],
+      "status": "supported",
+      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 19 fixture trees (mise run claude-sdk:resolve-diff). Known gaps: schema value normalization (invalid rule drops, catch defaults) and nested key order, pre-parse key aliases, managedSourcesBehavior merge mode, cloud and org mode, the git-ignored cwd check and the MDM re-read throttle. Python has no equivalent."
     }
   ]
 }
