@@ -16,6 +16,7 @@ use tokio::sync::Notify;
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 const FIXTURE: &str = include_str!("../tests/fixtures/sdk_mcp/dialects.json");
+const ENVELOPE: &str = include_str!("../tests/fixtures/sdk_mcp/python_envelope.json");
 
 fn failed(message: &str) -> CallbackError {
     CallbackError::Failed(Box::new(std::io::Error::other(message.to_owned())))
@@ -854,5 +855,39 @@ fn input_schema_validation_error_names_the_failure_of_a_compiling_schema() -> Te
     assert!(schema.validation_error(&json!({"a":1})).is_none());
     let message = schema.validation_error(&json!({})).ok_or("the instance matched")?;
     assert!(message.contains("\"a\""), "{message}");
+    Ok(())
+}
+
+/// `tests/fixtures/sdk_mcp/python_envelope.json`: messages of every JSON-RPC shape, each answered by
+/// `Query._handle_sdk_mcp_request` over the `mcp` package. A message no pydantic model accepts is answered with
+/// `-32603` and the `ValidationError` text, which the driver derives from `McpServerError::Protocol`.
+#[tokio::test]
+async fn python_dialect_reads_every_jsonrpc_shape_like_the_mcp_package() -> TestResult {
+    let fixture: Value = serde_json::from_str(ENVELOPE)?;
+    let cases = field(&fixture, "cases")?.as_array().ok_or("cases is not a list")?;
+    assert!(cases.len() > 500);
+    let demo = json!({"name":"demo","tools":[]});
+    let mut rejected = 0;
+    for (index, case) in cases.iter().enumerate() {
+        let message = field(case, "message")?.as_object().ok_or("message is not an object")?;
+        let expected = field(case, "answer")?.as_str();
+        let session = server(&demo, McpServerDialect::Python)?.open_session();
+        let outcome = session.request(message.clone(), CancellationToken::new()).await;
+        let context = format!("case {index}: {}", Value::Object(message.clone()));
+        match (outcome, expected) {
+            (Ok(None), None) => {}
+            (Ok(Some(answer)), Some(expected)) => {
+                assert_eq!(crate::python_json::to_string(&answer)?, expected, "{context}");
+            }
+            (Err(McpServerError::Protocol(text)), Some(expected)) => {
+                let answer: Value = serde_json::from_str(expected)?;
+                assert_eq!(answer["error"]["code"], -32603, "{context}");
+                assert_eq!(answer["error"]["message"], text.as_str(), "{context}");
+                rejected += 1;
+            }
+            (other, expected) => return Err(format!("{context}: got {other:?}, expected {expected:?}").into()),
+        }
+    }
+    assert!(rejected > 200);
     Ok(())
 }

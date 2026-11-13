@@ -1178,3 +1178,22 @@ pub(crate) const RAW_JSON_MAX_DEPTH: usize = 200;
 
 /// The prefix of the placeholder text a request id that a `Value` cannot hold stands for until it is written.
 pub(crate) const PYTHON_ID_MARKER_PREFIX: &str = "\u{0}pyid:";
+
+/// The pydantic model union a JSON-RPC message is validated against, as pydantic titles its `ValidationError`.
+pub(crate) const PYDANTIC_JSONRPC_MESSAGE_TITLE: &str =
+    "union[JSONRPCRequest,JSONRPCNotification,JSONRPCResponse,JSONRPCError]";
+
+/// pydantic refuses to convert a string of more than this many significant digits to an integer.
+pub(crate) const PYDANTIC_MAX_INT_DIGITS: usize = 4300;
+
+/// The pydantic minor version that documents each error type.
+pub(crate) const PYDANTIC_DOCUMENTATION_VERSION: &str = "2.14";
+
+/// pydantic-core shows at most this many bytes of an input's `repr`.
+pub(crate) const PYDANTIC_MAX_REPR_BYTES: usize = 50;
+
+/// The bytes pydantic-core keeps from the start of a `repr` it truncates.
+pub(crate) const PYDANTIC_REPR_HEAD_BYTES: usize = 25;
+
+/// The bytes pydantic-core keeps from the end of a `repr` it truncates.
+pub(crate) const PYDANTIC_REPR_TAIL_BYTES: usize = 24;
