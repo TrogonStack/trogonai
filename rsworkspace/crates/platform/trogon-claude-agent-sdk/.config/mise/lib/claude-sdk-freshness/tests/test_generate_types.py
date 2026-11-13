@@ -149,7 +149,8 @@ class GenerateTypesTests(unittest.TestCase):
         self.assertIn("Unknown(serde_json::Value),", output)
         self.assertIn("pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)>", output)
         self.assertIn("None => Self::Unknown(value),", output)
-        self.assertIn("super::support::unknown_keys(value, ResultOk::KNOWN_KEYS)", output)
+        self.assertIn("ResultOk::match_score(value)", output)
+        self.assertIn("super::support::unlisted_literals(value, &[(\"status\", &[\"ok\"])])", output)
         # A plain map declares no keys, so any struct that does declare them is more specific.
         self.assertIn("super::support::unknown_keys(value, &[]), Self::Map(inner)", output)
         self.assertIn("pub enum Loose {", output)

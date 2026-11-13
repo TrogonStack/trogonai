@@ -181,7 +181,13 @@ function parseType(node, source) {
   if (ts.isUnionTypeNode(node)) return unionOf(node.types.map(type => parseType(type, source)));
   if (ts.isTypeReferenceNode(node)) {
     const name = node.typeName.getText(source);
-    if (name === 'Record' && node.typeArguments?.length === 2 && node.typeArguments[0].kind === ts.SyntaxKind.StringKeyword) {
+    // `Partial<T>` only makes keys optional; a map already has optional keys.
+    if (name === 'Partial' && node.typeArguments?.length === 1) return parseType(node.typeArguments[0], source);
+    // `keyof X` of an interface with a string index signature is `string | number`, and the wire
+    // key is always text.
+    const stringKey = argument => argument.kind === ts.SyntaxKind.StringKeyword
+      || (ts.isTypeOperatorNode(argument) && argument.operator === ts.SyntaxKind.KeyOfKeyword);
+    if (name === 'Record' && node.typeArguments?.length === 2 && stringKey(node.typeArguments[0])) {
       return { k: 'map', val: parseType(node.typeArguments[1], source) };
     }
     if (name === 'Array' && node.typeArguments?.length === 1) return { k: 'array', el: parseType(node.typeArguments[0], source) };
@@ -350,10 +356,18 @@ class Emitter {
     const mirror = fields.map(field => `${field.serde}${field.decl}`);
     mirror.push(`    #[serde(flatten)]\n    pub extra: ${extraType},`, '    #[serde(skip)]\n    pub key_order: super::support::KeyOrder,');
     const known = ir.props.map(prop => rustString(prop.name)).join(', ');
+    // String-literal properties: a value outside the listed ones would still decode (as the
+    // enum's `Unknown`), so a union that picks a member by shape counts it as a mismatch.
+    const literals = [];
+    for (const prop of ir.props) {
+      let inner = prop.type.k === 'nullable' ? prop.type.inner : prop.type;
+      if (inner.k === 'ref' && this.declaration(inner.name).k === 'strenum') inner = this.declaration(inner.name);
+      if (inner.k === 'strenum') literals.push(`(${rustString(prop.name)}, &[${inner.values.map(rustString).join(', ')}])`);
+    }
     const out = [];
     out.push(`${doc}#[derive(Clone, Debug, PartialEq, Eq)]\npub struct ${name} {\n${plain.join('\n')}\n}\n`);
     out.push(`#[derive(Serialize, Deserialize)]\n#[serde(remote = "${name}")]\nstruct ${wire} {\n${mirror.join('\n')}\n}\n`);
-    out.push(`impl ${name} {`, '    /// The keys the pinned upstream declarations list for this object.', `    pub const KNOWN_KEYS: &'static [&'static str] = &[${known}];`, '}', '');
+    out.push(`impl ${name} {`, '    /// The keys the pinned upstream declarations list for this object.', `    pub const KNOWN_KEYS: &'static [&'static str] = &[${known}];`, '', '    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.', '    pub fn match_score(value: &serde_json::Value) -> usize {', `        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[${literals.join(', ')}])`, '    }', '}', '');
     out.push(`impl Serialize for ${name} {`, '    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {', `        super::support::ordered(${wire}::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)`, '    }', '}', '');
     out.push(`impl<'de> Deserialize<'de> for ${name} {`, '    fn deserialize<D: serde::Deserializer<\'de>>(deserializer: D) -> Result<Self, D::Error> {', '        let value = serde_json::Value::deserialize(deserializer)?;', `        let mut decoded = ${wire}::deserialize(value.clone()).map_err(serde::de::Error::custom)?;`, '        decoded.key_order = super::support::KeyOrder::of(&value);', '        Ok(decoded)', '    }', '}', '');
     this.chunks.push(out.join('\n'));
@@ -439,7 +453,7 @@ class Emitter {
     out.push(`impl ${name} {`, '    /// Decodes `value` into the declared member that reproduces it exactly with the fewest', '    /// undeclared keys, earliest declared on ties, or `None` when no member matches.', '    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {', '        let mut best: Option<(usize, Self)> = None;');
     for (const { variant, type, kind } of variants) {
       let candidate;
-      if (kind === 'struct') candidate = `super::support::exact::<${type}>(value).map(|inner| (super::support::unknown_keys(value, ${type}::KNOWN_KEYS), Self::${variant}(inner)))`;
+      if (kind === 'struct') candidate = `super::support::exact::<${type}>(value).map(|inner| (${type}::match_score(value), Self::${variant}(inner)))`;
       else if (kind === 'union') candidate = `${type}::best_match(value).map(|(score, inner)| (score, Self::${variant}(inner)))`;
       else if (kind === 'map') candidate = `super::support::exact::<${type}>(value).map(|inner| (super::support::unknown_keys(value, &[]), Self::${variant}(inner)))`;
       else candidate = `super::support::exact::<${type}>(value).map(|inner| (0, Self::${variant}(inner)))`;

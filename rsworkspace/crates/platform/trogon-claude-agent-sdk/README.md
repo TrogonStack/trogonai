@@ -267,6 +267,9 @@ at 24 hours.
 typed field, and keys it does not declare are kept in order. `Settings::from_json` then
 `to_json` reproduces the input byte for byte. `SettingsInput` names the three forms the
 `--settings` value takes: `Path`, `Json` and `Inline(Settings)`. Nothing is validated.
+`SandboxSettings` and its parts, `ResolvedSettings`, `ProvenanceEntry`, `ResolvedSettingSource`,
+`PolicySettingsOrigin`, `ResolveSettingsOptions` and `SDKSettingsParseError` carry the upstream
+names; Python sandbox dicts decode and encode through the sandbox types unchanged.
 
 ## External session stores
 

@@ -72,6 +72,7 @@ mod session_summary;
 mod session_transcript;
 mod setting_source;
 mod settings_input;
+mod settings_sandbox;
 mod stderr_tail;
 mod summary_dialect;
 mod task_id;
@@ -186,6 +187,9 @@ pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_ent
 pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
 pub use settings_input::SettingsInput;
+pub use settings_sandbox::{
+    SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
+};
 pub use stderr_tail::StderrTail;
 pub use summary_dialect::SummaryDialect;
 pub use task_id::TaskId;
@@ -196,6 +200,10 @@ pub use tool_rule::ToolRule;
 pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
 pub use upstream::settings::Settings;
+pub use upstream::settings_resolution::{
+    PolicySettingsOrigin, ProvenanceEntry, ResolveSettingsOptions, ResolvedSettingSource, ResolvedSettings,
+    SDKSettingsParseError,
+};
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 pub use user_input::{InputBlock, UserInput};
 pub use version_check::{parse_version, unreported_version_warning};

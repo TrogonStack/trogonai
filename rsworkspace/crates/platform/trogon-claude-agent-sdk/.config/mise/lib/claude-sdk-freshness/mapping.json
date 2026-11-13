@@ -2023,10 +2023,112 @@
         {
           "path": "tests/upstream_settings.rs",
           "name": "settings_input_names_the_three_upstream_forms"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "each_hook_handler_kind_decodes_into_its_own_variant"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "each_marketplace_source_kind_decodes_into_its_own_variant"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "an_unlisted_marketplace_source_survives_as_raw_json"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "status_line_ssh_configs_and_plugin_configs_round_trip_with_unknown_members"
         }
       ],
       "status": "supported",
-      "rationale": "Settings is generated from the pinned declarations: all 182 declared top-level keys, every nested object, string-literal union and object union, the $schema key and the open index signature. Unknown keys and key order survive a decode then encode byte for byte, and a string-literal value upstream does not list is kept. Nothing is validated. Python has no Settings type; its settings option is a path or JSON string, which SettingsInput distinguishes explicitly. Wiring Settings into Options.settings is mapped separately."
+      "rationale": "Settings is generated from the pinned declarations: all 182 declared top-level keys, every nested object, string-literal union and object union, the $schema key and the open index signature. Unknown keys and key order survive a decode then encode byte for byte, and a string-literal value upstream does not list is kept. Nothing is validated. Python has no Settings type; its settings option is a path or JSON string, which SettingsInput distinguishes explicitly. Wiring Settings into Options.settings is mapped separately. Hook handler kinds, marketplace and plugin sources, statusLine, sshConfigs, enabledPlugins and pluginConfigs are generated unions: a union picks the member that re-encodes to the same JSON with the fewest undeclared keys and unlisted string-literal values, so a discriminant selects its own member, and anything else is kept as raw JSON."
+    },
+    {
+      "id": "settings-sandbox",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "SandboxSettings",
+            "core.SandboxSettings",
+            "SandboxNetworkConfig",
+            "core.SandboxNetworkConfig",
+            "SandboxFilesystemConfig",
+            "core.SandboxFilesystemConfig",
+            "SandboxCredentialsConfig",
+            "core.SandboxCredentialsConfig",
+            "SandboxIgnoreViolations",
+            "core.SandboxIgnoreViolations"
+          ]
+        }
+      },
+      "rust_api": [
+        "SandboxSettings",
+        "SandboxNetworkConfig",
+        "SandboxFilesystemConfig",
+        "SandboxCredentialsConfig",
+        "SandboxIgnoreViolations"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "python_sandbox_dicts_map_byte_for_byte_onto_the_typed_sandbox"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "typescript_only_sandbox_keys_and_unknown_keys_are_kept"
+        }
+      ],
+      "status": "supported",
+      "rationale": "TypeScript declares the sandbox types as Zod inferences, which equal the generated sandbox property of Settings (16 keys, open object); the Rust names alias those types. Python SandboxSettings and SandboxNetworkConfig TypedDicts use a subset of the same keys, and fixtures show them re-encoding byte for byte. Python has no filesystem or credentials TypedDict, so those are TypeScript only."
+    },
+    {
+      "id": "settings-resolution-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "ResolvedSettings",
+            "core.ResolvedSettings",
+            "ProvenanceEntry",
+            "core.ProvenanceEntry",
+            "PolicySettingsOrigin",
+            "core.PolicySettingsOrigin",
+            "ResolvedSettingSource",
+            "core.ResolvedSettingSource",
+            "ResolveSettingsOptions",
+            "core.ResolveSettingsOptions",
+            "SDKSettingsParseError",
+            "core.SDKSettingsParseError"
+          ]
+        }
+      },
+      "rust_api": [
+        "ResolvedSettings",
+        "ProvenanceEntry",
+        "ResolvedSettingSource",
+        "PolicySettingsOrigin",
+        "ResolveSettingsOptions",
+        "SDKSettingsParseError",
+        "upstream::settings_resolution"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "resolved_settings_round_trip_with_provenance_and_machine_policy"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "every_policy_origin_and_source_name_decodes_and_unknown_ones_are_kept"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "resolve_options_and_parse_errors_round_trip"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The result, option and error shapes of resolveSettings are generated from the pinned declarations and keep unknown keys and unlisted source names. The resolveSettings function itself is mapped separately. Python has no equivalent types."
     }
   ]
 }
