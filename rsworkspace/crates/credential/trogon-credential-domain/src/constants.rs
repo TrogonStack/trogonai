@@ -1,5 +1,6 @@
 use uuid::Uuid;
 
+pub(super) const MAX_AUDIT_CORRELATION_ID_LEN: usize = 128;
 pub(super) const CREDENTIAL_ID_LEN: usize = 36;
 pub(super) const MAX_DESTROY_REASON_LEN: usize = 512;
 pub(super) const MAX_FINGERPRINT_LEN: usize = 128;

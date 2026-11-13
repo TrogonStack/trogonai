@@ -1,6 +1,8 @@
-use trogon_credential_domain::{CompleteReleaseRequest, CredentialKey, InjectionLocation, RuntimeServiceId};
+use trogon_credential_domain::{
+    AuditCorrelationId, CompleteReleaseRequest, CredentialKey, InjectionLocation, RuntimeServiceId,
+};
 
-use super::{AuditCorrelationId, ReleaseDestination, TenantAccount};
+use super::{ReleaseDestination, TenantAccount};
 
 /// A runtime service asking for one credential, as its NATS caller parsed it.
 ///

@@ -19,6 +19,7 @@
 //! extraction boundary can share them.
 
 mod allowed_host;
+mod audit_correlation_id;
 mod complete_release_request;
 mod configured_release_policy;
 mod constants;
@@ -47,6 +48,7 @@ mod source_integration_id;
 mod source_kind;
 
 pub use allowed_host::{AllowedHost, AllowedHostError, AllowedHosts};
+pub use audit_correlation_id::{AuditCorrelationId, AuditCorrelationIdError};
 pub use complete_release_request::CompleteReleaseRequest;
 pub use configured_release_policy::{ConfiguredReleasePolicy, ConfiguredReleasePolicyError};
 pub use credential_destroy_reason::{CredentialDestroyReason, CredentialDestroyReasonError};

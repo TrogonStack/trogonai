@@ -1,5 +1,5 @@
 use trogon_credential_aggregate::releasable_version;
-use trogon_secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
+use trogon_secret_store::{SecretMaterial, SecretStoreCorrelatedGet, SecretStoreError};
 use trogon_std::EpochClock;
 
 use super::constants::RELEASE_TTL_BOUND;
@@ -33,7 +33,7 @@ where
     T: TenantOwners,
     P: ReleasePolicySource,
     C: CredentialStateRead,
-    S: SecretStoreGet<Error = SecretStoreError>,
+    S: SecretStoreCorrelatedGet<Error = SecretStoreError>,
     A: ReleaseAudit,
     X: Sealer,
     K: EpochClock,
@@ -95,7 +95,7 @@ where
             }
             .into());
         }
-        let value = match self.store.get(&credential).await? {
+        let value = match self.store.get_correlated(&credential, request.correlation_id()).await? {
             SecretMaterial::Plaintext(value) => value,
             SecretMaterial::Verifier(_) => return Err(DenialReason::VerifierOnly.into()),
         };
