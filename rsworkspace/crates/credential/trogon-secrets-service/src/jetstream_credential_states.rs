@@ -8,6 +8,7 @@ use trogon_nats::jetstream::{JetStreamFirstRawMessageBySubject, JetStreamLastRaw
 use trogonai_proto::gateway::credentials::state_v1::CredentialStateSnapshot;
 use trogonai_proto::gateway::credentials::v1;
 
+use super::constants::BOUND_VANISHED;
 use super::{CredentialStateRead, CredentialStateReadError};
 
 /// Credential states folded from the credential stream on every read.
@@ -76,9 +77,6 @@ where
         }
     }
 }
-
-/// Why a read that found its bound gone answers nothing.
-const BOUND_VANISHED: &str = "the last event of the credential's subject was removed during the read";
 
 /// Folds one event read from `credential`'s subject into `state`.
 fn fold(
