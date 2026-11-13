@@ -3,7 +3,10 @@ use std::{future::Future, pin::Pin, sync::Arc};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::{CallbackError, CancellationToken, JsonObject, McpToolInputSchema, McpToolName, ToolResultStatus};
+use crate::{
+    CallbackError, CancellationToken, JsonObject, McpToolInputSchema, McpToolName, ToolResultStatus,
+    sdk_mcp_choices::ValidationChoices,
+};
 
 #[derive(Clone, Debug)]
 pub struct McpToolRequest {
@@ -109,6 +112,7 @@ pub struct SdkTool {
     annotations: Option<JsonObject>,
     search_hint: Option<String>,
     always_load: bool,
+    validation: ValidationChoices,
 }
 
 impl From<SdkToolOptions> for SdkTool {
@@ -130,6 +134,7 @@ impl From<SdkToolOptions> for SdkTool {
             annotations,
             search_hint,
             always_load,
+            validation: ValidationChoices::default(),
         }
     }
 }
@@ -137,6 +142,16 @@ impl From<SdkToolOptions> for SdkTool {
 impl SdkTool {
     pub fn name(&self) -> &McpToolName {
         &self.name
+    }
+
+    /// The choices and callbacks the TypeScript dialect validates the input with where the listed JSON Schema
+    /// leaves the zod schema ambiguous. They never reach `tools/list`.
+    pub fn with_validation(self, validation: ValidationChoices) -> Self {
+        Self { validation, ..self }
+    }
+
+    pub(crate) fn validation(&self) -> &ValidationChoices {
+        &self.validation
     }
 
     pub(crate) fn description(&self) -> &str {

@@ -83,6 +83,7 @@ mod raw_json_id;
 #[cfg(unix)]
 mod run_as;
 mod runtime_options;
+mod sdk_mcp_choices;
 mod sdk_mcp_js;
 mod sdk_mcp_regexp;
 mod sdk_mcp_server;
@@ -269,6 +270,11 @@ pub use raw_json_id::{RawJsonId, RawJsonIdError};
 pub use runtime_options::{
     DangerousPermissionSkip, DebugOutput, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget, ThinkingConfig,
     ThinkingDisplay,
+};
+pub use sdk_mcp_choices::{
+    LengthChoice, NullabilityChoice, NumberFormatChoice, RefineFailure, Refinement, SchemaCallback,
+    SchemaCallbackOptions, SchemaChoice, SchemaPointer, SchemaPointerError, StringCheckKind, StringFormatChoice,
+    Transformation, UnionChoice, ValidationChoices, ValidationChoicesError, ValidationChoicesOptions,
 };
 pub use sdk_mcp_server::{
     LocalMcpServer, LocalMcpServerOptions, McpFuture, McpServerError, SdkMcpServer, SdkMcpSession,

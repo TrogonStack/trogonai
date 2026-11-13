@@ -3368,8 +3368,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "^(?<x>a)\\k<x>$",
-         "x-flags": "u"
+         "pattern": "^(?<x>a)\\k<x>$"
         }
        },
        "required": [
@@ -3379,7 +3378,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "u"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3425,8 +3436,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "^.$",
-         "x-flags": "u"
+         "pattern": "^.$"
         }
        },
        "required": [
@@ -3436,7 +3446,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "u"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3454,8 +3476,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "^a.b$",
-         "x-flags": "s"
+         "pattern": "^a.b$"
         }
        },
        "required": [
@@ -3465,7 +3486,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "s"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3483,8 +3516,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "^\\p{L}+$",
-         "x-flags": "u"
+         "pattern": "^\\p{L}+$"
         }
        },
        "required": [
@@ -3494,7 +3526,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "u"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3512,8 +3556,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "^\\P{L}+$",
-         "x-flags": "u"
+         "pattern": "^\\P{L}+$"
         }
        },
        "required": [
@@ -3523,7 +3566,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "u"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3541,8 +3596,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "^[\\p{L}--[a-z]]$",
-         "x-flags": "v"
+         "pattern": "^[\\p{L}--[a-z]]$"
         }
        },
        "required": [
@@ -3552,7 +3606,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "v"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3570,8 +3636,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "^[\\p{L}&&\\p{ASCII}]$",
-         "x-flags": "v"
+         "pattern": "^[\\p{L}&&\\p{ASCII}]$"
         }
        },
        "required": [
@@ -3581,7 +3646,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "v"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3599,8 +3676,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "^abc$",
-         "x-flags": "i"
+         "pattern": "^abc$"
         }
        },
        "required": [
@@ -3610,7 +3686,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "i"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3628,8 +3716,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "^\\u212a$",
-         "x-flags": "iu"
+         "pattern": "^\\u212a$"
         }
        },
        "required": [
@@ -3639,7 +3726,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "iu"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3657,8 +3756,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "^b$",
-         "x-flags": "m"
+         "pattern": "^b$"
         }
        },
        "required": [
@@ -3668,7 +3766,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "m"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3686,8 +3796,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "b",
-         "x-flags": "y"
+         "pattern": "b"
         }
        },
        "required": [
@@ -3697,7 +3806,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "y"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3715,8 +3836,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "a",
-         "x-flags": "gd"
+         "pattern": "a"
         }
        },
        "required": [
@@ -3726,7 +3846,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "gd"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },
@@ -3856,8 +3988,7 @@
        "properties": {
         "x": {
          "type": "string",
-         "pattern": "^\\u{1F600}$",
-         "x-flags": "u"
+         "pattern": "^\\u{1F600}$"
         }
        },
        "required": [
@@ -3867,7 +3998,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "regex_flags",
+          "value": "u"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },

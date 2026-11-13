@@ -276,7 +276,12 @@ async fn call_tool(
     if let Some(error) = schema.compile_error() {
         return Ok(Ok(tool_error(error.to_owned())));
     }
-    let parsed = sdk_mcp_zod::Node::from_schema(&Value::Object(schema.as_json().clone()))
+    let Ok(prepared) = tool.validation().prepare(schema.as_json()) else {
+        return Ok(Ok(tool_error(format!(
+            "MCP error -32602: Tool {name} has a validation choice outside its input schema"
+        ))));
+    };
+    let parsed = sdk_mcp_zod::Node::from_schema(&prepared.schema, &prepared.callbacks)
         .parse(arguments.map_or(Input::Undefined, Input::Json));
     let mut issues = parsed.issues;
     if issues.is_empty()

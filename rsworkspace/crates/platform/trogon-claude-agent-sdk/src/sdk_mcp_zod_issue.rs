@@ -11,7 +11,7 @@ use serde_json::Value;
 pub(crate) struct Issue {
     fields: JsonObject,
     received: &'static str,
-    message: Option<&'static str>,
+    message: Option<String>,
     pub(crate) keeps_going: bool,
     pub(crate) path: Vec<Value>,
 }
@@ -51,11 +51,31 @@ impl Issue {
     }
 
     /// A `custom` issue with the message of a refinement.
-    pub(crate) fn custom(message: &'static str) -> Self {
+    pub(crate) fn custom(message: impl Into<String>) -> Self {
         Self {
-            message: Some(message),
+            message: Some(message.into()),
             ..Self::new([("code", "custom".into())], true)
         }
+    }
+
+    /// The `custom` issue a transform adds with `ctx.addIssue`: the message is one of its fields, so it
+    /// comes before the path, and the issue stops the checks after it.
+    pub(crate) fn added(message: impl Into<String>) -> Self {
+        let message: String = message.into();
+        Self::new([("code", "custom".into()), ("message", message.into())], false)
+    }
+
+    /// The issue of a discriminated union whose discriminator matches none of its options.
+    pub(crate) fn no_matching_discriminator(discriminator: &str) -> Self {
+        Self::new(
+            [
+                ("code", "invalid_union".into()),
+                ("errors", Value::Array(Vec::new())),
+                ("note", "No matching discriminator".into()),
+                ("discriminator", discriminator.into()),
+            ],
+            false,
+        )
     }
 
     pub(crate) fn at(mut self, segment: Value) -> Self {
@@ -67,11 +87,13 @@ impl Issue {
     pub(crate) fn report(&self) -> JsonObject {
         let mut report = self.fields.clone();
         report.insert("path".into(), Value::Array(self.path.clone()));
-        let message = match self.message {
-            Some(message) => message.to_owned(),
-            None => message(&self.fields, self.received),
-        };
-        report.insert("message".into(), message.into());
+        if !self.fields.contains_key("message") {
+            let message = match &self.message {
+                Some(message) => message.clone(),
+                None => message(&self.fields, self.received),
+            };
+            report.insert("message".into(), message.into());
+        }
         report
     }
 }

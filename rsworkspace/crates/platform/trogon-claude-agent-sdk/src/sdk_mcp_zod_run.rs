@@ -2,6 +2,7 @@
 
 use crate::{
     JsonObject, constants,
+    sdk_mcp_choices::{SchemaCallback, StringCheckKind},
     sdk_mcp_js::{
         float_safe_remainder, forgiving_base64, js_string, ordered, ordered_keys, prototype_function_length, to_number,
         trim, utf16_length,
@@ -186,6 +187,8 @@ pub(crate) fn run(node: &Node, input: Input<'_>) -> Outcome {
             _ => run(inner, input),
         },
         Node::Union(options) => union(options, input),
+        Node::Discriminated { key, options } => discriminated(key, options, input),
+        Node::Callback(inner, callback) => with_callback(inner, callback, input),
         Node::Text(text) => string(text, input),
         Node::Numeric(number) => numeric(number, input),
         Node::Array(array) => self::array(array, input),
@@ -204,6 +207,49 @@ fn strictly_equal(value: &Value, input: Input<'_>) -> bool {
         (Value::String(left), Input::Json(Value::String(right))) => left == right,
         (Value::Number(left), Input::Json(Value::Number(right))) => left.as_f64() == right.as_f64(),
         _ => false,
+    }
+}
+
+/// `z.discriminatedUnion`: the option the discriminator selects parses the value; no match is one issue at
+/// the discriminator.
+fn discriminated(key: &str, options: &[(Vec<Value>, Node)], input: Input<'_>) -> Outcome {
+    let Input::Json(Value::Object(map)) = input else {
+        return Outcome::fail(type_issue("object", input), input);
+    };
+    let tag = lookup(map, key);
+    match options
+        .iter()
+        .find(|(values, _)| values.iter().any(|value| strictly_equal(value, tag)))
+    {
+        Some((_, option)) => run(option, input),
+        None => Outcome::fail(Issue::no_matching_discriminator(key).at(Value::from(key)), input),
+    }
+}
+
+/// `.refine(check)` and `.transform(map)`: the refinement runs when no earlier check aborted, and the
+/// transformation runs when nothing failed.
+fn with_callback(node: &Node, callback: &SchemaCallback, input: Input<'_>) -> Outcome {
+    let mut result = run(node, input);
+    if aborted(&result.issues) {
+        return result;
+    }
+    if let Out::Json(value) = &result.value
+        && let Err(failure) = callback.refine(value)
+    {
+        result.issues.push(Issue::custom(failure.message()));
+    }
+    if !result.issues.is_empty() {
+        return result;
+    }
+    match result.value {
+        Out::Json(value) => match callback.transform(value) {
+            Ok(mapped) => Outcome::ok(mapped),
+            Err(failure) => Outcome::fail(Issue::added(failure.message()), input),
+        },
+        other => Outcome {
+            issues: result.issues,
+            value: other,
+        },
     }
 }
 
@@ -246,13 +292,24 @@ fn lengthable(input: Input<'_>) -> Option<(&'static str, Value)> {
     }
 }
 
-/// The minimum, maximum and exact length checks; they run even after an earlier check aborted.
-fn length_checks(min: Option<&Bound>, max: Option<&Bound>, exact: bool, input: Input<'_>, issues: &mut Vec<Issue>) {
+/// One length check of a string or array: the minimum, the maximum, or the exact length at the position of
+/// the minimum. They run even after an earlier check aborted.
+fn length_check(
+    kind: StringCheckKind,
+    min: Option<&Bound>,
+    max: Option<&Bound>,
+    exact: bool,
+    input: Input<'_>,
+    issues: &mut Vec<Issue>,
+) {
     let Some((origin, length)) = lengthable(input) else {
         return;
     };
     let measured = to_number(&length);
     if exact {
+        if kind != StringCheckKind::Minimum {
+            return;
+        }
         let Some(bound) = min else {
             return;
         };
@@ -285,31 +342,104 @@ fn length_checks(min: Option<&Bound>, max: Option<&Bound>, exact: bool, input: I
         issues.push(issue);
         return;
     }
-    if let Some(bound) = min
-        && !(measured >= bound.value)
-    {
-        issues.push(Issue::new(
-            [
-                ("origin", origin.into()),
-                ("code", "too_small".into()),
-                ("minimum", bound.json()),
-                ("inclusive", true.into()),
-            ],
-            true,
-        ));
+    match kind {
+        StringCheckKind::Minimum => {
+            if let Some(bound) = min
+                && !(measured >= bound.value)
+            {
+                issues.push(Issue::new(
+                    [
+                        ("origin", origin.into()),
+                        ("code", "too_small".into()),
+                        ("minimum", bound.json()),
+                        ("inclusive", true.into()),
+                    ],
+                    true,
+                ));
+            }
+        }
+        StringCheckKind::Maximum => {
+            if let Some(bound) = max
+                && !(measured <= bound.value)
+            {
+                issues.push(Issue::new(
+                    [
+                        ("origin", origin.into()),
+                        ("code", "too_big".into()),
+                        ("maximum", bound.json()),
+                        ("inclusive", true.into()),
+                    ],
+                    true,
+                ));
+            }
+        }
+        StringCheckKind::Format => {}
     }
-    if let Some(bound) = max
-        && !(measured <= bound.value)
-    {
-        issues.push(Issue::new(
-            [
-                ("origin", origin.into()),
-                ("code", "too_big".into()),
-                ("maximum", bound.json()),
-                ("inclusive", true.into()),
-            ],
-            true,
-        ));
+}
+
+/// The minimum, maximum and exact length checks in their usual order.
+fn length_checks(min: Option<&Bound>, max: Option<&Bound>, exact: bool, input: Input<'_>, issues: &mut Vec<Issue>) {
+    for kind in [StringCheckKind::Minimum, StringCheckKind::Maximum] {
+        length_check(kind, min, max, exact, input, issues);
+    }
+}
+
+/// The `pattern` or `format` check of a string, unless an earlier check aborted.
+fn format_check(node: &StringNode, text: &str, issues: &mut Vec<Issue>, value: &mut Out) {
+    if aborted(issues) {
+        return;
+    }
+    match &node.check {
+        StringCheck::None => {}
+        StringCheck::Affix { kind, text: needle } => {
+            let (name, key, matches) = match kind {
+                Affix::StartsWith => ("starts_with", "prefix", text.starts_with(needle.as_str())),
+                Affix::EndsWith => ("ends_with", "suffix", text.ends_with(needle.as_str())),
+                Affix::Includes => ("includes", "includes", text.contains(needle.as_str())),
+            };
+            if !matches {
+                issues.push(Issue::new(
+                    [
+                        ("origin", "string".into()),
+                        ("code", "invalid_format".into()),
+                        ("format", name.into()),
+                        (key, needle.as_str().into()),
+                    ],
+                    true,
+                ));
+            }
+        }
+        StringCheck::Pattern {
+            source,
+            format,
+            flags,
+            matcher,
+        } => {
+            if let Some(matcher) = matcher
+                && !sdk_mcp_regexp::test(matcher, text, flags)
+            {
+                issues.push(Issue::new(
+                    [
+                        ("origin", "string".into()),
+                        ("code", "invalid_format".into()),
+                        ("format", format.as_str().into()),
+                        ("pattern", format!("/{source}/{flags}").into()),
+                    ],
+                    true,
+                ));
+            }
+        }
+        StringCheck::Url => {
+            let trimmed = trim(text);
+            if url::Url::parse(trimmed).is_ok() {
+                *value = Out::Json(Value::from(trimmed));
+            } else {
+                issues.push(Issue::new(
+                    [("code", "invalid_format".into()), ("format", "url".into())],
+                    true,
+                ));
+            }
+        }
     }
 }
 
@@ -322,66 +452,27 @@ fn string(node: &StringNode, input: Input<'_>) -> Outcome {
     if text.is_none() {
         issues.push(type_issue("string", input));
     }
-    length_checks(node.min.as_ref(), node.max.as_ref(), node.exact, input, &mut issues);
     let mut value = Out::pass(input);
-    if let Some(text) = text {
-        if !aborted(&issues) {
-            match &node.check {
-                StringCheck::None => {}
-                StringCheck::Affix { kind, text: needle } => {
-                    let (name, key, matches) = match kind {
-                        Affix::StartsWith => ("starts_with", "prefix", text.starts_with(needle.as_str())),
-                        Affix::EndsWith => ("ends_with", "suffix", text.ends_with(needle.as_str())),
-                        Affix::Includes => ("includes", "includes", text.contains(needle.as_str())),
-                    };
-                    if !matches {
-                        issues.push(Issue::new(
-                            [
-                                ("origin", "string".into()),
-                                ("code", "invalid_format".into()),
-                                ("format", name.into()),
-                                (key, needle.as_str().into()),
-                            ],
-                            true,
-                        ));
-                    }
-                }
-                StringCheck::Pattern {
-                    source,
-                    format,
-                    flags,
-                    matcher,
-                } => {
-                    if let Some(matcher) = matcher
-                        && !sdk_mcp_regexp::test(matcher, text, flags)
-                    {
-                        issues.push(Issue::new(
-                            [
-                                ("origin", "string".into()),
-                                ("code", "invalid_format".into()),
-                                ("format", format.as_str().into()),
-                                ("pattern", format!("/{source}/{flags}").into()),
-                            ],
-                            true,
-                        ));
-                    }
-                }
-                StringCheck::Url => {
-                    let trimmed = trim(text);
-                    if url::Url::parse(trimmed).is_ok() {
-                        value = Out::Json(Value::from(trimmed));
-                    } else {
-                        issues.push(Issue::new(
-                            [("code", "invalid_format".into()), ("format", "url".into())],
-                            true,
-                        ));
-                    }
-                }
-            }
+    for kind in node.order {
+        match (kind, text) {
+            (StringCheckKind::Format, Some(text)) => format_check(node, text, &mut issues, &mut value),
+            (StringCheckKind::Format, None) => {}
+            (kind, _) => length_check(
+                kind,
+                node.min.as_ref(),
+                node.max.as_ref(),
+                node.exact,
+                input,
+                &mut issues,
+            ),
         }
-        if node.base64 && !aborted(&issues) && !forgiving_base64(text) {
-            issues.push(Issue::custom("Invalid Base64 string"));
-        }
+    }
+    if let Some(text) = text
+        && node.base64
+        && !aborted(&issues)
+        && !forgiving_base64(text)
+    {
+        issues.push(Issue::custom("Invalid Base64 string"));
     }
     Outcome { issues, value }
 }
