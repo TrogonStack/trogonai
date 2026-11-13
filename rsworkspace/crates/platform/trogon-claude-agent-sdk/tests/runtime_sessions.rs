@@ -244,11 +244,17 @@ fn echo_registry(counter: Arc<AtomicUsize>) -> Result<Arc<dyn SdkMcpServer>, Box
                 ))
             }
         }),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
     });
     Ok(Arc::new(LocalMcpServer::from(LocalMcpServerOptions {
         name: McpServerName::from("local"),
-        version: "1".into(),
-        tools: tool.into(),
+        version: Some("1".into()),
+        tools: Some(tool.into()),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
     })))
 }
 

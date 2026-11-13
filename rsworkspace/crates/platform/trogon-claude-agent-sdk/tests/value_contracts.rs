@@ -22,12 +22,12 @@ use trogon_claude_agent_sdk::{
     ClaudeAgentOptions, ControlRequestId, DialogKind, EffortLevel, ElicitationResponse, HookContinuation, HookEvent,
     HookFailureMode, HookOutput, HookOutputVisibility, HookPermissionDecision, HookRegistration, HookSpecificOutput,
     InputBlock, InterruptReceipt, JsonObject, LocalMcpServer, LocalMcpServerOptions, McpRemoteServerOptions,
-    McpSdkServerOptions, McpServerError, McpServerName, McpServerOptions, McpServerToolPolicy, McpStdioServerOptions,
-    McpToolInputSchema, McpToolName, McpToolOrgMaxPermission, McpToolOutput, McpToolPermissionPolicy, McpToolRequest,
-    McpUrl, McpUrlError, MessageId, MessageOrigin, OutputSchema, PermissionBehavior, PermissionMode, PermissionUpdate,
-    PermissionUpdateDestination, PermissionUpdateError, Prompt, QueueCapacity, QueueCapacityError, SdkMcpServer,
-    SdkMcpSession, SdkTool, SdkToolOptions, SessionId, SyncHookOutput, TaskId, Timeout, TimeoutError, ToolName,
-    ToolResultStatus, ToolRule, ToolUseId, UserDialogResponse, UserInput,
+    McpSdkServerOptions, McpServerDialect, McpServerError, McpServerName, McpServerOptions, McpServerToolPolicy,
+    McpStdioServerOptions, McpToolInputSchema, McpToolName, McpToolOrgMaxPermission, McpToolOutput,
+    McpToolPermissionPolicy, McpToolRequest, McpUrl, McpUrlError, MessageId, MessageOrigin, OutputSchema,
+    PermissionBehavior, PermissionMode, PermissionUpdate, PermissionUpdateDestination, PermissionUpdateError, Prompt,
+    QueueCapacity, QueueCapacityError, SdkMcpServer, SdkMcpSession, SdkTool, SdkToolOptions, SessionId, SyncHookOutput,
+    TaskId, Timeout, TimeoutError, ToolName, ToolResultStatus, ToolRule, ToolUseId, UserDialogResponse, UserInput,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -650,14 +650,20 @@ fn registry() -> Result<(LocalMcpServer, Arc<AtomicUsize>), Box<dyn std::error::
                 Ok(output)
             }
         }),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
     };
     assert!(!format!("{options:?}").contains("fixture-private-description"));
     let tool = SdkTool::from(options);
     assert!(!format!("{tool:?}").contains("fixture-private-description"));
     let server_options = LocalMcpServerOptions {
         name: McpServerName::from("registry"),
-        version: "fixture-private-version".into(),
-        tools: tool.into(),
+        version: Some("fixture-private-version".into()),
+        tools: Some(tool.into()),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
     };
     assert!(!format!("{server_options:?}").contains("fixture-private-version"));
     let server = LocalMcpServer::from(server_options);
@@ -697,22 +703,26 @@ async fn ready(server: &LocalMcpServer) -> Result<Arc<dyn SdkMcpSession>, Box<dy
 async fn s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_reinitialize() -> TestResult {
     let (server, calls) = registry()?;
     let uninitialized = server.open_session();
-    assert!(matches!(
-        uninitialized.request(JsonObject::new(), CancellationToken::new()).await,
-        Err(McpServerError::Json(_))
-    ));
+    // The TypeScript `Protocol` drops what its message schema rejects instead of answering it.
     for request in [
+        json!({}),
         json!({"jsonrpc":"1.0","id":1,"method":"ping"}),
         json!({"jsonrpc":"2.0","id":true,"method":"ping"}),
         json!({"jsonrpc":"2.0","id":1.5,"method":"ping"}),
+        json!({"jsonrpc":"2.0","id":u64::MAX,"method":"ping"}),
+        json!({"jsonrpc":"1.0","method":"ping"}),
     ] {
-        let response = rpc(uninitialized.as_ref(), request).await?;
-        assert_eq!(response["error"]["code"], -32600);
+        assert!(
+            uninitialized
+                .request(object(request)?, CancellationToken::new())
+                .await?
+                .is_none()
+        );
     }
     assert_eq!(
         rpc(
             uninitialized.as_ref(),
-            json!({"jsonrpc":"2.0","id":u64::MAX,"method":"ping"})
+            json!({"jsonrpc":"2.0","id":9_007_199_254_740_991_u64,"method":"ping"})
         )
         .await?["result"],
         json!({})
@@ -726,9 +736,6 @@ async fn s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_r
             .await?
             .is_none()
     );
-    let invalid_notification = rpc(uninitialized.as_ref(), json!({"jsonrpc":"1.0","method":"ping"})).await?;
-    assert_eq!(invalid_notification["id"], Value::Null);
-    assert_eq!(invalid_notification["error"]["code"], -32600);
     for (requested, negotiated) in [
         ("2024-10-07", "2024-10-07"),
         ("2024-11-05", "2024-11-05"),
@@ -748,7 +755,7 @@ async fn s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_r
     let session = server.open_session();
     let mut request = initialize("2025-11-25");
     request["params"]["clientInfo"] = json!({"name":"contracts"});
-    assert_eq!(rpc(session.as_ref(), request).await?["error"]["code"], -32602);
+    assert_eq!(rpc(session.as_ref(), request).await?["error"]["code"], -32603);
     let signal = CancellationToken::new();
     signal.cancel();
     assert!(matches!(
@@ -769,11 +776,17 @@ async fn s11_local_mcp_lists_tools_whose_names_upstream_only_warns_about() -> Te
         description: "listed".into(),
         input_schema: McpToolInputSchema::new(object(json!({"type":"object"}))?),
         handler: Arc::new(|_request: McpToolRequest| async { Ok::<_, CallbackError>(McpToolOutput::text("ok")) }),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
     });
     let server = LocalMcpServer::from(LocalMcpServerOptions {
         name: McpServerName::from("names"),
-        version: "1".into(),
-        tools: tool.into(),
+        version: Some("1".into()),
+        tools: Some(tool.into()),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
     });
     let session = ready(&server).await?;
     let listed = rpc(
@@ -792,7 +805,7 @@ async fn m02_m03_local_mcp_reports_tool_failures_as_error_results_before_invokin
     for (request, code) in [
         (
             json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}),
-            -32602,
+            -32603,
         ),
         (json!({"jsonrpc":"2.0","id":4,"method":"unknown/method"}), -32601),
     ] {
@@ -804,18 +817,19 @@ async fn m02_m03_local_mcp_reports_tool_failures_as_error_results_before_invokin
     )
     .await?;
     assert_eq!(unknown["result"]["isError"], true);
-    assert_eq!(unknown["result"]["content"][0]["text"], "Tool unknown not found");
+    assert_eq!(
+        unknown["result"]["content"][0]["text"],
+        "MCP error -32602: Tool unknown not found"
+    );
     let invalid = rpc(
         session.as_ref(),
         json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"inspect","arguments":{"status":4}}}),
     )
     .await?;
     assert_eq!(invalid["result"]["isError"], true);
-    assert!(
-        invalid["result"]["content"][0]["text"]
-            .as_str()
-            .is_some_and(|text| text.starts_with("Input validation error: Invalid arguments for tool inspect: "))
-    );
+    assert!(invalid["result"]["content"][0]["text"].as_str().is_some_and(|text| {
+        text.starts_with("MCP error -32602: Input validation error: Invalid arguments for tool inspect: ")
+    }));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     for (status, expected) in [("success", Some(false)), ("error", Some(true)), ("unreported", None)] {
         let response = rpc(session.as_ref(), json!({"jsonrpc":"2.0","id":status,"method":"tools/call","params":{"name":"inspect","arguments":{"status":status}}})).await?;
@@ -854,18 +868,28 @@ async fn s08_local_mcp_discovery_does_not_wait_for_the_initialized_notice_and_su
 {
     let empty = LocalMcpServer::from(LocalMcpServerOptions {
         name: McpServerName::from("empty"),
-        version: "1".into(),
-        tools: Default::default(),
+        version: Some("1".into()),
+        tools: Some(Default::default()),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
     });
     let (populated, calls) = registry()?;
-    for (server, expected) in [
-        (&empty, json!([])),
+    // A TypeScript server with no tools never registers the tools handlers.
+    let not_found = json!({"code":-32601,"message":"Method not found"});
+    for (server, field, expected) in [
+        (&empty, "error", not_found),
         (
             &populated,
-            json!([{
+            "result",
+            json!({"tools":[{
                 "name":"inspect", "description":"fixture-private-description",
-                "inputSchema":{"type":"object","required":["status"],"properties":{"status":{"type":"string"}}}
-            }]),
+                "inputSchema":{
+                    "$schema":"http://json-schema.org/draft-07/schema#",
+                    "type":"object","required":["status"],"properties":{"status":{"type":"string"}}
+                },
+                "execution":{"taskSupport":"forbidden"}
+            }]}),
         ),
     ] {
         let session = server.open_session();
@@ -875,7 +899,7 @@ async fn s08_local_mcp_discovery_does_not_wait_for_the_initialized_notice_and_su
         )
         .await?;
         assert_eq!(early["id"], "early");
-        assert_eq!(early["result"]["tools"], expected);
+        assert_eq!(early[field], expected);
         rpc(session.as_ref(), initialize("2025-11-25")).await?;
         let waiting = rpc(
             session.as_ref(),
@@ -883,7 +907,7 @@ async fn s08_local_mcp_discovery_does_not_wait_for_the_initialized_notice_and_su
         )
         .await?;
         assert_eq!(waiting["id"], "waiting");
-        assert_eq!(waiting["result"]["tools"], expected);
+        assert_eq!(waiting[field], expected);
         assert!(
             session
                 .request(
@@ -899,8 +923,113 @@ async fn s08_local_mcp_discovery_does_not_wait_for_the_initialized_notice_and_su
         )
         .await?;
         assert_eq!(listed["id"], "listed");
-        assert_eq!(listed["result"]["tools"], expected);
+        assert_eq!(listed[field], expected);
     }
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+/// `McpServerDialect::Python` answers like the `mcp` server that the Python `create_sdk_mcp_server` builds.
+#[tokio::test]
+async fn s08_s09_s10_m04_python_dialect_negotiates_gates_and_reads_ids_like_the_mcp_package() -> TestResult {
+    let tool = SdkTool::from(SdkToolOptions {
+        name: McpToolName::from("listed"),
+        description: "listed".into(),
+        input_schema: McpToolInputSchema::new(object(json!({"type":"object","properties":{}}))?),
+        handler: Arc::new(|_request: McpToolRequest| async { Ok::<_, CallbackError>(McpToolOutput::text("ok")) }),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
+    });
+    let server = LocalMcpServer::from(LocalMcpServerOptions {
+        tools: Some(tool.into()),
+        instructions: Some("ignored by the Python server".into()),
+        dialect: McpServerDialect::Python,
+        ..LocalMcpServerOptions::new(McpServerName::from("python"))
+    });
+    let invalid = json!({"code":-32602,"message":"Invalid request parameters","data":""});
+    let session = server.open_session();
+    let early = rpc(
+        session.as_ref(),
+        json!({"jsonrpc":"2.0","id":"early","method":"tools/list"}),
+    )
+    .await?;
+    assert_eq!(early["error"], invalid);
+    assert_eq!(
+        rpc(session.as_ref(), json!({"jsonrpc":"2.0","id":"ping","method":"ping"})).await?["result"],
+        json!({})
+    );
+    let mut request = initialize("2025-11-25");
+    request["params"]["clientInfo"] = json!({"name":"contracts"});
+    assert_eq!(rpc(session.as_ref(), request).await?["error"], invalid);
+    for (requested, negotiated) in [
+        ("2024-10-07", "2025-11-25"),
+        ("2024-11-05", "2024-11-05"),
+        ("2025-03-26", "2025-03-26"),
+        ("2025-06-18", "2025-06-18"),
+        ("future-version", "2025-11-25"),
+    ] {
+        let session = server.open_session();
+        let initialized = rpc(session.as_ref(), initialize(requested)).await?;
+        assert_eq!(
+            initialized["result"],
+            json!({
+                "capabilities":{"tools":{"listChanged":false}},
+                "protocolVersion":negotiated,
+                "serverInfo":{"name":"python","version":"1.0.0"}
+            })
+        );
+        // `initialize` alone opens the session; the notice is not required.
+        let listed = rpc(
+            session.as_ref(),
+            json!({"jsonrpc":"2.0","id":"listed","method":"tools/list"}),
+        )
+        .await?;
+        assert_eq!(listed["result"]["tools"][0]["name"], "listed");
+    }
+    for id in [json!(1.0), json!(1.5), json!(true), Value::Null] {
+        let ping = json!({"jsonrpc":"2.0","id":id,"method":"ping"});
+        assert!(
+            session
+                .request(object(ping)?, CancellationToken::new())
+                .await?
+                .is_none()
+        );
+    }
+    for id in [json!("text"), json!(7), json!(-7), json!(u64::MAX)] {
+        let ping = rpc(
+            session.as_ref(),
+            json!({"jsonrpc":"2.0","id":id.clone(),"method":"ping"}),
+        )
+        .await?;
+        assert_eq!(ping["id"], id);
+    }
+    Ok(())
+}
+
+/// The TypeScript dialect reads a JSON number with a zero fraction as the same integer id, as JavaScript does.
+#[tokio::test]
+async fn m04_typescript_dialect_reads_string_and_safe_integer_ids() -> TestResult {
+    let (server, _calls) = registry()?;
+    let session = server.open_session();
+    for (id, echoed) in [
+        (json!("text"), json!("text")),
+        (json!(7), json!(7)),
+        (json!(-7), json!(-7)),
+        (json!(1.0), json!(1)),
+        (json!(9_007_199_254_740_991_u64), json!(9_007_199_254_740_991_u64)),
+    ] {
+        let ping = rpc(session.as_ref(), json!({"jsonrpc":"2.0","id":id,"method":"ping"})).await?;
+        assert_eq!(ping["id"], echoed);
+    }
+    for id in [json!(1.5), json!(true), Value::Null, json!(9_007_199_254_740_992_u64)] {
+        let ping = json!({"jsonrpc":"2.0","id":id,"method":"ping"});
+        assert!(
+            session
+                .request(object(ping)?, CancellationToken::new())
+                .await?
+                .is_none()
+        );
+    }
     Ok(())
 }

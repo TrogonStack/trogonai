@@ -16,9 +16,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
     ArgvStyle, ClaudeAgentOptions, ClaudeCodeMarker, ClaudeSdkClient, Environment, EnvironmentMode, ExtraArgument,
     HookEvent, HookOutput, HookRegistration, LocalMcpServer, LocalMcpServerOptions, McpDiscovery,
-    McpRemoteServerOptions, McpSdkServerOptions, McpServerName, McpServerOptions, McpServerToolPolicy,
-    McpStdioServerOptions, McpToolPermissionPolicy, ScriptRuntime, SdkMcpServer, SdkTools, SystemPrompt, TraceContext,
-    UsdBudget,
+    McpRemoteServerOptions, McpSdkServerOptions, McpServerDialect, McpServerName, McpServerOptions,
+    McpServerToolPolicy, McpStdioServerOptions, McpToolPermissionPolicy, ScriptRuntime, SdkMcpServer, SdkTools,
+    SystemPrompt, TraceContext, UsdBudget,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -384,8 +384,11 @@ fn mcp_options(style: ArgvStyle) -> Result<ClaudeAgentOptions, Box<dyn std::erro
     );
     let inproc: Arc<dyn SdkMcpServer> = Arc::new(LocalMcpServer::from(LocalMcpServerOptions {
         name: McpServerName::from("inproc"),
-        version: "1.0.0".into(),
-        tools: SdkTools::default(),
+        version: Some("1.0.0".into()),
+        tools: Some(SdkTools::default()),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
     }));
     options.sdk_mcp_servers.insert(McpServerName::from("inproc"), inproc);
     Ok(options)

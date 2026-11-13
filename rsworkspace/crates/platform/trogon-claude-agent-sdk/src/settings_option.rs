@@ -21,8 +21,8 @@ use crate::{
         SETTINGS_PATH_WITH_SANDBOX_ERROR,
     },
     process_options::ArgvStyle,
+    python_json::python_repr,
     settings_json::{js_normalize, js_stringify, python_dumps},
-    skills::python_repr,
 };
 
 /// TypeScript's `managedSettingsViaInitialize`.

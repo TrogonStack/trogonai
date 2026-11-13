@@ -37,22 +37,14 @@ fn array_index(key: &str) -> Option<u32> {
     (index != u32::MAX && index.to_string() == key).then_some(index)
 }
 
-fn js_write(value: &Value, out: &mut String) {
+/// `JSON.stringify` of `value` with the indentation step `gap`, at the current indentation `indent`.
+fn js_write(value: &Value, gap: &str, indent: &str, out: &mut String) {
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(flag) => out.push_str(if *flag { "true" } else { "false" }),
         Value::Number(number) => out.push_str(&js_number(number)),
         Value::String(text) => out.push_str(&Value::String(text.clone()).to_string()),
-        Value::Array(items) => {
-            out.push('[');
-            for (position, item) in items.iter().enumerate() {
-                if position > 0 {
-                    out.push(',');
-                }
-                js_write(item, out);
-            }
-            out.push(']');
-        }
+        Value::Array(items) => js_write_entries(['[', ']'], items.iter().map(|item| (None, item)), gap, indent, out),
         Value::Object(map) => {
             let mut indexed: Vec<(u32, &String, &Value)> = Vec::new();
             let mut named: Vec<(&String, &Value)> = Vec::new();
@@ -63,25 +55,60 @@ fn js_write(value: &Value, out: &mut String) {
                 }
             }
             indexed.sort_by_key(|(index, _, _)| *index);
-            out.push('{');
-            let entries = indexed.into_iter().map(|(_, key, item)| (key, item)).chain(named);
-            for (position, (key, item)) in entries.enumerate() {
-                if position > 0 {
-                    out.push(',');
-                }
-                out.push_str(&Value::String(key.clone()).to_string());
-                out.push(':');
-                js_write(item, out);
-            }
-            out.push('}');
+            let entries = indexed
+                .into_iter()
+                .map(|(_, key, item)| (key, item))
+                .chain(named)
+                .map(|(key, item)| (Some(key), item));
+            js_write_entries(['{', '}'], entries, gap, indent, out);
         }
     }
+}
+
+/// The entries of an array or object between `open` and `close`: one per line under `gap`, or none when it is empty.
+fn js_write_entries<'a>(
+    [open, close]: [char; 2],
+    entries: impl Iterator<Item = (Option<&'a String>, &'a Value)>,
+    gap: &str,
+    indent: &str,
+    out: &mut String,
+) {
+    let inner = format!("{indent}{gap}");
+    let mut written = false;
+    out.push(open);
+    for (key, item) in entries {
+        if written {
+            out.push(',');
+        }
+        if !gap.is_empty() {
+            out.push('\n');
+            out.push_str(&inner);
+        }
+        if let Some(key) = key {
+            out.push_str(&Value::String(key.clone()).to_string());
+            out.push_str(if gap.is_empty() { ":" } else { ": " });
+        }
+        js_write(item, gap, &inner, out);
+        written = true;
+    }
+    if written && !gap.is_empty() {
+        out.push('\n');
+        out.push_str(indent);
+    }
+    out.push(close);
 }
 
 /// `JSON.stringify(value)`.
 pub(crate) fn js_stringify(value: &Value) -> String {
     let mut out = String::new();
-    js_write(value, &mut out);
+    js_write(value, "", "", &mut out);
+    out
+}
+
+/// `JSON.stringify(value, null, 2)`.
+pub(crate) fn js_stringify_pretty(value: &Value) -> String {
+    let mut out = String::new();
+    js_write(value, "  ", "", &mut out);
     out
 }
 

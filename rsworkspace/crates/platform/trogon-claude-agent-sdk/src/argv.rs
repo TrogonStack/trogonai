@@ -10,7 +10,7 @@ use crate::{
     OptionError, PartialMessages, ProtocolError, SessionPersistence, ThinkingConfig, ToolSet,
     adapters::{NativeHost, ReadFile},
     process_options::ArgvStyle,
-    skills::python_repr,
+    python_json::python_repr,
     wire::runtime_payload::{EmbeddedMcpPayload, McpConfigPayload},
 };
 

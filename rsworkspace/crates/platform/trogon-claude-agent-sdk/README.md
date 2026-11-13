@@ -140,11 +140,19 @@ without returning an error.
 `LocalMcpServerOptions.tools` requires an immutable `SdkTools` collection.
 Use `tool.into()` for one tool, `SdkTools::default()` for none, or
 `SdkTools::new([first, second])?` to reject duplicate names when assembling
-several tools. Exact names must be unique; case-distinct names remain separate.
-`LocalMcpServer::from` assembles these inputs infallibly.
+several tools, as the TypeScript SDK does. Exact names must be unique;
+case-distinct names remain separate. `SdkTools::with_duplicates` keeps repeated
+names, as the Python SDK does. `LocalMcpServerOptions::new(name)` starts from no
+tools; `version`, `instructions` and `always_load` mirror the upstream server
+options. `LocalMcpServer::from` assembles these inputs infallibly.
 Each client opens its own session. The built-in server supports initialize,
-initialized notification, ping and tool
-listing/calls. Custom
+initialized notification, cancellation, ping and tool listing/calls.
+`McpServerDialect::TypeScript`, the default, answers like `createSdkMcpServer`:
+it drops messages it cannot read, reports parameter errors as `-32603` and
+lists each schema with its draft-07 `$schema`. `McpServerDialect::Python`
+answers like `create_sdk_mcp_server`: it reports unreadable messages as
+`McpServerError::Protocol`, refuses requests before `initialize` and answers a
+cancelled call with `-32800`. Custom
 `SdkMcpServer`/`SdkMcpSession` implementations can add methods; the built-in
 server does not expose server-initiated client requests.
 [The SDK tools example](examples/sdk_tools.rs) registers an echo tool.
