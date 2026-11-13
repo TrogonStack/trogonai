@@ -160,3 +160,210 @@ fn every_port_reproduces_the_recorded_probes() {
             .join("\n")
     );
 }
+
+/// The pinned description with the given fields added (or replaced) and the given restrictive readings appended,
+/// so a policy read runs over a schema built to exercise one shape.
+fn schema_with(fields: Value, restrictive: Value) -> SettingsSchema {
+    let mut document: Value = serde_json::from_str(SETTINGS_SCHEMA_JSON).expect("document parses");
+    for (name, node) in fields.as_object().expect("fields") {
+        let keys = document["keys"].as_array_mut().expect("keys");
+        if !keys.iter().any(|key| key == name.as_str()) {
+            keys.push(Value::String(name.clone()));
+        }
+        document["fields"][name.as_str()] = node.clone();
+    }
+    document["read"]["policy"]["restrictive"]
+        .as_array_mut()
+        .expect("restrictive")
+        .extend(restrictive.as_array().expect("entries").iter().cloned());
+    SettingsSchema::parse(&document.to_string()).expect("schema builds")
+}
+
+fn read_policy(schema: &SettingsSchema, document: Value) -> Value {
+    Value::Object(schema.parse_policy_document(document.as_object().expect("object")))
+}
+
+fn optional(inner: Value) -> Value {
+    json!({"type": "optional", "inner": inner})
+}
+
+fn strings() -> Value {
+    json!({"type": "array", "element": {"type": "string"}})
+}
+
+/// A locked block whose `list` member is the given schema, beside a locked `lock` and a plain `name`.
+fn probe_block(list: Value) -> SettingsSchema {
+    schema_with(
+        json!({"probe": {"type": "object", "mode": "strip", "shape": {
+            "lock": optional(json!({"type": "boolean"})),
+            "name": optional(json!({"type": "string"})),
+            "list": list,
+        }}}),
+        json!([{"path": ["probe", "lock"], "restrictive": true}]),
+    )
+}
+
+fn malformed_after(pointer: &str, replacement: Value) -> Option<String> {
+    let mut document: Value = serde_json::from_str(SETTINGS_SCHEMA_JSON).expect("document parses");
+    *document["read"].pointer_mut(pointer).expect("pointer") = replacement;
+    policy::PolicySpec::from_json(&document["read"]).err()
+}
+
+#[test]
+fn a_malformed_policy_description_names_the_part_that_cannot_be_read() {
+    let cases = [
+        ("/policy/restrictive", json!(5), "restrictive"),
+        (
+            "/policy/restrictive",
+            json!([{"path": 5, "restrictive": true}]),
+            "restrictive",
+        ),
+        (
+            "/policy/restrictive",
+            json!([{"path": [1], "restrictive": true}]),
+            "restrictive",
+        ),
+        ("/permissionBlocks", json!(5), "permissionBlocks"),
+        ("/permissionBlocks/0/name", json!(5), "block name"),
+        ("/permissionBlocks/0/restrictions", json!(5), "restrictions"),
+        ("/permissionBlocks/0/grants", json!("x"), "grants"),
+        ("/policy/defaultMode", Value::Null, "defaultMode path"),
+        ("/policy/defaultMode/modes", json!(5), "modes"),
+        ("/policy/defaultMode/aliases", json!({"manual": 5}), "aliases"),
+        ("/policy/defaultMode/inert", json!(5), "inert"),
+        ("/policy/defaultMode/floor", json!(5), "floor"),
+    ];
+    for (pointer, replacement, what) in cases {
+        assert_eq!(
+            malformed_after(pointer, replacement),
+            Some(format!("read.policy.{what}")),
+            "{pointer}"
+        );
+    }
+    assert_eq!(
+        policy::PolicySpec::from_json(&json!({})).err(),
+        Some("read.policy.policy".to_owned())
+    );
+}
+
+#[test]
+fn a_null_lock_reads_as_unset_instead_of_its_restrictive_value() {
+    let schema = schema().expect("schema loads");
+    assert_eq!(
+        read_policy(schema, json!({"strictPluginOnlyCustomization": null})),
+        json!({})
+    );
+    assert_eq!(read_policy(schema, json!({"allowManagedHooksOnly": null})), json!({}));
+}
+
+#[test]
+fn a_strict_plugin_lock_that_is_a_plain_boolean_falls_back_to_true() {
+    let schema = schema_with(json!({"strictPluginOnlyCustomization": {"type": "boolean"}}), json!([]));
+    assert_eq!(
+        read_policy(&schema, json!({"strictPluginOnlyCustomization": false})),
+        json!({"strictPluginOnlyCustomization": false})
+    );
+    assert_eq!(
+        read_policy(&schema, json!({"strictPluginOnlyCustomization": "x"})),
+        json!({"strictPluginOnlyCustomization": true})
+    );
+}
+
+#[test]
+fn a_lock_below_a_field_that_is_not_an_object_reads_like_a_plain_field() {
+    let schema = schema_with(
+        json!({"probe": {"type": "string"}}),
+        json!([{"path": ["probe", "lock"], "restrictive": true}]),
+    );
+    assert_eq!(read_policy(&schema, json!({"probe": "x"})), json!({"probe": "x"}));
+    assert_eq!(read_policy(&schema, json!({"probe": 5})), json!({}));
+}
+
+fn nested_blocks() -> SettingsSchema {
+    let deep = json!({"type": "object", "mode": "strict", "shape": {"deep": optional(json!({"type": "boolean"}))}});
+    schema_with(
+        json!({"probe": {"type": "object", "mode": "strict", "shape": {
+            "lock": optional(json!({"type": "boolean"})),
+            "inner": optional(deep),
+        }}}),
+        json!([
+            {"path": ["probe", "lock"], "restrictive": true},
+            {"path": ["probe", "inner", "deep"], "restrictive": true},
+        ]),
+    )
+}
+
+#[test]
+fn a_locked_block_inside_a_locked_block_is_read_member_by_member() {
+    let schema = nested_blocks();
+    assert_eq!(
+        read_policy(&schema, json!({"probe": {"lock": false, "inner": {"deep": false}}})),
+        json!({"probe": {"lock": false, "inner": {"deep": false}}})
+    );
+    assert_eq!(
+        read_policy(&schema, json!({"probe": {"lock": "no", "inner": {"deep": "no"}}})),
+        json!({"probe": {"lock": true, "inner": {"deep": true}}})
+    );
+}
+
+#[test]
+fn a_strict_block_with_an_unknown_key_reads_as_its_restrictive_skeleton() {
+    let schema = nested_blocks();
+    assert_eq!(
+        read_policy(&schema, json!({"probe": {"extra": 1}})),
+        json!({"probe": {"lock": true, "inner": {"deep": true}}})
+    );
+}
+
+#[test]
+fn a_block_that_cannot_be_read_and_has_no_restrictive_member_is_dropped() {
+    let schema = schema_with(
+        json!({"ghost": {"type": "object", "mode": "strict", "shape": {"a": optional(json!({"type": "boolean"}))}}}),
+        json!([{"path": ["ghost", "missing"], "restrictive": true}]),
+    );
+    assert_eq!(read_policy(&schema, json!({"ghost": {"zzz": 1}})), json!({}));
+}
+
+#[test]
+fn a_block_that_fails_its_own_checks_reads_as_its_restrictive_skeleton() {
+    let source_is_not_a_string = json!({"check": "custom", "fn": {"source": "(e)=>typeof e.source!==\"string\""}});
+    let schema = schema_with(
+        json!({"gate": {"type": "object", "mode": "strip", "checks": [source_is_not_a_string], "shape": {
+            "lock": optional(json!({"type": "boolean"})),
+            "source": optional(json!({"type": "unknown"})),
+        }}}),
+        json!([{"path": ["gate", "lock"], "restrictive": true}]),
+    );
+    assert_eq!(
+        read_policy(&schema, json!({"gate": {"source": "x"}})),
+        json!({"gate": {"lock": true}})
+    );
+    assert_eq!(
+        read_policy(&schema, json!({"gate": {"source": 5}})),
+        json!({"gate": {"source": 5}})
+    );
+}
+
+#[test]
+fn a_list_behind_a_pipe_keeps_the_entries_the_pipe_accepts() {
+    let trimmed = json!({"probe": {"list": ["a"]}});
+    let document = json!({"probe": {"list": ["a", 1]}});
+    let failing_first = json!({"type": "pipe", "in": strings(), "out": strings()});
+    assert_eq!(read_policy(&probe_block(failing_first), document.clone()), trimmed);
+    let failing_second = json!({"type": "pipe", "in": {"type": "unknown"}, "out": strings()});
+    assert_eq!(read_policy(&probe_block(failing_second), document), trimmed);
+}
+
+#[test]
+fn a_list_whose_failing_entries_cannot_be_located_is_dropped() {
+    let document = json!({"probe": {"name": "n", "list": [1]}});
+    let dropped = json!({"probe": {"name": "n"}});
+    let stripped_input = json!({"type": "catch", "inner": strings(), "value": {}});
+    let unset_middle = json!({"type": "pipe", "in": stripped_input, "out": strings()});
+    assert_eq!(read_policy(&probe_block(unset_middle), document.clone()), dropped);
+    let text_input = json!({"type": "catch", "inner": strings(), "value": {"value": "x"}});
+    let text_middle = json!({"type": "pipe", "in": text_input, "out": strings()});
+    assert_eq!(read_policy(&probe_block(text_middle), document.clone()), dropped);
+    let union = json!({"type": "union", "options": [strings()]});
+    assert_eq!(read_policy(&probe_block(union), document), dropped);
+}
