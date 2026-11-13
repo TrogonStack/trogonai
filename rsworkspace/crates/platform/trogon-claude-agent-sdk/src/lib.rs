@@ -20,21 +20,7 @@ mod client;
 mod client_app;
 mod client_app_derivation;
 mod config_value;
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "the connector folder check starts calling these in a later change"
-    )
-)]
 mod connector_folder;
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "the connector folder check starts calling these in a later change"
-    )
-)]
 mod connector_vetting;
 mod constants;
 mod control;
@@ -76,7 +62,7 @@ mod model_name;
     not(test),
     allow(
         dead_code,
-        reason = "the connector folder check starts calling these in a later change"
+        reason = "node's path module is ported whole and replayed against recorded probes; the connector check reaches only part of it"
     )
 )]
 mod node_path;
@@ -246,6 +232,7 @@ pub use message::{
 pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use model_name::ModelName;
+pub use node_path::NodePathDialect;
 pub use option_error::OptionError;
 pub use options::{
     ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, FileCheckpointing,

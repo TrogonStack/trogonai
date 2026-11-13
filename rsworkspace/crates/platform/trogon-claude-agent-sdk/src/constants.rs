@@ -910,9 +910,6 @@ pub(crate) const LOGIN_METHODS: [&str; 2] = ["claudeai", "console"];
 /// Folder name whose contents the connector download flow owns (`J8e` upstream), compared after normalization.
 pub(crate) const CONNECTOR_DOWNLOADS_NAME: &str = "connector-downloads";
 
-/// The sandbox mount that always counts as a connector download folder (`z8e` upstream).
-pub(crate) const CONNECTOR_DOWNLOADS_ROOT: &str = "/mnt/user-data/uploads/connector-downloads";
-
 /// Whole contents of a `.gitignore` that marks a connector download folder as ignored (`n7e` upstream).
 pub(crate) const CONNECTOR_GITIGNORE_MARKERS: [&[u8]; 3] = [b"*", b"*\n", b"*\r\n"];
 
@@ -921,9 +918,6 @@ pub(crate) const CONNECTOR_GITIGNORE_MAX_BYTES: u64 = 3;
 
 /// Entries the connector folder check remembers before it forgets all of them (`nE` upstream).
 pub(crate) const CONNECTOR_CACHE_LIMIT: usize = 64;
-
-/// Names of the temporary files a connector download leaves behind (`e7e` upstream).
-pub(crate) const CONNECTOR_DOWNLOAD_TEMP_PATTERN: &str = r"^(?:download-[0-9a-f]{8}(?:-[0-9]+)?(?:\.[^./\\]*)?|\.download-[0-9a-f]{8}(?:-[0-9]+)?(?:\.[^./\\]*)?\.(?:from\.json|part))$";
 
 /// Symbolic links the path walk follows before it gives up on the path.
 pub(crate) const LINK_HOP_LIMIT: usize = 64;
@@ -952,6 +946,9 @@ pub(crate) const VETTING_HOME_MOUNT: &str = "/home";
 
 /// Folder whose device `/home` is compared with (`TI.homeIsOwnMount` upstream).
 pub(crate) const VETTING_USERS_MOUNT: &str = "/Users";
+
+/// The macOS automounter map that says whether `/home` is automounted (`TI.readAutoMaster` upstream).
+pub(crate) const VETTING_AUTO_MASTER: &str = "/etc/auto_master";
 
 /// Path components the automount checks look at (`NQ` upstream).
 pub(crate) const VETTING_AUTOMOUNT_DEPTH: usize = 6;

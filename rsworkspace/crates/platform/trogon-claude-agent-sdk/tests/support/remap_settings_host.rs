@@ -10,9 +10,10 @@ use std::{
 
 use trogon_claude_agent_sdk::adapters::{
     CheckReadable, CheckWritable, CurrentDirectory, DirectoryEntry, EffectiveGroupId, EffectiveUserId,
-    EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest, HostIdentity, LinkMetadata, NativeHost,
-    OperatingSystem, ReadDirectory, ReadFile, ReadLink, ReadMetadata, ReadSymlinkMetadata, RealGroupId, RealUserId,
-    SupplementaryGroupIds, WallClock,
+    EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest, HomeDirectory, HostIdentity,
+    LinkMetadata, NativeHost, OpenDirectoryNoFollow, OperatingSystem, ReadDeviceId, ReadDirectory, ReadFile,
+    ReadFileHead, ReadLink, ReadMetadata, ReadSymlinkMetadata, RealGroupId, RealUserId, SupplementaryGroupIds,
+    WallClock,
 };
 
 /// Machine-wide locations the resolver reads, which the host moves under a sandbox root.
@@ -180,6 +181,41 @@ impl SupplementaryGroupIds for RemapHost {
         match &self.identity {
             Some(identity) => identity.groups.clone().map(Ok),
             None => NativeHost.supplementary_group_ids(),
+        }
+    }
+}
+
+impl OpenDirectoryNoFollow for RemapHost {
+    type Error = io::Error;
+
+    fn open_directory_no_follow(&self, path: &Path) -> Result<(), io::Error> {
+        NativeHost.open_directory_no_follow(&self.remap(path))
+    }
+}
+
+impl ReadFileHead for RemapHost {
+    type Error = io::Error;
+
+    fn read_file_head(&self, path: &Path, limit: usize) -> Result<Vec<u8>, io::Error> {
+        NativeHost.read_file_head(&self.remap(path), limit)
+    }
+}
+
+impl ReadDeviceId for RemapHost {
+    type Error = io::Error;
+
+    fn device_id(&self, path: &Path) -> Result<u64, io::Error> {
+        NativeHost.device_id(&self.remap(path))
+    }
+}
+
+impl HomeDirectory for RemapHost {
+    type Error = io::Error;
+
+    fn home_directory(&self) -> Result<PathBuf, io::Error> {
+        match self.env.get("HOME") {
+            Some(Some(home)) => Ok(PathBuf::from(home)),
+            _ => NativeHost.home_directory(),
         }
     }
 }
