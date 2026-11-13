@@ -14,6 +14,7 @@ use url::Url;
 
 use crate::{
     constants::{SETTINGS_SCHEMA_JSON, SETTINGS_SCHEMA_SAFE_INTEGER},
+    settings_merge_spec::MergeSpec,
     settings_read_spec::ReadSpec,
     settings_schema_builtins::{
         Batteries, Payload, Predicate, Transform, payload_for, predicate_for, sentinel, transform_for,
@@ -37,6 +38,7 @@ pub(crate) struct SettingsSchema {
     /// The schemas the in-place sanitizers validate single entries with, by name.
     roots: HashMap<String, Arc<Node>>,
     read: ReadSpec,
+    merge: MergeSpec,
 }
 
 #[derive(Debug)]
@@ -159,11 +161,17 @@ impl SettingsSchema {
             fields,
             roots,
             read: ReadSpec::from_json(read).map_err(SettingsSchemaError::Malformed)?,
+            merge: MergeSpec::from_json(document.get("merge").ok_or_else(|| malformed("merge"))?)
+                .map_err(SettingsSchemaError::Malformed)?,
         })
     }
 
     pub(crate) fn read_spec(&self) -> &ReadSpec {
         &self.read
+    }
+
+    pub(crate) fn merge_spec(&self) -> &MergeSpec {
+        &self.merge
     }
 
     /// Whether the named sanitizer schema accepts the entry (`safeParse(...).success`).
