@@ -110,6 +110,9 @@ pub enum Error {
     /// Python `CLIJSONDecodeError`.
     #[error(transparent)]
     JsonDecode(#[from] JsonDecodeError),
+    /// An option the upstream SDK rejects before it starts the CLI.
+    #[error(transparent)]
+    Option(#[from] crate::OptionError),
     /// Python `MessageParseError`.
     #[error(transparent)]
     MessageParse(#[from] MessageParseError),

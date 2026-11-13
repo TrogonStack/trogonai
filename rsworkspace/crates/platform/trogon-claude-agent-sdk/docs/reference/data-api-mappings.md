@@ -25,6 +25,23 @@ integrity-verified published `0.3.319` declaration archive.
 | `allowed_tools: Vec<ToolRule>` | [`allowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2353) | `allowedTools` |
 | `disallowed_tools: Vec<ToolRule>` | [`disallowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2431) | `disallowedTools` |
 | `resume: Option<SessionId>` | [`resume`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2408) | `resume` |
+| `thinking: Option<ThinkingConfig>` | `thinking` | `thinking` |
+| `max_thinking_tokens: Option<u64>` | `max_thinking_tokens` | `maxThinkingTokens` |
+| `task_budget: Option<TaskBudget>` | `task_budget` | `taskBudget` |
+| `betas: Vec<SdkBeta>` | `betas` | `betas` |
+| `fallback_model: Option<ModelName>` | `fallback_model` | `fallbackModel` |
+| `permission_prompt_tool_name: Option<String>` | `permission_prompt_tool_name` | `permissionPromptToolName` |
+| `permission_prompts: Option<PermissionPrompts>` | Not exposed in pinned Python | `permissionPrompts` |
+| `channels: Vec<String>` | Not exposed in pinned Python | CLI bundle only |
+| `debug: DebugOutput` | Not exposed in pinned Python | `debug` |
+| `debug_file: Option<PathBuf>` | Not exposed in pinned Python | `debugFile` |
+| `include_hook_events: HookEvents` | `include_hook_events` | `includeHookEvents` |
+| `session_id: Option<SessionId>` | `session_id` | `sessionId` |
+| `resume_session_at: Option<String>` | `resume_session_at` | `resumeSessionAt` |
+| `resume_drops_turn: Option<String>` | `resume_drops_turn` | `resumeDropsTurn` |
+| `allow_dangerously_skip_permissions: DangerousPermissionSkip` | Not exposed in pinned Python | `allowDangerouslySkipPermissions` |
+| `project_config_root: Option<PathBuf>` | Not exposed in pinned Python | `projectConfigRoot` |
+| `skills: Option<Skills>` | `skills` | `skills` |
 
 | Rust value | Upstream scalar or purpose | Value contract |
 | --- | --- | --- |

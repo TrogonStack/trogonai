@@ -390,7 +390,7 @@ fn tool_lists_reach_the_cli_verbatim() -> Result<(), Error> {
         tools: ToolSet::Only(vec![crate::BuiltinToolName::from("Read Bash")]),
         ..ClaudeAgentOptions::default()
     };
-    let command = command(&options, std::path::Path::new("claude"), &Inherited::new())?;
+    let command = command(&options, std::path::Path::new("claude"), &Inherited::new(), None)?;
     let arguments: Vec<_> = command
         .as_std()
         .get_args()
@@ -437,7 +437,7 @@ fn argv_delivery_leaves_the_initialize_request_without_plugins() -> Result<(), E
 }
 
 fn derived_label_in(options: &ClaudeAgentOptions, inherited: &Inherited, cli: &std::path::Path) -> Option<String> {
-    let command = command(options, cli, inherited).ok()?;
+    let command = command(options, cli, inherited, None).ok()?;
     command
         .as_std()
         .get_envs()

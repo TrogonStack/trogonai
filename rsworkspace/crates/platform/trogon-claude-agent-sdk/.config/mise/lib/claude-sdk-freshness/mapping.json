@@ -1888,32 +1888,17 @@
       "upstream": {
         "python": {
           "symbols": [
-            "ClaudeAgentOptions.fallback_model",
-            "ClaudeAgentOptions.betas",
             "ClaudeAgentOptions.settings",
-            "ClaudeAgentOptions.skills",
-            "ClaudeAgentOptions.sandbox",
-            "ClaudeAgentOptions.thinking",
-            "ClaudeAgentOptions.task_budget"
+            "ClaudeAgentOptions.sandbox"
           ],
           "prefixes": []
         },
         "typescript": {
           "symbols": [
-            "Options.fallbackModel",
-            "Options.betas",
             "Options.settings",
-            "Options.skills",
             "Options.sandbox",
-            "Options.thinking",
-            "Options.taskBudget",
-            "core.Options.fallbackModel",
-            "core.Options.betas",
             "core.Options.settings",
-            "core.Options.skills",
-            "core.Options.sandbox",
-            "core.Options.thinking",
-            "core.Options.taskBudget"
+            "core.Options.sandbox"
           ],
           "prefixes": []
         }
@@ -1921,7 +1906,146 @@
       "rust_api": [],
       "tests": [],
       "status": "deferred",
-      "rationale": "Fallback/beta/custom settings/skills/sandbox/thinking/task-budget conveniences require individual Rust design and behavioral evidence; they are not enabled by aggregate configuration support."
+      "rationale": "Custom settings and sandbox conveniences, and the settings, managed settings, flag settings and updateSettings surfaces, require individual Rust design and behavioral evidence; they are not enabled by aggregate configuration support."
+    },
+    {
+      "id": "runtime-options",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.fallback_model",
+            "ClaudeAgentOptions.betas",
+            "ClaudeAgentOptions.skills",
+            "ClaudeAgentOptions.thinking",
+            "ClaudeAgentOptions.max_thinking_tokens",
+            "ClaudeAgentOptions.task_budget",
+            "ClaudeAgentOptions.permission_prompt_tool_name",
+            "ClaudeAgentOptions.include_hook_events",
+            "ClaudeAgentOptions.session_id",
+            "ClaudeAgentOptions.resume_session_at",
+            "ClaudeAgentOptions.resume_drops_turn"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.fallbackModel",
+            "core.Options.fallbackModel",
+            "Options.betas",
+            "core.Options.betas",
+            "Options.skills",
+            "core.Options.skills",
+            "Options.thinking",
+            "core.Options.thinking",
+            "Options.maxThinkingTokens",
+            "core.Options.maxThinkingTokens",
+            "Options.taskBudget",
+            "core.Options.taskBudget",
+            "Options.debug",
+            "core.Options.debug",
+            "Options.debugFile",
+            "core.Options.debugFile",
+            "Options.permissionPromptToolName",
+            "core.Options.permissionPromptToolName",
+            "Options.permissionPrompts",
+            "core.Options.permissionPrompts",
+            "Options.includeHookEvents",
+            "core.Options.includeHookEvents",
+            "Options.sessionId",
+            "core.Options.sessionId",
+            "Options.resumeSessionAt",
+            "core.Options.resumeSessionAt",
+            "Options.resumeDropsTurn",
+            "core.Options.resumeDropsTurn",
+            "Options.allowDangerouslySkipPermissions",
+            "core.Options.allowDangerouslySkipPermissions",
+            "Options.projectConfigRoot",
+            "core.Options.projectConfigRoot"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.thinking",
+        "ClaudeAgentOptions.max_thinking_tokens",
+        "ClaudeAgentOptions.task_budget",
+        "ClaudeAgentOptions.betas",
+        "ClaudeAgentOptions.fallback_model",
+        "ClaudeAgentOptions.permission_prompt_tool_name",
+        "ClaudeAgentOptions.permission_prompts",
+        "ClaudeAgentOptions.channels",
+        "ClaudeAgentOptions.debug",
+        "ClaudeAgentOptions.debug_file",
+        "ClaudeAgentOptions.include_hook_events",
+        "ClaudeAgentOptions.session_id",
+        "ClaudeAgentOptions.resume_session_at",
+        "ClaudeAgentOptions.resume_drops_turn",
+        "ClaudeAgentOptions.allow_dangerously_skip_permissions",
+        "ClaudeAgentOptions.project_config_root",
+        "ClaudeAgentOptions.skills",
+        "ThinkingConfig",
+        "ThinkingDisplay",
+        "TaskBudget",
+        "SdkBeta",
+        "PermissionPrompts",
+        "HookEvents",
+        "DangerousPermissionSkip",
+        "DebugOutput",
+        "Skills",
+        "OptionError"
+      ],
+      "tests": [
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "typescript_orders_every_runtime_option_like_sdk_mjs"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "python_orders_every_runtime_option_like_subprocess_cli"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "typescript_thinking_forms"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "python_thinking_forms"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "typescript_debug_flags"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "a_callback_with_a_prompt_tool_name_is_rejected_with_each_dialects_text"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "typescript_rejects_a_fallback_model_equal_to_the_model"
+        },
+        {
+          "path": "src/argv/runtime_tests.rs",
+          "name": "windows_metacharacters_are_listed_sorted_with_python_reprs"
+        },
+        {
+          "path": "src/skills/tests.rs",
+          "name": "python_defaults_the_setting_sources_only_when_skills_are_set"
+        },
+        {
+          "path": "src/skills/tests.rs",
+          "name": "only_an_explicit_list_reaches_the_initialize_request"
+        },
+        {
+          "path": "src/shadow_warning/tests.rs",
+          "name": "bypass_permissions_is_reported_with_each_dialects_text"
+        },
+        {
+          "path": "src/debug_file/tests.rs",
+          "name": "a_truthy_variable_selects_the_debug_directory_of_the_config_dir"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Exact argv, in the upstream order of each dialect. TypeScript uses --flag=value; Python uses two tokens except --resume, --session-id, --resume-session-at, --resume-drops-turn and --setting-sources. thinking wins over max_thinking_tokens; TypeScript sends maxThinkingTokens 0 as --thinking=disabled and an enabled config without a budget as --thinking=adaptive, while Python rejects it with the upstream KeyError text. The callback and permission_prompt_tool_name are mutually exclusive with dialect-specific text; the callback otherwise selects --permission-prompt-tool stdio. TypeScript refuses a fallback model equal to the model; Python does not. The TypeScript-only options permission_prompts, channels, debug, debug_file, allow_dangerously_skip_permissions and project_config_root are ignored by the Python dialect. The derived per-process debug file is added for connect() in the TypeScript dialect when no debug_file is set. skills appends Skill or Skill(name) to the allowed tools (TypeScript dedupes against the caller list only, Python against the growing list), Python defaults --setting-sources=user,project, and an explicit list also reaches the initialize request. The Python Windows metacharacter check applies to the resume and session options. The can-use-tool shadow advisory goes through tracing in both dialects. TypeScript surrogate and non-string skill name checks are unreachable because Rust strings are valid Unicode; channels has no declaration in the TypeScript types and follows the bundle."
     },
     {
       "id": "plugins",

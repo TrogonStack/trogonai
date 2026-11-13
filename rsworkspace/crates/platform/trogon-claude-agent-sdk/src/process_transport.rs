@@ -38,8 +38,9 @@ pub(crate) fn command(
     options: &ClaudeAgentOptions,
     cli_path: &Path,
     inherited: &Inherited,
+    derived_debug_file: Option<&Path>,
 ) -> Result<ProcessCommand, Error> {
-    let arguments = argv::build(options)?;
+    let arguments = argv::build(options, derived_debug_file)?;
     let mut command = if is_script(cli_path) {
         let runtime = options
             .script_runtime
@@ -127,6 +128,8 @@ pub(crate) struct ProcessSpawn<'a, P> {
     pub inherited: &'a Inherited,
     pub process: &'a P,
     pub config_dir: Option<&'a Path>,
+    /// The TypeScript default debug file, derived by `connect` when the SDK spawns the CLI itself.
+    pub derived_debug_file: Option<&'a Path>,
     pub closed: Closed,
 }
 
@@ -157,9 +160,10 @@ impl ProcessTransport {
             inherited,
             process,
             config_dir,
+            derived_debug_file,
             closed,
         } = input;
-        let mut command = command(options, &cli_path, inherited)?;
+        let mut command = command(options, &cli_path, inherited, derived_debug_file)?;
         if let Some(config_dir) = config_dir {
             command.env("CLAUDE_CONFIG_DIR", config_dir);
         }

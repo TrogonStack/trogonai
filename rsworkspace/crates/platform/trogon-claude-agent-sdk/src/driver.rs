@@ -342,6 +342,7 @@ fn initialize_config(
     if !options.supported_dialog_kinds.is_empty() && options.user_dialog_handler.is_none() {
         return Err(Error::DialogKindsWithoutHandler);
     }
+    crate::shadow_warning::reject_handler_with_tool_name(options)?;
     let typescript = options.argv_style == crate::ArgvStyle::TypeScript;
     let mut hooks = HooksPayload::new();
     let mut callbacks = HashMap::new();
@@ -416,6 +417,7 @@ fn initialize_config(
         system_prompt,
         append_system_prompt,
         agents,
+        skills: crate::skills::initialize_skills(options),
         supported_dialog_kinds,
         plugins: plugins_via_initialize(options)
             .then(|| options.plugins.iter().map(crate::plugin::PluginPayload::from).collect()),

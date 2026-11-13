@@ -311,4 +311,31 @@ pub struct ClaudeAgentOptions {
     pub user: Option<String>,
     /// Numeric user id the CLI runs as (Unix only), as `Popen(user=int)` does.
     pub run_as_uid: Option<u32>,
+    /// `thinking` / `thinkingConfig`. Takes precedence over `max_thinking_tokens`.
+    pub thinking: Option<crate::ThinkingConfig>,
+    /// The deprecated `max_thinking_tokens`. TypeScript treats `0` as disabled thinking; Python forwards it as is.
+    pub max_thinking_tokens: Option<u64>,
+    pub task_budget: Option<crate::TaskBudget>,
+    pub betas: Vec<crate::SdkBeta>,
+    pub fallback_model: Option<ModelName>,
+    /// The permission prompt tool. Rejected together with `permission_handler`.
+    pub permission_prompt_tool_name: Option<String>,
+    /// TypeScript `permissionPrompts`. Ignored with `ArgvStyle::Python`.
+    pub permission_prompts: Option<crate::PermissionPrompts>,
+    /// TypeScript `channels`. Ignored with `ArgvStyle::Python`.
+    pub channels: Vec<String>,
+    /// TypeScript `debug`. Ignored with `ArgvStyle::Python`.
+    pub debug: crate::DebugOutput,
+    /// TypeScript `debugFile`. Ignored with `ArgvStyle::Python`.
+    pub debug_file: Option<PathBuf>,
+    pub include_hook_events: crate::HookEvents,
+    pub session_id: Option<SessionId>,
+    pub resume_session_at: Option<String>,
+    /// Forwarded whenever set, including the empty string, so the CLI rejects a malformed value.
+    pub resume_drops_turn: Option<String>,
+    /// TypeScript `allowDangerouslySkipPermissions`. Ignored with `ArgvStyle::Python`.
+    pub allow_dangerously_skip_permissions: crate::DangerousPermissionSkip,
+    /// TypeScript `projectConfigRoot`. Ignored with `ArgvStyle::Python`.
+    pub project_config_root: Option<PathBuf>,
+    pub skills: Option<crate::Skills>,
 }
