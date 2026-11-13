@@ -90,26 +90,10 @@ async fn typed_controls_preserve_receipts_and_use_exact_wire_operations() -> Tes
         Ok::<_, trogon_claude_agent_sdk::Error>(requests)
     })
     .await??;
-    assert!(
-        requests
-            .iter()
-            .any(|request| request == &json!({"subtype":"set_model","model":"replacement"}))
-    );
-    assert!(
-        requests.iter().any(
-            |request| request == &json!({"subtype":"rewind_files","user_message_id":"user-message","dry_run":true})
-        )
-    );
-    assert!(
-        requests
-            .iter()
-            .any(|request| request == &json!({"subtype":"mcp_toggle","serverName":"local","enabled":false}))
-    );
-    assert!(
-        requests
-            .iter()
-            .any(|request| request == &json!({"subtype":"stop_task","task_id":"task-one"}))
-    );
+    assert!(requests.contains(&json!({"subtype":"set_model","model":"replacement"})));
+    assert!(requests.contains(&json!({"subtype":"rewind_files","user_message_id":"user-message","dry_run":true})));
+    assert!(requests.contains(&json!({"subtype":"mcp_toggle","serverName":"local","enabled":false})));
+    assert!(requests.contains(&json!({"subtype":"stop_task","task_id":"task-one"})));
     client.disconnect().await?;
     Ok(())
 }
@@ -349,7 +333,6 @@ async fn permission_context_and_updates_round_trip_through_the_callback() -> Tes
             Err(std::io::Error::other("missing permission receipt").into())
         })
         .await??;
-        let update: Value = update;
         assert_eq!(update["behavior"], "allow");
         assert_eq!(update["updatedPermissions"][0]["type"], "addRules");
         assert_eq!(update["updatedPermissions"][0]["destination"], destination);

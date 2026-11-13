@@ -53,13 +53,12 @@ fn accepting() -> Value {
     json!({"hooks_applied":true,"hook_on_failure_supported":true,"claude_code_version":"2.1.319"})
 }
 
-async fn connect(
-    options: ClaudeAgentOptions,
-    response: Value,
-) -> (
+type Connected = (
     Result<ClaudeSdkClient, Error>,
     tokio::task::JoinHandle<Result<Vec<String>, std::io::Error>>,
-) {
+);
+
+async fn connect(options: ClaudeAgentOptions, response: Value) -> Connected {
     let (process, harness) = ScriptedProcessSpawner::new();
     let server = tokio::spawn(serve(harness, response));
     let client = ClaudeSdkClient::connect_with_adapters(
