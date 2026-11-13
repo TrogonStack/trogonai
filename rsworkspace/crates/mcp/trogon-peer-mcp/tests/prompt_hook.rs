@@ -12,6 +12,8 @@ use trogon_peer_mcp::{
 };
 use trogonai_proto::peers::v1alpha1 as v1;
 
+type EnrollmentMutationCase = (&'static str, fn(&mut Value));
+
 #[derive(Clone, Debug, PartialEq)]
 enum ObservedCall {
     Enroll(v1::EnrollRequest),
@@ -1331,6 +1333,80 @@ async fn cancelled_reenrollment_does_not_reuse_the_prior_model_attachment() {
     }
     assert!(matches!(
         adapter.invoke(request("peer_roster", json!({}))).await,
-        Err(PeerMcpError::Unbound)
+        Err(PeerMcpError::EnrollmentUncertain)
     ));
+}
+
+#[tokio::test]
+async fn malformed_reenrollment_suspends_model_authority_until_valid_retry() {
+    let mutations: [EnrollmentMutationCase; 4] = [
+        ("missing peer", |response| response["peerId"] = Value::Null),
+        ("wrong connector", |response| {
+            response["attachment"]["attachmentRef"]["connectorId"] = json!("other_connector");
+        }),
+        ("zero generation", |response| {
+            response["attachment"]["attachmentRef"]["generation"] = json!(0);
+        }),
+        ("changed stable peer", |response| {
+            response["peerId"] = json!("c".repeat(64));
+            response["attachment"]["attachmentRef"]["peerId"] = response["peerId"].clone();
+        }),
+    ];
+    for (label, mutate) in mutations {
+        let backend = backend(Default::default());
+        let response = backend.enrollment.clone();
+        let calls = backend.calls.clone();
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        adapter
+            .invoke(prompt("native_b", "initial"))
+            .await
+            .expect("bind generation one");
+        let mut valid = serde_json::to_value(enrollment()).expect("enrollment JSON");
+        valid["attachment"]["attachmentRef"]["generation"] = json!(2);
+        let mut invalid = valid.clone();
+        mutate(&mut invalid);
+        *response.lock().expect("enrollment response") = serde_json::from_value(invalid).expect("response");
+        assert!(
+            matches!(
+                adapter.invoke(prompt("native_b", "generation_two")).await,
+                Err(PeerMcpError::InvalidEnrollment | PeerMcpError::InvalidEnrollmentIdentity(_))
+            ),
+            "malformed enrollment was accepted: {label}"
+        );
+        let error = adapter
+            .invoke(request("peer_roster", json!({})))
+            .await
+            .expect_err("suspended model tool");
+        assert_eq!(
+            serde_json::to_value(error.code()).expect("wire code"),
+            json!("enrollment_uncertain"),
+            "rejected reply restored prior model authority: {label}"
+        );
+        assert!(
+            matches!(
+                adapter.invoke(prompt("native_other", "other_session")).await,
+                Err(PeerMcpError::NativeSessionChanged)
+            ),
+            "rejected reply discarded native reservation: {label}"
+        );
+        assert_eq!(
+            calls
+                .lock()
+                .expect("calls")
+                .iter()
+                .filter(|call| matches!(call, ObservedCall::Prepare(_)))
+                .count(),
+            1
+        );
+        *response.lock().expect("enrollment response") = serde_json::from_value(valid).expect("valid response");
+        adapter
+            .invoke(prompt("native_b", "generation_two"))
+            .await
+            .expect("valid retry");
+        let observed = calls.lock().expect("calls");
+        let Some(ObservedCall::Prepare(preparation)) = observed.last() else {
+            panic!("preparation")
+        };
+        assert_eq!(preparation.attachment_ref.generation, Some(2));
+    }
 }
