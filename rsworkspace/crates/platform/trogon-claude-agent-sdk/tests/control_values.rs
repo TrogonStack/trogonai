@@ -6,10 +6,10 @@
     )
 )]
 
-use serde_json::json;
+use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    ConnectionInfo, ContextUsageResponse, FeatureSupport, InterruptReceipt, JsonObject, McpSetServersResult,
-    McpStatusResponse, MessageId, RewindFilesResult,
+    ConnectionInfo, ContextUsageResponse, FeatureSupport, InterruptReceipt, JsonObject, McpReadResourceResponse,
+    McpSetServersResult, McpStatusResponse, MessageId, RewindFilesResult,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -123,5 +123,27 @@ fn control_responses_keep_extension_fields() -> TestResult {
     let servers: McpSetServersResult =
         serde_json::from_value(json!({"added": ["a"], "removed": [], "errors": {"b": "failed"}}))?;
     assert_eq!(servers.errors.get("b").map(String::as_str), Some("failed"));
+    Ok(())
+}
+
+/// TypeScript `readMcpResource` hands back whatever Claude Code answered, so nothing is required or dropped.
+#[test]
+fn mcp_read_resource_response_keeps_the_response_as_sent() -> TestResult {
+    let sent = object(json!({
+        "contents": [{"uri": "ui://local/app", "mimeType": "text/html", "text": "<p></p>", "_meta": {"ui": {}}}],
+        "extra": 1
+    }))?;
+    let response = McpReadResourceResponse::from(Value::Object(sent.clone()));
+    assert_eq!(response.contents().map(<[_]>::len), Some(1));
+    assert_eq!(response.as_json(), &Value::Object(sent.clone()));
+    assert_eq!(response.clone().into_json(), Value::Object(sent));
+    let unexpected = McpReadResourceResponse::from(json!({"contents": "none"}));
+    assert_eq!(unexpected.contents(), None);
+    assert_eq!(unexpected.as_json()["contents"], "none");
+    let text = McpReadResourceResponse::from(json!("as sent"));
+    assert_eq!(text.contents(), None);
+    assert_eq!(text.as_json(), &json!("as sent"));
+    assert_eq!(McpReadResourceResponse::default().as_json(), &Value::Null);
+    assert_eq!(McpReadResourceResponse::default().contents(), None);
     Ok(())
 }

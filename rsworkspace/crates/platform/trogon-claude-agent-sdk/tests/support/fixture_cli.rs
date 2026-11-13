@@ -432,6 +432,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if mode == "controls" || mode == "mcp" || mode == "mcp-retain" {
                     let request = &value["request"];
                     emit(json!({"type":"system","subtype":"control_observed","request":request}))?;
+                    if request["subtype"] == "mcp_read_resource" && request["uri"] == "ui://local/none" {
+                        emit(
+                            json!({"type":"control_response","response":{"subtype":"success","request_id":value["request_id"]}}),
+                        )?;
+                        continue;
+                    }
+                    if request["subtype"] == "mcp_read_resource" && request["uri"] == "https://local/app" {
+                        emit(
+                            json!({"type":"control_response","response":{"subtype":"error","request_id":value["request_id"],"error":"fixture reads ui:// resources only"}}),
+                        )?;
+                        continue;
+                    }
                     let response = match field(request, "subtype")? {
                         "interrupt" => {
                             if request["cancel_queued"] == true {
@@ -448,6 +460,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                             json!({"categories":[],"totalTokens":3,"maxTokens":100,"rawMaxTokens":100,"percentage":3,"model":"fixture-model","isAutoCompactEnabled":true,"memoryFiles":[],"mcpTools":[]})
                         }
                         "background_tasks" => json!({"backgrounded":true}),
+                        "mcp_read_resource" => match request["uri"].as_str() {
+                            Some("ui://local/null") => Value::Null,
+                            Some("ui://local/text") => json!("as sent"),
+                            _ => {
+                                json!({"contents":[{"uri":request["uri"],"mimeType":"text/html;profile=mcp-app","text":"<p>app</p>","_meta":{"ui":{"csp":{}}}}],"extra":true})
+                            }
+                        },
                         "mcp_set_servers" => {
                             let names = request["servers"]
                                 .as_object()

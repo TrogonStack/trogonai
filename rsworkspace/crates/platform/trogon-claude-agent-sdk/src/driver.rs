@@ -41,6 +41,12 @@ pub(crate) enum Command {
         request: serde_json::Value,
         response: oneshot::Sender<Result<JsonObject, Error>>,
     },
+    /// A control whose `response` field is returned as sent, `None` when the frame has none.
+    RawControl {
+        operation: ControlOperation,
+        request: serde_json::Value,
+        response: oneshot::Sender<Result<Option<serde_json::Value>, Error>>,
+    },
     FinishInput {
         completion: Completion,
         response: oneshot::Sender<Result<(), Error>>,
@@ -196,13 +202,17 @@ enum ControlResponder {
         operation: ControlOperation,
         response: oneshot::Sender<Result<JsonObject, Error>>,
     },
+    Raw {
+        operation: ControlOperation,
+        response: oneshot::Sender<Result<Option<serde_json::Value>, Error>>,
+    },
 }
 
 impl ControlResponder {
     fn operation(&self) -> ControlOperation {
         match self {
             Self::Initialize(_) => ControlOperation::Initialize,
-            Self::Control { operation, .. } => *operation,
+            Self::Control { operation, .. } | Self::Raw { operation, .. } => *operation,
         }
     }
 
@@ -212,6 +222,9 @@ impl ControlResponder {
                 let _ = response.send(Err(error));
             }
             Self::Control { response, .. } => {
+                let _ = response.send(Err(error));
+            }
+            Self::Raw { response, .. } => {
                 let _ = response.send(Err(error));
             }
         }
@@ -1040,6 +1053,14 @@ where
                 self.start_control(ControlResponder::Control { operation, response }, request)
                     .await?;
             }
+            Command::RawControl {
+                operation,
+                request,
+                response,
+            } => {
+                self.start_control(ControlResponder::Raw { operation, response }, request)
+                    .await?;
+            }
             Command::FinishInput { completion, response } => {
                 self.run_state.input_done = Some(completion);
                 let _ = response.send(Ok(()));
@@ -1177,7 +1198,7 @@ where
                 }
             }
             Frame::ControlResponse { id, response } => {
-                let Some(mut pending) = self.pending.remove(&id) else {
+                let Some(pending) = self.pending.remove(&id) else {
                     // One line on purpose: with the `log` feature of `tracing` enabled by another workspace
                     // member, the macro repeats each field expression for the log fallback, and the
                     // fallback copy on a line of its own is never executed, which reads as uncovered.
@@ -1188,11 +1209,16 @@ where
                 let operation = pending.response.operation();
                 match response {
                     ControlResponse::Success(response) => {
-                        let response = match pending.response {
-                            ControlResponder::Initialize(sender) => return self.finish_initialize(sender, response),
-                            responder => {
-                                pending.response = responder;
-                                control_object(response)?
+                        let (response, sender) = match pending.response {
+                            ControlResponder::Initialize(sender) => {
+                                return self.finish_initialize(sender, response.unwrap_or_default());
+                            }
+                            ControlResponder::Raw { response: sender, .. } => {
+                                let _ = sender.send(Ok(response));
+                                return Ok(());
+                            }
+                            ControlResponder::Control { response: sender, .. } => {
+                                (control_object(response.unwrap_or_default())?, sender)
                             }
                         };
                         if operation == ControlOperation::Interrupt
@@ -1205,12 +1231,7 @@ where
                                 .pending_inputs
                                 .retain(|input| input.as_ref().is_none_or(|input| !cancelled.contains(input)));
                         }
-                        match pending.response {
-                            ControlResponder::Initialize(_) => {}
-                            ControlResponder::Control { response: sender, .. } => {
-                                let _ = sender.send(Ok(response));
-                            }
-                        }
+                        let _ = sender.send(Ok(response));
                     }
                     ControlResponse::Error(error) => {
                         pending.response.send_error(Error::ControlRejected {

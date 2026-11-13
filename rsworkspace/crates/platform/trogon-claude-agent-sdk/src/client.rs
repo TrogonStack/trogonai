@@ -632,6 +632,30 @@ impl ClientHandle {
         Ok(())
     }
 
+    /// TypeScript `readMcpResource`: reads a resource of a connected MCP server through Claude Code, which
+    /// refuses any URI outside the `ui://` scheme. The reply's `response` field is returned as sent, and `None`
+    /// stands for the `undefined` TypeScript returns when the reply has no such field.
+    pub async fn read_mcp_resource(
+        &self,
+        server_name: crate::McpServerName,
+        uri: &str,
+    ) -> Result<Option<crate::McpReadResourceResponse>, Error> {
+        let request = RequestPayload::McpReadResource {
+            server_name: server_name.as_str(),
+            uri,
+        }
+        .to_value()?;
+        let (response, receiver) = oneshot::channel();
+        self.enqueue(Command::RawControl {
+            operation: ControlOperation::McpReadResource,
+            request,
+            response,
+        })
+        .await?;
+        let response = receiver.await.map_err(|_| self.stopped_error())??;
+        Ok(response.map(crate::McpReadResourceResponse::from))
+    }
+
     pub async fn stop_task(&self, task_id: crate::TaskId) -> Result<(), Error> {
         self.control(
             ControlOperation::StopTask,
