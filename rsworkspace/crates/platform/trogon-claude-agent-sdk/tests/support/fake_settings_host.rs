@@ -5,13 +5,17 @@ use std::{
     ffi::{OsStr, OsString},
     io,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use trogon_claude_agent_sdk::adapters::{
     CheckReadable, CurrentDirectory, DirectoryEntry, DirectoryEntryKind, EnvironmentVariable, ExecuteFile,
     ExecuteFileOutcome, ExecuteFileRequest, ExecuteFileStatus, HostIdentity, LinkMetadata, OperatingSystem,
-    ReadDirectory, ReadFile, ReadLink, ReadSymlinkMetadata,
+    ReadDirectory, ReadFile, ReadLink, ReadSymlinkMetadata, WallClock,
 };
 
 /// A host made of maps, so every platform branch runs on any machine.
@@ -26,6 +30,8 @@ pub struct FakeHost {
     pub links: BTreeMap<PathBuf, PathBuf>,
     pub commands: BTreeMap<String, ExecuteFileOutcome>,
     pub runs: Mutex<Vec<String>>,
+    /// Milliseconds since the epoch the host's clock shows; a command moves it by the time the command took.
+    pub clock_ms: AtomicU64,
 }
 
 impl FakeHost {
@@ -41,7 +47,18 @@ impl FakeHost {
             links: BTreeMap::new(),
             commands: BTreeMap::new(),
             runs: Mutex::new(Vec::new()),
+            clock_ms: AtomicU64::new(0),
         }
+    }
+
+    /// Sets the clock, in milliseconds since the epoch.
+    pub fn at(self, milliseconds: u64) -> Self {
+        self.clock_ms.store(milliseconds, Ordering::SeqCst);
+        self
+    }
+
+    pub fn set_time(&self, milliseconds: u64) {
+        self.clock_ms.store(milliseconds, Ordering::SeqCst);
     }
 
     pub fn file(mut self, path: &str, text: &str) -> Self {
@@ -233,9 +250,21 @@ impl ExecuteFile for FakeHost {
             line.push_str(&argument.to_string_lossy());
         }
         self.runs.lock().expect("runs").push(line.clone());
-        self.commands
+        let outcome = self
+            .commands
             .get(&line)
             .cloned()
-            .unwrap_or_else(|| spawn_error("ENOENT"))
+            .unwrap_or_else(|| spawn_error("ENOENT"));
+        self.clock_ms
+            .fetch_add(u64::try_from(outcome.duration_ms).unwrap_or(u64::MAX), Ordering::SeqCst);
+        outcome
+    }
+}
+
+impl WallClock for FakeHost {
+    type Time = SystemTime;
+
+    fn now(&self) -> SystemTime {
+        UNIX_EPOCH + Duration::from_millis(self.clock_ms.load(Ordering::SeqCst))
     }
 }

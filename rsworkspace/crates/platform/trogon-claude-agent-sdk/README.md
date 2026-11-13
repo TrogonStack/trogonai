@@ -387,7 +387,7 @@ parent process). The result carries per-key provenance and `machinePolicy.didNot
 command output. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
 `claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
 byte for byte. Integers above 2^53 read like `JSON.parse` by default; `resolve_settings_in_dialect`
-and `resolve_settings_in_dialect_with` take `SettingsDialect::Python` to keep them exact. Gaps: schema value normalization, cloud and org mode, and the MDM re-read throttle.
+and `resolve_settings_in_dialect_with` take `SettingsDialect::Python` to keep them exact. Gaps: schema value normalization, and cloud and org mode.
 
 ## External session stores
 
