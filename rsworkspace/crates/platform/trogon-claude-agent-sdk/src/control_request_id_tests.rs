@@ -52,3 +52,11 @@ fn python_ids_carry_the_counter_and_eight_hex_digits() {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     );
 }
+
+#[test]
+fn random_uuid_ids_are_version_4_uuids() {
+    let id = ControlRequestId::random_uuid();
+    assert_eq!(id.as_str().len(), 36);
+    assert_eq!(id.as_str().as_bytes().get(14), Some(&b'4'));
+    assert_ne!(id, ControlRequestId::random_uuid());
+}

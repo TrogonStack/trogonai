@@ -392,6 +392,16 @@ pub(crate) fn control_request(
     .map_err(ProtocolError::from)
 }
 
+/// The `mcp_message` control request for a message an in-process server sent on its own, in upstream key order.
+pub(crate) fn mcp_forward(id: &ControlRequestId, request: Value) -> Result<Value, ProtocolError> {
+    serde_json::to_value(runtime_payload::TypeScriptMcpForward {
+        kind: "control_request",
+        request_id: id.as_str(),
+        request,
+    })
+    .map_err(ProtocolError::from)
+}
+
 /// The `can_use_tool` answer in the dialect's shape, or `None` when the host answered out of band.
 ///
 /// TypeScript writes `{...result, toolUseID}` with `updatedInput` only when the handler set it. Python sends the

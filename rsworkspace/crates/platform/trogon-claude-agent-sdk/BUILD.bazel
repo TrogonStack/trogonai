@@ -162,7 +162,10 @@ workspace_crate(
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
         "runtime_failure_contracts": {
-            "compile_data": glob(["tests/support/*.rs"]),
+            "compile_data": glob([
+                "tests/fixtures/sdk_mcp/*.json",
+                "tests/support/*.rs",
+            ]),
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
