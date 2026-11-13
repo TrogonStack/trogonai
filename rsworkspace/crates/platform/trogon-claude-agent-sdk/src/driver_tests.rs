@@ -99,6 +99,8 @@ impl DriverFixture {
             initialize_expectations: InitializeExpectations::default(),
             initialize_timeout: None,
             version_check: None,
+            verbatim_prompts: false,
+            warn_unsupported_verbatim: false,
             elicitation_handler: None,
             user_dialog_handler: None,
             dialog_kinds: HashSet::new(),

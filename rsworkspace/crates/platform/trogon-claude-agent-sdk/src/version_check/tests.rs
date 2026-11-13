@@ -1,4 +1,4 @@
-use super::{parse_version, skip_requested, unreported_version_warning};
+use super::{parse_version, skip_requested, unreported_version_warning, unsupported_verbatim_warning as warn};
 use std::ffi::OsStr;
 
 #[test]
@@ -24,4 +24,14 @@ fn any_non_empty_skip_value_disables_the_check() {
     assert!(skip_requested(Some(OsStr::new("1"))));
     assert!(!skip_requested(Some(OsStr::new(""))));
     assert!(!skip_requested(None));
+}
+
+#[test]
+fn verbatim_warning_needs_2_1_248_or_a_parseable_newer_version() {
+    assert!(warn(Some("2.1.248"), "claude").is_none());
+    assert!(warn(Some("2.2.0 (build)"), "claude").is_none());
+    let contains = |warning: Option<String>, text: &str| warning.is_some_and(|warning| warning.contains(text));
+    assert!(contains(warn(Some("2.1.247"), "claude"), "version 2.1.247 at claude"));
+    assert!(contains(warn(None, "claude"), "version unknown at claude"));
+    assert!(warn(Some("junk"), "claude").is_some());
 }

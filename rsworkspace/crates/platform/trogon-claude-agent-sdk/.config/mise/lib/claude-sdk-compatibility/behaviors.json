@@ -2681,6 +2681,107 @@
         "src/message_decode/python.rs",
         "src/driver.rs"
       ]
+    },
+    {
+      "id": "s35-system-prompt-delivery",
+      "concept": "Where the system prompt travels and which forms it takes",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 511,
+        "line_end": 523,
+        "sha256": "79050a160bc02b75621e9b49fb59c73c5bbec6bdb712685cc03f53decf09e0a2"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "appendSubagentSystemPrompt",
+        "occurrence": 2,
+        "occurrences": 4,
+        "span_before": 120,
+        "span_after": 120,
+        "sha256": "0553333d8cdd93e114245b1816c13c4c3f19b1fd4ad6ee2ac6e105af2acfa7d2"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript sends the prompt in the initialize request (systemPrompt as a list, appendSystemPrompt, systemPromptSnapshot, excludeDynamicSections) and has no prompt flag. Python puts the prompt on the command line (--system-prompt, --system-prompt-file, --append-system-prompt) and sends only excludeDynamicSections and systemPromptSnapshot in the request."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect. ClaudeAgentOptions::argv_style = ArgvStyle::Python selects Python's argv and request, and the prompt forms that exist in only one SDK (a list of texts, a prompt file) are refused in the other dialect instead of being dropped."
+      },
+      "contracts": [
+        "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects",
+        "initialize_options::typescript_refuses_a_prompt_file_and_python_refuses_several_prompt_texts"
+      ],
+      "rust": [
+        "src/system_prompt.rs",
+        "src/driver.rs",
+        "src/initialize_order.rs",
+        "src/argv.rs"
+      ]
+    },
+    {
+      "id": "s36-workspace-trust-validation",
+      "concept": "workspaceTrust with an accepted trust and no absolute directory",
+      "python": {
+        "status": "absent",
+        "reason": "claude_agent_sdk has no workspace trust option."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "workspaceTrust ignored",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 200,
+        "span_after": 120,
+        "sha256": "bb4abec4d5b4ab2dd0cec29fa6c0d0f913c5b10dca6b03bb3be1dcba3771fcd0"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "An accepted trust needs a directory that is absolute on posix or win32; otherwise the whole value is dropped with a warning. A declined or empty trust passes through as given."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects"
+      ],
+      "rust": [
+        "src/workspace_trust.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s37-verbatim-prompts",
+      "concept": "Marking user messages client_composed so the CLI skips @path expansion and slash commands",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 137,
+        "line_end": 148,
+        "sha256": "88a315163410552e5ac7a01ff7fb7379aa4a0012898ebd25f70fc9ceafabf603"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "client_composed:!0",
+        "occurrence": 0,
+        "occurrences": 2,
+        "span_before": 100,
+        "span_after": 40,
+        "sha256": "4c9286c57bf726904ad943b28917569c5f54dfde5b0dc8919515ab911383cf32"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "With the option on, every outgoing user message carries client_composed:true after its other keys. Python additionally warns at the first init message when the CLI is older than 2.1.248 or reports no version."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/version_check.rs"
+      ]
     }
   ]
 }

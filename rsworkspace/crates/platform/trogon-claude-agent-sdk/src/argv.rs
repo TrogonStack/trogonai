@@ -7,7 +7,7 @@ use std::{ffi::OsString, path::Path};
 
 use crate::{
     ClaudeAgentOptions, Customizations, DangerousPermissionSkip, DebugOutput, Error, ExtraArgument, HookEvents,
-    OptionError, PartialMessages, ProtocolError, SessionPersistence, SystemPrompt, ThinkingConfig, ToolSet,
+    OptionError, PartialMessages, ProtocolError, SessionPersistence, ThinkingConfig, ToolSet,
     adapters::{NativeHost, ReadFile},
     process_options::ArgvStyle,
     skills::python_repr,
@@ -58,6 +58,9 @@ where
     R: ReadFile<Error = std::io::Error>,
 {
     crate::shadow_warning::reject_handler_with_tool_name(options)?;
+    if options.argv_style == ArgvStyle::TypeScript {
+        options.system_prompt.reject_for_typescript()?;
+    }
     match options.argv_style {
         ArgvStyle::TypeScript => typescript(options, derived_debug_file),
         ArgvStyle::Python => python(options, files),
@@ -438,21 +441,7 @@ where
     let mut a: Vec<OsString> = ["--output-format", "stream-json", "--verbose"]
         .map(OsString::from)
         .into();
-    match &options.system_prompt {
-        SystemPrompt::Empty => {
-            a.push("--system-prompt".into());
-            a.push("".into());
-        }
-        SystemPrompt::Custom(prompt) => {
-            a.push("--system-prompt".into());
-            a.push(prompt.into());
-        }
-        SystemPrompt::ClaudeCode => {}
-        SystemPrompt::ClaudeCodeWithAppend(prompt) => {
-            a.push("--append-system-prompt".into());
-            a.push(prompt.into());
-        }
-    }
+    a.extend(options.system_prompt.python_argv()?);
     if let ToolSet::Only(tools) = &options.tools {
         a.push("--tools".into());
         a.push(joined(tools.iter().map(|t| t.as_str())).into());

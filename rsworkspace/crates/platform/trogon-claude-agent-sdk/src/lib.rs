@@ -112,6 +112,7 @@ mod shadow_warning;
 mod skills;
 mod stderr_tail;
 mod summary_dialect;
+mod system_prompt;
 mod task_id;
 mod timeout;
 mod tool_name;
@@ -123,6 +124,7 @@ mod usd_budget;
 mod user_input;
 mod version_check;
 mod wire;
+mod workspace_trust;
 
 pub use agent_definition::{AgentDefinition, AgentExecution, AgentMcpServerSpec};
 pub use agent_name::AgentName;
@@ -181,7 +183,7 @@ pub use option_error::OptionError;
 pub use options::{
     ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, FileCheckpointing,
     InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, MessageBuffer, PartialMessages, RequestIdExhaustion,
-    SessionFork, SessionPersistence, Shutdown, SystemPrompt, ToolSet,
+    SessionFork, SessionPersistence, Shutdown, SystemPrompt, ToolSet, VerbatimPrompts,
 };
 pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{
@@ -252,6 +254,7 @@ pub use settings_sandbox::{
 };
 pub use stderr_tail::StderrTail;
 pub use summary_dialect::SummaryDialect;
+pub use system_prompt::{CustomPrompt, PresetPrompt};
 pub use task_id::TaskId;
 pub use timeout::{Timeout, TimeoutError};
 pub use tokio_util::sync::CancellationToken;
@@ -268,6 +271,7 @@ pub use upstream::settings_resolution::{
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 pub use user_input::{InputBlock, UserInput};
 pub use version_check::{parse_version, unreported_version_warning};
+pub use workspace_trust::WorkspaceTrust;
 
 /// A JSON object whose schema is owned by an individual tool or upstream event.
 pub type JsonObject = serde_json::Map<String, serde_json::Value>;

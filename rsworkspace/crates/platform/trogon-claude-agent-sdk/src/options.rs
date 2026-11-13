@@ -67,13 +67,14 @@ pub enum PartialMessages {
     Include,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub enum SystemPrompt {
+pub use crate::system_prompt::SystemPrompt;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum VerbatimPrompts {
     #[default]
-    Empty,
-    Custom(String),
-    ClaudeCode,
-    ClaudeCodeWithAppend(String),
+    Disabled,
+    /// Marks every user message `client_composed`, so the CLI skips `@path` expansion and slash commands.
+    Enabled,
 }
 
 /// How messages wait for the caller to read them.
@@ -225,6 +226,22 @@ impl Limits {
     }
 }
 
+impl ClaudeAgentOptions {
+    /// `captureSdkMcpManifests`: the explicit option, else `!truthy(process.env.CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS)`.
+    /// The variable is read from the process environment, never from `ClaudeAgentOptions::env`. Pass the value the
+    /// parent process has for it.
+    pub fn captures_sdk_mcp_manifests(&self, disable_variable: Option<&std::ffi::OsStr>) -> bool {
+        self.capture_sdk_mcp_manifests.unwrap_or_else(|| {
+            !disable_variable.is_some_and(|value| {
+                matches!(
+                    value.to_string_lossy().trim().to_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+        })
+    }
+}
+
 impl Default for Limits {
     fn default() -> Self {
         Self {
@@ -347,4 +364,36 @@ pub struct ClaudeAgentOptions {
     pub managed_settings: Option<crate::Settings>,
     /// TypeScript `managedSettingsDelivery`. Ignored with `ArgvStyle::Python`.
     pub managed_settings_delivery: crate::ManagedSettingsDelivery,
+    /// `verbatimPrompts` / `verbatim_prompts`.
+    pub verbatim_prompts: VerbatimPrompts,
+    /// `planModeInstructions`. TypeScript only.
+    pub plan_mode_instructions: Option<String>,
+    /// `appendSubagentSystemPrompt`. TypeScript only.
+    pub append_subagent_system_prompt: Option<String>,
+    /// `toolAliases`, in insertion order; a repeated name keeps its first position with the last value, as a
+    /// JavaScript object does. TypeScript only.
+    pub tool_aliases: Option<Vec<(String, String)>>,
+    /// `codeRunningMcpTools`. TypeScript only.
+    pub code_running_mcp_tools: Option<Vec<String>>,
+    /// `title`. TypeScript only.
+    pub title: Option<String>,
+    /// `webSearchIsolationExemptMcpServers`. TypeScript only.
+    pub web_search_isolation_exempt_mcp_servers: Option<Vec<String>>,
+    /// `promptSuggestions`. TypeScript only.
+    pub prompt_suggestions: Option<bool>,
+    /// `agentProgressSummaries`. TypeScript only; it never reaches the environment, as upstream.
+    pub agent_progress_summaries: Option<bool>,
+    /// `forwardSubagentText` / `forward_subagent_text`. Python sends it only when it is `true`.
+    pub forward_subagent_text: Option<bool>,
+    /// `perTaskStopAffordance`. TypeScript only.
+    pub per_task_stop_affordance: Option<bool>,
+    /// `rapidFollowupPreempt`. TypeScript only.
+    pub rapid_followup_preempt: Option<bool>,
+    /// `forwardNestedSubagentToolCalls`. TypeScript only.
+    pub forward_nested_subagent_tool_calls: Option<bool>,
+    /// `workspaceTrust`. TypeScript only; an accepted trust without an absolute directory is dropped with a warning.
+    pub workspace_trust: Option<crate::WorkspaceTrust>,
+    /// `captureSdkMcpManifests`. `None` derives it from the process environment, see
+    /// [`ClaudeAgentOptions::captures_sdk_mcp_manifests`].
+    pub capture_sdk_mcp_manifests: Option<bool>,
 }
