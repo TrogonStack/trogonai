@@ -58,7 +58,9 @@ pub(crate) enum IncomingControl {
     HostAuthTokenRefresh {
         status: Option<Value>,
     },
-    Unsupported,
+    Unsupported {
+        subtype: String,
+    },
     Malformed(ProtocolError),
 }
 
@@ -120,7 +122,8 @@ struct HookRequestWire {
 #[derive(Deserialize)]
 struct OAuthTokenWire {
     kind: Option<Value>,
-    token_state: Option<String>,
+    /// Read as TypeScript compares it, so a non-string state is just not one of the known ones.
+    token_state: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -317,13 +320,15 @@ pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<
                 let wire: OAuthTokenWire = decode(wire.request.data)?;
                 IncomingControl::OAuthTokenRefresh {
                     kind: wire.kind,
-                    token_state: wire.token_state,
+                    token_state: wire.token_state.as_ref().and_then(Value::as_str).map(str::to_owned),
                 }
             } else if wire.request.subtype == "host_auth_token_refresh" {
                 let wire: HostAuthTokenWire = decode(wire.request.data)?;
                 IncomingControl::HostAuthTokenRefresh { status: wire.status }
             } else {
-                IncomingControl::Unsupported
+                IncomingControl::Unsupported {
+                    subtype: wire.request.subtype,
+                }
             };
             Frame::ControlRequest { id, request }
         }
@@ -451,6 +456,70 @@ pub(crate) fn permission_response(
     success_response(id, response).map(Some)
 }
 
+/// The answer to a `can_use_tool` request when no permission handler is registered.
+pub(crate) fn missing_permission_handler_response(
+    id: &ControlRequestId,
+    style: crate::ArgvStyle,
+) -> Result<Value, ProtocolError> {
+    callback_error_response(
+        id,
+        match style {
+            crate::ArgvStyle::TypeScript => "canUseTool callback is not provided.",
+            crate::ArgvStyle::Python => "canUseTool callback is not provided",
+        },
+    )
+}
+
+/// The `hook_callback` answer for a callback id the initialize request did not register.
+pub(crate) fn unknown_hook_response(id: &ControlRequestId, callback_id: &str) -> Result<Value, ProtocolError> {
+    callback_error_response(id, &format!("No hook callback found for ID: {callback_id}"))
+}
+
+/// The answer to a failed handler. A cancelled TypeScript handler throws its signal's `AbortError`; a cancelled
+/// Python handler raises the cancellation, which writes nothing.
+pub(crate) fn handler_error_response(
+    id: &ControlRequestId,
+    error: &crate::CallbackError,
+    style: crate::ArgvStyle,
+) -> Result<Option<Value>, ProtocolError> {
+    match (error, style) {
+        (crate::CallbackError::Cancelled, crate::ArgvStyle::Python) => Ok(None),
+        (crate::CallbackError::Cancelled, crate::ArgvStyle::TypeScript) => {
+            callback_error_response(id, "This operation was aborted").map(Some)
+        }
+        (crate::CallbackError::Failed(error), _) => callback_error_response(id, &error.to_string()).map(Some),
+    }
+}
+
+/// The answer to a subtype this SDK does not handle, or `None` when the dialect leaves it unanswered.
+///
+/// TypeScript throws its `unsupported_request` error, except for the remote tool subtypes it ignores and the auth
+/// refresh subtypes whose callback is missing. Python raises one plain error for every subtype it does not
+/// handle.
+pub(crate) fn unsupported_response(
+    id: &ControlRequestId,
+    subtype: &str,
+    style: crate::ArgvStyle,
+) -> Option<Result<Value, ProtocolError>> {
+    let message = format!("Unsupported control request subtype: {subtype}");
+    match style {
+        crate::ArgvStyle::Python => Some(callback_error_response(id, &message)),
+        crate::ArgvStyle::TypeScript => match subtype {
+            _ if crate::constants::REMOTE_TOOL_SUBTYPES.contains(&subtype) => None,
+            "oauth_token_refresh" => Some(callback_error_response(id, crate::constants::OAUTH_CALLBACK_MISSING)),
+            "host_auth_token_refresh" => Some(callback_error_response(
+                id,
+                crate::constants::HOST_AUTH_CALLBACK_MISSING,
+            )),
+            "remote_control_work_secret" => Some(callback_error_response(
+                id,
+                "refreshWorkSecret callback is not provided.",
+            )),
+            _ => Some(error_frame(id, &message, Some("unsupported_request"))),
+        },
+    }
+}
+
 pub(crate) fn success_response<T: Serialize>(id: &ControlRequestId, response: T) -> Result<Value, ProtocolError> {
     serde_json::to_value(runtime_payload::OutboundFrame::Response {
         response: runtime_payload::CallbackResponse::Success {
@@ -461,23 +530,23 @@ pub(crate) fn success_response<T: Serialize>(id: &ControlRequestId, response: T)
     .map_err(ProtocolError::from)
 }
 
-pub(crate) fn callback_error_response(id: &ControlRequestId, message: &str) -> Result<Value, ProtocolError> {
+fn error_frame(id: &ControlRequestId, message: &str, error_code: Option<&str>) -> Result<Value, ProtocolError> {
     let frame: runtime_payload::OutboundFrame<'_, Value> = runtime_payload::OutboundFrame::Response {
         response: runtime_payload::CallbackResponse::Error {
             request_id: id.as_str(),
             error: message,
-            error_code: None,
+            error_code,
         },
     };
     serde_json::to_value(frame).map_err(ProtocolError::from)
 }
 
-pub(crate) fn malformed_response(id: &ControlRequestId) -> Result<Value, ProtocolError> {
-    callback_error_response(id, "Malformed SDK permission request")
+pub(crate) fn callback_error_response(id: &ControlRequestId, message: &str) -> Result<Value, ProtocolError> {
+    error_frame(id, message, None)
 }
 
-pub(crate) fn unsupported_response(id: &ControlRequestId) -> Result<Value, ProtocolError> {
-    callback_error_response(id, "Unsupported SDK control request")
+pub(crate) fn malformed_response(id: &ControlRequestId) -> Result<Value, ProtocolError> {
+    callback_error_response(id, "Malformed SDK permission request")
 }
 
 #[cfg(test)]

@@ -143,21 +143,21 @@ pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> Envir
 }
 
 /// `sdk.mjs` announces its token callbacks and writes `toolConfig` into the child environment after the
-/// checkpointing and session-state variables.
+/// checkpointing and session-state variables. claude_agent_sdk does neither, so the CLI never asks it for a token.
 fn callback_and_tool_config(
     plan: &mut EnvironmentPlan,
     options: &ClaudeAgentOptions,
     mode: EnvironmentMode,
     inherited: &Inherited,
 ) {
+    if options.argv_style != ArgvStyle::TypeScript {
+        return;
+    }
     if options.oauth_token_handler.is_some() {
         plan.set.insert(OAUTH_REFRESH_ENV.into(), "1".into());
     }
     if options.host_auth_token_handler.is_some() {
         plan.set.insert(HOST_AUTH_REFRESH_ENV.into(), "1".into());
-    }
-    if options.argv_style != ArgvStyle::TypeScript {
-        return;
     }
     let question = options.tool_config.ask_user_question;
     if let Some(format) = question.preview_format {

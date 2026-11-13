@@ -23,9 +23,11 @@ use tokio::{
     sync::oneshot,
 };
 use trogon_claude_agent_sdk::{
-    ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, ComputerFolder, DenialDisposition, DuplicateControlRequests,
-    FeatureSupport, JsonObject, MatchedAskRule, PermissionDecision, PermissionDecisionClassification, PermissionMode,
-    PermissionUpdate, PermissionUpdateDestination, ToolPermissionRequest, ToolUseId,
+    ArgvStyle, CallbackError, ClaudeAgentOptions, ClaudeSdkClient, ComputerFolder, DenialDisposition, DialogKind,
+    DuplicateControlRequests, ElicitationMode, ElicitationRequest, ElicitationResponse, FeatureSupport,
+    HostAuthTokenRequest, JsonObject, MatchedAskRule, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
+    PermissionDecision, PermissionDecisionClassification, PermissionMode, PermissionUpdate,
+    PermissionUpdateDestination, ToolPermissionRequest, ToolUseId, UserDialogRequest, UserDialogResponse,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -40,6 +42,7 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 /// One thing the scripted CLI does after `initialize` is answered.
 enum Step {
     Send(Value),
+    Wait(u64),
 }
 
 async fn write(stdout: &mut DuplexStream, frame: &Value) -> Result<(), std::io::Error> {
@@ -92,6 +95,7 @@ async fn serve(
                 for step in steps {
                     match step {
                         Step::Send(frame) => write(&mut stdout, &frame).await?,
+                        Step::Wait(millis) => tokio::time::sleep(Duration::from_millis(millis)).await,
                     }
                 }
             }
@@ -380,6 +384,167 @@ async fn permission_decisions_are_written_byte_for_byte() -> TestResult {
     Ok(())
 }
 
+fn unanswered_requests() -> Vec<Step> {
+    [
+        ("a1", json!({"subtype":"can_use_tool","tool_name":"Bash","input":{}})),
+        (
+            "a2",
+            json!({"subtype":"hook_callback","callback_id":"missing","input":{}}),
+        ),
+        (
+            "a3",
+            json!({"subtype":"elicitation","mcp_server_name":"local","message":"m","mode":"form"}),
+        ),
+        (
+            "a4",
+            json!({"subtype":"request_user_dialog","dialog_kind":"fixture","payload":{}}),
+        ),
+        ("a5", json!({"subtype":"future_thing"})),
+        ("a6", json!({"subtype":"remote_tool_call"})),
+        ("a7", json!({"subtype":"remote_tools_probe"})),
+        ("a8", json!({"subtype":"oauth_token_refresh"})),
+        ("a9", json!({"subtype":"host_auth_token_refresh"})),
+        ("a10", json!({"subtype":"remote_control_work_secret"})),
+        ("a11", json!({"subtype":"ui_render"})),
+    ]
+    .into_iter()
+    .map(|(id, body)| request(id, body))
+    .collect()
+}
+
+#[tokio::test]
+async fn typescript_answers_requests_without_a_handler_like_sdk_mjs() -> TestResult {
+    let expected = [
+        r#"{"type":"control_response","response":{"subtype":"error","request_id":"a1","error":"canUseTool callback is not provided."}}"#,
+        r#"{"type":"control_response","response":{"subtype":"error","request_id":"a2","error":"No hook callback found for ID: missing"}}"#,
+        r#"{"type":"control_response","response":{"subtype":"success","request_id":"a3","response":{"action":"decline"}}}"#,
+        r#"{"type":"control_response","response":{"subtype":"error","request_id":"a5","error":"Unsupported control request subtype: future_thing","error_code":"unsupported_request"}}"#,
+        r#"{"type":"control_response","response":{"subtype":"error","request_id":"a8","error":"getOAuthToken callback is not provided."}}"#,
+        r#"{"type":"control_response","response":{"subtype":"error","request_id":"a9","error":"getHostAuthToken callback is not provided."}}"#,
+        r#"{"type":"control_response","response":{"subtype":"error","request_id":"a10","error":"refreshWorkSecret callback is not provided."}}"#,
+        r#"{"type":"control_response","response":{"subtype":"error","request_id":"a11","error":"Unsupported control request subtype: ui_render","error_code":"unsupported_request"}}"#,
+    ];
+    let responses = run(options(ArgvStyle::TypeScript), unanswered_requests(), expected.len()).await?;
+    assert_eq!(responses, expected);
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_answers_requests_without_a_handler_like_claude_agent_sdk() -> TestResult {
+    let expected = [
+        r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a1", "error": "canUseTool callback is not provided"}}"#,
+        r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a2", "error": "No hook callback found for ID: missing"}}"#,
+        r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a3", "error": "Unsupported control request subtype: elicitation"}}"#,
+        r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a4", "error": "Unsupported control request subtype: request_user_dialog"}}"#,
+        r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a5", "error": "Unsupported control request subtype: future_thing"}}"#,
+        r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a6", "error": "Unsupported control request subtype: remote_tool_call"}}"#,
+        r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a7", "error": "Unsupported control request subtype: remote_tools_probe"}}"#,
+        r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a8", "error": "Unsupported control request subtype: oauth_token_refresh"}}"#,
+        r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a9", "error": "Unsupported control request subtype: host_auth_token_refresh"}}"#,
+        r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a10", "error": "Unsupported control request subtype: remote_control_work_secret"}}"#,
+        r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a11", "error": "Unsupported control request subtype: ui_render"}}"#,
+    ];
+    let responses = run(options(ArgvStyle::Python), unanswered_requests(), expected.len()).await?;
+    assert_eq!(responses, expected);
+    Ok(())
+}
+
+/// `claude_agent_sdk` has no token callbacks, so a handler set on the options never runs under the Python
+/// dialect and the requests get its plain unsupported error, the same lines as with no handler.
+#[tokio::test]
+async fn python_answers_token_refreshes_as_unsupported_even_with_handlers() -> TestResult {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mut configured = options(ArgvStyle::Python);
+    let oauth_calls = calls.clone();
+    configured.oauth_token_handler = Some(Arc::new(move |_: OAuthTokenRequest| {
+        if let Ok(mut calls) = oauth_calls.lock() {
+            calls.push("oauth");
+        }
+        async { Ok::<_, CallbackError>(OAuthTokenResponse::token("t")) }
+    }));
+    let host_calls = calls.clone();
+    configured.host_auth_token_handler = Some(Arc::new(move |_: HostAuthTokenRequest| {
+        if let Ok(mut calls) = host_calls.lock() {
+            calls.push("host");
+        }
+        async { Ok::<_, CallbackError>(Some("h".to_owned())) }
+    }));
+    let steps = vec![
+        request("a8", json!({"subtype":"oauth_token_refresh"})),
+        request("a9", json!({"subtype":"host_auth_token_refresh"})),
+    ];
+    assert_eq!(
+        run(configured, steps, 2).await?,
+        [
+            r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a8", "error": "Unsupported control request subtype: oauth_token_refresh"}}"#,
+            r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "a9", "error": "Unsupported control request subtype: host_auth_token_refresh"}}"#,
+        ]
+    );
+    assert!(calls.lock().map_err(|_| "poisoned")?.is_empty());
+    Ok(())
+}
+
+/// `sdk.mjs` compares `token_state` to its two known strings, so any other value, a non-string one included,
+/// reaches `getOAuthToken` as no hint and the request is still answered.
+#[tokio::test]
+async fn a_non_string_token_state_reaches_the_oauth_handler_as_no_hint() -> TestResult {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let recorded = seen.clone();
+    let mut configured = options(ArgvStyle::TypeScript);
+    configured.oauth_token_handler = Some(Arc::new(move |request: OAuthTokenRequest| {
+        if let Ok(mut seen) = recorded.lock() {
+            seen.push((request.kind.clone(), request.token_state));
+        }
+        async { Ok::<_, CallbackError>(OAuthTokenResponse::token("t")) }
+    }));
+    let steps = vec![
+        request(
+            "t1",
+            json!({"subtype":"oauth_token_refresh","kind":"proactive","token_state":7}),
+        ),
+        request("t2", json!({"subtype":"oauth_token_refresh","token_state":"refused"})),
+    ];
+    let responses = run(configured, steps, 2).await?;
+    for (line, id) in responses.iter().zip(["t1", "t2"]) {
+        let frame: Value = serde_json::from_str(line)?;
+        assert_eq!(frame["response"]["subtype"], "success", "{line}");
+        assert_eq!(frame["response"]["request_id"], id, "{line}");
+    }
+    assert_eq!(
+        *seen.lock().map_err(|_| "poisoned")?,
+        [(Some(json!("proactive")), None), (None, Some(OAuthTokenState::Refused))]
+    );
+    Ok(())
+}
+
+fn cancelled(style: ArgvStyle) -> ClaudeAgentOptions {
+    let mut configured = options(style);
+    configured.permission_handler = Some(Arc::new(|request: ToolPermissionRequest| async move {
+        request.signal.cancelled().await;
+        PermissionDecision::allow()
+    }));
+    configured
+}
+
+#[tokio::test]
+async fn a_cancelled_handler_still_answers_in_typescript_and_stays_silent_in_python() -> TestResult {
+    let steps = || {
+        vec![
+            bash("p1", Some("tu-1")),
+            Step::Wait(150),
+            Step::Send(json!({"type":"control_cancel_request","request_id":"p1"})),
+        ]
+    };
+    assert_eq!(
+        run(cancelled(ArgvStyle::TypeScript), steps(), 1).await?,
+        [
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"p1","response":{"behavior":"allow","toolUseID":"tu-1"}}}"#
+        ]
+    );
+    assert!(run(cancelled(ArgvStyle::Python), steps(), 0).await?.is_empty());
+    Ok(())
+}
+
 fn duplicated(style: ArgvStyle, policy: DuplicateControlRequests, seen: Arc<Mutex<Vec<Value>>>) -> ClaudeAgentOptions {
     let mut configured = options(style);
     configured.limits.duplicate_control_requests = policy;
@@ -441,6 +606,108 @@ async fn a_redelivered_in_flight_request_is_skipped_or_run_twice() -> TestResult
     assert_eq!(
         *seen.lock().map_err(|_| "lock poisoned")?,
         [json!({"command":"one"}), json!({"command":"two"})]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn elicitation_passes_unknown_modes_and_a_null_answer_writes_nothing() -> TestResult {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&seen);
+    let mut configured = options(ArgvStyle::TypeScript);
+    configured.elicitation_handler = Some(Arc::new(move |request: ElicitationRequest| {
+        let silent = request.message == "silent";
+        if let Ok(mut seen) = observed.lock() {
+            seen.push((request.request_id.as_str().to_owned(), request.mode.clone()));
+        }
+        async move {
+            if silent {
+                return Ok::<_, CallbackError>(ElicitationResponse::AnsweredOutOfBand);
+            }
+            let mut content = JsonObject::new();
+            content.insert("a".into(), 1.into());
+            Ok::<_, CallbackError>(ElicitationResponse::Accept { content: Some(content) })
+        }
+    }));
+    let responses = run(
+        configured,
+        vec![
+            request(
+                "e1",
+                json!({"subtype":"elicitation","mcp_server_name":"local","message":"Pick","mode":"form",
+                    "requested_schema":{"type":"object"},"elicitation_id":"el-1","title":"T","display_name":"D",
+                    "description":"Desc"}),
+            ),
+            request(
+                "e2",
+                json!({"subtype":"elicitation","mcp_server_name":"local","message":"silent","mode":"future"}),
+            ),
+        ],
+        1,
+    )
+    .await?;
+    assert_eq!(
+        responses,
+        [
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"e1","response":{"action":"accept","content":{"a":1}}}}"#
+        ]
+    );
+    assert_eq!(
+        *seen.lock().map_err(|_| "lock poisoned")?,
+        [
+            ("e1".to_owned(), Some(ElicitationMode::Form)),
+            ("e2".to_owned(), Some(ElicitationMode::Other("future".into()))),
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn every_dialog_kind_reaches_the_handler_and_a_null_answer_writes_nothing() -> TestResult {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&seen);
+    let mut configured = options(ArgvStyle::TypeScript);
+    configured.supported_dialog_kinds = vec![DialogKind::from("fixture")];
+    configured.user_dialog_handler = Some(Arc::new(move |request: UserDialogRequest| {
+        let kind = request.dialog_kind.as_str().to_owned();
+        if let Ok(mut seen) = observed.lock() {
+            seen.push((request.request_id.as_str().to_owned(), kind.clone()));
+        }
+        async move {
+            Ok::<_, CallbackError>(match kind.as_str() {
+                "fixture" => UserDialogResponse::Completed { result: json!({"x":1}) },
+                "silent" => UserDialogResponse::AnsweredOutOfBand,
+                _ => UserDialogResponse::Cancelled,
+            })
+        }
+    }));
+    let responses = run(
+        configured,
+        vec![
+            request(
+                "d1",
+                json!({"subtype":"request_user_dialog","dialog_kind":"fixture","payload":{"choice":1},"tool_use_id":"tu-1"}),
+            ),
+            request("d2", json!({"subtype":"request_user_dialog","dialog_kind":"undeclared","payload":{}})),
+            request("d3", json!({"subtype":"request_user_dialog","dialog_kind":"silent","payload":{}})),
+        ],
+        2,
+    )
+    .await?;
+    assert_eq!(
+        responses,
+        [
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"d1","response":{"behavior":"completed","result":{"x":1}}}}"#,
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"d2","response":{"behavior":"cancelled"}}}"#,
+        ]
+    );
+    assert_eq!(
+        *seen.lock().map_err(|_| "lock poisoned")?,
+        [
+            ("d1".to_owned(), "fixture".to_owned()),
+            ("d2".to_owned(), "undeclared".to_owned()),
+            ("d3".to_owned(), "silent".to_owned()),
+        ]
     );
     Ok(())
 }

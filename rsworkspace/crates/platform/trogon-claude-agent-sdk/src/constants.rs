@@ -1113,3 +1113,11 @@ pub(crate) const NODE_WINDOWS_RESERVED_NAMES: &[&str] = &[
     "LPT\u{b2}",
     "LPT\u{b3}",
 ];
+
+/// TypeScript subtypes addressed to the machine serving the session's tools, which the SDK leaves unanswered.
+pub(crate) const REMOTE_TOOL_SUBTYPES: [&str; 4] = [
+    "remote_tool_call",
+    "remote_plumbing_call",
+    "remote_tools_probe",
+    "remote_tools_reannounce",
+];

@@ -14,7 +14,7 @@ use tokio::{
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
     PermissionDecision, ProtocolError, StderrTail, ToolPermissionHandler, Transport,
-    constants::{HOST_AUTH_CALLBACK_MISSING, OAUTH_CALLBACK_MISSING, TYPESCRIPT_INITIALIZE_TIMEOUT},
+    constants::TYPESCRIPT_INITIALIZE_TIMEOUT,
     wire::{
         self, ControlResponse, Frame, IncomingControl,
         runtime_payload::{
@@ -266,6 +266,9 @@ where
     /// Python: callbacks that lost their request id to a duplicate still run and answer, but a cancel no longer
     /// reaches them.
     detached_callbacks: HashMap<tokio::task::Id, crate::CancellationToken>,
+    /// TypeScript: callbacks whose request was cancelled. Their signal fired and their request id is free again,
+    /// but they still run and their answer is still written.
+    cancelled_callbacks: HashSet<tokio::task::Id>,
     hook_callbacks: HashMap<String, HookCallback>,
     sdk_mcp_servers: McpSessions,
     initialize_request: serde_json::Value,
@@ -275,7 +278,6 @@ where
     user_dialog_handler: Option<Arc<dyn crate::UserDialogHandler>>,
     oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
     host_auth_token_handler: Option<Arc<dyn crate::HostAuthTokenHandler>>,
-    dialog_kinds: HashSet<String>,
     session: Option<crate::SessionRuntime<F>>,
     mirror_flush: Option<MirrorBarrier>,
     deferred_messages: VecDeque<(Message, Option<MirrorBarrier>)>,
@@ -656,6 +658,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         callback_handles: HashMap::new(),
         callback_signals: HashMap::new(),
         detached_callbacks: HashMap::new(),
+        cancelled_callbacks: HashSet::new(),
         hook_callbacks: initialization.hook_callbacks,
         sdk_mcp_servers: options
             .sdk_mcp_servers
@@ -669,11 +672,6 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         user_dialog_handler: options.user_dialog_handler,
         oauth_token_handler: options.oauth_token_handler,
         host_auth_token_handler: options.host_auth_token_handler,
-        dialog_kinds: options
-            .supported_dialog_kinds
-            .iter()
-            .map(|kind| kind.as_str().to_owned())
-            .collect(),
         session,
         mirror_flush: None,
         deferred_messages: VecDeque::new(),
@@ -844,6 +842,9 @@ where
                             self.callback_signals.remove(&id);
                             self.write_callback_response(response).await?;
                         }
+                        Some(Ok((task_id, (_, response)))) if self.cancelled_callbacks.remove(&task_id) => {
+                            self.write_callback_response(response).await?;
+                        }
                         Some(Ok((task_id, (id, response)))) if self.detached_callbacks.remove(&task_id).is_some() => {
                             // Python's `finally` pops the request id whichever task holds it, so the live task
                             // under that id loses its cancel route too.
@@ -853,8 +854,8 @@ where
                             }
                             self.write_callback_response(response).await?;
                         }
-                        Some(Err(error)) if error.is_cancelled() => {}
-                        Some(Err(error)) if self.detached_callbacks.contains_key(&error.id()) || self.callback_handles.values().any(|handle| handle.id() == error.id()) => return Err(Error::CallbackTask(error)),
+                        // An aborted task, or the callback of a request cancelled from the session, ends quietly.
+                        Some(Err(error)) if !error.is_cancelled() && !self.cancelled_callbacks.remove(&error.id()) && (self.detached_callbacks.contains_key(&error.id()) || self.callback_handles.values().any(|handle| handle.id() == error.id())) => return Err(Error::CallbackTask(error)),
                         _ => {}
                     }
                 }
@@ -871,7 +872,7 @@ where
     }
 
     fn running_callbacks(&self) -> usize {
-        self.callback_handles.len() + self.detached_callbacks.len()
+        self.callback_handles.len() + self.detached_callbacks.len() + self.cancelled_callbacks.len()
     }
 
     /// The control request whose wait ran out, answered with its timeout error, which also ends the run.
@@ -929,7 +930,13 @@ where
             .is_some_and(|limit| self.pending.len() >= limit.get())
     }
 
+    #[cfg(test)]
     async fn admit_callback(&mut self, id: &ControlRequestId) -> Result<bool, Error> {
+        Ok(self.admit_request(id)? && self.admit_capacity(id).await?)
+    }
+
+    /// Applies the duplicate policy to a request whose id is still in flight.
+    fn admit_request(&mut self, id: &ControlRequestId) -> Result<bool, Error> {
         if let Some(handle) = self.callback_handles.get(id) {
             match self.limits.duplicate_control_requests {
                 crate::DuplicateControlRequests::Skip => {
@@ -946,6 +953,12 @@ where
                 crate::DuplicateControlRequests::Fail => return Err(ProtocolError::DuplicateControlRequest.into()),
             }
         }
+        Ok(true)
+    }
+
+    /// Applies the opt-in limit on running callbacks before a handler starts; requests answered at once never
+    /// count against it.
+    async fn admit_capacity(&mut self, id: &ControlRequestId) -> Result<bool, Error> {
         if self
             .limits
             .max_incoming_callbacks
@@ -956,6 +969,227 @@ where
             return Ok(false);
         }
         Ok(true)
+    }
+
+    /// Answers one admitted inbound control request the way the dialect's SDK does.
+    async fn control_request(&mut self, id: ControlRequestId, request: IncomingControl) -> Result<(), Error> {
+        let style = self.argv_style;
+        let python = style == crate::ArgvStyle::Python;
+        match request {
+            IncomingControl::Unsupported { subtype } => {
+                if let Some(response) = wire::unsupported_response(&id, &subtype, style) {
+                    self.write_response(response).await?;
+                }
+            }
+            IncomingControl::Malformed(error) => {
+                tracing::warn!(
+                    ?error,
+                    "answering a malformed permission request with an error response"
+                );
+                self.write_response(wire::malformed_response(&id)).await?;
+            }
+            IncomingControl::Permission(request) => {
+                let Some(handler) = self.handler.clone() else {
+                    return self
+                        .write_response(wire::missing_permission_handler_response(&id, style))
+                        .await;
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let input = request.input.clone();
+                let tool_use_id = request.tool_use_id.clone();
+                let signal = request.signal.clone();
+                let callback_id = id.clone();
+                let fallback = wire::permission_response(
+                    &id,
+                    input.clone(),
+                    tool_use_id.as_ref(),
+                    PermissionDecision::deny("Permission callback timed out"),
+                    style,
+                );
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    let decision = handler.decide(*request).await;
+                    wire::permission_response(&callback_id, input, tool_use_id.as_ref(), decision, style)
+                });
+            }
+            IncomingControl::Hook {
+                callback_id,
+                input,
+                tool_use_id,
+            } => {
+                let Some(callback) = self.hook_callbacks.get(&callback_id).cloned() else {
+                    return self
+                        .write_response(wire::unknown_hook_response(&id, &callback_id))
+                        .await;
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::HookRequest {
+                    input,
+                    tool_use_id,
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "SDK hook callback timed out").map(Some);
+                self.spawn_callback(id, signal, callback.timeout, fallback, async move {
+                    match callback.handler.call(request).await {
+                        Ok(output) => wire::success_response(&response_id, output.to_wire_json()?).map(Some),
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::Mcp { server_name, message } => match style {
+                crate::ArgvStyle::TypeScript => self.typescript_mcp_message(id, server_name, message).await?,
+                crate::ArgvStyle::Python => self.python_mcp_message(id, server_name, message).await?,
+            },
+            IncomingControl::Elicitation(request) => {
+                let Some(handler) = self.elicitation_handler.clone() else {
+                    // TypeScript declines; Python does not handle the subtype at all.
+                    let response = if python {
+                        wire::callback_error_response(&id, "Unsupported control request subtype: elicitation")
+                    } else {
+                        wire::success_response(
+                            &id,
+                            crate::ElicitationResponse::Decline
+                                .to_wire_json()
+                                .map_err(ProtocolError::from)?,
+                        )
+                    };
+                    return self.write_response(response).await;
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::ElicitationRequest {
+                    server_name: crate::McpServerName::from(request.server_name),
+                    message: request.message,
+                    mode: request.mode.map(crate::ElicitationMode::from),
+                    url: request.url,
+                    elicitation_id: request.elicitation_id,
+                    requested_schema: request.requested_schema,
+                    title: request.title,
+                    display_name: request.display_name,
+                    description: request.description,
+                    request_id: id.clone(),
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::success_response(
+                    &id,
+                    crate::ElicitationResponse::Cancel
+                        .to_wire_json()
+                        .map_err(ProtocolError::from)?,
+                )
+                .map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match handler.call(request).await {
+                        Ok(crate::ElicitationResponse::AnsweredOutOfBand) => Ok(None),
+                        Ok(response) => wire::success_response(&response_id, response.to_wire_json()?).map(Some),
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::UserDialog {
+                kind,
+                payload,
+                tool_use_id,
+            } => {
+                let Some(handler) = self.user_dialog_handler.clone() else {
+                    // TypeScript stays silent so a capable client, or the worker's deadline, settles the dialog;
+                    // Python does not handle the subtype at all.
+                    if python && let Some(response) = wire::unsupported_response(&id, "request_user_dialog", style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::UserDialogRequest {
+                    dialog_kind: crate::DialogKind::from(kind),
+                    payload,
+                    tool_use_id,
+                    request_id: id.clone(),
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::success_response(
+                    &id,
+                    crate::UserDialogResponse::Cancelled
+                        .to_wire_json()
+                        .map_err(ProtocolError::from)?,
+                )
+                .map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match handler.call(request).await {
+                        Ok(crate::UserDialogResponse::AnsweredOutOfBand) => Ok(None),
+                        Ok(response) => wire::success_response(&response_id, response.to_wire_json()?).map(Some),
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::OAuthTokenRefresh { kind, token_state } => {
+                // Python has no token callbacks and answers the subtype as unsupported.
+                let handler = self.oauth_token_handler.clone().filter(|_| !python);
+                let Some(handler) = handler else {
+                    if let Some(response) = wire::unsupported_response(&id, "oauth_token_refresh", style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::OAuthTokenRequest {
+                    kind,
+                    token_state: crate::OAuthTokenState::from_wire(token_state.as_deref()),
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "getOAuthToken callback timed out").map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match handler.call(request).await {
+                        Ok(response) => wire::success_response(&response_id, response.to_wire_json()).map(Some),
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::HostAuthTokenRefresh { status } => {
+                let handler = self.host_auth_token_handler.clone().filter(|_| !python);
+                let Some(handler) = handler else {
+                    if let Some(response) = wire::unsupported_response(&id, "host_auth_token_refresh", style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::HostAuthTokenRequest {
+                    status,
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "getHostAuthToken callback timed out").map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match handler.call(request).await {
+                        Ok(token) => {
+                            wire::success_response(&response_id, crate::auth_token::host_auth_wire_json(&token))
+                                .map(Some)
+                        }
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+        }
+        Ok(())
     }
 
     async fn command(&mut self, command: Command) -> Result<(), Error> {
@@ -1274,246 +1508,25 @@ where
                     }
                 }
             }
-            Frame::ControlRequest { id, request } => match (request, self.user_dialog_handler.clone()) {
-                (IncomingControl::UserDialog { kind, .. }, _) if !self.dialog_kinds.contains(&kind) => {}
-                (IncomingControl::UserDialog { .. }, None) => {}
-                (IncomingControl::Unsupported, _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    self.write_response(wire::unsupported_response(&id)).await?;
+            Frame::ControlRequest { id, request } => {
+                if self.admit_request(&id)? {
+                    self.control_request(id, request).await?;
                 }
-                (IncomingControl::Malformed(error), _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    tracing::warn!(
-                        ?error,
-                        "answering a malformed permission request with an error response"
-                    );
-                    self.write_response(wire::malformed_response(&id)).await?;
-                }
-                (IncomingControl::Permission(request), _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    let style = self.argv_style;
-                    let input = request.input.clone();
-                    let tool_use_id = request.tool_use_id.clone();
-                    let signal = request.signal.clone();
-                    if let Some(handler) = self.handler.clone() {
-                        let callback_id = id.clone();
-                        let fallback = wire::permission_response(
-                            &id,
-                            input.clone(),
-                            tool_use_id.as_ref(),
-                            PermissionDecision::deny("Permission callback timed out"),
-                            style,
-                        );
-                        self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-                            let decision = handler.decide(*request).await;
-                            wire::permission_response(&callback_id, input, tool_use_id.as_ref(), decision, style)
-                        });
-                    } else {
-                        self.write_callback_response(wire::permission_response(
-                            &id,
-                            input,
-                            tool_use_id.as_ref(),
-                            PermissionDecision::deny("No permission handler is available"),
-                            style,
-                        ))
-                        .await?;
-                    }
-                }
-                (
-                    IncomingControl::Hook {
-                        callback_id,
-                        input,
-                        tool_use_id,
-                    },
-                    _,
-                ) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    if let Some(callback) = self.hook_callbacks.get(&callback_id).cloned() {
-                        let signal = crate::CancellationToken::new();
-                        let request = crate::HookRequest {
-                            input,
-                            tool_use_id,
-                            signal: signal.clone(),
-                        };
-                        let response_id = id.clone();
-                        let fallback = wire::callback_error_response(&id, "SDK hook callback timed out").map(Some);
-                        self.spawn_callback(id, signal, callback.timeout, fallback, async move {
-                            match callback.handler.call(request).await {
-                                Ok(output) => wire::success_response(&response_id, output.to_wire_json()?).map(Some),
-                                Err(_) => {
-                                    wire::callback_error_response(&response_id, "SDK hook callback failed").map(Some)
-                                }
-                            }
-                        });
-                    } else {
-                        self.write_response(wire::callback_error_response(&id, "Unknown SDK hook callback"))
-                            .await?;
-                    }
-                }
-                (IncomingControl::Mcp { server_name, message }, _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    match self.argv_style {
-                        crate::ArgvStyle::TypeScript => self.typescript_mcp_message(id, server_name, message).await?,
-                        crate::ArgvStyle::Python => self.python_mcp_message(id, server_name, message).await?,
-                    }
-                }
-                (IncomingControl::Elicitation(request), _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    if let Some(handler) = self.elicitation_handler.clone() {
-                        let signal = crate::CancellationToken::new();
-                        let mode = match request.mode.as_deref() {
-                            None | Some("form") => crate::ElicitationMode::Form,
-                            Some("url") => crate::ElicitationMode::Url,
-                            _ => {
-                                return self
-                                    .write_response(wire::callback_error_response(&id, "Unsupported elicitation mode"))
-                                    .await;
-                            }
-                        };
-                        let request = crate::ElicitationRequest {
-                            server_name: crate::McpServerName::from(request.server_name),
-                            message: request.message,
-                            mode,
-                            url: request.url,
-                            elicitation_id: request.elicitation_id,
-                            requested_schema: request.requested_schema,
-                            title: request.title,
-                            display_name: request.display_name,
-                            description: request.description,
-                            signal: signal.clone(),
-                        };
-                        let response_id = id.clone();
-                        let fallback = wire::success_response(
-                            &id,
-                            crate::ElicitationResponse::Cancel
-                                .to_wire_json()
-                                .map_err(ProtocolError::from)?,
-                        )
-                        .map(Some);
-                        self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-                            let response = handler
-                                .call(request)
-                                .await
-                                .unwrap_or(crate::ElicitationResponse::Cancel);
-                            wire::success_response(&response_id, response.to_wire_json()?).map(Some)
-                        });
-                    } else {
-                        self.write_response(wire::success_response(
-                            &id,
-                            crate::ElicitationResponse::Cancel
-                                .to_wire_json()
-                                .map_err(ProtocolError::from)?,
-                        ))
-                        .await?;
-                    }
-                }
-                (
-                    IncomingControl::UserDialog {
-                        kind,
-                        payload,
-                        tool_use_id,
-                    },
-                    Some(handler),
-                ) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    let signal = crate::CancellationToken::new();
-                    let request = crate::UserDialogRequest {
-                        dialog_kind: crate::DialogKind::from(kind),
-                        payload,
-                        tool_use_id,
-                        signal: signal.clone(),
-                    };
-                    let response_id = id.clone();
-                    let fallback = wire::success_response(
-                        &id,
-                        crate::UserDialogResponse::Cancelled
-                            .to_wire_json()
-                            .map_err(ProtocolError::from)?,
-                    )
-                    .map(Some);
-                    self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-                        let response = handler
-                            .call(request)
-                            .await
-                            .unwrap_or(crate::UserDialogResponse::Cancelled);
-                        wire::success_response(&response_id, response.to_wire_json()?).map(Some)
-                    });
-                }
-                (IncomingControl::OAuthTokenRefresh { kind, token_state }, _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    let Some(handler) = self.oauth_token_handler.clone() else {
-                        self.write_response(wire::callback_error_response(&id, OAUTH_CALLBACK_MISSING))
-                            .await?;
-                        return Ok(());
-                    };
-                    let signal = crate::CancellationToken::new();
-                    let request = crate::OAuthTokenRequest {
-                        kind,
-                        token_state: crate::OAuthTokenState::from_wire(token_state.as_deref()),
-                        signal: signal.clone(),
-                    };
-                    let response_id = id.clone();
-                    let fallback = wire::callback_error_response(&id, "getOAuthToken callback timed out").map(Some);
-                    self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-                        match handler.call(request).await {
-                            Ok(response) => wire::success_response(&response_id, response.to_wire_json()).map(Some),
-                            Err(error) => {
-                                wire::callback_error_response(&response_id, &callback_failure(&error)).map(Some)
-                            }
-                        }
-                    });
-                }
-                (IncomingControl::HostAuthTokenRefresh { status }, _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    let Some(handler) = self.host_auth_token_handler.clone() else {
-                        self.write_response(wire::callback_error_response(&id, HOST_AUTH_CALLBACK_MISSING))
-                            .await?;
-                        return Ok(());
-                    };
-                    let signal = crate::CancellationToken::new();
-                    let request = crate::HostAuthTokenRequest {
-                        status,
-                        signal: signal.clone(),
-                    };
-                    let response_id = id.clone();
-                    let fallback = wire::callback_error_response(&id, "getHostAuthToken callback timed out").map(Some);
-                    self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-                        match handler.call(request).await {
-                            Ok(token) => {
-                                wire::success_response(&response_id, crate::auth_token::host_auth_wire_json(&token))
-                                    .map(Some)
-                            }
-                            Err(error) => {
-                                wire::callback_error_response(&response_id, &callback_failure(&error)).map(Some)
-                            }
-                        }
-                    });
-                }
-            },
+            }
             Frame::Cancel { id } => {
                 if let Some(handle) = self.callback_handles.remove(&id) {
                     if let Some(signal) = self.callback_signals.remove(&id) {
                         signal.cancel();
                     }
-                    handle.abort();
+                    match self.argv_style {
+                        // TypeScript aborts the request's signal and forgets the id; the handler keeps running and
+                        // its answer is still written.
+                        crate::ArgvStyle::TypeScript => {
+                            self.cancelled_callbacks.insert(handle.id());
+                        }
+                        // Python cancels the handler task, which writes nothing.
+                        crate::ArgvStyle::Python => handle.abort(),
+                    }
                 }
             }
             Frame::TranscriptMirror { file_path, entries } => {
@@ -1627,6 +1640,9 @@ where
             .as_ref()
             .filter(|message| crate::mcp_routing::typescript_expects_response(message))
         {
+            if !self.admit_capacity(&id).await? {
+                return Ok(());
+            }
             let message = message.clone();
             let signal = crate::CancellationToken::new();
             let callback_signal = signal.clone();
@@ -1705,6 +1721,9 @@ where
                 .write_response(wire::success_response(&id, McpResponsePayload { mcp_response }))
                 .await;
         };
+        if !self.admit_capacity(&id).await? {
+            return Ok(());
+        }
         let signal = crate::CancellationToken::new();
         let callback_signal = signal.clone();
         let response_id = id.clone();
@@ -1849,14 +1868,6 @@ where
             _ = &mut self.shutdown => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
             result = async { match limit { Some(limit) => timeout(limit, self.transport.write(&text)).await.map_err(|_| Error::WriteTimeout)?, None => self.transport.write(&text).await } } => result,
         }
-    }
-}
-
-/// A thrown error becomes the response's `error` text, as `TE.processControlRequest` does with `message`.
-fn callback_failure(error: &crate::CallbackError) -> String {
-    match error {
-        crate::CallbackError::Failed(source) => source.to_string(),
-        crate::CallbackError::Cancelled => "Callback cancelled".to_owned(),
     }
 }
 

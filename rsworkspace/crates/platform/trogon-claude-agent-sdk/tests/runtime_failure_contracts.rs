@@ -433,18 +433,18 @@ async fn callback_failures_return_bounded_protocol_fallbacks_without_stopping_co
                 }));
                 (
                     json!({"subtype":"elicitation","mcp_server_name":"local","message":"request","mode":"future"}),
-                    "error",
+                    "success",
                 )
             }
             CallbackCase::UrlElicitation => {
                 configured.elicitation_handler = Some(Arc::new(|request: ElicitationRequest| async move {
-                    assert_eq!(request.mode, ElicitationMode::Url);
+                    assert_eq!(request.mode, Some(ElicitationMode::Url));
                     assert_eq!(request.url.as_deref(), Some("https://example.com/approval"));
                     Err(CallbackError::Cancelled)
                 }));
                 (
                     json!({"subtype":"elicitation","mcp_server_name":"local","message":"request","mode":"url","url":"https://example.com/approval"}),
-                    "success",
+                    "error",
                 )
             }
             CallbackCase::FailedDialog => {
@@ -453,7 +453,7 @@ async fn callback_failures_return_bounded_protocol_fallbacks_without_stopping_co
                     Some(Arc::new(|_: UserDialogRequest| async { Err(CallbackError::Cancelled) }));
                 (
                     json!({"subtype":"request_user_dialog","dialog_kind":"fixture","payload":{}}),
-                    "success",
+                    "error",
                 )
             }
         };
@@ -463,11 +463,20 @@ async fn callback_failures_return_bounded_protocol_fallbacks_without_stopping_co
         let response = cli.read().await?;
         assert_eq!(response["response"]["request_id"], "callback-one");
         assert_eq!(response["response"]["subtype"], expected);
-        if matches!(case, CallbackCase::MissingElicitation | CallbackCase::UrlElicitation) {
-            assert_eq!(response["response"]["response"]["action"], "cancel");
+        if matches!(
+            case,
+            CallbackCase::MissingElicitation | CallbackCase::InvalidElicitation
+        ) {
+            assert_eq!(response["response"]["response"], json!({"action":"decline"}));
         }
-        if matches!(case, CallbackCase::FailedDialog) {
-            assert_eq!(response["response"]["response"]["behavior"], "cancelled");
+        if matches!(
+            case,
+            CallbackCase::FailedHook | CallbackCase::UrlElicitation | CallbackCase::FailedDialog
+        ) {
+            assert_eq!(response["response"]["error"], "This operation was aborted");
+        }
+        if matches!(case, CallbackCase::UnknownHook) {
+            assert_eq!(response["response"]["error"], "No hook callback found for ID: missing");
         }
         let handle = client.handle();
         let control = tokio::spawn(async move { handle.set_model(None).await });
@@ -869,32 +878,80 @@ async fn callback_capacity_is_bounded_and_cancellation_preserves_control_progres
     let observed = started.clone();
     let mut configured = options()?;
     configured.limits.max_incoming_callbacks = Some(QueueCapacity::new(1)?);
-    configured.permission_handler = Some(Arc::new(move |_: ToolPermissionRequest| {
+    configured.permission_handler = Some(Arc::new(move |request: ToolPermissionRequest| {
         observed.notify_one();
-        async { std::future::pending::<PermissionDecision>().await }
+        async move {
+            request.signal.cancelled().await;
+            PermissionDecision::deny("cancelled")
+        }
     }));
     configured.supported_dialog_kinds = vec![DialogKind::from("fixture")];
     configured.user_dialog_handler = Some(Arc::new(|_: UserDialogRequest| async { Err(CallbackError::Cancelled) }));
+    configured.hooks = vec![HookRegistration {
+        event: HookEvent::PreToolUse,
+        matcher: None,
+        callbacks: vec![Arc::new(|_: HookRequest| async { Err(CallbackError::Cancelled) })],
+        timeout: None,
+        on_failure: Some(HookFailureMode::Continue),
+    }];
+    configured
+        .sdk_mcp_servers
+        .insert(McpServerName::from("local"), Arc::new(FailedMcp));
+    configured.elicitation_handler = Some(Arc::new(|_: ElicitationRequest| async {
+        Ok(ElicitationResponse::Decline)
+    }));
     let (client, mut cli) = connect(configured).await?;
     cli.send(json!({"type":"control_request","request_id":"pending","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}})).await?;
     started.notified().await;
-    for request in [
-        json!({"subtype":"future_callback"}),
-        json!({"subtype":"can_use_tool","tool_name":"Read","input":{}}),
-        json!({"subtype":"can_use_tool","input":{}}),
-        json!({"subtype":"hook_callback","callback_id":"missing","input":{}}),
-        json!({"subtype":"mcp_message","server_name":"missing","message":{}}),
-        json!({"subtype":"elicitation","mcp_server_name":"local","message":"request","mode":"form"}),
-        json!({"subtype":"request_user_dialog","dialog_kind":"fixture","payload":{}}),
+    let busy = json!({"subtype":"error","request_id":"excess","error":"Too many outstanding SDK callbacks"});
+    for (request, expected) in [
+        (
+            json!({"subtype":"future_callback"}),
+            json!({"subtype":"error","request_id":"excess","error":"Unsupported control request subtype: future_callback","error_code":"unsupported_request"}),
+        ),
+        (
+            json!({"subtype":"can_use_tool","tool_name":"Read","input":{}}),
+            busy.clone(),
+        ),
+        (
+            json!({"subtype":"can_use_tool","input":{}}),
+            json!({"subtype":"error","request_id":"excess","error":"Malformed SDK permission request"}),
+        ),
+        (
+            json!({"subtype":"hook_callback","callback_id":"missing","input":{}}),
+            json!({"subtype":"error","request_id":"excess","error":"No hook callback found for ID: missing"}),
+        ),
+        (
+            json!({"subtype":"hook_callback","callback_id":"hook_0","input":{}}),
+            busy.clone(),
+        ),
+        (
+            json!({"subtype":"mcp_message","server_name":"missing","message":{}}),
+            json!({"subtype":"error","request_id":"excess","error":"SDK MCP server not found: missing"}),
+        ),
+        (
+            json!({"subtype":"mcp_message","server_name":"local","message":{"jsonrpc":"2.0","id":1,"method":"ping"}}),
+            busy.clone(),
+        ),
+        (
+            json!({"subtype":"elicitation","mcp_server_name":"local","message":"request","mode":"form"}),
+            busy.clone(),
+        ),
+        (
+            json!({"subtype":"request_user_dialog","dialog_kind":"fixture","payload":{}}),
+            busy.clone(),
+        ),
     ] {
         cli.send(json!({"type":"control_request","request_id":"excess","request":request}))
             .await?;
         let response = cli.read().await?;
-        assert_eq!(response["response"]["request_id"], "excess");
-        assert_eq!(response["response"]["error"], "Too many outstanding SDK callbacks");
+        assert_eq!(response["response"], expected);
     }
     cli.send(json!({"type":"control_cancel_request","request_id":"pending"}))
         .await?;
+    let cancelled = cli.read().await?;
+    assert_eq!(cancelled["response"]["request_id"], "pending");
+    assert_eq!(cancelled["response"]["response"]["behavior"], "deny");
     cli.send(json!({"type":"control_request","request_id":"after-cancel","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}})).await?;
     let handle = client.handle();
     let control = tokio::spawn(async move { handle.set_model(None).await });

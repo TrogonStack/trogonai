@@ -1112,10 +1112,26 @@
         {
           "path": "tests/golden_inbound_control.rs",
           "name": "permission_decisions_are_written_byte_for_byte"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "a_cancelled_handler_still_answers_in_typescript_and_stays_silent_in_python"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "a_redelivered_in_flight_request_is_skipped_or_run_twice"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "typescript_answers_requests_without_a_handler_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "python_answers_requests_without_a_handler_like_claude_agent_sdk"
         }
       ],
       "status": "supported",
-      "rationale": "can_use_tool answers match sdk.mjs 0.3.323 and claude_agent_sdk 0.2.181 byte for byte in each ArgvStyle. TypeScript appends toolUseID, keeps decisionClassification and writes nothing for AnsweredOutOfBand; Python echoes the original input on allow and rejects a null result with its TypeError text. Handlers receive cancellation signals. CLI rules can authorize before consulting the host."
+      "rationale": "can_use_tool answers match sdk.mjs 0.3.323 and claude_agent_sdk 0.2.181 byte for byte in each ArgvStyle. TypeScript appends toolUseID, keeps decisionClassification, writes nothing for AnsweredOutOfBand, still writes a cancelled handler's answer and skips a redelivered in-flight request id; Python echoes the original input on allow, rejects a null result with its TypeError text, drops a cancelled handler without a response and runs a redelivered id twice (DuplicateControlRequests::RunBoth, opt-in). A missing handler is answered with each SDK's own error text. CLI rules can authorize before consulting the host."
     },
     {
       "id": "permission-types",
@@ -1615,10 +1631,18 @@
         {
           "path": "tests/runtime_features.rs",
           "name": "elicitation_callback_returns_a_typed_form_response"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "elicitation_passes_unknown_modes_and_a_null_answer_writes_nothing"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "typescript_answers_requests_without_a_handler_like_sdk_mjs"
         }
       ],
       "status": "supported",
-      "rationale": "Cancellation-aware typed callback returns form/URL elicitation responses; fixture verifies the wire round trip."
+      "rationale": "The handler sees every mode the CLI sends (ElicitationMode::Other keeps unknown ones) and the request id. Answers match sdk.mjs 0.3.323 byte for byte: AnsweredOutOfBand writes nothing, no handler declines. claude_agent_sdk 0.2.181 has no elicitation handler and answers with its unsupported-subtype error in the Python dialect."
     },
     {
       "id": "user-dialog",
@@ -1652,15 +1676,23 @@
         },
         {
           "path": "tests/runtime_features.rs",
-          "name": "saturated_callbacks_do_not_settle_undeclared_dialog"
+          "name": "an_undeclared_dialog_kind_still_reaches_the_handler_like_the_typescript_sdk"
         },
         {
           "path": "tests/runtime_features.rs",
-          "name": "duplicate_id_does_not_settle_undeclared_dialog"
+          "name": "saturated_callbacks_leave_a_dialog_without_a_handler_unanswered"
+        },
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "a_dialog_reusing_an_in_flight_id_is_skipped"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "every_dialog_kind_reaches_the_handler_and_a_null_answer_writes_nothing"
         }
       ],
       "status": "supported",
-      "rationale": "Only declared dialog kinds invoke handlers or receive responses, including saturated and duplicate-ID cases."
+      "rationale": "As in sdk.mjs 0.3.323, supportedDialogKinds is only advertised in initialize and every request_user_dialog reaches the handler whatever its kind. AnsweredOutOfBand and a missing handler write nothing; a redelivered in-flight id is skipped. claude_agent_sdk 0.2.181 has no dialog handler and answers with its unsupported-subtype error in the Python dialect."
     },
     {
       "id": "embedded-mcp",
@@ -3721,6 +3753,14 @@
           "name": "a_cancel_request_cancels_the_token_callback_signal"
         },
         {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "python_answers_token_refreshes_as_unsupported_even_with_handlers"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "a_non_string_token_state_reaches_the_oauth_handler_as_no_hint"
+        },
+        {
           "path": "tests/session_store.rs",
           "name": "python_dialect_reports_the_resume_materialization_text"
         },
@@ -3730,7 +3770,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; the Python timeout wording is selected by argv_style. debug_stderr is an upstream no-op, so the Rust field is accepted and ignored. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. Known limits: a host token handler returns a string or none, never the bare number the bundle would forward, and token callbacks use the opt-in callback_timeout limit."
+      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; ArgvStyle::Python answers both token refreshes with the Python unsupported-subtype error even when a handler is set, and the Python timeout wording is selected by argv_style. debug_stderr is an upstream no-op, so the Rust field is accepted and ignored. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. Known limits: a host token handler returns a string or none, never the bare number the bundle would forward, and token callbacks use the opt-in callback_timeout limit."
     },
     {
       "id": "core-options",

@@ -322,10 +322,10 @@ async fn argv_binds_values_and_forwards_cwd() -> TestResult {
 }
 
 #[tokio::test]
-async fn permission_requests_default_to_deny() -> TestResult {
+async fn permission_requests_without_a_handler_get_the_typescript_error() -> TestResult {
     let mut client = ClaudeSdkClient::connect(options("permission")?).await?;
     client.send_prompt(Prompt::from("permission")).await?;
-    assert_eq!(read_result(&mut client).await?, "denied");
+    assert_eq!(read_result(&mut client).await?, "canUseTool callback is not provided.");
     client.disconnect().await?;
     Ok(())
 }
@@ -395,16 +395,16 @@ async fn pending_callback_does_not_block_interrupt() -> TestResult {
 }
 
 #[tokio::test]
-async fn cancelled_permission_callback_cannot_reply_later() -> TestResult {
+async fn a_cancelled_permission_callback_still_answers_like_the_typescript_sdk() -> TestResult {
     let mut options = options("permission-cancel")?;
-    options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
-        sleep(Duration::from_millis(100)).await;
+    options.permission_handler = Some(Arc::new(|request: ToolPermissionRequest| async move {
+        request.signal.cancelled().await;
+        sleep(Duration::from_millis(50)).await;
         PermissionDecision::allow()
     }));
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("cancel")).await?;
-    assert_eq!(read_result(&mut client).await?, "cancelled-permission");
-    sleep(Duration::from_millis(150)).await;
+    assert_eq!(read_result(&mut client).await?, "allow");
     client.handle().interrupt().await?;
     client.disconnect().await?;
     Ok(())

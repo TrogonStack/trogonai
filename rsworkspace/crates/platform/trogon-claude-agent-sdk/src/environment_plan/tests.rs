@@ -303,7 +303,7 @@ fn python_dialect_ignores_tool_config() {
 }
 
 #[test]
-fn token_callbacks_announce_themselves_in_every_mode() {
+fn token_callbacks_announce_themselves_in_every_typescript_mode() {
     let handler: std::sync::Arc<dyn crate::OAuthTokenHandler> =
         std::sync::Arc::new(|_request: crate::OAuthTokenRequest| async { Ok(crate::OAuthTokenResponse::default()) });
     let host: std::sync::Arc<dyn crate::HostAuthTokenHandler> =
@@ -325,6 +325,10 @@ fn token_callbacks_announce_themselves_in_every_mode() {
             set(&plan, "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH").as_deref(),
             Some("1")
         );
+        both.argv_style = crate::ArgvStyle::Python;
+        let python = plan(&both, &inherited(&[]));
+        assert_eq!(set(&python, "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH"), None);
+        assert_eq!(set(&python, "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH"), None);
     }
 }
 

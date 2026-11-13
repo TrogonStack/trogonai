@@ -90,6 +90,7 @@ impl DriverFixture {
             callback_handles: HashMap::new(),
             callback_signals: HashMap::new(),
             detached_callbacks: HashMap::new(),
+            cancelled_callbacks: HashSet::new(),
             hook_callbacks: HashMap::new(),
             sdk_mcp_servers: McpSessions::new(),
             initialize_request: crate::wire::runtime_payload::InitializeRequest::default()
@@ -105,7 +106,6 @@ impl DriverFixture {
             user_dialog_handler: None,
             oauth_token_handler: None,
             host_auth_token_handler: None,
-            dialog_kinds: HashSet::new(),
             session: None,
             mirror_flush: None,
             deferred_messages: VecDeque::new(),
@@ -195,9 +195,15 @@ async fn stale_permission_completion_cannot_remove_replacement() -> Result<(), B
         replacement_retained,
         "a stale allow completion removed the replacement callback"
     );
-    assert!(outcome.is_err(), "a stale completion emitted a response to the CLI");
+    assert!(outcome.is_err(), "the event loop stopped");
     assert!(elapsed >= Duration::from_millis(100));
     assert!(elapsed <= Duration::from_millis(101));
+    // TypeScript still writes what a cancelled handler returns.
+    let stale = fixture.harness.written.try_recv()?;
+    assert!(
+        stale.contains(r#""request_id":"reused-id""#) && stale.contains(r#""behavior":"allow""#),
+        "{stale}"
+    );
     fixture.finish().await
 }
 
@@ -716,10 +722,4 @@ fn the_initialize_request_carries_managed_settings_after_the_plugins() -> Result
         },
     )?;
     Ok(())
-}
-
-#[test]
-fn callback_failures_report_the_source_text_or_the_cancellation() {
-    assert_eq!(callback_failure(&crate::CallbackError::Failed("boom".into())), "boom");
-    assert_eq!(callback_failure(&crate::CallbackError::Cancelled), "Callback cancelled");
 }
