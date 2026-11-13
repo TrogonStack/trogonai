@@ -53,6 +53,7 @@ pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> Envir
         .map(|(key, value)| (OsString::from(key), OsString::from(value.expose())))
         .collect();
     let configured_has = |name: &str| configured.keys().any(|key| key == OsStr::new(name));
+    let configured_non_empty = |name: &str| configured.get(OsStr::new(name)).is_some_and(|value| !value.is_empty());
     let entrypoint = options.entrypoint.as_deref().unwrap_or(DEFAULT_ENTRYPOINT);
     let mut plan = EnvironmentPlan::default();
     let mode = options.environment_mode;
@@ -84,10 +85,10 @@ pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> Envir
             plan.set.extend(configured.clone());
             plan.set.remove(OsStr::new("NODE_OPTIONS"));
             plan.set.remove(OsStr::new("DEBUG"));
-            if !configured_has("CLAUDE_CODE_ENTRYPOINT") {
+            if !configured_non_empty("CLAUDE_CODE_ENTRYPOINT") {
                 plan.set.insert("CLAUDE_CODE_ENTRYPOINT".into(), entrypoint.into());
             }
-            if !configured_has("CLAUDE_AGENT_SDK_VERSION") {
+            if !configured_non_empty("CLAUDE_AGENT_SDK_VERSION") {
                 plan.set.insert("CLAUDE_AGENT_SDK_VERSION".into(), SDK_VERSION.into());
             }
             if truthy(inherited.get(OsStr::new("DEBUG_CLAUDE_AGENT_SDK"))) {
@@ -134,14 +135,19 @@ pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> Envir
     }
 
     let reads = "CLAUDE_CODE_SDK_READS_SESSION_STATE";
+    // TypeScript's replace mode starts from `options.env` alone; the other modes see the inherited environment too.
     let present = configured
         .keys()
         .any(|key| key.to_string_lossy().eq_ignore_ascii_case(reads))
-        || inherited
-            .keys()
-            .any(|key| key.to_string_lossy().eq_ignore_ascii_case(reads));
+        || (mode != EnvironmentMode::Replace
+            && inherited
+                .keys()
+                .any(|key| key.to_string_lossy().eq_ignore_ascii_case(reads)));
     if !present {
         plan.set.insert(reads.into(), "1".into());
     }
     plan
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,5 +1,8 @@
-use super::build;
-use crate::{ArgvStyle, ClaudeAgentOptions, Customizations, ExtraArgument, SessionPersistence};
+use super::{build, request_await_initialize};
+use crate::{
+    ArgvStyle, ClaudeAgentOptions, ContinueConversation, Customizations, ExtraArgument, ScriptRuntime,
+    SessionPersistence,
+};
 
 fn tokens(options: &ClaudeAgentOptions) -> Vec<String> {
     build(options)
@@ -70,4 +73,59 @@ fn persistence_bare_and_extra_args_trail_the_known_flags() {
         tokens(&options)[5..],
         ["--no-session-persistence", "--bare", "--x", "y"]
     );
+}
+
+fn resumed() -> ClaudeAgentOptions {
+    ClaudeAgentOptions {
+        continue_conversation: ContinueConversation::Yes,
+        ..ClaudeAgentOptions::default()
+    }
+}
+
+#[test]
+fn await_initialize_follows_typescript_resume_rules() {
+    let mut options = resumed();
+    request_await_initialize(&mut options);
+    assert_eq!(tokens(&options)[5..], ["--continue", "--await-initialize"]);
+
+    let mut fresh = ClaudeAgentOptions::default();
+    request_await_initialize(&mut fresh);
+    assert!(fresh.extra_args.is_empty());
+
+    let mut explicit_path = ClaudeAgentOptions {
+        cli_path: Some("claude".into()),
+        ..resumed()
+    };
+    request_await_initialize(&mut explicit_path);
+    assert!(explicit_path.extra_args.is_empty());
+
+    let mut python = ClaudeAgentOptions {
+        argv_style: ArgvStyle::Python,
+        ..resumed()
+    };
+    request_await_initialize(&mut python);
+    assert!(python.extra_args.is_empty());
+}
+
+#[test]
+fn await_initialize_is_skipped_when_an_sdk_url_is_present() {
+    let mut extra = ClaudeAgentOptions {
+        extra_args: vec![ExtraArgument {
+            flag: "sdk-url=wss://host".into(),
+            value: None,
+        }],
+        ..resumed()
+    };
+    request_await_initialize(&mut extra);
+    assert_eq!(extra.extra_args.len(), 1);
+
+    let mut runtime = ClaudeAgentOptions {
+        script_runtime: ScriptRuntime {
+            executable: None,
+            arguments: vec!["--sdk-url=wss://host".into()],
+        },
+        ..resumed()
+    };
+    request_await_initialize(&mut runtime);
+    assert!(runtime.extra_args.is_empty());
 }

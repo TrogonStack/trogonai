@@ -45,6 +45,7 @@ mod permission_update;
 mod process_options;
 mod prompt;
 mod queue_capacity;
+mod run_as;
 mod sdk_mcp_server;
 mod sdk_tool;
 mod sdk_tools;

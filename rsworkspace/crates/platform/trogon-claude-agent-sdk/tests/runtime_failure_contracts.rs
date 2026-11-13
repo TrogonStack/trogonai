@@ -227,6 +227,7 @@ async fn declarative_cli_choices_preserve_named_arguments() -> TestResult {
         let (client, cli) = connect(configured).await?;
         let commands = cli.observer.commands()?;
         let arguments = &commands[0].arguments;
+        // The default TypeScript argv shape uses `--flag=value` tokens.
         for expected in [
             "--agent=reviewer",
             "--max-turns=3",
@@ -236,14 +237,16 @@ async fn declarative_cli_choices_preserve_named_arguments() -> TestResult {
             "--bare",
             "--add-dir=folder with spaces",
         ] {
-            assert!(arguments.iter().any(|argument| argument == expected));
+            assert!(
+                arguments.iter().any(|argument| argument == expected),
+                "{expected} missing from {arguments:?}"
+            );
         }
-        assert!(!arguments.iter().any(|argument| argument == "--system-prompt="));
-        assert_eq!(
-            arguments
+        // The TypeScript shape delivers the system prompt through `initialize`, never on argv.
+        assert!(
+            !arguments
                 .iter()
-                .any(|argument| argument == "--append-system-prompt=extra context"),
-            matches!(system, SystemPrompt::ClaudeCodeWithAppend(_))
+                .any(|argument| argument.to_string_lossy().contains("system-prompt"))
         );
         cli.disconnect(client).await?;
     }

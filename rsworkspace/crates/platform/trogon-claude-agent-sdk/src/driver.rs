@@ -401,7 +401,9 @@ fn command(
         return Err(Error::FileCheckpointingWithSessionStore);
     }
     #[cfg(unix)]
-    if let Some(uid) = options.run_as_uid {
+    if let Some(name) = &options.user {
+        command.uid(crate::run_as::lookup(name).map_err(Error::Io)?);
+    } else if let Some(uid) = options.run_as_uid {
         command.uid(uid);
     }
     command

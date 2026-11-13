@@ -234,11 +234,8 @@ async fn structured_input_and_declarative_configuration_reach_the_cli() -> TestR
             .iter()
             .any(|value| value.as_str().is_some_and(|value| value.starts_with("--json-schema=")))
     );
-    assert!(
-        arguments
-            .iter()
-            .any(|value| value.as_str().is_some_and(|value| value.starts_with("--mcp-config=")))
-    );
+    // Upstream TypeScript passes `--mcp-config` and its value as separate tokens.
+    assert!(arguments.iter().any(|value| value == "--mcp-config"));
     assert_eq!(
         init.data["initialize_request"]["agents"]["reviewer"]["prompt"],
         "Review the code"

@@ -473,12 +473,41 @@ impl TrackedEnvironment {
         }
     }
 
+    /// Session-related accesses only: the SDK also reads these names to plan the child's own environment
+    /// (entrypoint, version, debug and session-state markers, `PATH`, `HOME`), which is not session lookup.
     fn accesses(&self) -> io::Result<Vec<EnvironmentAccess>> {
+        const LAUNCH_VARIABLES: [&str; 7] = [
+            "CLAUDE_CODE_ENTRYPOINT",
+            "CLAUDE_AGENT_SDK_VERSION",
+            "CLAUDE_CODE_SDK_READS_SESSION_STATE",
+            "DEBUG_CLAUDE_AGENT_SDK",
+            "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK",
+            "PATH",
+            "USERPROFILE",
+        ];
+        let mut home_reads_skipped = true;
         Ok(self
             .accesses
             .lock()
             .map_err(|_| io::Error::other("environment tracking poisoned"))?
-            .clone())
+            .iter()
+            .filter(|access| match access {
+                EnvironmentAccess::Variable(key) => {
+                    let key = key.to_string_lossy();
+                    if LAUNCH_VARIABLES.contains(&key.as_ref()) {
+                        return false;
+                    }
+                    // The launch capture reads HOME once, before any session lookup.
+                    if key == "HOME" && home_reads_skipped {
+                        home_reads_skipped = false;
+                        return false;
+                    }
+                    true
+                }
+                _ => true,
+            })
+            .cloned()
+            .collect())
     }
 
     fn record(&self, access: EnvironmentAccess) -> io::Result<()> {

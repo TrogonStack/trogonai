@@ -63,22 +63,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     assert!(args.windows(2).any(|pair| pair == ["--output-format", "stream-json"]));
     assert!(args.windows(2).any(|pair| pair == ["--input-format", "stream-json"]));
-    assert!(
-        args.windows(2)
-            .any(|pair| pair == ["--permission-prompt-tool", "stdio"])
-    );
     assert!(args.iter().any(|arg| arg == "--verbose"));
     let mode = args
         .iter()
         .find_map(|arg| arg.strip_prefix("--model=fixture:"))
+        .or_else(|| {
+            args.windows(2).find_map(|pair| {
+                (pair[0] == "--model")
+                    .then(|| pair[1].strip_prefix("fixture:"))
+                    .flatten()
+            })
+        })
         .unwrap_or("normal");
-    let custom_prompt = args.iter().find_map(|arg| arg.strip_prefix("--system-prompt="));
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
     let first = lines
         .next()
         .ok_or_else(|| io::Error::other("fixture missing initialize"))??;
     let initialize: Value = serde_json::from_str(&first)?;
+    // The TypeScript argv shape delivers the system prompt inside `initialize`.
+    let custom_prompt = initialize["request"]["systemPrompt"][0]
+        .as_str()
+        .filter(|prompt| !prompt.is_empty());
     assert_eq!(initialize["type"], "control_request");
     assert_eq!(initialize["request"]["subtype"], "initialize");
     if !mode.starts_with("hook") {

@@ -151,6 +151,9 @@ pub struct ClaudeAgentOptions {
     pub stderr_handler: Option<StderrHandler>,
     pub extra_args: Vec<ExtraArgument>,
     pub script_runtime: ScriptRuntime,
-    /// Numeric user id the CLI runs as (Unix only).
+    /// Python's `user`: the CLI runs as this account (Unix only). The name is looked up in `/etc/passwd`; only the
+    /// uid changes, as with `Popen(user=...)`. Takes precedence over `run_as_uid`.
+    pub user: Option<String>,
+    /// Numeric user id the CLI runs as (Unix only), as `Popen(user=int)` does.
     pub run_as_uid: Option<u32>,
 }

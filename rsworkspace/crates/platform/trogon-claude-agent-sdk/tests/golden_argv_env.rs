@@ -299,3 +299,17 @@ async fn script_cli_runs_under_the_configured_runtime() -> Result<(), Box<dyn st
     assert_eq!(arguments(&capture)[..2], ["--smol", "cli.mjs"]);
     Ok(())
 }
+
+#[tokio::test]
+async fn a_custom_spawner_skips_cli_discovery_like_upstream_custom_transports() -> Result<(), Box<dyn std::error::Error>>
+{
+    // No cli_path and an environment with an empty PATH: discovery would fail, but the caller owns spawning.
+    let capture = run(ClaudeAgentOptions::default(), &[("PATH", ""), ("HOME", "/nonexistent")]).await?;
+    assert_eq!(capture.command.executable, OsString::from("claude"));
+    assert!(
+        !arguments(&capture)
+            .iter()
+            .any(|argument| argument == "--await-initialize")
+    );
+    Ok(())
+}

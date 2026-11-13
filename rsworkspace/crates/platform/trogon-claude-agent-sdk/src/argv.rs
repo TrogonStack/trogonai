@@ -12,6 +12,35 @@ use crate::{
     wire::runtime_payload::{EmbeddedMcpPayload, McpConfigPayload},
 };
 
+/// TypeScript's `--sdk-url` guard: an extra argument named `sdk-url`, `sdk-url=...`, or an executable argument.
+pub(crate) fn mentions_sdk_url(options: &ClaudeAgentOptions) -> bool {
+    options
+        .extra_args
+        .iter()
+        .any(|extra| extra.flag == "sdk-url" || extra.flag.starts_with("sdk-url="))
+        || options.script_runtime.arguments.iter().any(|argument| {
+            let argument = argument.to_string_lossy();
+            argument == "--sdk-url" || argument.starts_with("--sdk-url=")
+        })
+}
+
+/// TypeScript asks the CLI to await `initialize` when it resumes or continues with the SDK-resolved executable
+/// (no `pathToClaudeCodeExecutable`, no custom spawn) and no `--sdk-url`, by appending `await-initialize` to
+/// `extraArgs`. Python never sends it.
+pub(crate) fn request_await_initialize(options: &mut ClaudeAgentOptions) {
+    if options.cli_path.is_none()
+        && options.argv_style == crate::ArgvStyle::TypeScript
+        && (options.resume.is_some() || options.continue_conversation == crate::ContinueConversation::Yes)
+        && !mentions_sdk_url(options)
+        && !options.extra_args.iter().any(|extra| extra.flag == "await-initialize")
+    {
+        options.extra_args.push(ExtraArgument {
+            flag: "await-initialize".into(),
+            value: None,
+        });
+    }
+}
+
 pub(crate) fn build(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     match options.argv_style {
         ArgvStyle::TypeScript => typescript(options),

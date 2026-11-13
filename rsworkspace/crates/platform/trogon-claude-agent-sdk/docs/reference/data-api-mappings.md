@@ -71,4 +71,5 @@ integrity-verified published `0.3.319` declaration archive.
 | `stderr_handler: Option<StderrHandler>` | `stderr` callback (lines) | `stderr` callback (chunks) |
 | `extra_args: Vec<ExtraArgument>` | `extra_args` | `extraArgs` |
 | `script_runtime: ScriptRuntime` | not applicable | `executable`, `executableArgs` |
-| `run_as_uid: Option<u32>` | not applicable | `spawn` `uid` |
+| `user: Option<String>` | `user` | not applicable |
+| `run_as_uid: Option<u32>` | `user` as an int | `spawn` `uid` |
