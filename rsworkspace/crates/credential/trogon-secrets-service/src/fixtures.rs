@@ -35,3 +35,7 @@ pub(crate) fn request(tenant: &TenantAccount) -> ReleaseRequest {
         AuditCorrelationId::new(CORRELATION_ID).unwrap(),
     )
 }
+
+/// Credential events and the JetStream messages that carry them, for the tests
+/// that fold a real or mocked credential stream.
+pub(crate) mod credential_events;

@@ -7886,16 +7886,22 @@ dependencies = [
 name = "trogon-secrets-service"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
  "buffa",
  "nkeys",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tracing",
  "trogon-credential-aggregate",
  "trogon-credential-domain",
+ "trogon-decider-nats",
+ "trogon-decider-runtime",
+ "trogon-nats",
  "trogon-secret-store",
  "trogon-std",
  "trogonai-proto",
+ "uuid",
 ]
 
 [[package]]
