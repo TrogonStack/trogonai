@@ -16,3 +16,7 @@ impl UsdBudget {
         self.0
     }
 }
+
+#[cfg(test)]
+#[path = "usd_budget_tests.rs"]
+mod tests;
