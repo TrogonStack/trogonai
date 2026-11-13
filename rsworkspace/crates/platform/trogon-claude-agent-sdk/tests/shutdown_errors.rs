@@ -3,7 +3,9 @@
 use std::{error::Error as StdError, path::PathBuf, time::Duration};
 
 use tokio::time::timeout;
-use trogon_claude_agent_sdk::{ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, Error, Message, Prompt, Timeout};
+use trogon_claude_agent_sdk::{
+    ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, Error, Message, MessageDecoding, Prompt, Timeout,
+};
 
 type TestResult = Result<(), Box<dyn StdError>>;
 
@@ -22,7 +24,11 @@ fn options(mode: &str, style: ArgvStyle) -> Result<ClaudeAgentOptions, Box<dyn S
 
 /// Drives one prompt to the first error, or to the end of the stream when there is none.
 async fn terminal_error(mode: &str, style: ArgvStyle) -> Result<(Vec<Message>, Option<Error>), Box<dyn StdError>> {
-    let mut client = ClaudeSdkClient::connect(options(mode, style)?).await?;
+    terminal_error_with(options(mode, style)?).await
+}
+
+async fn terminal_error_with(options: ClaudeAgentOptions) -> Result<(Vec<Message>, Option<Error>), Box<dyn StdError>> {
+    let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("go")).await?;
     client.finish_input().await?;
     let collected = timeout(Duration::from_secs(10), async {
@@ -136,7 +142,9 @@ async fn e03_json_decode_error_carries_the_line_and_the_original_error() -> Test
 #[tokio::test]
 async fn e04_message_parse_error_carries_the_raw_data() -> TestResult {
     for style in [ArgvStyle::Python, ArgvStyle::TypeScript] {
-        let (_, error) = terminal_error("malformed", style).await?;
+        let mut python = options("malformed", style)?;
+        python.message_decoding = MessageDecoding::Python;
+        let (_, error) = terminal_error_with(python).await?;
         let Some(Error::MessageParse(parse)) = error else {
             return Err(
                 std::io::Error::other(format!("{style:?}: expected a message parse error, got {error:?}")).into(),
@@ -144,7 +152,22 @@ async fn e04_message_parse_error_carries_the_raw_data() -> TestResult {
         };
         let data = parse.data().ok_or_else(|| std::io::Error::other("missing data"))?;
         assert_eq!(data.get("type"), Some(&serde_json::json!("assistant")));
-        assert!(!parse.message().is_empty());
+        assert_eq!(parse.message(), "Missing required field in assistant message: 'model'");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn typescript_decoding_yields_a_known_message_it_cannot_type() -> TestResult {
+    for style in [ArgvStyle::Python, ArgvStyle::TypeScript] {
+        let (messages, error) = terminal_error("malformed", style).await?;
+        assert!(!matches!(error, Some(Error::MessageParse(_))), "{style:?}: {error:?}");
+        assert!(
+            messages
+                .iter()
+                .any(|message| matches!(message, Message::Unknown { kind, .. } if kind == "assistant")),
+            "{style:?}"
+        );
     }
     Ok(())
 }
@@ -306,7 +329,9 @@ async fn abort_stops_the_process_and_ends_the_run_with_an_abort_error() -> TestR
 #[tokio::test]
 async fn t14_ending_input_after_the_run_failed_is_a_no_op_for_both_styles() -> TestResult {
     for style in [ArgvStyle::Python, ArgvStyle::TypeScript] {
-        let mut client = ClaudeSdkClient::connect(options("malformed", style)?).await?;
+        let mut options = options("malformed", style)?;
+        options.message_decoding = MessageDecoding::Python;
+        let mut client = ClaudeSdkClient::connect(options).await?;
         client.send_prompt(Prompt::from("go")).await?;
         let error = timeout(Duration::from_secs(10), async {
             loop {

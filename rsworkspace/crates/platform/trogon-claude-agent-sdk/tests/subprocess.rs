@@ -5,9 +5,9 @@ use std::{error::Error as StdError, num::NonZeroUsize, sync::Arc, time::Duration
 use tokio::time::{sleep, timeout};
 use trogon_claude_agent_sdk::{
     BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, Error, FeatureSupport,
-    FileCheckpointing, InMemorySessionStore, Message, PartialMessages, PermissionDecision, Prompt, QueueCapacity,
-    SessionId, SessionStore, SessionStoreOptions, SystemPrompt, Timeout, ToolPermissionRequest, ToolRule, ToolSet,
-    adapters::SystemClock, query,
+    FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages, PermissionDecision, Prompt,
+    QueueCapacity, SessionId, SessionStore, SessionStoreOptions, SystemPrompt, Timeout, ToolPermissionRequest,
+    ToolRule, ToolSet, adapters::SystemClock, query,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -420,8 +420,10 @@ async fn cancelling_a_receive_preserves_partial_frame() -> TestResult {
 }
 
 #[tokio::test]
-async fn malformed_known_frame_is_a_terminal_protocol_error() -> TestResult {
-    let mut client = ClaudeSdkClient::connect(options("malformed")?).await?;
+async fn malformed_known_frame_is_a_terminal_protocol_error_with_python_decoding() -> TestResult {
+    let mut options = options("malformed")?;
+    options.message_decoding = MessageDecoding::Python;
+    let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("malformed")).await?;
     let error = loop {
         match client.next_message().await {

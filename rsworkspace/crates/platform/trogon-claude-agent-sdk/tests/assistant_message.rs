@@ -16,6 +16,7 @@ fn assistant_messages_keep_model_content_ids_and_both_extension_scopes() -> Resu
         stop_reason: None,
         additional_fields: outer.clone(),
         message_fields: nested.clone(),
+        raw: JsonObject::new(),
     };
     let copied = message.clone();
     assert_eq!(copied.model, "provider/model release");
