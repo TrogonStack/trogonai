@@ -134,7 +134,73 @@ attempt('neither transport', {});
 attempt('both transports', { websocket, sse });
 await wait(30);
 
+// Messages the query hands to its consumer: which envelope getCcrEvent finds for each, and how far
+// getSseLastSequenceNum has advanced, while the transport has already read every frame.
+const encoder = new TextEncoder();
+const frame = (n, payload) =>
+  `event: client_event\nid: ${n}\ndata: ${JSON.stringify({ event_id: `e${n}`, sequence_num: n, created_at: `2026-01-01T00:00:0${n % 10}Z`, source: 'worker', payload })}\n\n`;
+const result = (text, uuid) => ({
+  type: 'result',
+  subtype: 'success',
+  is_error: false,
+  duration_ms: 1,
+  duration_api_ms: 1,
+  num_turns: 1,
+  session_id: 'remote-session',
+  result: text,
+  total_cost_usd: 0,
+  ...(uuid ? { uuid } : {}),
+});
+const envelope = (event) =>
+  event ? { event_id: event.event_id, sequence_num: event.sequence_num, created_at: event.created_at ?? null, source: event.source ?? null } : null;
+
+const sseCases = [];
+const sseCase = async (name, seed, events) => {
+  const first = (seed ?? 0) + 1;
+  let controller;
+  const stream = new ReadableStream({
+    start(c) {
+      controller = c;
+    },
+  });
+  const wire = events.map((payload, index) => ({ sequence_num: first + 1 + index, payload }));
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith('/stream')) {
+      return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    }
+    const payload = JSON.parse(init.body).events[0].payload;
+    if (payload.type === 'control_request') {
+      const response = { subtype: 'success', request_id: payload.request_id, response: {} };
+      controller.enqueue(encoder.encode(frame(first, { type: 'control_response', response })));
+    }
+    return new Response('', { status: 200 });
+  };
+  const abortController = new AbortController();
+  const sseOptions = { streamUrl: 'http://127.0.0.1:1/stream', sendUrl: 'http://127.0.0.1:1/send', sessionId: 'session' };
+  if (seed !== undefined) sseOptions.fromSequenceNum = seed;
+  const q = sdk.query({ prompt: idle, abortController, sse: sseOptions });
+  const iterator = q[Symbol.asyncIterator]();
+  const steps = [];
+  const got = [];
+  const snap = (at) =>
+    steps.push({ at, last: sdk.getSseLastSequenceNum(q) ?? null, ccr: got.map((message) => envelope(sdk.getCcrEvent(q, message))) });
+  await wait(30);
+  snap('initialized');
+  for (const item of wire) controller.enqueue(encoder.encode(frame(item.sequence_num, item.payload)));
+  await wait(30);
+  snap('read ahead');
+  for (let index = 0; index < wire.length; index++) {
+    got.push((await iterator.next()).value);
+    snap(`message ${index + 1}`);
+  }
+  abortController.abort();
+  sseCases.push({ name, seed: seed ?? null, first, events: wire, steps });
+};
+await sseCase('read ahead', undefined, [result('a', 'u2'), result('b'), result('c'), result('d', 'u5')]);
+await sseCase('seeded', 10, [result('a', 'u12'), result('b')]);
+
 const lines = (items) => `[\n${items.map((item) => JSON.stringify(item)).join(',\n')}\n]`;
-const document = `{\n"queries": ${lines(recorded)},\n"errors": ${lines(errors)}\n}\n`;
+const document = `{\n"queries": ${lines(recorded)},\n"errors": ${lines(errors)},\n"sse": ${lines(sseCases)}\n}\n`;
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, document);
+process.exit(0);

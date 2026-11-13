@@ -150,18 +150,19 @@ pub fn get_sse_drop_counts(query: &Query) -> Option<IndexMap<&'static str, u64>>
     query.sse_handle().map(SseHandle::drop_counts)
 }
 
-/// TypeScript `getSseLastSequenceNum`: `None` for a WebSocket query and before any number is known.
+/// TypeScript `getSseLastSequenceNum`: the highest sequence number among the messages [`Query::next_message`] has
+/// returned, or the `from_sequence_num` seed. `None` for a WebSocket query and while that number is 0.
 #[must_use]
 pub fn get_sse_last_sequence_num(query: &Query) -> Option<u64> {
     query.sse_handle().and_then(SseHandle::last_sequence_num)
 }
 
-/// TypeScript `getCcrEvent`: the envelope of the durable frame that delivered the message the transport read last,
-/// `None` for a WebSocket query. TypeScript finds it by message object identity; a Rust message is moved to the
-/// caller, so the envelope of the latest read stands in for it.
+/// TypeScript `getCcrEvent`: the envelope of the durable frame `message` arrived in, `None` for a WebSocket query
+/// and for a message that did not come from a durable frame. TypeScript looks the message object up; a Rust message
+/// is found by its `uuid`, or by equal JSON when it has none.
 #[must_use]
-pub fn get_ccr_event(query: &Query, _message: &Message) -> Option<SseCcrEvent> {
-    query.sse_handle().and_then(SseHandle::last_ccr_event)
+pub fn get_ccr_event(query: &Query, message: &Message) -> Option<SseCcrEvent> {
+    query.sse_handle().and_then(|handle| handle.ccr_event(message.raw()))
 }
 
 /// TypeScript `suspendSseStream`: false for a WebSocket, closed or suspended query.

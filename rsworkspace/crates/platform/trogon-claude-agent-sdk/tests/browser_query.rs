@@ -21,9 +21,9 @@ use trogon_claude_agent_sdk::{
     BrowserQueryOptions, BrowserTransport, DialogKind, ElicitationHandler, ElicitationRequest, ElicitationResponse,
     Error, HookEvent, HookHandler, HookOutput, HookRegistration, HookRequest, JsonObject, LocalMcpServer,
     LocalMcpServerOptions, McpServerDialect, McpServerName, Message, OutputSchema, PermissionDecision, Prompt,
-    SdkMcpServer, SdkTools, SseOptions, Timeout, ToolPermissionHandler, ToolPermissionRequest, UserDialogHandler,
-    UserDialogRequest, UserDialogResponse, UserInput, WebSocketOptions, browser_query, get_ccr_event,
-    get_sse_drop_counts, get_sse_last_sequence_num, resume_sse_stream, suspend_sse_stream,
+    SdkMcpServer, SdkTools, SseCcrEvent, SseOptions, Timeout, ToolPermissionHandler, ToolPermissionRequest,
+    UserDialogHandler, UserDialogRequest, UserDialogResponse, UserInput, WebSocketOptions, browser_query,
+    get_ccr_event, get_sse_drop_counts, get_sse_last_sequence_num, resume_sse_stream, suspend_sse_stream,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -342,15 +342,31 @@ async fn read_request(socket: &mut TcpStream) -> Option<(String, Vec<u8>)> {
 }
 
 fn client_event(sequence_num: u64, event_id: &str, payload: &Value) -> String {
-    let data = json!({"event_id": event_id, "sequence_num": sequence_num, "source": "worker", "payload": payload});
+    let created_at = format!("2026-01-01T00:00:0{}Z", sequence_num % 10);
+    let data = json!({
+        "event_id": event_id, "sequence_num": sequence_num, "created_at": created_at, "source": "worker",
+        "payload": payload,
+    });
     format!("event: client_event\nid: {sequence_num}\ndata: {data}\n\n")
+}
+
+/// What the fake server pushes: the control response (numbered `first`) and `after_control` once the initialize
+/// request arrives, and `after_user` once a user message does.
+struct Script {
+    first: u64,
+    after_control: Vec<String>,
+    after_user: Vec<String>,
 }
 
 type Events = Arc<Mutex<Option<mpsc::UnboundedReceiver<String>>>>;
 
-/// Answers the stream request with the events pushed to `events`, and every POST with 200: a control request is
-/// answered with a control response, a user message with a malformed delivery update and a result.
-async fn sse_connection(mut socket: TcpStream, pushed: mpsc::UnboundedSender<String>, events: Events) {
+/// Answers the stream request with the frames pushed to `events`, and every POST with 200.
+async fn sse_connection(
+    mut socket: TcpStream,
+    script: Arc<Script>,
+    pushed: mpsc::UnboundedSender<String>,
+    events: Events,
+) {
     while let Some((method, body)) = read_request(&mut socket).await {
         if method == "POST" {
             let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
@@ -361,11 +377,15 @@ async fn sse_connection(mut socket: TcpStream, pushed: mpsc::UnboundedSender<Str
                         "type": "control_response",
                         "response": {"subtype": "success", "request_id": payload["request_id"], "response": {}},
                     });
-                    let _ = pushed.send(client_event(1, "e1", &answer));
+                    let _ = pushed.send(client_event(script.first, "control", &answer));
+                    for frame in &script.after_control {
+                        let _ = pushed.send(frame.clone());
+                    }
                 }
                 Some("user") => {
-                    let _ = pushed.send("event: delivery_update\ndata: {\"event_id\":5}\n\n".to_owned());
-                    let _ = pushed.send(client_event(2, "e2", &result_message()));
+                    for frame in &script.after_user {
+                        let _ = pushed.send(frame.clone());
+                    }
                 }
                 _ => {}
             }
@@ -396,32 +416,55 @@ async fn sse_connection(mut socket: TcpStream, pushed: mpsc::UnboundedSender<Str
     }
 }
 
-async fn sse_origin() -> Result<String, Box<dyn StdError>> {
+async fn sse_origin(script: Script) -> Result<String, Box<dyn StdError>> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let origin = format!("http://{}", listener.local_addr()?);
     let (pushed, receiver) = mpsc::unbounded_channel();
     let events: Events = Arc::new(Mutex::new(Some(receiver)));
+    let script = Arc::new(script);
     tokio::spawn(async move {
         while let Ok((socket, _)) = listener.accept().await {
-            tokio::spawn(sse_connection(socket, pushed.clone(), Arc::clone(&events)));
+            tokio::spawn(sse_connection(
+                socket,
+                Arc::clone(&script),
+                pushed.clone(),
+                Arc::clone(&events),
+            ));
         }
     });
     Ok(origin)
 }
 
+fn sse_options(origin: &str) -> SseOptions {
+    SseOptions::new(format!("{origin}/stream"), format!("{origin}/send"), "session")
+}
+
+fn envelope_json(event: Option<SseCcrEvent>) -> Value {
+    event.map_or(Value::Null, |event| {
+        json!({
+            "event_id": event.event_id, "sequence_num": event.sequence_num, "created_at": event.created_at,
+            "source": event.source,
+        })
+    })
+}
+
 #[tokio::test]
 async fn an_sse_query_exposes_the_transport_state_through_the_accessors() -> TestResult {
-    let origin = sse_origin().await?;
+    let origin = sse_origin(Script {
+        first: 1,
+        after_control: Vec::new(),
+        after_user: vec![
+            "event: delivery_update\ndata: {\"event_id\":5}\n\n".to_owned(),
+            client_event(2, "e2", &result_message()),
+        ],
+    })
+    .await?;
     let options = BrowserQueryOptions::new(
         stream::iter([UserInput::from(Prompt::from("hi"))]),
-        BrowserTransport::Sse(SseOptions::new(
-            format!("{origin}/stream"),
-            format!("{origin}/send"),
-            "session",
-        )),
+        BrowserTransport::Sse(sse_options(&origin)),
     );
     let mut query = timeout(WAIT, browser_query(options)).await??;
-    assert_eq!(get_sse_last_sequence_num(&query), Some(1));
+    assert_eq!(get_sse_last_sequence_num(&query), None);
     let message = timeout(WAIT, query.next_message()).await??.ok_or("a message")?;
     assert!(matches!(message, Message::Result(_)));
     let event = get_ccr_event(&query, &message).ok_or("an envelope")?;
@@ -437,5 +480,68 @@ async fn an_sse_query_exposes_the_transport_state_through_the_accessors() -> Tes
     assert!(resume_sse_stream(&query));
     assert!(!resume_sse_stream(&query));
     query.close().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn envelopes_and_the_delivered_number_follow_the_consumer_not_the_reads() -> TestResult {
+    let golden: Value = serde_json::from_str(FIXTURE)?;
+    let cases = golden["sse"].as_array().ok_or("sse")?;
+    assert_eq!(cases.len(), 2);
+    for case in cases {
+        let name = case["name"].as_str().ok_or("name")?;
+        let events = case["events"].as_array().ok_or("events")?;
+        let frames = events
+            .iter()
+            .map(|event| {
+                let sequence_num = event["sequence_num"].as_u64().ok_or("sequence_num")?;
+                Ok(client_event(
+                    sequence_num,
+                    &format!("e{sequence_num}"),
+                    &event["payload"],
+                ))
+            })
+            .collect::<Result<Vec<_>, Box<dyn StdError>>>()?;
+        let origin = sse_origin(Script {
+            first: case["first"].as_u64().ok_or("first")?,
+            after_control: frames,
+            after_user: Vec::new(),
+        })
+        .await?;
+        let mut sse = sse_options(&origin);
+        sse.from_sequence_num = case["seed"].as_u64().map(u32::try_from).transpose()?.map(f64::from);
+        let options = BrowserQueryOptions::new(stream::pending::<UserInput>(), BrowserTransport::Sse(sse));
+        let mut query = timeout(WAIT, browser_query(options)).await??;
+        let steps = case["steps"].as_array().ok_or("steps")?;
+        assert_eq!(steps.len(), events.len() + 2, "{name}");
+        assert_eq!(
+            get_sse_last_sequence_num(&query),
+            case["steps"][0]["last"].as_u64(),
+            "{name}"
+        );
+        // Every frame is read ahead by the driver before the consumer asks for a message.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            get_sse_last_sequence_num(&query),
+            case["steps"][1]["last"].as_u64(),
+            "{name} read ahead"
+        );
+        let mut got = Vec::new();
+        for step in steps.iter().skip(2) {
+            got.push(timeout(WAIT, query.next_message()).await??.ok_or("a message")?);
+            assert_eq!(
+                get_sse_last_sequence_num(&query),
+                step["last"].as_u64(),
+                "{name} {}",
+                step["at"]
+            );
+            let envelopes: Vec<Value> = got
+                .iter()
+                .map(|message| envelope_json(get_ccr_event(&query, message)))
+                .collect();
+            assert_eq!(Value::Array(envelopes), step["ccr"], "{name} {}", step["at"]);
+        }
+        query.close().await?;
+    }
     Ok(())
 }

@@ -450,7 +450,7 @@ upstream SDKs).
   silence, and POSTs writes in order with a 30000 ms timeout, honouring
   `Retry-After` and dropping a line after three failures. `SseTransport::handle`
   returns an `SseHandle` with `suspend`, `resume`, `expect_control_response`,
-  `drop_counts`, `last_sequence_num` and `last_ccr_event`. Cancelling the token
+  `drop_counts`, `last_sequence_num`, `ccr_event` and `mark_delivered`. Cancelling the token
   given to `with_abort` fails the read with `SseError::Aborted`.
 - Deferred to other tracks: flag settings and `updateSettings`.
 

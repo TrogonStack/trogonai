@@ -3544,10 +3544,14 @@
         {
           "path": "tests/browser_query.rs",
           "name": "an_sse_query_exposes_the_transport_state_through_the_accessors"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "envelopes_and_the_delivered_number_follow_the_consumer_not_the_reads"
         }
       ],
       "status": "supported",
-      "rationale": "browser_query is the browser entrypoint's query(): it connects over the WebSocket or SSE transport, sends an initialize request that carries hooks, the SDK MCP server names, jsonSchema, promptSuggestions and supportedDialogKinds and nothing else (replayed against goldens recorded by running the real browser-sdk.js in node, browser_query_goldens.mjs), streams the prompt in the background and aborts the query when a send fails. Declaring dialog kinds without a handler fails before any connection with the upstream text. The accessors take the Query and return None or false for a WebSocket query. The types the entrypoint re-exports (Query, messages, hooks, MCP servers, elicitation and dialog types, createSdkMcpServer, tool) are the crate's existing equivalents. Differences: the websocket and sse options are the BrowserTransport enum, so neither and both cannot be written; mcpServers that upstream rejects at run time (not an in-process server) cannot be expressed because sdk_mcp_servers only holds in-process servers; and get_ccr_event returns the envelope of the frame the transport read last instead of matching the message by object identity, because messages are moved to the caller."
+      "rationale": "browser_query is the browser entrypoint's query(): it connects over the WebSocket or SSE transport, sends an initialize request that carries hooks, the SDK MCP server names, jsonSchema, promptSuggestions and supportedDialogKinds and nothing else (replayed against goldens recorded by running the real browser-sdk.js in node, browser_query_goldens.mjs), streams the prompt in the background and aborts the query when a send fails. Declaring dialog kinds without a handler fails before any connection with the upstream text. The accessors take the Query and return None or false for a WebSocket query. The types the entrypoint re-exports (Query, messages, hooks, MCP servers, elicitation and dialog types, createSdkMcpServer, tool) are the crate's existing equivalents. Differences: the websocket and sse options are the BrowserTransport enum, so neither and both cannot be written; mcpServers that upstream rejects at run time (not an in-process server) cannot be expressed because sdk_mcp_servers only holds in-process servers; and get_ccr_event finds a message's envelope by its uuid, or by equal JSON when it has none, instead of by object identity, because messages are moved to the caller; the map is never trimmed, like the upstream WeakMap, and getSseLastSequenceNum advances when Query::next_message returns the message, as markDelivered does when the consumer receives it (both replayed against recorded goldens with several frames read ahead)."
     },
     {
       "id": "bridge-entrypoint",
