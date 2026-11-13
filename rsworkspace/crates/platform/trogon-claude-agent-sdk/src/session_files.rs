@@ -4,8 +4,11 @@
 //! `get_subagent_messages`. Metadata comes from `stat` plus a 64 KiB head and tail read of each file, never from a
 //! full parse, exactly as upstream does.
 
+use crate::adapters::{EnvironmentVariable, SystemEnvironment};
+use crate::constants::{LITE_READ_BUF_SIZE, MAX_SANITIZED_LENGTH};
 use std::{
     collections::{HashMap, HashSet},
+    ffi::OsStr,
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -25,10 +28,6 @@ use crate::{
         parent_ids_from_agent_metadata, parse_transcript_entries,
     },
 };
-
-/// Size of the head and tail buffers of a lite metadata read.
-pub const LITE_READ_BUF_SIZE: u64 = 65_536;
-const MAX_SANITIZED_LENGTH: usize = 200;
 
 /// Arguments of [`SessionFiles::list_sessions`] (`ListSessionsOptions` upstream).
 #[derive(Clone, Debug)]
@@ -70,11 +69,18 @@ impl SessionFiles {
     /// Resolves the directory like the CLI: `CLAUDE_CONFIG_DIR`, else `~/.claude`, NFC normalized. `None` when
     /// neither the variable nor a home directory is set.
     pub fn from_environment() -> Option<Self> {
-        let configured = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|value| !value.is_empty());
+        Self::from_environment_with(&SystemEnvironment)
+    }
+
+    /// [`SessionFiles::from_environment`] over an explicit environment source.
+    pub fn from_environment_with<E: EnvironmentVariable>(environment: &E) -> Option<Self> {
+        let configured = environment
+            .var_os(OsStr::new("CLAUDE_CONFIG_DIR"))
+            .filter(|value| !value.is_empty());
         let config = match configured {
             Some(value) => PathBuf::from(value),
             None => {
-                let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
+                let home = environment.var_os(OsStr::new(if cfg!(windows) { "USERPROFILE" } else { "HOME" }))?;
                 PathBuf::from(home).join(".claude")
             }
         };
@@ -92,11 +98,8 @@ impl SessionFiles {
         &self.projects_dir
     }
 
-    /// Lists sessions newest first, with ties broken by session id so pages are stable.
-    pub fn list_sessions(&self, options: &ListSessionsOptions) -> Vec<SdkSessionInfo> {
-        if options.dialect == SummaryDialect::TypeScript {
-            return self.list_sessions_ts(options);
-        }
+    /// Lists sessions under the Python summary rules, newest first, with ties broken by session id.
+    pub(crate) fn list_sessions_python(&self, options: &ListSessionsOptions) -> Vec<SdkSessionInfo> {
         let sessions = match options
             .directory
             .as_deref()
@@ -108,21 +111,8 @@ impl SessionFiles {
         sort_page(sessions, options.limit, options.offset)
     }
 
-    /// Reads one session's metadata, or `None` when it is missing, a sidechain, or has nothing to summarize.
-    pub fn get_session_info(&self, session_id: &str, directory: Option<&Path>) -> Option<SdkSessionInfo> {
-        self.get_session_info_with(session_id, directory, SummaryDialect::TypeScript)
-    }
-
-    /// [`SessionFiles::get_session_info`] under the selected upstream SDK's rules.
-    pub fn get_session_info_with(
-        &self,
-        session_id: &str,
-        directory: Option<&Path>,
-        dialect: SummaryDialect,
-    ) -> Option<SdkSessionInfo> {
-        if dialect == SummaryDialect::TypeScript {
-            return self.get_session_info_ts(session_id, directory);
-        }
+    /// Reads one session's metadata under the Python summary rules.
+    pub(crate) fn get_session_info_python(&self, session_id: &str, directory: Option<&Path>) -> Option<SdkSessionInfo> {
         let session_id = valid_uuid(session_id)?;
         let file_name = format!("{session_id}.jsonl");
         if let Some(directory) = directory.filter(|directory| !directory.as_os_str().is_empty()) {
@@ -700,18 +690,6 @@ fn collect_agent_files(base: &Path) -> Vec<(String, PathBuf)> {
     let mut files = Vec::new();
     walk(base, &mut files);
     files
-}
-
-/// [`SessionFiles::list_sessions`] over the environment's config directory; empty when none can be resolved.
-pub fn list_sessions(options: &ListSessionsOptions) -> Vec<SdkSessionInfo> {
-    SessionFiles::from_environment()
-        .map(|files| files.list_sessions(options))
-        .unwrap_or_default()
-}
-
-/// [`SessionFiles::get_session_info`] over the environment's config directory.
-pub fn get_session_info(session_id: &str, directory: Option<&Path>) -> Option<SdkSessionInfo> {
-    SessionFiles::from_environment()?.get_session_info(session_id, directory)
 }
 
 /// [`SessionFiles::get_session_messages`] over the environment's config directory.

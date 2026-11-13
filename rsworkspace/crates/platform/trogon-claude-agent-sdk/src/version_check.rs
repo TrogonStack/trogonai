@@ -1,6 +1,6 @@
 //! The first-init-message version warning of Python `_check_claude_version` (0.2.181).
 
-pub const MINIMUM_CLAUDE_CODE_VERSION: &str = "2.0.0";
+use crate::constants::MINIMUM_CLAUDE_CODE_VERSION;
 
 /// Python's `re.match(r"(\d{1,9})\.(\d{1,9})\.(\d{1,9})", version)`: a prefix match.
 pub fn parse_version(version: &str) -> Option<[u32; 3]> {

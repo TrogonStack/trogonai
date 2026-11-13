@@ -2,23 +2,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Distinguishes an omitted field (`None`) from an explicit `null` (`Some(None)`).
-pub(super) mod double_option {
-    use super::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<T: Serialize, S: Serializer>(value: &Option<Option<T>>, serializer: S) -> Result<S::Ok, S::Error> {
-        match value {
-            Some(inner) => inner.serialize(serializer),
-            None => serializer.serialize_none(),
-        }
-    }
-
-    pub fn deserialize<'de, T: Deserialize<'de>, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<Option<T>>, D::Error> {
-        Option::<T>::deserialize(deserializer).map(Some)
-    }
-}
+pub(super) mod double_option;
 
 /// Keeps an explicit `null` in an optional `unknown` field as `Some(Value::Null)`.
 pub(super) fn optional_value<'de, D: Deserializer<'de>>(
@@ -97,36 +81,4 @@ pub(super) fn keep_best<T>(best: &mut Option<(usize, T)>, candidate: Option<(usi
 }
 
 #[cfg(test)]
-mod tests {
-    use serde::{Deserialize, Serialize};
-    use serde_json::{Value, json};
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    struct Probe {
-        #[serde(default, skip_serializing_if = "Option::is_none", with = "super::double_option")]
-        tri: Option<Option<String>>,
-        #[serde(
-            default,
-            skip_serializing_if = "Option::is_none",
-            deserialize_with = "super::optional_value"
-        )]
-        free: Option<Value>,
-    }
-
-    #[test]
-    fn omitted_null_and_present_stay_distinct() -> Result<(), serde_json::Error> {
-        for fixture in [
-            json!({}),
-            json!({"tri": null, "free": null}),
-            json!({"tri": "x", "free": {"a": 1}}),
-        ] {
-            let probe: Probe = serde_json::from_value(fixture.clone())?;
-            assert_eq!(serde_json::to_value(&probe)?, fixture);
-        }
-        let null: Probe = serde_json::from_value(json!({"tri": null}))?;
-        assert_eq!(null.tri, Some(None));
-        let omitted: Probe = serde_json::from_value(json!({}))?;
-        assert_eq!(omitted.tri, None);
-        Ok(())
-    }
-}
+mod tests;
