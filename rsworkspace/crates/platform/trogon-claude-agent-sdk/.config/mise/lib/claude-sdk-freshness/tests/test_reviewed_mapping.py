@@ -55,7 +55,9 @@ class ReviewedMappingTests(unittest.TestCase):
             {item["id"] for item in report["declared_known_gaps"]},
             {feature["id"] for feature in features if feature["status"] in {"partial", "deferred"}},
         )
-        self.assertIn("isolation-defaults", {item["id"] for item in report["intentional_differences"]})
+        isolation = next(feature for feature in features if feature["id"] == "isolation-defaults")
+        self.assertEqual(isolation["status"], "supported")
+        self.assertNotIn("isolation-defaults", {item["id"] for item in report["intentional_differences"]})
         self.assertTrue(report["unreviewed_rust_mappings"]["python"]["observed"])
         self.assertTrue(report["unreviewed_rust_mappings"]["typescript"]["observed"])
 
