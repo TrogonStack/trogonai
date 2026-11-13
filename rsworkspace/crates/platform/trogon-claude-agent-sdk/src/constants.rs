@@ -43,6 +43,13 @@ pub const DEFAULT_ENTRYPOINT: &str = "sdk-trogon-rs";
 
 pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Identity the derived client app label carries, standing in for the Python distribution metadata.
+pub(crate) const SDK_PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
+
+pub(crate) const CLIENT_APP_ENV: &str = "CLAUDE_AGENT_SDK_CLIENT_APP";
+
+pub(crate) const DERIVED_CLIENT_APP_ENV: &str = "CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP";
+
 /// Inherited variables the plan consults. Captured through the environment adapter before spawning.
 pub(crate) const INHERITED_KEYS: &[&str] = &[
     "CLAUDE_CODE_ENTRYPOINT",
@@ -369,3 +376,9 @@ pub(crate) const SETTINGS_SCHEMA_REMOTE_SCHEMES: [&str; 11] = [
     "gitlab:",
     "bitbucket:",
 ];
+
+/// First size of the `getpwnam_r` scratch buffer, doubled on `ERANGE`.
+pub(crate) const PASSWD_INITIAL_BUFFER: usize = 1024;
+
+/// Largest `getpwnam_r` scratch buffer tried before giving up.
+pub(crate) const PASSWD_MAX_BUFFER: usize = 1 << 20;

@@ -1,19 +1,35 @@
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 
-use crate::{Error, StderrTail};
+use crate::{Error, StderrTail, error::JsonDecodeError};
 
 pub(crate) struct FrameReader<R> {
     reader: BufReader<R>,
     buffer: Vec<u8>,
-    limit: usize,
+    /// Characters held in `buffer`, which is what Python's `len(str)` guard counts.
+    chars: usize,
+    limit: Option<usize>,
     tail: bool,
 }
 
+/// Python counts the decoded characters of a line: every byte that is not a UTF-8 continuation byte.
+fn chars_in(bytes: &[u8]) -> usize {
+    bytes.iter().filter(|byte| (**byte & 0xC0) != 0x80).count()
+}
+
+fn guard(limit: Option<usize>, length: usize) -> Result<(), Error> {
+    match limit {
+        Some(limit) if length > limit => Err(Error::JsonDecode(JsonDecodeError::buffer_exceeded(limit, length))),
+        _ => Ok(()),
+    }
+}
+
 impl<R: AsyncRead + Unpin> FrameReader<R> {
-    pub(crate) fn new(reader: R, limit: usize) -> Self {
+    /// `limit` is Python's `max_buffer_size`; TypeScript has no such bound, so `None` keeps every line.
+    pub(crate) fn new(reader: R, limit: Option<usize>) -> Self {
         Self {
             reader: BufReader::new(reader),
             buffer: Vec::new(),
+            chars: 0,
             limit,
             tail: false,
         }
@@ -30,6 +46,7 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
             let available = self.reader.fill_buf().await.map_err(Error::Io)?;
             if available.is_empty() {
                 self.tail = !self.buffer.is_empty();
+                self.chars = 0;
                 return Ok(if self.buffer.is_empty() {
                     None
                 } else {
@@ -38,13 +55,17 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
             }
             let newline = available.iter().position(|byte| *byte == b'\n');
             let count = newline.map_or(available.len(), |index| index + 1);
-            if self.buffer.len().saturating_add(count) > self.limit {
-                return Err(Error::FrameTooLarge { limit: self.limit });
-            }
+            // A finished line is measured without its newline; an unfinished one by everything received.
+            let length = self
+                .chars
+                .saturating_add(chars_in(&available[..newline.unwrap_or(count)]));
+            guard(self.limit, length)?;
             self.buffer.extend_from_slice(&available[..count]);
+            self.chars = length;
             self.reader.consume(count);
             if newline.is_some() {
                 self.buffer.pop();
+                self.chars = 0;
                 if self.buffer.last() == Some(&b'\r') {
                     self.buffer.pop();
                 }
@@ -121,3 +142,6 @@ pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

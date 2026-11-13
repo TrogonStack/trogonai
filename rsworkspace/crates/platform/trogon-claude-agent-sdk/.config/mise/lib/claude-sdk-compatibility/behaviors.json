@@ -2346,8 +2346,7 @@
         "behavior": "The recorded version must start with major.minor.patch (up to nine digits each) and that triple, compared as a list, must not be below 999.0.0 (DERIVED_CLIENT_APP_MINIMUM_CLAUDE_CODE_VERSION). Nothing qualifies until upstream lowers the minimum."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Only ASCII digits count, where Python's \\d accepts other Unicode decimal digits. The minimum is a crate constant, exposed through meets_derived_client_app_minimum, and connect does not call it."
+        "kind": "upstream"
       },
       "contracts": [
         "bundled_cli::derived_client_app_minimum_compares_the_leading_triple_as_a_list"
@@ -2375,7 +2374,7 @@
       },
       "decision": {
         "kind": "rust-adaptation",
-        "reason": "bundled_cli_derives_client_app answers the trigger for a caller-supplied package root and pin, because a Rust crate has no package directory or __cli_version__. The label itself is not derived here and connect does not call it, so TypeScript's behavior stays the default."
+        "reason": "bundled_cli_derives_client_app answers the trigger for a caller-supplied package root and pin, because a Rust crate has no package directory or __cli_version__. connect asks it only when ClaudeAgentOptions::client_app_derivation names a BundledCli, so TypeScript's behavior stays the default, and the label names this crate because Rust has no Python distribution metadata."
       },
       "contracts": [
         "bundled_cli::the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",

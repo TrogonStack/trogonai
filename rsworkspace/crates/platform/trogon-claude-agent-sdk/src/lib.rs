@@ -16,6 +16,7 @@ mod cli_discovery;
 mod cli_path;
 mod client;
 mod client_app;
+mod client_app_derivation;
 mod config_value;
 mod constants;
 mod control;
@@ -43,10 +44,12 @@ mod output_schema;
 mod permission;
 mod permission_mode;
 mod permission_update;
+mod plugin;
 mod process_options;
 mod process_transport;
 mod prompt;
 mod queue_capacity;
+#[cfg(unix)]
 mod run_as;
 mod sdk_mcp_server;
 mod sdk_tool;
@@ -115,6 +118,7 @@ pub use client::{
     query_with_adapters, query_with_transport,
 };
 pub use client_app::{format_client_app, normalize_client_app};
+pub use client_app_derivation::{BundledCli, ClientAppDerivation};
 pub use config_value::ConfigValue;
 pub use constants::{DEFAULT_ENTRYPOINT, MINIMUM_CLAUDE_CODE_VERSION, SDK_VERSION};
 pub use control::{
@@ -131,8 +135,8 @@ pub use effort_level::EffortLevel;
 pub use environment::Environment;
 pub use environment_plan::EnvironmentPlan;
 pub use error::{
-    AbortError, ControlOperation, ControlRejectionError, Error, JsonDecodeError, MessageParseError, ProtocolError,
-    ResultError,
+    AbortError, ControlOperation, ControlRejectionError, Error, JsonDecodeError, JsonDecodeSourceError,
+    MessageParseError, ProtocolError, ResultError,
 };
 pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
@@ -163,6 +167,7 @@ pub use permission_mode::PermissionMode;
 pub use permission_update::{
     PermissionBehavior, PermissionRuleValue, PermissionUpdate, PermissionUpdateDestination, PermissionUpdateError,
 };
+pub use plugin::{LocalPlugin, PluginDelivery};
 pub use process_options::{
     ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, ScriptRuntime, StderrDelivery, StderrHandler,
     TraceContext,

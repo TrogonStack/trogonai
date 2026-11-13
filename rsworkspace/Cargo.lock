@@ -7348,6 +7348,7 @@ dependencies = [
  "icu_collator",
  "indexmap 2.14.0",
  "jsonschema",
+ "libc",
  "regex",
  "serde",
  "serde_json",

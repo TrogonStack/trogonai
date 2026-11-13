@@ -189,6 +189,18 @@ fn typescript(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     for directory in &options.additional_directories {
         equals(&mut a, "--add-dir", directory);
     }
+    if crate::driver::plugins_via_initialize(options) {
+        a.push("--await-initialize".into());
+    } else {
+        for plugin in &options.plugins {
+            let flag = if plugin.skip_mcp_discovery == Some(true) {
+                "--plugin-dir-no-mcp"
+            } else {
+                "--plugin-dir"
+            };
+            equals(&mut a, flag, &plugin.path);
+        }
+    }
     if options.fork_session == crate::SessionFork::Fork {
         a.push("--fork-session".into());
     }
@@ -285,6 +297,10 @@ fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     }
     if let Some(sources) = &options.setting_sources {
         equals(&mut a, "--setting-sources", joined(sources.iter().map(|s| s.as_str())));
+    }
+    for plugin in &options.plugins {
+        a.push("--plugin-dir".into());
+        a.push(plugin.path.clone().into_os_string());
     }
     if options.session_persistence == SessionPersistence::Disabled {
         a.push("--no-session-persistence".into());

@@ -123,7 +123,9 @@ async fn e03_json_decode_error_carries_the_line_and_the_original_error() -> Test
         return Err(std::io::Error::other("expected a JSON decode error").into());
     };
     assert_eq!(decode.line(), "{\"type\": oops");
-    assert!(decode.original_error().is_syntax());
+    assert!(
+        matches!(decode.original_error(), trogon_claude_agent_sdk::JsonDecodeSourceError::Json(error) if error.is_syntax())
+    );
     assert_eq!(
         Error::from(decode).to_string(),
         "Failed to decode JSON: {\"type\": oops..."

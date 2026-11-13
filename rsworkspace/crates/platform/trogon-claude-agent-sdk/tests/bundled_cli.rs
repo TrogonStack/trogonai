@@ -200,6 +200,9 @@ fn derived_client_app_minimum_compares_the_leading_triple_as_a_list() {
         "999.0.0-beta",
         "999.0.0 trailing",
         "999.0.1234567890",
+        "\u{669}\u{669}\u{669}.0.0",
+        "\u{1d7ff}\u{1d7ff}\u{1d7ff}.\u{660}.\u{660}",
+        "999.\u{ff10}.\u{ff10}",
     ] {
         assert!(meets_derived_client_app_minimum(version), "{version}");
     }
@@ -217,6 +220,8 @@ fn derived_client_app_minimum_compares_the_leading_triple_as_a_list() {
         "1234567890.0.0",
         "999.1234567890.0",
         "999,0,0",
+        "\u{666}\u{666}\u{666}.0.0",
+        "\u{b2}99.0.0",
     ] {
         assert!(!meets_derived_client_app_minimum(version), "{version}");
     }

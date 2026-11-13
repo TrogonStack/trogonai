@@ -47,7 +47,10 @@ pub struct ClientHandle {
     closed: Closed,
 }
 
-fn capture_inherited<E: crate::adapters::EnvironmentVariable>(environment: &E) -> crate::environment_plan::Inherited {
+fn capture_inherited<E: crate::adapters::EnvironmentVariable>(
+    environment: &E,
+    options: &ClaudeAgentOptions,
+) -> crate::environment_plan::Inherited {
     let mut inherited: crate::environment_plan::Inherited = crate::constants::INHERITED_KEYS
         .iter()
         .filter_map(|key| {
@@ -55,6 +58,13 @@ fn capture_inherited<E: crate::adapters::EnvironmentVariable>(environment: &E) -
             environment.var_os(&key).map(|value| (key, value))
         })
         .collect();
+    // Only a derivation that checks for an explicit label looks at the inherited one.
+    if options.client_app_derivation != crate::ClientAppDerivation::Disabled {
+        let key = std::ffi::OsString::from(crate::constants::CLIENT_APP_ENV);
+        if let Some(value) = environment.var_os(&key) {
+            inherited.insert(key, value);
+        }
+    }
     // Upstream matches the session-state variable case-insensitively across the whole inherited environment.
     inherited.extend(environment.vars_os().into_iter().filter(|(key, _)| {
         key.to_string_lossy()
@@ -70,7 +80,7 @@ impl ClaudeSdkClient {
     pub async fn connect(mut options: ClaudeAgentOptions) -> Result<Self, Error> {
         let adapters: crate::adapters::RuntimeAdapters = crate::adapters::RuntimeAdapters::default();
         let discovered = if options.cli_path.is_none() {
-            let inherited = capture_inherited(&adapters.environment);
+            let inherited = capture_inherited(&adapters.environment, &options);
             crate::argv::request_await_initialize(&mut options);
             Some(crate::cli_discovery::discover(
                 &inherited,
@@ -111,7 +121,7 @@ impl ClaudeSdkClient {
         P: crate::adapters::SpawnProcess<Error = std::io::Error>,
         F: crate::adapters::SessionFileSystem,
     {
-        let inherited = capture_inherited(&adapters.environment);
+        let inherited = capture_inherited(&adapters.environment, &options);
         let cli_path = options
             .cli_path
             .clone()

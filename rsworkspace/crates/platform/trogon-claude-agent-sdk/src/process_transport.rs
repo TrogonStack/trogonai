@@ -20,9 +20,10 @@ use crate::{
     ArgvStyle, ClaudeAgentOptions, Error, JsonObject, StderrTail, Transport,
     adapters::SpawnProcess,
     argv,
-    constants::SCRIPT_EXTENSIONS,
+    constants::{CLIENT_APP_ENV, DERIVED_CLIENT_APP_ENV, SCRIPT_EXTENSIONS},
     environment_plan::{self, Inherited},
     framing::{FrameReader, drain_stderr_with},
+    process_options::EnvironmentMode,
 };
 
 fn is_script(path: &Path) -> bool {
@@ -56,7 +57,17 @@ pub(crate) fn command(
     if let Some(cwd) = &options.cwd {
         command.current_dir(cwd);
     }
-    let plan = environment_plan::plan(options, inherited);
+    let mut plan = environment_plan::plan(options, inherited);
+    let explicit_label = options.client_app.is_some()
+        || inherited.contains_key(OsStr::new(CLIENT_APP_ENV))
+        || options.env.iter().any(|(key, _)| key == CLIENT_APP_ENV);
+    let derived = (options.environment_mode == EnvironmentMode::Overlay && !explicit_label)
+        .then(|| crate::client_app_derivation::derive(&options.client_app_derivation, cli_path))
+        .flatten();
+    if let Some(label) = derived {
+        plan.remove.remove(OsStr::new(DERIVED_CLIENT_APP_ENV));
+        plan.set.insert(DERIVED_CLIENT_APP_ENV.into(), label.into());
+    }
     if plan.clear {
         command.env_clear();
     }
@@ -129,6 +140,9 @@ pub(crate) struct ProcessTransport {
     closed: Closed,
     /// The process was stopped by the SDK (a kill request or an escalation), so its exit status is not an error.
     forced: bool,
+    /// TypeScript's `endInput` ends the stream but keeps the transport ready, so a later write is dropped without
+    /// an error (`[ProcessTransport] Dropping write to ended stdin stream`).
+    input_ended: bool,
 }
 
 impl ProcessTransport {
@@ -169,12 +183,16 @@ impl ProcessTransport {
         Ok(Self {
             child,
             stdin: Some(stdin),
-            frames: FrameReader::new(stdout, options.limits.max_frame_bytes.get()),
+            frames: FrameReader::new(
+                stdout,
+                (options.argv_style == ArgvStyle::Python).then(|| options.limits.max_frame_bytes.get()),
+            ),
             stderr,
             argv_style: options.argv_style,
             shutdown_timeout: options.limits.shutdown_timeout.as_duration(),
             closed,
             forced: false,
+            input_ended: false,
         })
     }
 
@@ -188,7 +206,7 @@ impl ProcessTransport {
     /// while the process is still running with an exit error recorded, a state neither SDK can enter (Python sets
     /// `_exit_error` after `returncode`, TypeScript clears `ready` with the error).
     fn write_unavailable(&mut self) -> Option<Error> {
-        if self.stdin.is_none() {
+        if self.stdin.is_none() && !self.input_ended {
             return Some(Error::NotReadyForWriting);
         }
         if let Ok(Some(status)) = self.child.try_wait() {
@@ -261,6 +279,10 @@ impl Transport for ProcessTransport {
         if let Some(error) = self.write_unavailable() {
             return Err(error);
         }
+        if self.input_ended {
+            tracing::debug!("dropping a write to an ended stdin stream");
+            return Ok(());
+        }
         let stdin = self.stdin.as_mut().ok_or(Error::NotReadyForWriting)?;
         stdin.write_all(data.as_bytes()).await.map_err(Error::WriteFailed)
     }
@@ -296,6 +318,7 @@ impl Transport for ProcessTransport {
     /// SDK did not cause is `Error::Process`.
     async fn close(&mut self) -> Result<(), Error> {
         self.stdin.take();
+        self.input_ended = false;
         let reaped = self.reap().await;
         self.stderr.abort();
         let (status, stderr) = reaped?;
@@ -311,11 +334,13 @@ impl Transport for ProcessTransport {
     }
 
     fn is_ready(&self) -> bool {
-        self.stdin.is_some()
+        self.stdin.is_some() || self.input_ended
     }
 
     async fn end_input(&mut self) -> Result<(), Error> {
-        self.stdin.take();
+        if self.stdin.take().is_some() && self.argv_style != ArgvStyle::Python {
+            self.input_ended = true;
+        }
         Ok(())
     }
 
