@@ -386,7 +386,8 @@ parent process). The result carries per-key provenance and `machinePolicy.didNot
 `resolve_settings_with` runs it against any `SettingsHost`, so tests inject files, variables and
 command output. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
 `claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
-byte for byte. Gaps: schema value normalization, `managedSourcesBehavior: "merge"`, cloud and
+byte for byte. Integers above 2^53 read like `JSON.parse` by default; `resolve_settings_in_dialect`
+and `resolve_settings_in_dialect_with` take `SettingsDialect::Python` to keep them exact. Gaps: schema value normalization, `managedSourcesBehavior: "merge"`, cloud and
 org mode, and the git-ignored cwd check.
 
 ## External session stores
