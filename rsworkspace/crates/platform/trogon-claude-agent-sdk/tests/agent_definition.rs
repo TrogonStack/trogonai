@@ -6,8 +6,6 @@
     )
 )]
 
-use std::num::NonZeroUsize;
-
 use serde_json::json;
 use trogon_claude_agent_sdk::{AgentDefinition, AgentExecution, Prompt, SettingSource, ToolName};
 
@@ -37,7 +35,7 @@ fn every_optional_field_reaches_the_wire_form() -> TestResult {
         agent.skills = Some(vec!["skill".into()]);
         agent.memory = Some(memory);
         agent.initial_prompt = Some(Prompt::from("start".to_owned()));
-        agent.max_turns = NonZeroUsize::new(2);
+        agent.max_turns = Some(2.into());
         agent.execution = Some(AgentExecution::Background);
         assert_eq!(
             agent.to_wire_json()?,
