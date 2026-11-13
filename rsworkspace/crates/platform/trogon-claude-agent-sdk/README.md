@@ -211,7 +211,9 @@ id.
 
 `set_mcp_servers` is not serialized, as in TypeScript. It swaps in-process
 servers before the request is sent and keeps the session of a server that stays
-registered. Remove a server and re-add it to replace its registry instance.
+registered. Remove a server and re-add it to replace its registry instance. Its
+reply is a `ControlReply<McpSetServersResult>` kept as the CLI sent it, like
+the other controls.
 
 ## Configuration and limits
 

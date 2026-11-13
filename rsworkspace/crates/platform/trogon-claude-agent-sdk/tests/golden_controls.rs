@@ -19,8 +19,9 @@ use std::{
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
     ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, ContextUsageDetail, ControlOperation, Error, InterruptReceipt,
-    JsonObject, LocalPlugin, MaxThinkingTokensDisplay, McpPermissionModeOverride, McpServerName, MessageId,
-    ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RewindMode, SettingsUpdateSource, TaskId, ToolUseId,
+    JsonObject, LocalPlugin, MaxThinkingTokensDisplay, McpPermissionModeOverride, McpServerName, McpServers, MessageId,
+    ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RewindMode, SdkMcpServers, SettingsUpdateSource, TaskId,
+    ToolUseId,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -411,6 +412,65 @@ async fn an_absent_response_stays_undefined_and_a_null_one_stays_null_like_types
     assert_eq!(handle.context_usage(None).await?.as_json(), None);
     client.disconnect().await?;
     server.await??;
+    Ok(())
+}
+
+/// `setMcpServers` returns the reply's `response` field as sent, and `claude_agent_sdk` control requests read
+/// anything but an object as `{}`. Recorded from both SDKs answering five `mcp_set_servers` requests with no
+/// `response`, `null`, a full result, a string and a malformed result.
+#[tokio::test]
+async fn mcp_replacement_replies_are_kept_like_each_sdk() -> TestResult {
+    let result = json!({"added":["a"],"removed":[],"errors":{},"extra":1});
+    let malformed = json!({"added":"x"});
+    let replies = || {
+        vec![
+            Reply::Omitted,
+            Reply::Success(Value::Null),
+            Reply::Success(result.clone()),
+            Reply::Success(json!("text")),
+            Reply::Success(malformed.clone()),
+        ]
+    };
+    for (style, expected) in [
+        (
+            ArgvStyle::TypeScript,
+            [
+                None,
+                Some(Value::Null),
+                Some(result.clone()),
+                Some(json!("text")),
+                Some(malformed.clone()),
+            ],
+        ),
+        (
+            ArgvStyle::Python,
+            [
+                Some(json!({})),
+                Some(json!({})),
+                Some(result.clone()),
+                Some(json!({})),
+                Some(malformed.clone()),
+            ],
+        ),
+    ] {
+        let (client, server) = connect(style, script([("mcp_set_servers", replies())])).await?;
+        let handle = client.handle();
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            seen.push(handle.set_mcp_servers(McpServers::new(), SdkMcpServers::new()).await?);
+        }
+        let decoded = seen[2].decode()?;
+        assert_eq!(decoded.added, ["a"]);
+        assert_eq!(decoded.additional_fields.get("extra"), Some(&json!(1)));
+        assert!(seen[4].decode().is_err());
+        let seen: Vec<Option<Value>> = seen
+            .into_iter()
+            .map(trogon_claude_agent_sdk::ControlReply::into_json)
+            .collect();
+        assert_eq!(seen, expected);
+        client.disconnect().await?;
+        server.await??;
+    }
     Ok(())
 }
 

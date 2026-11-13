@@ -580,11 +580,14 @@ impl ClientHandle {
         self.initialization_field("account")
     }
 
+    /// TypeScript `setMcpServers`: the reply's `response` field is returned as sent, `None` when the reply has
+    /// none, where TypeScript returns `undefined`. Under `ArgvStyle::Python` anything but an object reads as `{}`,
+    /// as `claude_agent_sdk` control requests do.
     pub async fn set_mcp_servers(
         &self,
         external: crate::McpServers,
         embedded: crate::SdkMcpServers,
-    ) -> Result<crate::McpSetServersResult, Error> {
+    ) -> Result<ControlReply<crate::McpSetServersResult>, Error> {
         let (response, receiver) = oneshot::channel();
         self.enqueue(Command::SetMcpServers {
             external,
@@ -593,9 +596,7 @@ impl ClientHandle {
         })
         .await?;
         let response = receiver.await.map_err(|_| Error::DriverStopped)??;
-        serde_json::from_value(response.unwrap_or_default())
-            .map_err(ProtocolError::from)
-            .map_err(Error::from)
+        Ok(ControlReply::new(response))
     }
     pub async fn stream_input<S>(&self, mut stream: S) -> Result<(), Error>
     where

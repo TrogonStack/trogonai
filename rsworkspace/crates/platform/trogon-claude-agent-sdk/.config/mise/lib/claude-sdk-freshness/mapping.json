@@ -783,10 +783,14 @@
         {
           "path": "tests/runtime_sessions.rs",
           "name": "rejected_mcp_replacement_still_disconnects_removed_in_process_servers"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "mcp_replacement_replies_are_kept_like_each_sdk"
         }
       ],
       "status": "supported",
-      "rationale": "Dynamic updates preserve existing same-name embedded sessions; remove and re-add to replace a registry."
+      "rationale": "Dynamic updates preserve existing same-name embedded sessions; remove and re-add to replace a registry. The reply is kept as the CLI sent it, None where TypeScript returns undefined, and {} for anything but an object under ArgvStyle::Python."
     },
     {
       "id": "initialization",
