@@ -39,6 +39,7 @@ mod hooks;
 mod js_json;
 mod js_object_order;
 mod js_runtime;
+mod js_text;
 mod json_scan;
 mod managed_settings_delivery;
 mod mcp_config;
@@ -148,6 +149,9 @@ mod settings_schema_ports;
 mod settings_schema_regexp;
 mod shadow_warning;
 mod skills;
+mod sse_frame;
+mod sse_parser;
+mod sse_utf8_decoder;
 mod stderr_tail;
 mod summary_dialect;
 mod system_prompt;
@@ -319,6 +323,8 @@ pub use settings_resolve_state::ResolverState;
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };
+pub use sse_frame::SseFrame;
+pub use sse_parser::SseParser;
 pub use stderr_tail::StderrTail;
 pub use summary_dialect::SummaryDialect;
 pub use system_prompt::{CustomPrompt, PresetPrompt};
