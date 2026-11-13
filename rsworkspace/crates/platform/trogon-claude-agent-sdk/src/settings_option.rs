@@ -227,6 +227,13 @@ pub(crate) fn typescript_extra_entries(options: &ClaudeAgentOptions) -> Result<V
         .iter()
         .map(|extra| (extra.flag.clone(), extra.value.as_deref().map(OsString::from)))
         .collect();
+    // `extraArgs` is `{...extraArgs, workload}`: it exists before the settings merge, so settings see it last.
+    if let Some(workload) = options.workload.as_deref().filter(|workload| !workload.is_empty()) {
+        match entries.iter_mut().find(|(flag, _)| flag == "workload") {
+            Some(entry) => entry.1 = Some(OsString::from(workload)),
+            None => entries.push(("workload".into(), Some(OsString::from(workload)))),
+        }
+    }
     let set = |entries: &mut Vec<ExtraEntry>, value: OsString| match entries
         .iter_mut()
         .find(|(flag, _)| flag == "settings")

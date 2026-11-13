@@ -53,6 +53,14 @@ workspace_crate(
         "builtin_tool_name_storage": {},
         "bundled_cli": {},
         "callback_handlers": {},
+        "callback_options": {
+            "compile_data": glob([
+                "tests/support/*.rs",
+                "tests/fixtures/callbacks_ts_golden.json",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "control_request_id": {},
         "control_values": {},
         "dialog_kind": {},

@@ -258,6 +258,7 @@ async fn load_candidate(
             load_timeout(
                 options,
                 format!("SessionStore.load() timed out after {{ms}}ms for session {id}"),
+                format!("SessionStore.load() for session {id}"),
             )
         })??;
     Ok(entries
@@ -274,7 +275,13 @@ async fn latest_candidate(
         options.store.list_sessions(project),
     )
     .await
-    .map_err(|_| load_timeout(options, "SessionStore.listSessions() timed out after {ms}ms".to_owned()))??;
+    .map_err(|_| {
+        load_timeout(
+            options,
+            "SessionStore.listSessions() timed out after {ms}ms".to_owned(),
+            "SessionStore.list_sessions()".to_owned(),
+        )
+    })??;
     if entry_limit_exceeded(options, sessions.len()) {
         return Err(SessionError::EntryLimit);
     }
@@ -308,7 +315,13 @@ async fn latest_candidate_ts(
         options.store.list_sessions(project),
     )
     .await
-    .map_err(|_| load_timeout(options, "SessionStore.listSessions() timed out after {ms}ms".to_owned()))??;
+    .map_err(|_| {
+        load_timeout(
+            options,
+            "SessionStore.listSessions() timed out after {ms}ms".to_owned(),
+            "SessionStore.list_sessions()".to_owned(),
+        )
+    })??;
     if entry_limit_exceeded(options, sessions.len()) {
         return Err(SessionError::EntryLimit);
     }
@@ -322,9 +335,14 @@ async fn latest_candidate_ts(
     load_candidate(options, project, first.session_id).await
 }
 
-/// The timeout error with upstream's text; `{ms}` stands for the configured limit in milliseconds.
-fn load_timeout(options: &SessionStoreOptions, message: String) -> SessionError {
+/// The timeout error with the dialect's text; `{ms}` stands for the configured limit in milliseconds.
+/// Python words every expiry as `<call> timed out after <ms>ms during resume materialization`.
+fn load_timeout(options: &SessionStoreOptions, typescript: String, python: String) -> SessionError {
     let ms = options.limits.load_timeout.as_duration().as_millis().to_string();
+    let message = match options.dialect {
+        SummaryDialect::TypeScript => typescript,
+        SummaryDialect::Python => format!("{python} timed out after {{ms}}ms during resume materialization"),
+    };
     SessionError::LoadTimeout(message.replace("{ms}", &ms))
 }
 
@@ -509,6 +527,7 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
                     "SessionStore.listSubkeys() timed out after {{ms}}ms for session {}",
                     self.id
                 ),
+                format!("SessionStore.list_subkeys() for session {}", self.id),
             )
         })??;
         if options
@@ -546,6 +565,7 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
                             "SessionStore.load() timed out after {{ms}}ms for session {} subpath {subpath}",
                             self.id
                         ),
+                        format!("SessionStore.load() for session {} subpath {subpath}", self.id),
                     )
                 })??;
             let Some(entries) = entries.filter(|entries| !entries.is_empty()) else {

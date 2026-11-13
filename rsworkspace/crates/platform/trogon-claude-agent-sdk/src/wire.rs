@@ -49,6 +49,13 @@ pub(crate) enum IncomingControl {
         payload: JsonObject,
         tool_use_id: Option<ToolUseId>,
     },
+    OAuthTokenRefresh {
+        kind: Option<Value>,
+        token_state: Option<String>,
+    },
+    HostAuthTokenRefresh {
+        status: Option<Value>,
+    },
     Unsupported,
     Malformed(ProtocolError),
 }
@@ -112,6 +119,17 @@ struct HookRequestWire {
 struct McpRequestWire {
     server_name: String,
     message: JsonObject,
+}
+
+#[derive(Deserialize)]
+struct OAuthTokenWire {
+    kind: Option<Value>,
+    token_state: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct HostAuthTokenWire {
+    status: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -253,6 +271,15 @@ pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<
                     payload: wire.payload,
                     tool_use_id: optional_tool_id(wire.tool_use_id)?,
                 }
+            } else if wire.request.subtype == "oauth_token_refresh" {
+                let wire: OAuthTokenWire = decode(wire.request.data)?;
+                IncomingControl::OAuthTokenRefresh {
+                    kind: wire.kind,
+                    token_state: wire.token_state,
+                }
+            } else if wire.request.subtype == "host_auth_token_refresh" {
+                let wire: HostAuthTokenWire = decode(wire.request.data)?;
+                IncomingControl::HostAuthTokenRefresh { status: wire.status }
             } else {
                 IncomingControl::Unsupported
             };
@@ -356,7 +383,7 @@ pub(crate) fn success_response<T: Serialize>(id: &ControlRequestId, response: T)
     .map_err(ProtocolError::from)
 }
 
-pub(crate) fn callback_error_response(id: &ControlRequestId, message: &'static str) -> Result<Value, ProtocolError> {
+pub(crate) fn callback_error_response(id: &ControlRequestId, message: &str) -> Result<Value, ProtocolError> {
     let frame: runtime_payload::OutboundFrame<'_, Value> = runtime_payload::OutboundFrame::Response {
         response: runtime_payload::CallbackResponse::Error {
             request_id: id.as_str(),

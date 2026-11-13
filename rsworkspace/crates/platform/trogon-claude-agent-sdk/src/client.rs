@@ -86,10 +86,13 @@ fn capture_inherited<E: crate::adapters::EnvironmentVariable>(
         }
     }
     // Upstream matches the session-state variable case-insensitively across the whole inherited environment.
+    // The `toolConfig` variables are removed from an inherited environment in any letter case.
     inherited.extend(environment.vars_os().into_iter().filter(|(key, _)| {
         let key = key.to_string_lossy();
         key.eq_ignore_ascii_case("CLAUDE_CODE_SDK_READS_SESSION_STATE")
-            || key.eq_ignore_ascii_case(crate::constants::AGENT_PROGRESS_SUMMARIES_ENV)
+            || crate::constants::TOOL_CONFIG_ENVS
+                .iter()
+                .any(|name| key.eq_ignore_ascii_case(name))
     }));
     inherited
 }

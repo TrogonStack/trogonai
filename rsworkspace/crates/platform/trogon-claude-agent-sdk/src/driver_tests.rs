@@ -103,6 +103,8 @@ impl DriverFixture {
             warn_unsupported_verbatim: false,
             elicitation_handler: None,
             user_dialog_handler: None,
+            oauth_token_handler: None,
+            host_auth_token_handler: None,
             dialog_kinds: HashSet::new(),
             session: None,
             mirror_flush: None,
@@ -714,4 +716,10 @@ fn the_initialize_request_carries_managed_settings_after_the_plugins() -> Result
         },
     )?;
     Ok(())
+}
+
+#[test]
+fn callback_failures_report_the_source_text_or_the_cancellation() {
+    assert_eq!(callback_failure(&crate::CallbackError::Failed("boom".into())), "boom");
+    assert_eq!(callback_failure(&crate::CallbackError::Cancelled), "Callback cancelled");
 }

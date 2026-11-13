@@ -2,7 +2,10 @@
 //!
 //! `Overlay` follows Python `subprocess_cli.py` (0.2.181) and `Replace`/`Inherit` follow `sdk.mjs` (0.3.323).
 
-use crate::constants::{AGENT_PROGRESS_SUMMARIES_ENV, DEFAULT_ENTRYPOINT, SDK_VERSION};
+use crate::constants::{
+    AGENT_PROGRESS_SUMMARIES_ENV, DEFAULT_ENTRYPOINT, HOST_AUTH_REFRESH_ENV, OAUTH_REFRESH_ENV, QUESTION_EXTENDED_ENV,
+    QUESTION_OPTIONAL_DESCRIPTIONS_ENV, QUESTION_PREVIEW_FORMAT_ENV, SDK_VERSION,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::{OsStr, OsString},
@@ -10,7 +13,7 @@ use std::{
 
 use crate::{
     ClaudeAgentOptions, FileCheckpointing,
-    process_options::{ClaudeCodeMarker, EnvironmentMode},
+    process_options::{ArgvStyle, ClaudeCodeMarker, EnvironmentMode},
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -87,14 +90,6 @@ pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> Envir
             }
             plan.set.insert("CLAUDE_AGENT_SDK_VERSION".into(), SDK_VERSION.into());
             plan.remove.insert("NODE_OPTIONS".into());
-            // `OD` deletes this variable, matched without regard to case, because the TypeScript SDK sends the
-            // setting in the initialize request instead and never sets the variable itself.
-            plan.remove.extend(
-                inherited
-                    .keys()
-                    .filter(|key| key.to_string_lossy().eq_ignore_ascii_case(AGENT_PROGRESS_SUMMARIES_ENV))
-                    .cloned(),
-            );
             if truthy(inherited.get(OsStr::new("DEBUG_CLAUDE_AGENT_SDK"))) {
                 plan.set.insert("DEBUG".into(), "1".into());
             } else {
@@ -123,6 +118,8 @@ pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> Envir
         }
     }
 
+    callback_and_tool_config(&mut plan, options, inherited);
+
     if options.file_checkpointing == FileCheckpointing::Enabled {
         plan.set
             .insert("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING".into(), "true".into());
@@ -141,6 +138,44 @@ pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> Envir
         plan.set.insert(reads.into(), "1".into());
     }
     plan
+}
+
+/// `sdk.mjs` announces its token callbacks and writes `toolConfig` into the child environment after the
+/// checkpointing and session-state variables.
+fn callback_and_tool_config(plan: &mut EnvironmentPlan, options: &ClaudeAgentOptions, inherited: &Inherited) {
+    if options.oauth_token_handler.is_some() {
+        plan.set.insert(OAUTH_REFRESH_ENV.into(), "1".into());
+    }
+    if options.host_auth_token_handler.is_some() {
+        plan.set.insert(HOST_AUTH_REFRESH_ENV.into(), "1".into());
+    }
+    if options.argv_style != ArgvStyle::TypeScript {
+        return;
+    }
+    let question = options.tool_config.ask_user_question;
+    if let Some(format) = question.preview_format {
+        plan.set
+            .insert(QUESTION_PREVIEW_FORMAT_ENV.into(), format.as_str().into());
+    }
+    for (enabled, name) in [
+        (question.extended_questions, QUESTION_EXTENDED_ENV),
+        (question.optional_descriptions, QUESTION_OPTIONAL_DESCRIPTIONS_ENV),
+        (false, AGENT_PROGRESS_SUMMARIES_ENV),
+    ] {
+        if enabled {
+            plan.set.insert(name.into(), "1".into());
+        } else if options.environment_mode == EnvironmentMode::Inherit {
+            // Only an inherited environment is cleaned, and upstream matches the name in any case.
+            for key in inherited.keys() {
+                if key.to_string_lossy().eq_ignore_ascii_case(name) {
+                    plan.set.remove(key);
+                    plan.remove.insert(key.clone());
+                }
+            }
+            plan.set.remove(OsStr::new(name));
+            plan.remove.insert(name.into());
+        }
+    }
 }
 
 #[cfg(test)]

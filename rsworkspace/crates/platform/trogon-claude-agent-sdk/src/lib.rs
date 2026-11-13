@@ -10,6 +10,7 @@ pub mod test_support;
 mod agent_definition;
 mod agent_name;
 mod argv;
+mod auth_token;
 mod builtin_tool_name;
 mod bundled_cli;
 mod channel;
@@ -129,6 +130,7 @@ mod summary_dialect;
 mod system_prompt;
 mod task_id;
 mod timeout;
+mod tool_config;
 mod tool_name;
 mod tool_rule;
 mod tool_use_id;
@@ -142,6 +144,10 @@ mod workspace_trust;
 
 pub use agent_definition::{AgentDefinition, AgentExecution, AgentMcpServerSpec};
 pub use agent_name::AgentName;
+pub use auth_token::{
+    HostAuthToken, HostAuthTokenFuture, HostAuthTokenHandler, HostAuthTokenRequest, OAuthDeclineReason,
+    OAuthTokenFuture, OAuthTokenHandler, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
+};
 pub use builtin_tool_name::BuiltinToolName;
 pub use bundled_cli::{
     NativeCliNotFoundError, NativePackageTarget, NodeModuleLookup, NodeModuleNotFoundError, ResolveNodeModule,
@@ -283,6 +289,7 @@ pub use system_prompt::{CustomPrompt, PresetPrompt};
 pub use task_id::TaskId;
 pub use timeout::{Timeout, TimeoutError};
 pub use tokio_util::sync::CancellationToken;
+pub use tool_config::{AskUserQuestionConfig, QuestionPreviewFormat, ToolConfig};
 pub use tool_name::ToolName;
 pub use tool_rule::ToolRule;
 pub use tool_use_id::ToolUseId;
