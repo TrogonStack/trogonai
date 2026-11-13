@@ -2,6 +2,7 @@
 //!
 //! `Overlay` follows Python `subprocess_cli.py` (0.2.181) and `Replace`/`Inherit` follow `sdk.mjs` (0.3.323).
 
+use crate::constants::{DEFAULT_ENTRYPOINT, SDK_VERSION};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::{OsStr, OsString},
@@ -11,21 +12,6 @@ use crate::{
     ClaudeAgentOptions, FileCheckpointing,
     process_options::{ClaudeCodeMarker, EnvironmentMode},
 };
-
-pub const DEFAULT_ENTRYPOINT: &str = "sdk-trogon-rs";
-pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// Inherited variables the plan consults. Captured through the environment adapter before spawning.
-pub(crate) const INHERITED_KEYS: &[&str] = &[
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CLAUDE_AGENT_SDK_VERSION",
-    "CLAUDE_CODE_SDK_READS_SESSION_STATE",
-    "DEBUG_CLAUDE_AGENT_SDK",
-    "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK",
-    "PATH",
-    "HOME",
-    "USERPROFILE",
-];
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct EnvironmentPlan {

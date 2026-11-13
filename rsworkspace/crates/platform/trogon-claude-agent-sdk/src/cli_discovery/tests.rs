@@ -55,14 +55,14 @@ fn reports_the_exact_install_hint_when_nothing_is_found() -> TestResult {
     let root = tempfile::tempdir()?;
     // Both hints are only reachable when no well-known location exists, so the home is the empty temp directory.
     if let Err(error) = discover(&inherited(root.path(), root.path()), &NativeFileSystem, false) {
-        assert!(error.to_string().starts_with(
+        assert!(error.message().starts_with(
             "Claude Code not found. Install with:\n  npm install -g @anthropic-ai/claude-code\n\nIf already installed locally, try:\n  export PATH=\"$HOME/node_modules/.bin:$PATH\"\n"
         ));
     }
     let windows = discover(&inherited(root.path(), root.path()), &NativeFileSystem, true)
         .err()
         .ok_or("expected a Windows discovery failure")?;
-    assert!(windows.to_string().contains("irm https://claude.ai/install.ps1 | iex"));
+    assert!(windows.message().contains("irm https://claude.ai/install.ps1 | iex"));
     Ok(())
 }
 

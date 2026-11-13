@@ -10,8 +10,8 @@ use std::{
 
 use crate::adapters::{SystemClock, WallClock};
 use crate::{
-    QueueCapacity, SessionEntry, SessionId, SessionKey, SessionProjectKey, SessionSummaryEntry, Timeout,
-    session_summary::{SummaryDialect, fold_session_summary},
+    QueueCapacity, SessionEntry, SessionId, SessionKey, SessionProjectKey, SessionSummaryEntry, SummaryDialect,
+    Timeout, session_summary::fold_session_summary,
 };
 
 pub type SessionStoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, SessionStoreError>> + Send + 'a>>;

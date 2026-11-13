@@ -1,3 +1,11 @@
+#![cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    allow(
+        serde_json_macro,
+        reason = "The conformance checks append literal transcript entries shaped like upstream fixtures."
+    )
+)]
+
 use std::{future::Future, sync::Arc};
 
 use serde_json::{Value, json};
@@ -10,7 +18,7 @@ use crate::{
 /// A violated [`SessionStore`] contract, naming the numbered upstream check that failed.
 #[derive(Debug, thiserror::Error)]
 #[error("session store conformance check {check} failed: {detail}")]
-pub struct ConformanceFailure {
+pub struct ConformanceError {
     pub check: u8,
     pub detail: String,
 }
@@ -25,10 +33,10 @@ pub struct ConformanceOptions {
     pub dialect: SummaryDialect,
 }
 
-type Check = Result<(), ConformanceFailure>;
+type Check = Result<(), ConformanceError>;
 
-fn fail(check: u8, detail: impl Into<String>) -> ConformanceFailure {
-    ConformanceFailure {
+fn fail(check: u8, detail: impl Into<String>) -> ConformanceError {
+    ConformanceError {
         check,
         detail: detail.into(),
     }
@@ -38,7 +46,7 @@ fn expect(check: u8, condition: bool, detail: &str) -> Check {
     if condition { Ok(()) } else { Err(fail(check, detail)) }
 }
 
-fn store_error(check: u8) -> impl Fn(crate::SessionStoreError) -> ConformanceFailure {
+fn store_error(check: u8) -> impl Fn(crate::SessionStoreError) -> ConformanceError {
     move |error| {
         let mut detail = error.to_string();
         let mut source = std::error::Error::source(&error);
@@ -51,7 +59,7 @@ fn store_error(check: u8) -> impl Fn(crate::SessionStoreError) -> ConformanceFai
     }
 }
 
-fn key(project: &str, session: &str) -> Result<SessionKey, ConformanceFailure> {
+fn key(project: &str, session: &str) -> Result<SessionKey, ConformanceError> {
     SessionKey::new(
         SessionProjectKey::new(project).map_err(|error| fail(0, error.to_string()))?,
         SessionId::from(session),
@@ -59,18 +67,18 @@ fn key(project: &str, session: &str) -> Result<SessionKey, ConformanceFailure> {
     .map_err(|error| fail(0, error.to_string()))
 }
 
-fn sub(base: &SessionKey, subpath: &str) -> Result<SessionKey, ConformanceFailure> {
+fn sub(base: &SessionKey, subpath: &str) -> Result<SessionKey, ConformanceError> {
     Ok(base
         .clone()
         .with_subpath(SessionSubpath::new(subpath).map_err(|error| fail(0, error.to_string()))?))
 }
 
-fn project(name: &str) -> Result<SessionProjectKey, ConformanceFailure> {
+fn project(name: &str) -> Result<SessionProjectKey, ConformanceError> {
     SessionProjectKey::new(name).map_err(|error| fail(0, error.to_string()))
 }
 
 /// Builds an entry like upstream's `_e`: `type` is required and otherwise irrelevant to the contracts.
-fn entry(fields: Value) -> Result<SessionEntry, ConformanceFailure> {
+fn entry(fields: Value) -> Result<SessionEntry, ConformanceError> {
     let mut object = serde_json::Map::new();
     object.insert("type".into(), "x".into());
     if let Value::Object(fields) = fields {
@@ -79,7 +87,7 @@ fn entry(fields: Value) -> Result<SessionEntry, ConformanceFailure> {
     Ok(SessionEntry::new(object))
 }
 
-fn entries(values: Vec<Value>) -> Result<Vec<SessionEntry>, ConformanceFailure> {
+fn entries(values: Vec<Value>) -> Result<Vec<SessionEntry>, ConformanceError> {
     values.into_iter().map(entry).collect()
 }
 

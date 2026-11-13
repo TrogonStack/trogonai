@@ -195,6 +195,26 @@ the stdin `initialize` bytes).
   with Python's hint text. `connect_with_adapters` never discovers, matching
   Python's custom transport and TypeScript's `spawnClaudeCodeProcess`: its
   spawner receives `claude` when `cli_path` is omitted.
+- Failures follow upstream. A missing executable is `Error::CliNotFoundAt`, a missing
+  `cwd` is `Error::WorkingDirectoryMissing`, any other spawn failure is
+  `Error::Spawn` ("Failed to start Claude Code: ..."). `Error::Process` displays
+  Python's `ProcessError` text, exposes `exit_code()` (negated signal number on
+  Unix) and `typescript_message()` for TypeScript's text. When the CLI exits
+  unsuccessfully after an `is_error` result, the error is `Error::Result`
+  (`ResultError`): Python's text always, TypeScript's text when it is non-empty.
+  `abort()` stops the process and ends the run with `Error::Aborted`
+  (`AbortError`). Closing escalates stdin close, SIGTERM, SIGKILL, each waiting
+  `limits.shutdown_timeout`.
+- Writes fail with distinct errors in upstream's order: `Error::NotReadyForWriting`
+  after stdin is closed (and, in the TypeScript style, after the process exited,
+  where the exit event clears `ready`), `Error::WriteToTerminatedProcess` after an
+  exit in the Python style (with the exit code), `Error::WriteFailed` for an I/O
+  failure and `Error::Aborted` after `abort()`.
+- Non-JSON stdout: `ArgvStyle::TypeScript` skips every undecodable line. Python
+  style skips lines that do not start with `{` and fails on a corrupt line with
+  `Error::JsonDecode` (the line and the original error), except that a corrupt
+  unterminated tail at end of file is dropped. A JSON line that is not a valid
+  message is `Error::MessageParse`, carrying the raw object.
 - `ArgvStyle::TypeScript` appends `--await-initialize` through extra arguments
   when `connect` resumes or continues without `cli_path` and without `sdk-url`,
   as `sdk.mjs` does for its resolved executable. Python never sends it.

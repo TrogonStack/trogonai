@@ -2,8 +2,7 @@
 //!
 //! The pattern is `(@scope/)?name(/version)?` with a 128 character cap. Generic runtime names are never labels.
 
-const MAX_CLIENT_APP_LENGTH: usize = 128;
-const GENERIC_NAMES: [&str; 6] = ["index", "main", "cli", "server", "app", "node"];
+use crate::constants::{GENERIC_NAMES, MAX_CLIENT_APP_LENGTH};
 
 fn name_part(part: &str) -> bool {
     let mut characters = part.chars();
