@@ -53,6 +53,23 @@
      }
     }
    ],
+   "expect_text": [],
+   "order": [
+    "initialize",
+    "control_response"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -175,6 +192,26 @@
      }
     }
    ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"for\":\"num\"}}}}"
+   ],
+   "order": [
+    "initialize",
+    "control_response",
+    "mcp_message"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -318,6 +355,26 @@
      }
     }
    ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"for\":\"str\"}}}}"
+   ],
+   "order": [
+    "initialize",
+    "control_response",
+    "mcp_message"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -461,6 +518,26 @@
      }
     }
    ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{\"for\":\"first\"}}}}"
+   ],
+   "order": [
+    "initialize",
+    "control_response",
+    "mcp_message"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -604,6 +681,26 @@
      }
     }
    ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"id\":true,\"result\":{\"for\":\"bt\"}}}}"
+   ],
+   "order": [
+    "initialize",
+    "control_response",
+    "mcp_message"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -753,6 +850,26 @@
      }
     }
    ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"id\":[1],\"result\":{\"for\":\"arr\"}}}}"
+   ],
+   "order": [
+    "initialize",
+    "control_response",
+    "mcp_message"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -859,6 +976,23 @@
      }
     }
    ],
+   "expect_text": [],
+   "order": [
+    "initialize",
+    "control_response"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -990,6 +1124,34 @@
      }
     }
    ],
+   "expect_text": [],
+   "order": [
+    "initialize",
+    "control_response",
+    "control_response"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    },
+    "t": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "t",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -1060,6 +1222,22 @@
     }
    ],
    "expect": [],
+   "expect_text": [],
+   "order": [
+    "initialize"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -1112,6 +1290,23 @@
      }
     }
    ],
+   "expect_text": [],
+   "order": [
+    "initialize",
+    "control_response"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -1163,6 +1358,23 @@
      }
     }
    ],
+   "expect_text": [],
+   "order": [
+    "initialize",
+    "control_response"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -1214,6 +1426,23 @@
      }
     }
    ],
+   "expect_text": [],
+   "order": [
+    "initialize",
+    "control_response"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -1292,6 +1521,26 @@
      }
     }
    ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{\"level\":\"info\",\"data\":\"from-server\"}}}}"
+   ],
+   "order": [
+    "initialize",
+    "mcp_message",
+    "control_response"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -1379,6 +1628,26 @@
      }
     }
    ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"late\":true}}}}"
+   ],
+   "order": [
+    "initialize",
+    "mcp_message",
+    "control_response"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -1479,6 +1748,26 @@
      }
     }
    ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"id\":9,\"result\":{\"for\":\"two\"}}}}"
+   ],
+   "order": [
+    "initialize",
+    "control_response",
+    "mcp_message"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -1587,6 +1876,26 @@
      }
     }
    ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"id\":\"srv-1\",\"method\":\"ping\"}}}"
+   ],
+   "order": [
+    "initialize",
+    "mcp_message",
+    "control_response"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -1694,6 +2003,26 @@
      }
     }
    ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"id\":\"other\",\"result\":{\"late\":true}}}}"
+   ],
+   "order": [
+    "initialize",
+    "control_response",
+    "mcp_message"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -1772,6 +2101,22 @@
     }
    ],
    "expect": [],
+   "expect_text": [],
+   "order": [
+    "initialize"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
    "server_received": [
     {
      "jsonrpc": "2.0",
@@ -1824,6 +2169,356 @@
      }
     }
    ],
+   "expect_text": [],
+   "order": [
+    "initialize",
+    "control_response"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "frames_sent_before_initialize_are_held_and_flushed_in_order",
+   "connect_send": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/message",
+      "params": {
+       "level": "info",
+       "data": "first"
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/message",
+      "params": {
+       "level": "info",
+       "data": "second"
+      }
+     }
+    ]
+   },
+   "steps": [],
+   "expect": [
+    {
+     "type": "control_request",
+     "request_id": "<uuid>",
+     "request": {
+      "subtype": "mcp_message",
+      "server_name": "s",
+      "message": {
+       "jsonrpc": "2.0",
+       "method": "notifications/message",
+       "params": {
+        "level": "info",
+        "data": "first"
+       }
+      }
+     }
+    },
+    {
+     "type": "control_request",
+     "request_id": "<uuid>",
+     "request": {
+      "subtype": "mcp_message",
+      "server_name": "s",
+      "message": {
+       "jsonrpc": "2.0",
+       "method": "notifications/message",
+       "params": {
+        "level": "info",
+        "data": "second"
+       }
+      }
+     }
+    }
+   ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{\"level\":\"info\",\"data\":\"first\"}}}}",
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{\"level\":\"info\",\"data\":\"second\"}}}}"
+   ],
+   "order": [
+    "initialize",
+    "mcp_message",
+    "mcp_message"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "manifests_with_tools_are_captured_unchanged",
+   "tools": true,
+   "servers": [
+    "s",
+    "t"
+   ],
+   "steps": [],
+   "expect": [],
+   "expect_text": [],
+   "order": [
+    "initialize"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     },
+     "toolsListResult": {
+      "tools": [
+       {
+        "name": "echo",
+        "inputSchema": {
+         "type": "object"
+        }
+       }
+      ]
+     }
+    },
+    "t": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "t",
+       "version": "1.0.0"
+      }
+     },
+     "toolsListResult": {
+      "tools": [
+       {
+        "name": "echo",
+        "inputSchema": {
+         "type": "object"
+        }
+       }
+      ]
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "tools_list_changed_before_initialize_drops_the_tools_list_manifest",
+   "tools": true,
+   "connect_send": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/tools/list_changed"
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/message",
+      "params": {
+       "level": "info",
+       "data": "after"
+      }
+     }
+    ]
+   },
+   "servers": [
+    "s",
+    "t"
+   ],
+   "steps": [],
+   "expect": [
+    {
+     "type": "control_request",
+     "request_id": "<uuid>",
+     "request": {
+      "subtype": "mcp_message",
+      "server_name": "s",
+      "message": {
+       "jsonrpc": "2.0",
+       "method": "notifications/tools/list_changed"
+      }
+     }
+    },
+    {
+     "type": "control_request",
+     "request_id": "<uuid>",
+     "request": {
+      "subtype": "mcp_message",
+      "server_name": "s",
+      "message": {
+       "jsonrpc": "2.0",
+       "method": "notifications/message",
+       "params": {
+        "level": "info",
+        "data": "after"
+       }
+      }
+     }
+    }
+   ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}}}",
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{\"level\":\"info\",\"data\":\"after\"}}}}"
+   ],
+   "order": [
+    "initialize",
+    "mcp_message",
+    "mcp_message"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    },
+    "t": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "t",
+       "version": "1.0.0"
+      }
+     },
+     "toolsListResult": {
+      "tools": [
+       {
+        "name": "echo",
+        "inputSchema": {
+         "type": "object"
+        }
+       }
+      ]
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "tools_list_changed_with_an_id_keeps_the_manifest",
+   "tools": true,
+   "connect_send": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "method": "notifications/tools/list_changed"
+     }
+    ]
+   },
+   "servers": [
+    "s",
+    "t"
+   ],
+   "steps": [],
+   "expect": [
+    {
+     "type": "control_request",
+     "request_id": "<uuid>",
+     "request": {
+      "subtype": "mcp_message",
+      "server_name": "s",
+      "message": {
+       "jsonrpc": "2.0",
+       "id": 5,
+       "method": "notifications/tools/list_changed"
+      }
+     }
+    }
+   ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"notifications/tools/list_changed\"}}}"
+   ],
+   "order": [
+    "initialize",
+    "mcp_message"
+   ],
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     },
+     "toolsListResult": {
+      "tools": [
+       {
+        "name": "echo",
+        "inputSchema": {
+         "type": "object"
+        }
+       }
+      ]
+     }
+    },
+    "t": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "t",
+       "version": "1.0.0"
+      }
+     },
+     "toolsListResult": {
+      "tools": [
+       {
+        "name": "echo",
+        "inputSchema": {
+         "type": "object"
+        }
+       }
+      ]
+     }
+    }
+   },
    "server_received": [],
    "query_outcome": "ended"
   }
