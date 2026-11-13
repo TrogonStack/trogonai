@@ -1,0 +1,5017 @@
+{
+ "sources": {
+  "typescript": "@anthropic-ai/claude-agent-sdk 0.3.323 createSdkMcpServer over an in-memory transport, with tool input schemas built by zod 4.1.12"
+ },
+ "typescript": {
+  "servers": {
+   "ch_union_plain": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "anyOf": [
+          {
+           "type": "object",
+           "properties": {
+            "k": {
+             "type": "string",
+             "const": "a"
+            },
+            "n": {
+             "type": "number"
+            }
+           },
+           "required": [
+            "k",
+            "n"
+           ]
+          },
+          {
+           "type": "object",
+           "properties": {
+            "k": {
+             "type": "string",
+             "const": "b"
+            },
+            "s": {
+             "type": "string"
+            }
+           },
+           "required": [
+            "k",
+            "s"
+           ]
+          }
+         ]
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args"
+     }
+    ]
+   },
+   "ch_union_discriminated": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "anyOf": [
+          {
+           "type": "object",
+           "properties": {
+            "k": {
+             "type": "string",
+             "const": "a"
+            },
+            "n": {
+             "type": "number"
+            }
+           },
+           "required": [
+            "k",
+            "n"
+           ]
+          },
+          {
+           "type": "object",
+           "properties": {
+            "k": {
+             "type": "string",
+             "const": "b"
+            },
+            "s": {
+             "type": "string"
+            }
+           },
+           "required": [
+            "k",
+            "s"
+           ]
+          }
+         ]
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "union",
+          "value": "k"
+         }
+        }
+       ],
+       "callbacks": []
+      }
+     }
+    ]
+   },
+   "ch_nullable_nullable": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "anyOf": [
+          {
+           "type": "string",
+           "minLength": 2
+          },
+          {
+           "type": "null"
+          }
+         ]
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args"
+     }
+    ]
+   },
+   "ch_nullable_union": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "anyOf": [
+          {
+           "type": "string",
+           "minLength": 2
+          },
+          {
+           "type": "null"
+          }
+         ]
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "nullability",
+          "value": "union_with_null"
+         }
+        }
+       ],
+       "callbacks": []
+      }
+     }
+    ]
+   },
+   "ch_length_string_exact": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string",
+         "minLength": 3,
+         "maxLength": 3
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args"
+     }
+    ]
+   },
+   "ch_length_string_min_max": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string",
+         "minLength": 3,
+         "maxLength": 3
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "length",
+          "value": "min_max"
+         }
+        }
+       ],
+       "callbacks": []
+      }
+     }
+    ]
+   },
+   "ch_length_array_exact": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "minItems": 2,
+         "maxItems": 2,
+         "type": "array",
+         "items": {
+          "type": "number"
+         }
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args"
+     }
+    ]
+   },
+   "ch_length_array_min_max": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "minItems": 2,
+         "maxItems": 2,
+         "type": "array",
+         "items": {
+          "type": "number"
+         }
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "length",
+          "value": "min_max"
+         }
+        }
+       ],
+       "callbacks": []
+      }
+     }
+    ]
+   },
+   "ch_order_declared": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string",
+         "minLength": 3,
+         "maxLength": 5,
+         "pattern": "^a"
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args"
+     }
+    ]
+   },
+   "ch_order_format_first": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string",
+         "minLength": 3,
+         "maxLength": 5,
+         "pattern": "^a"
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "check_order",
+          "value": [
+           "format",
+           "minimum",
+           "maximum"
+          ]
+         }
+        }
+       ],
+       "callbacks": []
+      }
+     }
+    ]
+   },
+   "ch_order_max_first": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string",
+         "minLength": 3,
+         "maxLength": 5,
+         "pattern": "^a"
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "check_order",
+          "value": [
+           "maximum",
+           "format",
+           "minimum"
+          ]
+         }
+        }
+       ],
+       "callbacks": []
+      }
+     }
+    ]
+   },
+   "ch_order_middle_format": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string",
+         "minLength": 3,
+         "maxLength": 5,
+         "pattern": "^a"
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "check_order",
+          "value": [
+           "minimum",
+           "format",
+           "maximum"
+          ]
+         }
+        }
+       ],
+       "callbacks": []
+      }
+     }
+    ]
+   },
+   "ch_int32_format": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "integer",
+         "minimum": -2147483648,
+         "maximum": 2147483647
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args"
+     }
+    ]
+   },
+   "ch_int32_bounded": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "integer",
+         "minimum": -2147483648,
+         "maximum": 2147483647
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "number_format",
+          "value": "bounded_integer"
+         }
+        }
+       ],
+       "callbacks": []
+      }
+     }
+    ]
+   },
+   "ch_uint32_format": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 4294967295
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args"
+     }
+    ]
+   },
+   "ch_uint32_bounded": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 4294967295
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "number_format",
+          "value": "bounded_integer"
+         }
+        }
+       ],
+       "callbacks": []
+      }
+     }
+    ]
+   },
+   "ch_time_plain": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string",
+         "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?$"
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args"
+     }
+    ]
+   },
+   "ch_time_iso": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string",
+         "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?$"
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "/properties/x",
+         "choice": {
+          "kind": "string_format",
+          "value": "iso_time"
+         }
+        }
+       ],
+       "callbacks": []
+      }
+     }
+    ]
+   },
+   "ch_refine_default_refine": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [],
+       "callbacks": [
+        {
+         "pointer": "/properties/x",
+         "refine": "not_bad",
+         "transform": null
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "ch_refine_message_refine": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [],
+       "callbacks": [
+        {
+         "pointer": "/properties/x",
+         "refine": "starts_with_a",
+         "transform": null
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "ch_refine_after_check_min": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string",
+         "minLength": 3
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [],
+       "callbacks": [
+        {
+         "pointer": "/properties/x",
+         "refine": "not_abc",
+         "transform": null
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "ch_refine_after_pattern_pattern": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string",
+         "pattern": "^a"
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [],
+       "callbacks": [
+        {
+         "pointer": "/properties/x",
+         "refine": "not_abc",
+         "transform": null
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "ch_transform_upper": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [],
+       "callbacks": [
+        {
+         "pointer": "/properties/x",
+         "refine": null,
+         "transform": "upper"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "ch_transform_issue_gate": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [],
+       "callbacks": [
+        {
+         "pointer": "/properties/x",
+         "refine": null,
+         "transform": "gate"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "ch_refine_transform_both": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string",
+         "minLength": 2
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [],
+       "callbacks": [
+        {
+         "pointer": "/properties/x",
+         "refine": "not_abc",
+         "transform": "upper"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "ch_transform_nested_nested": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "object",
+         "properties": {
+          "a": {
+           "type": "string"
+          },
+          "b": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "a",
+          "b"
+         ]
+        }
+       },
+       "required": [
+        "x"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [],
+       "callbacks": [
+        {
+         "pointer": "/properties/x/properties/a",
+         "refine": null,
+         "transform": "gate"
+        },
+        {
+         "pointer": "/properties/x/properties/b",
+         "refine": "not_bad",
+         "transform": null
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "ch_transform_optional_optional": {
+    "name": "p",
+    "version": null,
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "t",
+      "description": "d",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "string"
+        }
+       }
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "args",
+      "validation": {
+       "choices": [],
+       "callbacks": [
+        {
+         "pointer": "/properties/x",
+         "refine": null,
+         "transform": "upper"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "cases": [
+   {
+    "server": "ch_union_plain",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7389,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"k\":{\"type\":\"string\",\"const\":\"a\"},\"n\":{\"type\":\"number\"}},\"required\":[\"k\",\"n\"]},{\"type\":\"object\",\"properties\":{\"k\":{\"type\":\"string\",\"const\":\"b\"},\"s\":{\"type\":\"string\"}},\"required\":[\"k\",\"s\"]}]}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7389}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7390,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": "a",
+          "n": 1
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":{\\\"k\\\":\\\"a\\\",\\\"n\\\":1}}\"}]},\"jsonrpc\":\"2.0\",\"id\":7390}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7391,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": "a",
+          "n": "x"
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"expected\\\": \\\"number\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"n\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected number, received string\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"b\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"b\\\\\\\"\\\"\\n        },\\n        {\\n          \\\"expected\\\": \\\"string\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"s\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7391}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7392,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": "b"
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"a\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"a\\\\\\\"\\\"\\n        },\\n        {\\n          \\\"expected\\\": \\\"number\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"n\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected number, received undefined\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"expected\\\": \\\"string\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"s\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7392}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7393,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": "b",
+          "s": "q"
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":{\\\"k\\\":\\\"b\\\",\\\"s\\\":\\\"q\\\"}}\"}]},\"jsonrpc\":\"2.0\",\"id\":7393}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7394,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": "c"
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"a\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"a\\\\\\\"\\\"\\n        },\\n        {\\n          \\\"expected\\\": \\\"number\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"n\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected number, received undefined\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"b\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"b\\\\\\\"\\\"\\n        },\\n        {\\n          \\\"expected\\\": \\\"string\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"s\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7394}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7395,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {}
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"a\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"a\\\\\\\"\\\"\\n        },\\n        {\\n          \\\"expected\\\": \\\"number\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"n\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected number, received undefined\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"b\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"b\\\\\\\"\\\"\\n        },\\n        {\\n          \\\"expected\\\": \\\"string\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"s\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7395}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7396,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "n": 1
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"a\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"a\\\\\\\"\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"b\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"b\\\\\\\"\\\"\\n        },\\n        {\\n          \\\"expected\\\": \\\"string\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"s\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7396}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7397,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"expected\\\": \\\"object\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"expected\\\": \\\"object\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7397}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7398,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"expected\\\": \\\"object\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected object, received null\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"expected\\\": \\\"object\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected object, received null\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7398}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7399,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "s"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"expected\\\": \\\"object\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected object, received string\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"expected\\\": \\\"object\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected object, received string\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7399}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7400,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": []
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"expected\\\": \\\"object\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected object, received array\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"expected\\\": \\\"object\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected object, received array\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7400}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7401,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": 1
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"a\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"a\\\\\\\"\\\"\\n        },\\n        {\\n          \\\"expected\\\": \\\"number\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"n\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected number, received undefined\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"b\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"b\\\\\\\"\\\"\\n        },\\n        {\\n          \\\"expected\\\": \\\"string\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"s\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7401}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7402,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": [
+           "a"
+          ]
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"a\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"a\\\\\\\"\\\"\\n        },\\n        {\\n          \\\"expected\\\": \\\"number\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"n\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected number, received undefined\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"code\\\": \\\"invalid_value\\\",\\n          \\\"values\\\": [\\n            \\\"b\\\"\\n          ],\\n          \\\"path\\\": [\\n            \\\"k\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected \\\\\\\"b\\\\\\\"\\\"\\n        },\\n        {\\n          \\\"expected\\\": \\\"string\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [\\n            \\\"s\\\"\\n          ],\\n          \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7402}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_union_discriminated",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7404,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"k\":{\"type\":\"string\",\"const\":\"a\"},\"n\":{\"type\":\"number\"}},\"required\":[\"k\",\"n\"]},{\"type\":\"object\",\"properties\":{\"k\":{\"type\":\"string\",\"const\":\"b\"},\"s\":{\"type\":\"string\"}},\"required\":[\"k\",\"s\"]}]}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7404}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7405,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": "a",
+          "n": 1
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":{\\\"k\\\":\\\"a\\\",\\\"n\\\":1}}\"}]},\"jsonrpc\":\"2.0\",\"id\":7405}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7406,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": "a",
+          "n": "x"
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"n\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received string\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7406}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7407,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": "b"
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"s\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7407}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7408,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": "b",
+          "s": "q"
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":{\\\"k\\\":\\\"b\\\",\\\"s\\\":\\\"q\\\"}}\"}]},\"jsonrpc\":\"2.0\",\"id\":7408}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7409,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": "c"
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [],\\n    \\\"note\\\": \\\"No matching discriminator\\\",\\n    \\\"discriminator\\\": \\\"k\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"k\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7409}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7410,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {}
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [],\\n    \\\"note\\\": \\\"No matching discriminator\\\",\\n    \\\"discriminator\\\": \\\"k\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"k\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7410}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7411,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "n": 1
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [],\\n    \\\"note\\\": \\\"No matching discriminator\\\",\\n    \\\"discriminator\\\": \\\"k\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"k\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7411}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7412,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7412}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7413,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7413}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7414,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "s"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received string\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7414}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7415,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": []
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received array\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7415}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7416,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": 1
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [],\\n    \\\"note\\\": \\\"No matching discriminator\\\",\\n    \\\"discriminator\\\": \\\"k\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"k\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7416}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7417,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "k": [
+           "a"
+          ]
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [],\\n    \\\"note\\\": \\\"No matching discriminator\\\",\\n    \\\"discriminator\\\": \\\"k\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"k\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7417}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_nullable_nullable",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7419,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"anyOf\":[{\"type\":\"string\",\"minLength\":2},{\"type\":\"null\"}]}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7419}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7420,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":null}\"}]},\"jsonrpc\":\"2.0\",\"id\":7420}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7421,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"ab\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7421}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7422,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "a"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=2 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7422}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7423,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7423}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7424,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {}
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received object\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7424}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7425,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7425}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7426,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": true
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received boolean\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7426}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_nullable_union",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7428,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"anyOf\":[{\"type\":\"string\",\"minLength\":2},{\"type\":\"null\"}]}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7428}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7429,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":null}\"}]},\"jsonrpc\":\"2.0\",\"id\":7429}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7430,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"ab\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7430}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7431,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "a"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=2 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7431}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7432,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"expected\\\": \\\"string\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"expected\\\": \\\"null\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected null, received number\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7432}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7433,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {}
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"expected\\\": \\\"string\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected string, received object\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"expected\\\": \\\"null\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected null, received object\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7433}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7434,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"expected\\\": \\\"string\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"expected\\\": \\\"null\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected null, received undefined\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7434}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7435,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": true
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"invalid_union\\\",\\n    \\\"errors\\\": [\\n      [\\n        {\\n          \\\"expected\\\": \\\"string\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected string, received boolean\\\"\\n        }\\n      ],\\n      [\\n        {\\n          \\\"expected\\\": \\\"null\\\",\\n          \\\"code\\\": \\\"invalid_type\\\",\\n          \\\"path\\\": [],\\n          \\\"message\\\": \\\"Invalid input: expected null, received boolean\\\"\\n        }\\n      ]\\n    ],\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7435}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_length_string_exact",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7437,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"minLength\":3,\"maxLength\":3}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7437}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7438,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"exact\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have exactly 3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7438}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7439,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abc"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abc\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7439}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7440,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"exact\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected string to have exactly 3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7440}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7441,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"exact\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have exactly 3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7441}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7442,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7442}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7443,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7443}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7444,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7444}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_length_string_min_max",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7446,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"minLength\":3,\"maxLength\":3}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7446}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7447,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7447}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7448,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abc"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abc\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7448}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7449,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected string to have <=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7449}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7450,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7450}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7451,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7451}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7452,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7452}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7453,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7453}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_length_array_exact",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7455,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"minItems\":2,\"maxItems\":2,\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7455}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7456,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": [
+          1
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"exact\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected array to have exactly 2 items\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7456}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7457,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": [
+          1,
+          2
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":[1,2]}\"}]},\"jsonrpc\":\"2.0\",\"id\":7457}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7458,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": [
+          1,
+          2,
+          3
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"exact\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected array to have exactly 2 items\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7458}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7459,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": []
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"exact\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected array to have exactly 2 items\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7459}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7460,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7460}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7461,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": [
+          "a"
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      0\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received string\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"exact\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected array to have exactly 2 items\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7461}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7462,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7462}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_length_array_min_max",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7464,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"minItems\":2,\"maxItems\":2,\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7464}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7465,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": [
+          1
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected array to have >=2 items\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7465}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7466,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": [
+          1,
+          2
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":[1,2]}\"}]},\"jsonrpc\":\"2.0\",\"id\":7466}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7467,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": [
+          1,
+          2,
+          3
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected array to have <=2 items\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7467}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7468,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": []
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected array to have >=2 items\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7468}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7469,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7469}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7470,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": [
+          "a"
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      0\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received string\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected array to have >=2 items\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7470}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7471,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7471}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_order_declared",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7473,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"minLength\":3,\"maxLength\":5,\"pattern\":\"^a\"}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7473}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7474,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7474}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7475,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "b"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7475}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7476,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bbbbbbb"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 5,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected string to have <=5 characters\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7476}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7477,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcdefg"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 5,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected string to have <=5 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7477}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7478,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7478}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7479,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcd\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7479}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7480,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcde"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcde\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7480}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7481,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7481}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7482,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7482}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_order_format_first",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7484,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"minLength\":3,\"maxLength\":5,\"pattern\":\"^a\"}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7484}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7485,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7485}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7486,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "b"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7486}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7487,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bbbbbbb"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 5,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected string to have <=5 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7487}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7488,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcdefg"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 5,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected string to have <=5 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7488}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7489,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7489}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7490,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcd\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7490}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7491,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcde"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcde\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7491}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7492,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7492}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7493,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7493}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_order_max_first",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7495,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"minLength\":3,\"maxLength\":5,\"pattern\":\"^a\"}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7495}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7496,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7496}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7497,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "b"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7497}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7498,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bbbbbbb"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 5,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected string to have <=5 characters\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7498}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7499,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcdefg"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 5,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected string to have <=5 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7499}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7500,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7500}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7501,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcd\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7501}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7502,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcde"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcde\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7502}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7503,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7503}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7504,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7504}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_order_middle_format",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7506,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"minLength\":3,\"maxLength\":5,\"pattern\":\"^a\"}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7506}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7507,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7507}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7508,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "b"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7508}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7509,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bbbbbbb"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 5,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected string to have <=5 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7509}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7510,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcdefg"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 5,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected string to have <=5 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7510}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7511,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7511}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7512,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcd\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7512}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7513,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcde"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcde\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7513}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7514,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7514}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7515,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7515}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_int32_format",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7517,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\",\"minimum\":-2147483648,\"maximum\":2147483647}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7517}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7518,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 1.5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"int\\\",\\n    \\\"format\\\": \\\"int32\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected int, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7518}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7519,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 2147483647
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":2147483647}\"}]},\"jsonrpc\":\"2.0\",\"id\":7519}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7520,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 2147483648
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 2147483647,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <2147483647\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7520}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7521,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": -2147483648
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":-2147483648}\"}]},\"jsonrpc\":\"2.0\",\"id\":7521}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7522,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": -2147483649
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": -2147483648,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected number to be >=-2147483648\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7522}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7523,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 3000000000
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 2147483647,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <2147483647\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7523}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7524,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 9007199254740991
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 2147483647,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <2147483647\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7524}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7525,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 1e+300
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 9007199254740991,\\n    \\\"note\\\": \\\"Integers must be within the safe integer range.\\\",\\n    \\\"origin\\\": \\\"int\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected int to be <9007199254740991\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7525}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7526,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 0
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":0}\"}]},\"jsonrpc\":\"2.0\",\"id\":7526}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7527,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "x"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received string\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7527}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7528,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7528}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7529,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7529}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7530,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": -0.5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"int\\\",\\n    \\\"format\\\": \\\"int32\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected int, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7530}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_int32_bounded",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7532,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\",\"minimum\":-2147483648,\"maximum\":2147483647}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7532}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7533,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 1.5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"int\\\",\\n    \\\"format\\\": \\\"safeint\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected int, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7533}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7534,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 2147483647
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":2147483647}\"}]},\"jsonrpc\":\"2.0\",\"id\":7534}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7535,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 2147483648
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 2147483647,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <=2147483647\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7535}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7536,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": -2147483648
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":-2147483648}\"}]},\"jsonrpc\":\"2.0\",\"id\":7536}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7537,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": -2147483649
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": -2147483648,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected number to be >=-2147483648\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7537}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7538,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 3000000000
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 2147483647,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <=2147483647\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7538}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7539,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 9007199254740991
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 2147483647,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <=2147483647\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7539}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7540,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 1e+300
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 9007199254740991,\\n    \\\"note\\\": \\\"Integers must be within the safe integer range.\\\",\\n    \\\"origin\\\": \\\"int\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected int to be <9007199254740991\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 2147483647,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <=2147483647\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7540}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7541,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 0
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":0}\"}]},\"jsonrpc\":\"2.0\",\"id\":7541}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7542,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "x"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received string\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7542}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7543,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7543}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7544,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7544}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7545,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": -0.5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"int\\\",\\n    \\\"format\\\": \\\"safeint\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected int, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7545}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_uint32_format",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7547,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":4294967295}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7547}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7548,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 1.5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"int\\\",\\n    \\\"format\\\": \\\"uint32\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected int, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7548}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7549,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 4294967295
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":4294967295}\"}]},\"jsonrpc\":\"2.0\",\"id\":7549}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7550,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 4294967296
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 4294967295,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <4294967295\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7550}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7551,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": -1
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 0,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected number to be >=0\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7551}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7552,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 0
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":0}\"}]},\"jsonrpc\":\"2.0\",\"id\":7552}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7553,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5000000000
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 4294967295,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <4294967295\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7553}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7554,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 1e+300
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 9007199254740991,\\n    \\\"note\\\": \\\"Integers must be within the safe integer range.\\\",\\n    \\\"origin\\\": \\\"int\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected int to be <9007199254740991\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7554}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7555,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "x"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received string\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7555}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7556,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7556}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_uint32_bounded",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7558,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":4294967295}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7558}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7559,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 1.5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"int\\\",\\n    \\\"format\\\": \\\"safeint\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected int, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7559}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7560,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 4294967295
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":4294967295}\"}]},\"jsonrpc\":\"2.0\",\"id\":7560}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7561,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 4294967296
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 4294967295,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <=4294967295\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7561}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7562,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": -1
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 0,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected number to be >=0\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7562}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7563,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 0
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":0}\"}]},\"jsonrpc\":\"2.0\",\"id\":7563}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7564,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5000000000
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 4294967295,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <=4294967295\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7564}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7565,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 1e+300
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 9007199254740991,\\n    \\\"note\\\": \\\"Integers must be within the safe integer range.\\\",\\n    \\\"origin\\\": \\\"int\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected int to be <9007199254740991\\\"\\n  },\\n  {\\n    \\\"origin\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"too_big\\\",\\n    \\\"maximum\\\": 4294967295,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too big: expected number to be <=4294967295\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7565}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7566,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "x"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received string\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7566}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7567,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"number\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected number, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7567}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_time_plain",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7570,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"pattern\":\"^(?:[01]\\\\d|2[0-3]):[0-5]\\\\d(?::[0-5]\\\\d(?:\\\\.\\\\d+)?)?$\"}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7570}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7571,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "12:00"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"12:00\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7571}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7572,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "12:00:00"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"12:00:00\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7572}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7573,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "25:00"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7573}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7574,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "x"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7574}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7575,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "12:00:00.123"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"12:00:00.123\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7575}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7576,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7576}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7577,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7577}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7578,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7578}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7579,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7579}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7580,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "12:00:00Z"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7580}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_time_iso",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7582,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"pattern\":\"^(?:[01]\\\\d|2[0-3]):[0-5]\\\\d(?::[0-5]\\\\d(?:\\\\.\\\\d+)?)?$\"}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7582}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7583,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "12:00"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"12:00\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7583}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7584,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "12:00:00"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"12:00:00\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7584}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7585,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "25:00"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"time\\\",\\n    \\\"pattern\\\": \\\"/^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid ISO time\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7585}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7586,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "x"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"time\\\",\\n    \\\"pattern\\\": \\\"/^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid ISO time\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7586}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7587,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "12:00:00.123"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"12:00:00.123\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7587}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7588,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"time\\\",\\n    \\\"pattern\\\": \\\"/^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid ISO time\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7588}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7589,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7589}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7590,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7590}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7591,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7591}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7592,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "12:00:00Z"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"time\\\",\\n    \\\"pattern\\\": \\\"/^(?:[01]\\\\\\\\d|2[0-3]):[0-5]\\\\\\\\d(?::[0-5]\\\\\\\\d(?:\\\\\\\\.\\\\\\\\d+)?)?$/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid ISO time\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7592}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_refine_default_refine",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7594,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7594}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7595,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bad"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7595}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7596,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"ab\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7596}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7597,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abc"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abc\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7597}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7598,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "a"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"a\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7598}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7599,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7599}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7600,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcd\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7600}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7601,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7601}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7602,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7602}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7603,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7603}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7604,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "no"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"no\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7604}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_refine_message_refine",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7606,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7606}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7607,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bad"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"must start with a\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7607}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7608,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"ab\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7608}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7609,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abc"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abc\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7609}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7610,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "a"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"a\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7610}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7611,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"must start with a\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7611}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7612,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcd\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7612}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7613,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7613}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7614,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7614}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7615,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7615}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7616,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "no"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"must start with a\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7616}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_refine_after_check_min",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7618,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"minLength\":3}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7618}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7619,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bad"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"bad\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7619}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7620,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7620}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7621,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abc"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"not abc\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7621}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7622,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "a"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7622}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7623,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7623}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7624,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcd\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7624}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7625,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7625}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7626,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7626}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7627,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7627}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7628,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "no"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 3,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=3 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7628}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_refine_after_pattern_pattern",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7630,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"pattern\":\"^a\"}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7630}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7631,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bad"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7631}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7632,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"ab\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7632}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7633,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abc"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"not abc\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7633}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7634,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "a"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"a\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7634}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7635,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7635}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7636,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcd\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7636}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7637,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7637}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7638,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7638}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7639,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7639}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7640,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "no"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_format\\\",\\n    \\\"format\\\": \\\"regex\\\",\\n    \\\"pattern\\\": \\\"/^a/\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid string: must match pattern /^a/\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7640}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_transform_upper",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7642,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7642}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7643,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bad"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"BAD\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7643}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7644,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"AB\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7644}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7645,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abc"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"ABC\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7645}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7646,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "a"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"A\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7646}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7647,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7647}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7648,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"ABCD\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7648}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7649,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7649}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7650,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7650}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7651,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7651}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7652,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "no"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"NO\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7652}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_transform_issue_gate",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7654,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7654}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7655,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bad"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"bad\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7655}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7656,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"ab\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7656}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7657,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abc"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abc\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7657}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7658,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "a"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"a\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7658}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7659,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7659}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7660,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"abcd\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7660}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7661,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7661}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7662,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7662}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7663,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7663}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7664,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "no"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"message\\\": \\\"nope\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ]\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7664}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_refine_transform_both",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7666,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"minLength\":2}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7666}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7667,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bad"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"BAD\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7667}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7668,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"AB\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7668}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7669,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abc"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"not abc\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7669}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7670,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "a"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=2 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7670}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7671,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"origin\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"too_small\\\",\\n    \\\"minimum\\\": 2,\\n    \\\"inclusive\\\": true,\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Too small: expected string to have >=2 characters\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7671}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7672,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"ABCD\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7672}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7673,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7673}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7674,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7674}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7675,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7675}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7676,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "no"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"NO\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7676}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_transform_nested_nested",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7678,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"},\"b\":{\"type\":\"string\"}},\"required\":[\"a\",\"b\"]}},\"required\":[\"x\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7678}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7679,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "a": "no",
+          "b": "bad"
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"message\\\": \\\"nope\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"a\\\"\\n    ]\\n  },\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"b\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7679}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7680,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "a": "x",
+          "b": "y"
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":{\\\"a\\\":\\\"x\\\",\\\"b\\\":\\\"y\\\"}}\"}]},\"jsonrpc\":\"2.0\",\"id\":7680}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7681,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "a": 1,
+          "b": 2
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"a\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"b\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7681}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7682,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {}
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"a\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"b\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7682}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7683,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": {
+          "a": "no"
+         }
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"message\\\": \\\"nope\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"a\\\"\\n    ]\\n  },\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\",\\n      \\\"b\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7683}"
+     ]
+    ]
+   },
+   {
+    "server": "ch_transform_optional_optional",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7685,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"t\",\"description\":\"d\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}}},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":7685}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7686,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "bad"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"BAD\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7686}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7687,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "ab"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"AB\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7687}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7688,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abc"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"ABC\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7688}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7689,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "a"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"A\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7689}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7690,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": ""
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7690}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7691,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "abcd"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"ABCD\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7691}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7692,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": 5
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7692}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7693,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": null
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool t: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"x\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":7693}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7694,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {}
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{}\"}]},\"jsonrpc\":\"2.0\",\"id\":7694}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 7695,
+       "method": "tools/call",
+       "params": {
+        "name": "t",
+        "arguments": {
+         "x": "no"
+        }
+       }
+      },
+      "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"x\\\":\\\"NO\\\"}\"}]},\"jsonrpc\":\"2.0\",\"id\":7695}"
+     ]
+    ]
+   }
+  ]
+ }
+}

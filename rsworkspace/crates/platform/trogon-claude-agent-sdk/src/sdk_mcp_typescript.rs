@@ -5,7 +5,8 @@ use super::{LocalMcpSession, McpServerError, RequestId, ServerState, tool_error}
 use crate::{
     CallbackError, CancellationToken, JsonObject, McpToolRequest, SdkTool, SdkTools,
     constants::{self, SUPPORTED_PROTOCOL_VERSIONS},
-    settings_json::{js_stringify, js_stringify_pretty},
+    sdk_mcp_zod::{self, Input},
+    settings_json::js_stringify_pretty,
 };
 use serde_json::Value;
 
@@ -14,6 +15,15 @@ pub(crate) async fn request(
     message: JsonObject,
     signal: CancellationToken,
 ) -> Result<Option<JsonObject>, McpServerError> {
+    // `uj` (request) and `dj` (notification) are strict objects; a message that breaks one is dropped.
+    let envelope: &[&str] = if message.contains_key("id") {
+        &["jsonrpc", "id", "method", "params"]
+    } else {
+        &["jsonrpc", "method", "params"]
+    };
+    if message.keys().any(|key| !envelope.contains(&key.as_str())) {
+        return Ok(None);
+    }
     if message.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
         return Ok(None);
     }
@@ -27,13 +37,16 @@ pub(crate) async fn request(
     };
     if params
         .and_then(|params| params.get("_meta"))
-        .is_some_and(|meta| !meta.is_object())
+        .is_some_and(|meta| !sdk_mcp_zod::meta().parse(Input::Json(meta)).issues.is_empty())
     {
         return Ok(None);
     }
     let Some(id) = message.get("id") else {
+        // `_oncancel` ignores a falsy request id, and `reason` must be a string when it is present.
         if method == "notifications/cancelled"
+            && params.is_some_and(|params| params.get("reason").is_none_or(Value::is_string))
             && let Some(id) = params.and_then(|params| params.get("requestId")).and_then(request_id)
+            && !is_falsy(&id.value)
         {
             session.cancel(&id.key);
         }
@@ -63,6 +76,14 @@ pub(crate) async fn request(
     answer.transpose()
 }
 
+/// Whether JavaScript treats a request id as false: `0` and the empty string.
+fn is_falsy(id: &Value) -> bool {
+    match id {
+        Value::String(text) => text.is_empty(),
+        other => other.as_f64() == Some(0.0),
+    }
+}
+
 /// A string or a safe integer; a number with a zero fraction is the same integer in JavaScript.
 fn request_id(id: &Value) -> Option<RequestId> {
     match id {
@@ -88,6 +109,26 @@ async fn dispatch(
     signal: CancellationToken,
 ) -> Result<JsonObject, McpServerError> {
     let tools = state.tools.as_ref().filter(|tools| !tools.is_empty());
+    let registered = match (method, tools) {
+        ("initialize" | "ping", _) => true,
+        ("tools/list" | "tools/call", Some(_)) => true,
+        _ => false,
+    };
+    if !registered {
+        return Ok(error(id, -32601, "Method not found".into()));
+    }
+    // `Protocol` rejects a task-augmented request before the handler parses its params.
+    if params
+        .and_then(|params| params.get("task"))
+        .and_then(Value::as_object)
+        .is_some_and(|task| task.get("ttl").is_none_or(Value::is_number))
+    {
+        return Ok(error(
+            id,
+            -32603,
+            format!("Server does not support task creation (required for {method})"),
+        ));
+    }
     let result = match (method, tools) {
         ("initialize", _) => {
             let issues = initialize_issues(params);
@@ -97,16 +138,27 @@ async fn dispatch(
             Value::Object(initialize_result(state, params))
         }
         ("ping", _) => Value::Object(JsonObject::new()),
-        ("tools/list", Some(tools)) => Value::Object(JsonObject::from_iter([(
-            "tools".into(),
-            Value::Array(list_tools(state, tools)),
-        )])),
+        ("tools/list", Some(tools)) => {
+            if let Some(cursor) = params.and_then(|params| params.get("cursor"))
+                && !cursor.is_string()
+            {
+                let issues = [invalid_type("string", path(&["params", "cursor"]), Some(cursor))];
+                return Ok(error(id, -32603, pretty(&issues)));
+            }
+            Value::Object(JsonObject::from_iter([(
+                "tools".into(),
+                Value::Array(list_tools(state, tools)),
+            )]))
+        }
         ("tools/call", Some(_)) => {
             let issues = call_issues(params);
             if !issues.is_empty() {
                 return Ok(error(id, -32603, pretty(&issues)));
             }
-            call_tool(state, params, signal).await?
+            match call_tool(state, params, signal).await? {
+                Ok(result) => result,
+                Err(message) => return Ok(error(id, -32602, message)),
+            }
         }
         _ => return Ok(error(id, -32601, "Method not found".into())),
     };
@@ -206,39 +258,63 @@ fn listed_tool(state: &ServerState, tool: &SdkTool) -> JsonObject {
     listed
 }
 
+/// `Ok(Err(message))` is the `-32602` error `Server` answers when the handler result breaks `CallToolResultSchema`.
 async fn call_tool(
     state: &ServerState,
     params: Option<&JsonObject>,
     signal: CancellationToken,
-) -> Result<Value, McpServerError> {
+) -> Result<Result<Value, String>, McpServerError> {
     let name = params
         .and_then(|params| params.get("name"))
         .and_then(Value::as_str)
         .unwrap_or_default();
     let arguments = params.and_then(|params| params.get("arguments"));
     let Some(tool) = state.tools.as_ref().and_then(|tools| tools.get(name)) else {
-        return Ok(tool_error(format!("MCP error -32602: Tool {name} not found")));
+        return Ok(Ok(tool_error(format!("MCP error -32602: Tool {name} not found"))));
     };
     let schema = tool.input_schema();
     if let Some(error) = schema.compile_error() {
-        return Ok(tool_error(error.to_owned()));
+        return Ok(Ok(tool_error(error.to_owned())));
     }
-    let mut issues = Vec::new();
-    walk(schema.as_json(), arguments, &mut Vec::new(), &mut issues);
-    if issues.is_empty() && !schema.is_valid(arguments.unwrap_or(&Value::Null)) {
+    let Ok(prepared) = tool.validation().prepare(schema.as_json()) else {
+        return Ok(Ok(tool_error(format!(
+            "MCP error -32602: Tool {name} has a validation choice outside its input schema"
+        ))));
+    };
+    let parsed = sdk_mcp_zod::Node::from_schema(&prepared.schema, &prepared.callbacks)
+        .parse(arguments.map_or(Input::Undefined, Input::Json));
+    let mut issues = parsed.issues;
+    if issues.is_empty()
+        && sdk_mcp_zod::has_unmodeled(schema.as_json())
+        && !schema.is_valid(arguments.unwrap_or(&Value::Null))
+    {
         issues.push(custom(Vec::new()));
     }
     if !issues.is_empty() {
-        return Ok(tool_error(format!(
+        return Ok(Ok(tool_error(format!(
             "MCP error -32602: Input validation error: Invalid arguments for tool {name}: {}",
             pretty(&issues)
-        )));
+        ))));
     }
-    let arguments = arguments.and_then(Value::as_object).cloned().unwrap_or_default();
+    let arguments = match parsed.value {
+        Some(Value::Object(arguments)) => arguments,
+        _ => JsonObject::new(),
+    };
     match tool.call(McpToolRequest { arguments, signal }).await {
-        Ok(output) => Ok(output.to_wire_json()?),
+        Ok(output) => {
+            let wire = output.to_wire_json()?;
+            let checked = sdk_mcp_zod::call_tool_result().parse(Input::Json(&wire));
+            if checked.issues.is_empty() {
+                Ok(Ok(checked.value.unwrap_or(wire)))
+            } else {
+                Ok(Err(format!(
+                    "MCP error -32602: Invalid tools/call result: {}",
+                    pretty(&checked.issues)
+                )))
+            }
+        }
         Err(CallbackError::Cancelled) => Err(CallbackError::Cancelled.into()),
-        Err(CallbackError::Failed(error)) => Ok(tool_error(error.to_string())),
+        Err(CallbackError::Failed(error)) => Ok(Ok(tool_error(error.to_string()))),
     }
 }
 
@@ -248,6 +324,18 @@ fn call_issues(params: Option<&JsonObject>) -> Vec<JsonObject> {
         return vec![invalid_type("object", path(&["params"]), None)];
     };
     let mut issues = Vec::new();
+    // `task` comes first in the schema; a valid one never reaches this parse.
+    match params.get("task") {
+        None => {}
+        Some(Value::Object(task)) => {
+            if let Some(ttl) = task.get("ttl")
+                && !ttl.is_number()
+            {
+                issues.push(invalid_type("number", path(&["params", "task", "ttl"]), Some(ttl)));
+            }
+        }
+        other => issues.push(invalid_type("object", path(&["params", "task"]), other)),
+    }
     string_field(params, &["params"], "name", true, &mut issues);
     if let Some(arguments) = params.get("arguments")
         && !arguments.is_object()
@@ -399,85 +487,6 @@ fn is_js_object(value: &Value) -> bool {
     value.is_object() || value.is_array()
 }
 
-/// The zod issues of the object schema `McpServer` derives from a tool's input schema, in schema order.
-fn walk(schema: &JsonObject, value: Option<&Value>, at: &mut Vec<Value>, issues: &mut Vec<JsonObject>) {
-    if let Some(options) = schema.get("enum").and_then(Value::as_array) {
-        if value.is_none_or(|value| !options.iter().any(|option| js_equal(option, value))) {
-            issues.push(invalid_value(options.clone(), at.clone()));
-        }
-        return;
-    }
-    if let Some(constant) = schema.get("const") {
-        if value.is_none_or(|value| !js_equal(constant, value)) {
-            issues.push(invalid_value(vec![constant.clone()], at.clone()));
-        }
-        return;
-    }
-    let Some(expected) = schema.get("type").and_then(Value::as_str) else {
-        return;
-    };
-    match (expected, value) {
-        ("string", Some(Value::String(_)))
-        | ("number", Some(Value::Number(_)))
-        | ("boolean", Some(Value::Bool(_)))
-        | ("null", Some(Value::Null)) => {}
-        ("integer", Some(Value::Number(number))) => {
-            if !is_safe_integer(number) {
-                issues.push(invalid_int(at.clone()));
-            }
-        }
-        ("integer", other) => issues.push(invalid_type("number", at.clone(), other)),
-        ("object", Some(Value::Object(object))) => walk_properties(schema, object, at, issues),
-        ("array", Some(Value::Array(items))) => {
-            let unconstrained = JsonObject::new();
-            let item_schema = schema.get("items").and_then(Value::as_object).unwrap_or(&unconstrained);
-            for (index, item) in items.iter().enumerate() {
-                at.push(index.into());
-                walk(item_schema, Some(item), at, issues);
-                at.pop();
-            }
-        }
-        // The schema compiled, so `expected` is one of the seven JSON Schema types.
-        (_, other) => issues.push(invalid_type(expected, at.clone(), other)),
-    }
-}
-
-fn walk_properties(schema: &JsonObject, object: &JsonObject, at: &mut Vec<Value>, issues: &mut Vec<JsonObject>) {
-    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
-        return;
-    };
-    let required = schema.get("required").and_then(Value::as_array);
-    for (key, property) in properties {
-        let value = object.get(key);
-        let is_required = required.is_some_and(|names| names.iter().any(|name| name.as_str() == Some(key.as_str())));
-        if value.is_none() && !is_required {
-            continue;
-        }
-        if let Value::Object(property) = property {
-            at.push(key.as_str().into());
-            walk(property, value, at, issues);
-            at.pop();
-        }
-    }
-}
-
-fn is_safe_integer(number: &serde_json::Number) -> bool {
-    if let Some(integer) = number.as_i64() {
-        return integer.unsigned_abs() <= constants::JS_MAX_SAFE_INTEGER.unsigned_abs();
-    }
-    number
-        .as_f64()
-        .is_some_and(|float| float.fract() == 0.0 && float.abs() <= constants::JS_MAX_SAFE_INTEGER as f64)
-}
-
-/// `===` for the JSON values a zod enum or literal holds.
-fn js_equal(left: &Value, right: &Value) -> bool {
-    match (left, right) {
-        (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
-        _ => left == right,
-    }
-}
-
 fn path(segments: &[&str]) -> Vec<Value> {
     segments.iter().map(|segment| Value::from(*segment)).collect()
 }
@@ -507,58 +516,10 @@ fn invalid_type(expected: &str, at: Vec<Value>, value: Option<&Value>) -> JsonOb
     ])
 }
 
-fn invalid_int(at: Vec<Value>) -> JsonObject {
-    JsonObject::from_iter([
-        ("expected".into(), "int".into()),
-        ("format".into(), "safeint".into()),
-        ("code".into(), "invalid_type".into()),
-        ("path".into(), Value::Array(at)),
-        ("message".into(), "Invalid input: expected int, received number".into()),
-    ])
-}
-
-fn invalid_value(values: Vec<Value>, at: Vec<Value>) -> JsonObject {
-    let message = match values.as_slice() {
-        [only] => format!("Invalid input: expected {}", stringify_primitive(only)),
-        _ => format!(
-            "Invalid option: expected one of {}",
-            values.iter().map(stringify_primitive).collect::<Vec<_>>().join("|")
-        ),
-    };
-    JsonObject::from_iter([
-        ("code".into(), "invalid_value".into()),
-        ("values".into(), Value::Array(values)),
-        ("path".into(), Value::Array(at)),
-        ("message".into(), message.into()),
-    ])
-}
-
 fn custom(at: Vec<Value>) -> JsonObject {
     JsonObject::from_iter([
         ("code".into(), "custom".into()),
         ("path".into(), Value::Array(at)),
         ("message".into(), "Invalid input".into()),
     ])
-}
-
-/// zod `stringifyPrimitive`: a string in double quotes without escaping, anything else as `String(value)`.
-fn stringify_primitive(value: &Value) -> String {
-    match value {
-        Value::String(text) => format!("\"{text}\""),
-        other => js_string(other),
-    }
-}
-
-/// `String(value)` for a JSON value; a `null`, boolean or number reads as its `JSON.stringify` text.
-fn js_string(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        Value::Array(items) => items
-            .iter()
-            .map(|item| if item.is_null() { String::new() } else { js_string(item) })
-            .collect::<Vec<_>>()
-            .join(","),
-        Value::Object(_) => "[object Object]".to_owned(),
-        scalar => js_stringify(scalar),
-    }
 }

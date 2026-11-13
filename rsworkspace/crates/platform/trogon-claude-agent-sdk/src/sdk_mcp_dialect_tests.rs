@@ -9,13 +9,20 @@
 )]
 
 use super::*;
-use crate::{McpToolName, McpToolOutput, McpToolRequest, SdkTool, SdkToolOptions, ToolResultStatus};
+use crate::{
+    LengthChoice, McpToolName, McpToolOutput, McpToolRequest, NullabilityChoice, NumberFormatChoice, RefineFailure,
+    Refinement, SchemaCallback, SchemaCallbackOptions, SchemaChoice, SchemaPointer, SdkTool, SdkToolOptions,
+    StringCheckKind, StringFormatChoice, ToolResultStatus, Transformation, UnionChoice, ValidationChoices,
+    ValidationChoicesOptions, settings_json::js_stringify,
+};
 use serde_json::json;
 use tokio::sync::Notify;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 const FIXTURE: &str = include_str!("../tests/fixtures/sdk_mcp/dialects.json");
+const ZOD_FIXTURE: &str = include_str!("../tests/fixtures/sdk_mcp/typescript_zod.json");
+const CHOICES_FIXTURE: &str = include_str!("../tests/fixtures/sdk_mcp/typescript_choices.json");
 
 fn failed(message: &str) -> CallbackError {
     CallbackError::Failed(Box::new(std::io::Error::other(message.to_owned())))
@@ -26,6 +33,7 @@ fn content(status: ToolResultStatus) -> McpToolOutput {
         content: Vec::new(),
         structured_content: None,
         status,
+        result: None,
     }
 }
 
@@ -52,8 +60,19 @@ fn output(handler: &str, request: &McpToolRequest) -> Result<McpToolOutput, Call
             ..McpToolOutput::text("x")
         }),
         "boom" => Err(failed("boom")),
-        other => Err(failed(other)),
+        // The parsed arguments, as the generator's handler echoes `JSON.stringify(args)`.
+        "args" => Ok(text(&js_stringify(&Value::Object(request.arguments.clone())))),
+        other => match other.strip_prefix("result:") {
+            Some(result) => result_output(result),
+            None => Err(failed(other)),
+        },
     }
+}
+
+/// A handler that returns the JSON result the generator's handler returns, untouched.
+fn result_output(result: &str) -> Result<McpToolOutput, CallbackError> {
+    let parsed: Value = serde_json::from_str(result).map_err(|error| failed(&error.to_string()))?;
+    Ok(McpToolOutput::from_result(parsed))
 }
 
 fn field<'a>(value: &'a Value, name: &str) -> Result<&'a Value, String> {
@@ -66,18 +85,136 @@ fn optional_text(value: &Value, name: &str) -> Option<String> {
     value.get(name).and_then(Value::as_str).map(str::to_owned)
 }
 
+fn text_of<'a>(value: &'a Value, name: &str) -> Result<&'a str, String> {
+    field(value, name)?
+        .as_str()
+        .ok_or_else(|| format!("`{name}` is not a string: {value}"))
+}
+
+/// The choice a fixture names: `{"kind": .., "value": ..}`.
+fn choice(definition: &Value) -> Result<SchemaChoice, Box<dyn std::error::Error>> {
+    let value = definition.get("value");
+    let word = || value.and_then(Value::as_str).ok_or("choice without a text value");
+    Ok(match text_of(definition, "kind")? {
+        "union" if word()? == "plain" => SchemaChoice::Union(UnionChoice::Plain),
+        "union" => SchemaChoice::Union(UnionChoice::Discriminated {
+            discriminator: word()?.to_owned(),
+        }),
+        "nullability" => SchemaChoice::Nullability(match word()? {
+            "union_with_null" => NullabilityChoice::UnionWithNull,
+            _ => NullabilityChoice::Nullable,
+        }),
+        "length" => SchemaChoice::Length(match word()? {
+            "min_max" => LengthChoice::MinMax,
+            _ => LengthChoice::Exact,
+        }),
+        "check_order" => SchemaChoice::StringCheckOrder(
+            value
+                .and_then(Value::as_array)
+                .ok_or("check order without a list")?
+                .iter()
+                .map(|kind| match kind.as_str() {
+                    Some("minimum") => Ok(StringCheckKind::Minimum),
+                    Some("maximum") => Ok(StringCheckKind::Maximum),
+                    Some("format") => Ok(StringCheckKind::Format),
+                    _ => Err(format!("unknown check {kind}")),
+                })
+                .collect::<Result<_, _>>()?,
+        ),
+        "number_format" => SchemaChoice::NumberFormat(match word()? {
+            "bounded_integer" => NumberFormatChoice::BoundedInteger,
+            _ => NumberFormatChoice::Inferred,
+        }),
+        "string_format" => SchemaChoice::StringFormat(match word()? {
+            "iso_time" => StringFormatChoice::IsoTime,
+            _ => StringFormatChoice::PlainPattern,
+        }),
+        "regex_flags" => SchemaChoice::RegexFlags(word()?.to_owned()),
+        other => return Err(format!("unknown choice {other}").into()),
+    })
+}
+
+/// The `.refine` checks the generator registers under these names.
+fn refinement(name: &str) -> Result<Refinement, String> {
+    let (rejected, message): (&'static str, Option<&'static str>) = match name {
+        "not_bad" => ("bad", None),
+        "not_abc" => ("abc", Some("not abc")),
+        "starts_with_a" => ("", Some("must start with a")),
+        other => return Err(format!("unknown fixture refinement {other}")),
+    };
+    Ok(Arc::new(move |value: &Value| {
+        let text = value.as_str().unwrap_or_default();
+        let fails = if name == "starts_with_a" {
+            !text.starts_with('a')
+        } else {
+            text == rejected
+        };
+        match (fails, message) {
+            (false, _) => Ok(()),
+            (true, Some(message)) => Err(RefineFailure::new(message)),
+            (true, None) => Err(RefineFailure::invalid()),
+        }
+    }))
+}
+
+/// The `.transform` maps the generator registers under these names.
+fn transformation(name: &str) -> Result<Transformation, String> {
+    match name {
+        "upper" => Ok(Arc::new(|value: Value| {
+            Ok(Value::from(value.as_str().unwrap_or_default().to_uppercase()))
+        })),
+        "gate" => Ok(Arc::new(|value: Value| {
+            if value.as_str() == Some("no") {
+                Err(RefineFailure::new("nope"))
+            } else {
+                Ok(value)
+            }
+        })),
+        other => Err(format!("unknown fixture transformation {other}")),
+    }
+}
+
+fn validation(definition: &Value) -> Result<ValidationChoices, Box<dyn std::error::Error>> {
+    let list = |name: &str| -> Result<Vec<Value>, String> {
+        field(definition, name)?
+            .as_array()
+            .cloned()
+            .ok_or_else(|| format!("`{name}` is not a list"))
+    };
+    let mut choices = Vec::new();
+    for entry in list("choices")? {
+        choices.push((
+            SchemaPointer::parse(text_of(&entry, "pointer")?)?,
+            choice(field(&entry, "choice")?)?,
+        ));
+    }
+    let mut callbacks = Vec::new();
+    for entry in list("callbacks")? {
+        let named = |name: &str| field(&entry, name).map(Value::as_str);
+        let callback = SchemaCallback::from(SchemaCallbackOptions {
+            refine: named("refine")?.map(refinement).transpose()?,
+            transform: named("transform")?.map(transformation).transpose()?,
+        });
+        callbacks.push((SchemaPointer::parse(text_of(&entry, "pointer")?)?, callback));
+    }
+    Ok(ValidationChoices::new(ValidationChoicesOptions { choices, callbacks })?)
+}
+
 fn tool(definition: &Value) -> Result<SdkTool, Box<dyn std::error::Error>> {
     let handler = field(definition, "handler")?
         .as_str()
         .ok_or("handler is not a string")?
         .to_owned();
-    if !["echo", "ok", "empty", "empty_false", "rich", "boom"].contains(&handler.as_str()) {
+    if !(["echo", "ok", "empty", "empty_false", "rich", "boom", "args"].contains(&handler.as_str())
+        || handler.starts_with("result:"))
+    {
         return Err(format!("unknown fixture handler {handler}").into());
     }
     let schema = field(definition, "schema")?
         .as_object()
         .ok_or("schema is not an object")?;
-    Ok(SdkTool::from(SdkToolOptions {
+    let validation = definition.get("validation").map(validation).transpose()?;
+    let tool = SdkTool::from(SdkToolOptions {
         name: McpToolName::from(field(definition, "name")?.as_str().ok_or("name is not a string")?),
         description: optional_text(definition, "description").unwrap_or_default(),
         input_schema: McpToolInputSchema::new(schema.clone()),
@@ -88,7 +225,11 @@ fn tool(definition: &Value) -> Result<SdkTool, Box<dyn std::error::Error>> {
         annotations: definition.get("annotations").and_then(Value::as_object).cloned(),
         search_hint: optional_text(definition, "search_hint"),
         always_load: definition.get("always_load").and_then(Value::as_bool).unwrap_or(false),
-    }))
+    });
+    Ok(match validation {
+        Some(validation) => tool.with_validation(validation),
+        None => tool,
+    })
 }
 
 fn server(spec: &Value, dialect: McpServerDialect) -> Result<LocalMcpServer, Box<dyn std::error::Error>> {
@@ -118,11 +259,22 @@ async fn replay(
     suite: &str,
     render: fn(&JsonObject) -> Result<String, serde_json::Error>,
 ) -> TestResult {
-    let fixture: Value = serde_json::from_str(FIXTURE)?;
+    replay_fixture(FIXTURE, dialect, suite, render, (30, 90)).await
+}
+
+/// Replays `suite` of `fixture`, requiring more than `minimum` cases and exchanges.
+async fn replay_fixture(
+    fixture: &str,
+    dialect: McpServerDialect,
+    suite: &str,
+    render: fn(&JsonObject) -> Result<String, serde_json::Error>,
+    minimum: (usize, usize),
+) -> TestResult {
+    let fixture: Value = serde_json::from_str(fixture)?;
     let suite = field(&fixture, suite)?;
     let servers = field(suite, "servers")?;
     let cases = field(suite, "cases")?.as_array().ok_or("cases is not a list")?;
-    assert!(cases.len() > 30);
+    assert!(cases.len() > minimum.0);
     let mut exchanged = 0;
     for (index, case) in cases.iter().enumerate() {
         let name = field(case, "server")?.as_str().ok_or("case server is not a string")?;
@@ -144,7 +296,7 @@ async fn replay(
             exchanged += 1;
         }
     }
-    assert!(exchanged > 90);
+    assert!(exchanged > minimum.1);
     Ok(())
 }
 
@@ -154,6 +306,34 @@ async fn typescript_dialect_answers_like_create_sdk_mcp_server() -> TestResult {
         McpServerDialect::TypeScript,
         "typescript",
         serde_json::to_string::<JsonObject>,
+    )
+    .await
+}
+
+/// Zod issues, object modes, unions, formats, handler results and the protocol envelope, each answer
+/// recorded from the bundled zod and MCP SDK.
+#[tokio::test]
+async fn typescript_dialect_validates_like_the_bundled_zod_and_mcp_sdk() -> TestResult {
+    replay_fixture(
+        ZOD_FIXTURE,
+        McpServerDialect::TypeScript,
+        "typescript",
+        serde_json::to_string::<JsonObject>,
+        (60, 600),
+    )
+    .await
+}
+
+/// Every validation choice and callback: each variant of an option lists the same JSON Schema and answers
+/// as the zod schema behind it does, recorded from zod 4.1.12 through the pinned SDK.
+#[tokio::test]
+async fn typescript_dialect_validates_each_exposed_choice_like_zod() -> TestResult {
+    replay_fixture(
+        CHOICES_FIXTURE,
+        McpServerDialect::TypeScript,
+        "typescript",
+        serde_json::to_string::<JsonObject>,
+        (25, 270),
     )
     .await
 }
@@ -712,15 +892,14 @@ fn recorded(result: &str) -> Result<Value, serde_json::Error> {
     serde_json::from_str(result)
 }
 
-/// A keyword that the walk does not model still fails the call with the `McpServer` validation error.
 #[tokio::test]
-async fn typescript_dialect_rejects_arguments_that_fail_a_keyword_it_does_not_walk() -> TestResult {
+async fn typescript_dialect_reports_a_minimum_like_the_bundled_zod() -> TestResult {
     let listed = r##"{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"n":{"type":"number","minimum":5}},"required":["n"]}"##;
-    let result = typescript_call(listed, json!({"name":"t","arguments":{"n":1}})).await?;
-    let message = error_text(&result)?;
-    assert!(
-        message.starts_with("MCP error -32602: Input validation error: Invalid arguments for tool t: "),
-        "{message}"
+    assert_eq!(
+        typescript_call(listed, json!({"name":"t","arguments":{"n":1}})).await?,
+        recorded(
+            r##"{"content":[{"type":"text","text":"MCP error -32602: Input validation error: Invalid arguments for tool t: [\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 5,\n    \"inclusive\": true,\n    \"path\": [\n      \"n\"\n    ],\n    \"message\": \"Too small: expected number to be >=5\"\n  }\n]"}],"isError":true}"##
+        )?
     );
     assert_eq!(
         typescript_call(listed, json!({"name":"t","arguments":{"n":6}})).await?,
