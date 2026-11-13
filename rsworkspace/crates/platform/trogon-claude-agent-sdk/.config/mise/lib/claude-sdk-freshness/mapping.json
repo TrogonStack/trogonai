@@ -1251,7 +1251,24 @@
         "SdkToolsError",
         "McpServerError",
         "McpToolRequest",
-        "McpToolOutput"
+        "McpToolOutput",
+        "ValidationChoices",
+        "ValidationChoicesOptions",
+        "ValidationChoicesError",
+        "SchemaPointer",
+        "SchemaPointerError",
+        "SchemaChoice",
+        "UnionChoice",
+        "NullabilityChoice",
+        "LengthChoice",
+        "StringCheckKind",
+        "NumberFormatChoice",
+        "StringFormatChoice",
+        "SchemaCallback",
+        "SchemaCallbackOptions",
+        "RefineFailure",
+        "Refinement",
+        "Transformation"
       ],
       "tests": [
         {
@@ -1301,6 +1318,46 @@
         {
           "path": "src/sdk_mcp_regexp_tests.rs",
           "name": "matches_follow_ecmascript_lookaround_backreferences_named_groups_and_unicode_flags"
+        },
+        {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "typescript_dialect_validates_each_exposed_choice_like_zod"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "pointers_follow_rfc_6901"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "duplicate_choices_callbacks_and_incomplete_orders_are_typed_errors"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "preparing_writes_the_choices_into_a_copy_and_leaves_the_listed_schema_alone"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "a_pointer_outside_the_schema_is_returned"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "a_default_choice_leaves_the_schema_as_listed"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "the_exact_length_choice_reports_one_exact_issue_and_min_max_reports_a_bound"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "the_check_order_choice_orders_the_issues"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "refinements_and_transformations_run_at_the_node_with_zods_issue_shape"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "the_discriminated_union_choice_names_a_missing_discriminator"
         },
         {
           "path": "src/sdk_mcp_server_tests.rs",
