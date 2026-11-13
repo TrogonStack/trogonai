@@ -1067,3 +1067,49 @@ pub(crate) const WRITABLE_WALK_LINK_LIMIT: usize = 40;
 /// The write bit for others (`S_IWOTH`) and for the group (`S_IWGRP`) of a mode.
 pub(crate) const MODE_OTHER_WRITABLE: u32 = 0o2;
 pub(crate) const MODE_GROUP_WRITABLE: u32 = 0o20;
+
+// Node `path` port
+
+/// UTF-16 code unit of `.`.
+pub(crate) const NODE_PATH_CHAR_DOT: u16 = 0x2e;
+
+/// UTF-16 code unit of `/`.
+pub(crate) const NODE_PATH_CHAR_FORWARD_SLASH: u16 = 0x2f;
+
+/// UTF-16 code unit of `\`.
+pub(crate) const NODE_PATH_CHAR_BACKWARD_SLASH: u16 = 0x5c;
+
+/// UTF-16 code unit of `:`.
+pub(crate) const NODE_PATH_CHAR_COLON: u16 = 0x3a;
+
+/// Device names the Windows flavor of node's `path` treats as reserved (compared after `toUpperCase`).
+pub(crate) const NODE_WINDOWS_RESERVED_NAMES: &[&str] = &[
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+    "COM\u{b9}",
+    "COM\u{b2}",
+    "COM\u{b3}",
+    "LPT\u{b9}",
+    "LPT\u{b2}",
+    "LPT\u{b3}",
+];
