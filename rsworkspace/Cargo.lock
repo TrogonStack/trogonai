@@ -7903,6 +7903,7 @@ dependencies = [
  "tokio-util",
  "toml 1.1.8+spec-1.1.0",
  "tracing",
+ "tracing-subscriber",
  "trogon-audit",
  "trogon-credential-aggregate",
  "trogon-credential-domain",
