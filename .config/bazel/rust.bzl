@@ -76,5 +76,5 @@ def workspace_crate(
             proc_macro_deps = all_crate_deps(proc_macro = True) + test_proc_macro_deps,
             rustc_flags = _RUSTC_FLAGS,
             deps = [":" + name] + all_crate_deps(normal = True) + deps + test_deps,
-            **dict({"data": data}, **attrs)
+            **dict({"data": data, "version": version}, **attrs)
         )

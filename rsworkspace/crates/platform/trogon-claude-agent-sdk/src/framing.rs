@@ -56,11 +56,6 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
     }
 }
 
-#[cfg(test)]
-pub(crate) async fn drain_stderr<R: AsyncRead + Unpin>(reader: R, limit: usize) -> Result<StderrTail, std::io::Error> {
-    drain_stderr_with(reader, limit, None).await
-}
-
 fn deliver(handler: &crate::StderrHandler, text: &str) {
     // A failing callback must not break the stream, as in both upstream SDKs.
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (handler.callback)(text)));

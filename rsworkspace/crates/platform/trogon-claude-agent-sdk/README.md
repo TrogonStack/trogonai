@@ -195,6 +195,17 @@ the stdin `initialize` bytes).
   with Python's hint text. `connect_with_adapters` never discovers, matching
   Python's custom transport and TypeScript's `spawnClaudeCodeProcess`: its
   spawner receives `claude` when `cli_path` is omitted.
+- `Transport` is Python's transport interface: `connect`, `write`, `read_message`
+  (one object per call, `None` at the end of the stream, in place of Python's
+  `read_messages` iterator), `close`, `is_ready` and `end_input`, plus a provided
+  `kill` that `abort()` calls before `close` (TypeScript's abort signal). It is a
+  generic bound, not a trait object. `ClaudeSdkClient::connect_with_transport`,
+  `connect_with_transport_and_adapters`, `query_with_transport` and
+  `query_turn_with_transport` inject one; the subprocess implementation is the
+  default and stays crate-private. A custom transport gets no CLI discovery, no
+  argument list and no store-backed resume materialization, while the session
+  store mirror still runs, as in Python. `read_message` must be cancel safe, and
+  an `Err` from any method ends the run as `Error::Transport` surfaces it.
 - Failures follow upstream. A missing executable is `Error::CliNotFoundAt`, a missing
   `cwd` is `Error::WorkingDirectoryMissing`, any other spawn failure is
   `Error::Spawn` ("Failed to start Claude Code: ..."). `Error::Process` displays
@@ -270,6 +281,16 @@ typed field, and keys it does not declare are kept in order. `Settings::from_jso
 `SandboxSettings` and its parts, `ResolvedSettings`, `ProvenanceEntry`, `ResolvedSettingSource`,
 `PolicySettingsOrigin`, `ResolveSettingsOptions` and `SDKSettingsParseError` carry the upstream
 names; Python sandbox dicts decode and encode through the sandbox types unchanged.
+
+`resolve_settings` ports TypeScript `resolveSettings`: the user, project, local and flag sources
+cascade with array union, and the managed policy comes from the first tier that has settings
+(remote, macOS plist via `plutil`, Windows registry via `reg query`, `/etc/claude-code`, the
+parent process). The result carries per-key provenance and `machinePolicy.didNotLoad`.
+`resolve_settings_with` runs it against any `SettingsHost`, so tests inject files, variables and
+command output. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
+`claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
+byte for byte. Gaps: schema value normalization, `managedSourcesBehavior: "merge"`, cloud and
+org mode, and the git-ignored cwd check.
 
 ## External session stores
 

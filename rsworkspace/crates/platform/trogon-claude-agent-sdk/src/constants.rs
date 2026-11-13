@@ -187,3 +187,340 @@ pub(crate) const TS_FORK_MESSAGE_KEYS: [&str; 3] = ["anchorUuid", "uuids", "allU
 pub(crate) const TS_FORK_SEGMENT_KEYS: [&str; 3] = ["headUuid", "anchorUuid", "tailUuid"];
 
 pub(crate) const TS_FORK_TITLE_FALLBACK: &str = "Forked session";
+
+/// Largest settings file the resolver reads, in bytes (`fm` upstream).
+pub(crate) const SETTINGS_FILE_MAX_BYTES: usize = 2_097_152;
+
+/// Largest `plutil` or `reg.exe` output the resolver reads, in bytes (`Sy` upstream).
+pub(crate) const POLICY_READ_MAX_BUFFER: usize = 2_097_152;
+
+/// Timeout for each `plutil` or `reg.exe` run (`Ex` upstream).
+pub(crate) const POLICY_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Keys that do not make a managed settings document count as policy content (`Qi` upstream).
+pub(crate) const POLICY_META_KEYS: [&str; 2] = ["managedSourcesBehavior", "wslInheritsWindowsSettings"];
+
+/// Keys only honored from administrator-controlled sources (`mE` upstream).
+pub(crate) const MANAGED_ONLY_KEYS: [&str; 3] = ["managedMcpServers", "isolation", "attributionProjectPolicy"];
+
+/// Settings sources in precedence order, lowest first (`x5` upstream).
+pub(crate) const SOURCE_ORDER: [&str; 5] = [
+    "userSettings",
+    "projectSettings",
+    "localSettings",
+    "flagSettings",
+    "policySettings",
+];
+
+/// Default `settingSources` of `resolveSettings` (`Cet` upstream).
+pub(crate) const DEFAULT_SETTING_SOURCES: [&str; 3] = ["user", "project", "local"];
+
+/// `permissions.defaultMode` values the trust filter treats as escalating (`Aet` upstream).
+pub(crate) const ESCALATING_DEFAULT_MODES: [&str; 3] = ["bypassPermissions", "auto", "acceptEdits"];
+
+/// Escalating modes that a repo-local `local` source may also not set (`P5` upstream).
+pub(crate) const STRICT_ESCALATING_DEFAULT_MODES: [&str; 2] = ["auto", "bypassPermissions"];
+
+/// Settings keys whose arrays are replaced rather than unioned.
+pub(crate) const REPLACED_ARRAY_KEYS: [&str; 1] = ["fallbackModel"];
+
+/// Bundle identifier whose managed preferences hold the policy.
+pub(crate) const PLIST_DOMAIN: &str = "com.anthropic.claudecode";
+
+/// Directory that holds managed preferences on macOS.
+pub(crate) const PLIST_DIRECTORY: &str = "/Library/Managed Preferences";
+
+/// `plutil` binary the plist reader runs.
+pub(crate) const PLUTIL_PATH: &str = "/usr/bin/plutil";
+
+/// Arguments of the `plutil` conversion to JSON.
+pub(crate) const PLUTIL_CONVERT_ARGS: [&str; 5] = ["-convert", "json", "-o", "-", "--"];
+
+/// Arguments of the `plutil` lint run.
+pub(crate) const PLUTIL_LINT_ARGS: [&str; 3] = ["-lint", "-s", "--"];
+
+/// Machine-wide registry key of the Windows policy.
+pub(crate) const REGISTRY_MACHINE_KEY: &str = "HKLM\\SOFTWARE\\Policies\\ClaudeCode";
+
+/// Per-user registry key of the Windows policy.
+pub(crate) const REGISTRY_USER_KEY: &str = "HKCU\\SOFTWARE\\Policies\\ClaudeCode";
+
+/// Registry value that holds the settings document.
+pub(crate) const REGISTRY_VALUE_NAME: &str = "Settings";
+
+/// Text `reg query` prints when the key or value does not exist.
+pub(crate) const REGISTRY_NOT_FOUND_TEXT: &str = "unable to find the specified registry key or value";
+
+/// `reg.exe` as WSL reaches it.
+pub(crate) const WSL_REGISTRY_TOOL: &str = "/mnt/c/Windows/System32/reg.exe";
+
+/// Windows managed settings directory as WSL reaches it.
+pub(crate) const WSL_MANAGED_DIRECTORY: &str = "/mnt/c/Program Files/ClaudeCode";
+
+/// Kernel version file the platform check reads.
+pub(crate) const PROC_VERSION_PATH: &str = "/proc/version";
+
+/// Managed settings directory on macOS.
+pub(crate) const MACOS_MANAGED_DIRECTORY: &str = "/Library/Application Support/ClaudeCode";
+
+/// Managed settings directory on Windows.
+pub(crate) const WINDOWS_MANAGED_DIRECTORY: &str = "C:\\Program Files\\ClaudeCode";
+
+/// Managed settings directory everywhere else.
+pub(crate) const LINUX_MANAGED_DIRECTORY: &str = "/etc/claude-code";
+
+/// Managed settings file name.
+pub(crate) const MANAGED_SETTINGS_FILE: &str = "managed-settings.json";
+
+/// Managed settings drop-in directory name.
+pub(crate) const MANAGED_SETTINGS_DROP_IN_DIRECTORY: &str = "managed-settings.d";
+
+/// Managed policy key that decides whether tiers merge or the first one wins.
+pub(crate) const MANAGED_SOURCES_BEHAVIOR_KEY: &str = "managedSourcesBehavior";
+
+/// Environment variable that opts out of the admin environment union.
+pub(crate) const DISABLE_ADMIN_ENV_UNION_VARIABLE: &str = "CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION";
+
+/// Boolean policy keys a parent `managedSettings` can only tighten to `true`.
+pub(crate) const PARENT_RESTRICT_TRUE_KEYS: [&str; 4] = [
+    "disableRemoteControl",
+    "disableAgentView",
+    "disableWorkflows",
+    "disableArtifact",
+];
+
+/// Boolean policy keys a parent `managedSettings` can only tighten to `false`.
+pub(crate) const PARENT_RESTRICT_FALSE_KEYS: [&str; 2] = ["enableWorkflows", "enableArtifact"];
+
+/// Allow-list policy keys that a parent slice never overrides (`Mu` upstream).
+pub(crate) const ALLOW_LIST_KEYS: [&str; 4] = [
+    "allowedMcpServers",
+    "availableModels",
+    "strictKnownMarketplaces",
+    "allowedProviders",
+];
+
+/// Top-level key order of the upstream settings schema; keys outside it follow in input order.
+pub(crate) const SETTINGS_SCHEMA_KEY_ORDER: [&str; 191] = [
+    "$schema",
+    "apiKeyHelper",
+    "proxyAuthHelper",
+    "awsCredentialExport",
+    "awsAuthRefresh",
+    "gcpAuthRefresh",
+    "processWrapper",
+    "policyHelper",
+    "policyHelpers",
+    "fileSuggestion",
+    "respectGitignore",
+    "breakReminder",
+    "quietHours",
+    "cleanupPeriodDays",
+    "desktopSessionCleanupPeriodDays",
+    "syncClaudeAiSkills",
+    "syncClaudeAiPlugins",
+    "skillListingMaxDescChars",
+    "skillListingBudgetFraction",
+    "wslInheritsWindowsSettings",
+    "env",
+    "attribution",
+    "attributionProject",
+    "attributionProjectPolicy",
+    "includeCoAuthoredBy",
+    "includeGitInstructions",
+    "permissions",
+    "model",
+    "fallbackModel",
+    "availableModels",
+    "enforceAvailableModels",
+    "availableModelsMatch",
+    "deniedModels",
+    "modelOverrides",
+    "modelPicker",
+    "modelPricing",
+    "enableAllProjectMcpServers",
+    "enabledMcpjsonServers",
+    "disabledMcpjsonServers",
+    "disableClaudeAiConnectors",
+    "skillOverrides",
+    "disableBundledSkills",
+    "managedMcpServers",
+    "allowedMcpServers",
+    "deniedMcpServers",
+    "hooks",
+    "worktree",
+    "disableAllHooks",
+    "disableReplyCheck",
+    "disableAgentView",
+    "disableRemoteControl",
+    "disableWorkflows",
+    "disableArtifact",
+    "enableArtifact",
+    "enableWorkflows",
+    "workflowSizeGuideline",
+    "workflowKeywordTriggerEnabled",
+    "disableSkillShellExecution",
+    "disableWindowsBashCommandSplit",
+    "defaultShell",
+    "bashEditDiffEnabled",
+    "bashOutputMaxChars",
+    "taskOutputMaxChars",
+    "respondToBashCommands",
+    "allowManagedHooksOnly",
+    "allowedHttpHookUrls",
+    "httpHookAllowedEnvVars",
+    "allowManagedPermissionRulesOnly",
+    "allowManagedMcpServersOnly",
+    "allowAllClaudeAiMcps",
+    "allowClaudeInChromeWithManagedMcp",
+    "strictPluginOnlyCustomization",
+    "statusLine",
+    "prUrlTemplate",
+    "footerLinksRegexes",
+    "subagentStatusLine",
+    "enabledPlugins",
+    "prependPlugins",
+    "appendPlugins",
+    "extraKnownMarketplaces",
+    "additionalMarketplaces",
+    "strictKnownMarketplaces",
+    "allowedMarketplaces",
+    "blockedMarketplaces",
+    "disableCommandPluginSources",
+    "disableSideloadFlags",
+    "pluginSuggestionMarketplaces",
+    "forceLoginMethod",
+    "forceLoginGatewayUrl",
+    "gatewayInternalNetworks",
+    "parentSettingsBehavior",
+    "managedSourcesBehavior",
+    "forceLoginOrgUUID",
+    "allowedProviders",
+    "forceRemoteSettingsRefresh",
+    "otelHeadersHelper",
+    "outputStyle",
+    "viewMode",
+    "language",
+    "skipWebFetchPreflight",
+    "sandbox",
+    "feedbackSurveyRate",
+    "feedbackDrafts",
+    "spinnerTipsEnabled",
+    "clawdFileProgressEnabled",
+    "spinnerVerbs",
+    "spinnerTipsOverride",
+    "syntaxHighlightingDisabled",
+    "maxProseWidth",
+    "spellcheck",
+    "terminalTitleFromRename",
+    "promptCacheTtl",
+    "subagentPromptCacheTtl",
+    "alwaysThinkingEnabled",
+    "effortLevel",
+    "maxEffortLevel",
+    "modelSettings",
+    "ultracode",
+    "autoCompactWindow",
+    "advisorModel",
+    "fastMode",
+    "fastModePerSessionOptIn",
+    "promptSuggestionEnabled",
+    "emojiCompletionEnabled",
+    "awaySummaryEnabled",
+    "responseComparisonEnabled",
+    "showClearContextOnPlanAccept",
+    "askUserQuestionTimeout",
+    "dialogExpiry",
+    "agent",
+    "modelProposedGoals",
+    "companyAnnouncements",
+    "pluginConfigs",
+    "remote",
+    "autoUpdatesChannel",
+    "minimumVersion",
+    "requiredMinimumVersion",
+    "requiredMaximumVersion",
+    "plansDirectory",
+    "tui",
+    "voice",
+    "channelsEnabled",
+    "allowedChannelPlugins",
+    "prefersReducedMotion",
+    "timeFormat",
+    "timeZone",
+    "doneMeansMerged",
+    "totalTokensReminder",
+    "totalTokensReminderBudget",
+    "totalTokensReminderAfterUserTurn",
+    "autoMemoryEnabled",
+    "autoMemoryDirectory",
+    "autoDreamEnabled",
+    "showThinkingSummaries",
+    "skipDangerousModePermissionPrompt",
+    "skipWorkflowUsageWarning",
+    "disableAutoMode",
+    "remoteTools",
+    "sshConfigs",
+    "sshHostCommands",
+    "claudeMd",
+    "claudeMdExcludes",
+    "pluginTrustMessage",
+    "theme",
+    "editorMode",
+    "keybindingFlavor",
+    "vimInsertModeRemaps",
+    "verbose",
+    "preferredNotifChannel",
+    "autoCompactEnabled",
+    "precomputeCompactionEnabled",
+    "precomputeArmTokens",
+    "idleCompaction",
+    "switchModelsOnFlag",
+    "autoContinueAtUsageLimit",
+    "autoScrollEnabled",
+    "wheelScrollAccelerationEnabled",
+    "fileCheckpointingEnabled",
+    "showTurnDuration",
+    "showMessageTimestamps",
+    "terminalProgressBarEnabled",
+    "todoFeatureEnabled",
+    "teammateMode",
+    "remoteControlAtStartup",
+    "remoteControl",
+    "isolatePeerMachines",
+    "daemonColdStart",
+    "crossSessionInbound",
+    "autoUploadSessions",
+    "inputNeededNotifEnabled",
+    "agentPushNotifEnabled",
+];
+
+pub(crate) const USER_SETTINGS_FILE: &str = "settings.json";
+pub(crate) const PROJECT_SETTINGS_FILE: [&str; 2] = [".claude", "settings.json"];
+pub(crate) const LOCAL_SETTINGS_FILE: [&str; 2] = [".claude", "settings.local.json"];
+pub(crate) const BUSY_ERRNOS: [&str; 4] = ["EAGAIN", "EMFILE", "ENFILE", "ENOMEM"];
+pub(crate) const MAX_BUFFER_ERRNO: &str = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+pub(crate) const OTEL_PREFIXES: [&str; 2] = ["OTEL_EXPORTER_OTLP_", "ANT_OTEL_EXPORTER_OTLP_"];
+pub(crate) const OTEL_EXACT: [&str; 10] = [
+    "OTEL_LOG_RAW_API_BODIES",
+    "OTEL_LOG_USER_PROMPTS",
+    "OTEL_LOG_ASSISTANT_RESPONSES",
+    "OTEL_LOG_TOOL_CONTENT",
+    "OTEL_LOG_TOOL_DETAILS",
+    "OTEL_LOG_MANAGED_SETTINGS",
+    "OTEL_LOGS_EXPORTER",
+    "ENABLE_BETA_TRACING_DETAILED",
+    "BETA_TRACING_ENDPOINT",
+    "ANT_OTEL_LOGS_EXPORTER",
+];
+pub(crate) const AUTH_HELPERS: [&str; 4] = [
+    "apiKeyHelper",
+    "awsAuthRefresh",
+    "awsCredentialExport",
+    "gcpAuthRefresh",
+];
+pub(crate) const CLOUD_PROVIDER_FLAGS: [&str; 3] = [
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_MANTLE",
+];

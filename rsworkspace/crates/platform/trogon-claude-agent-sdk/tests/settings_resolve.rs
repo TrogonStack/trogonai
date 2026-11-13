@@ -1,0 +1,311 @@
+#![allow(clippy::expect_used, clippy::unwrap_used)]
+
+use serde_json::{Value, json};
+use trogon_claude_agent_sdk::{
+    ResolveSettingsOptions, ResolvedSettings, Settings, adapters::OperatingSystem, filter_escalating_default_mode,
+    resolve_settings_with,
+};
+
+#[path = "support/fake_settings_host.rs"]
+mod fake_settings_host;
+
+use fake_settings_host::{FakeHost, exited, ok, spawn_error};
+
+fn options(value: Value) -> ResolveSettingsOptions {
+    serde_json::from_value(value).expect("options")
+}
+
+fn resolve(host: &FakeHost, value: Value) -> Value {
+    let resolved = resolve_settings_with(host, &options(value)).expect("resolve");
+    serde_json::to_value(resolved).expect("encode")
+}
+
+fn cascade_host() -> FakeHost {
+    FakeHost::linux()
+        .file(
+            "/home/fixture/.claude/settings.json",
+            r#"{"model":"user-model","permissions":{"allow":["Bash(a)"]},"env":{"A":"1"}}"#,
+        )
+        .file(
+            "/work/project/.claude/settings.json",
+            r#"{"model":"project-model","permissions":{"allow":["Bash(b)","Bash(a)"]}}"#,
+        )
+        .file("/work/project/.claude/settings.local.json", r#"{"env":{"B":"2"}}"#)
+}
+
+#[test]
+fn cascade_merges_in_precedence_order_with_array_union_and_recursion() {
+    let result = resolve(&cascade_host(), json!({}));
+    assert_eq!(
+        result["effective"],
+        json!({
+            "model": "project-model",
+            "permissions": {"allow": ["Bash(a)", "Bash(b)"]},
+            "env": {"A": "1", "B": "2"}
+        })
+    );
+    assert_eq!(
+        result["provenance"],
+        json!({
+            "model": {"source": "project", "path": "/work/project/.claude/settings.json"},
+            "permissions": {"source": "project", "path": "/work/project/.claude/settings.json"},
+            "env": {"source": "local", "path": "/work/project/.claude/settings.local.json"}
+        })
+    );
+    assert_eq!(result["machinePolicy"], json!({"didNotLoad": false}));
+}
+
+#[test]
+fn sources_list_each_non_empty_source_low_to_high() {
+    let result = resolve(&cascade_host(), json!({}));
+    let sources = result["sources"].as_array().expect("sources");
+    let labels: Vec<_> = sources.iter().map(|item| item["source"].as_str().unwrap()).collect();
+    assert_eq!(labels, ["user", "project", "local"]);
+    assert_eq!(sources[0]["path"], "/home/fixture/.claude/settings.json");
+    assert_eq!(sources[0]["settings"]["model"], "user-model");
+}
+
+#[test]
+fn empty_setting_sources_skip_every_filesystem_source() {
+    let result = resolve(&cascade_host(), json!({"settingSources": []}));
+    assert_eq!(result["effective"], json!({}));
+    assert_eq!(result["sources"], json!([]));
+}
+
+#[test]
+fn explicit_cwd_selects_the_project_files() {
+    let host = cascade_host().file("/elsewhere/.claude/settings.json", r#"{"model":"elsewhere"}"#);
+    let result = resolve(&host, json!({"cwd": "/elsewhere", "settingSources": ["project"]}));
+    assert_eq!(result["effective"], json!({"model": "elsewhere"}));
+}
+
+#[test]
+fn config_dir_variable_moves_the_user_file() {
+    let host = FakeHost::linux()
+        .variable("CLAUDE_CONFIG_DIR", "/cfg")
+        .file("/cfg/settings.json", r#"{"model":"configured"}"#);
+    let result = resolve(&host, json!({"settingSources": ["user"]}));
+    assert_eq!(result["provenance"]["model"]["path"], "/cfg/settings.json");
+}
+
+#[test]
+fn invalid_and_non_object_files_are_skipped_without_failing() {
+    let host = FakeHost::linux()
+        .file("/home/fixture/.claude/settings.json", "{ not json")
+        .file("/work/project/.claude/settings.json", "[1]")
+        .file("/work/project/.claude/settings.local.json", "   \n");
+    let result = resolve(&host, json!({}));
+    assert_eq!(result["effective"], json!({}));
+    assert_eq!(result["sources"], json!([]));
+}
+
+#[test]
+fn managed_file_wins_and_reports_its_origin() {
+    let host = cascade_host().file("/etc/claude-code/managed-settings.json", r#"{"model":"managed-model"}"#);
+    let result = resolve(&host, json!({}));
+    assert_eq!(result["effective"]["model"], "managed-model");
+    assert_eq!(
+        result["provenance"]["model"],
+        json!({"source": "managed", "policyOrigin": "file"})
+    );
+    let last = result["sources"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(
+        last,
+        json!({"source": "managed", "settings": {"model": "managed-model"}, "policyOrigin": "file"})
+    );
+}
+
+#[test]
+fn managed_drop_ins_merge_in_code_unit_order_after_the_base_file() {
+    let host = FakeHost::linux()
+        .file(
+            "/etc/claude-code/managed-settings.json",
+            r#"{"env":{"BASE":"1"},"model":"base"}"#,
+        )
+        .directory(
+            "/etc/claude-code/managed-settings.d",
+            &["20-b.json", "10-a.json", ".hidden.json", "notes.txt"],
+        )
+        .file(
+            "/etc/claude-code/managed-settings.d/10-a.json",
+            r#"{"model":"a","env":{"A":"1"}}"#,
+        )
+        .file("/etc/claude-code/managed-settings.d/20-b.json", r#"{"model":"b"}"#)
+        .file(
+            "/etc/claude-code/managed-settings.d/.hidden.json",
+            r#"{"model":"hidden"}"#,
+        );
+    let result = resolve(&host, json!({"settingSources": []}));
+    assert_eq!(
+        result["effective"],
+        json!({"env": {"BASE": "1", "A": "1"}, "model": "b"})
+    );
+}
+
+#[test]
+fn unreadable_managed_file_reports_did_not_load() {
+    let host = FakeHost::linux().file("/etc/claude-code/managed-settings.json", "{ broken");
+    let result = resolve(&host, json!({"settingSources": []}));
+    assert_eq!(result["machinePolicy"], json!({"didNotLoad": ["file"]}));
+}
+
+#[test]
+fn remote_policy_outranks_the_managed_file() {
+    let host = FakeHost::linux().file("/etc/claude-code/managed-settings.json", r#"{"model":"file"}"#);
+    let result = resolve(
+        &host,
+        json!({"settingSources": [], "serverManagedSettings": {"model": "remote", "cleanupPeriodDays": 3}}),
+    );
+    assert_eq!(result["effective"]["model"], "remote");
+    assert_eq!(result["provenance"]["model"]["policyOrigin"], "remote");
+}
+
+#[test]
+fn parent_managed_settings_contribute_only_restrictive_keys() {
+    let result = resolve(
+        &FakeHost::linux(),
+        json!({
+            "settingSources": [],
+            "managedSettings": {
+                "model": "ignored",
+                "allowManagedHooksOnly": true,
+                "permissions": {"deny": ["Bash(rm:*)", "Read(!secret)"], "allow": ["Bash(ls)"]}
+            }
+        }),
+    );
+    assert_eq!(result["effective"]["allowManagedHooksOnly"], true);
+    assert_eq!(result["effective"].get("model"), None);
+    assert_eq!(result["effective"]["permissions"]["deny"], json!(["Bash(rm:*)"]));
+    assert_eq!(result["provenance"]["allowManagedHooksOnly"]["policyOrigin"], "parent");
+}
+
+#[test]
+fn plist_policy_is_read_with_plutil_on_macos() {
+    let mut host = FakeHost::linux();
+    host.system = OperatingSystem::Darwin;
+    let plist = "/Library/Managed Preferences/fixture-user/com.anthropic.claudecode.plist";
+    let device = "/Library/Managed Preferences/com.anthropic.claudecode.plist";
+    let host = host.file(plist, "bplist").file(device, "bplist").command(
+        &format!("/usr/bin/plutil -convert json -o - -- {plist}"),
+        ok(r#"{"model":"plist-model"}"#),
+    );
+    let result = resolve(&host, json!({"settingSources": []}));
+    assert_eq!(result["effective"], json!({"model": "plist-model"}));
+    assert_eq!(result["provenance"]["model"]["policyOrigin"], "plist");
+    assert_eq!(host.ran()[0], format!("/usr/bin/plutil -convert json -o - -- {plist}"));
+}
+
+#[test]
+fn registry_policy_is_read_with_reg_on_windows() {
+    let mut host = FakeHost::linux();
+    host.system = OperatingSystem::Win32;
+    let machine = "C:\\Windows\\System32\\reg.exe query HKLM\\SOFTWARE\\Policies\\ClaudeCode /v Settings";
+    let host = host.command(
+        machine,
+        ok("\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\ClaudeCode\r\n    Settings    REG_SZ    {\"model\":\"hklm-model\"}\r\n"),
+    );
+    let result = resolve(&host, json!({"settingSources": []}));
+    assert_eq!(result["effective"], json!({"model": "hklm-model"}));
+    assert_eq!(result["provenance"]["model"]["policyOrigin"], "hklm");
+    assert_eq!(result["machinePolicy"], json!({"didNotLoad": false}));
+}
+
+#[test]
+fn a_busy_registry_read_is_reported_but_a_missing_key_is_not() {
+    let mut busy = FakeHost::linux();
+    busy.system = OperatingSystem::Win32;
+    let line = "C:\\Windows\\System32\\reg.exe query HKLM\\SOFTWARE\\Policies\\ClaudeCode /v Settings";
+    let busy = busy.command(line, spawn_error("EAGAIN"));
+    assert_eq!(
+        resolve(&busy, json!({"settingSources": []}))["machinePolicy"],
+        json!({"didNotLoad": ["registry"]})
+    );
+    let mut missing = FakeHost::linux();
+    missing.system = OperatingSystem::Win32;
+    let missing = missing.command(
+        line,
+        exited(
+            1,
+            "ERROR: The system was unable to find the specified registry key or value.",
+        ),
+    );
+    assert_eq!(
+        resolve(&missing, json!({"settingSources": []}))["machinePolicy"],
+        json!({"didNotLoad": false})
+    );
+}
+
+#[test]
+fn wsl_without_the_inherit_flag_ignores_the_windows_side() {
+    let host = FakeHost::linux()
+        .variable("WSL_DISTRO_NAME", "Ubuntu")
+        .file(
+            "/mnt/c/Program Files/ClaudeCode/managed-settings.json",
+            r#"{"model":"windows"}"#,
+        )
+        .file("/etc/claude-code/managed-settings.json", r#"{"model":"linux"}"#);
+    let result = resolve(&host, json!({"settingSources": []}));
+    assert_eq!(result["effective"]["model"], "linux");
+}
+
+#[test]
+fn wsl_with_the_inherit_flag_reads_the_windows_side_first() {
+    let host = FakeHost::linux()
+        .variable("WSL_DISTRO_NAME", "Ubuntu")
+        .file(
+            "/mnt/c/Program Files/ClaudeCode/managed-settings.json",
+            r#"{"wslInheritsWindowsSettings":true,"model":"windows"}"#,
+        )
+        .file("/etc/claude-code/managed-settings.json", r#"{"model":"linux"}"#);
+    let result = resolve(&host, json!({"settingSources": []}));
+    assert_eq!(result["effective"]["model"], "windows");
+}
+
+fn resolved(effective: Value, sources: Value) -> ResolvedSettings {
+    serde_json::from_value(json!({
+        "effective": effective,
+        "provenance": {},
+        "sources": sources,
+        "machinePolicy": {"didNotLoad": false}
+    }))
+    .expect("resolved")
+}
+
+fn filtered(resolved: &ResolvedSettings) -> Value {
+    let settings: Settings = filter_escalating_default_mode(resolved);
+    serde_json::to_value(settings).expect("encode")
+}
+
+#[test]
+fn escalating_default_mode_from_a_project_source_is_dropped() {
+    let resolved = resolved(
+        json!({"permissions": {"defaultMode": "bypassPermissions", "allow": ["x"]}}),
+        json!([{"source": "project", "settings": {"permissions": {"defaultMode": "bypassPermissions"}}}]),
+    );
+    assert_eq!(filtered(&resolved), json!({"permissions": {"allow": ["x"]}}));
+}
+
+#[test]
+fn accept_edits_from_a_local_source_survives_but_not_from_a_project_source() {
+    let local = resolved(
+        json!({"permissions": {"defaultMode": "acceptEdits"}}),
+        json!([{"source": "local", "settings": {"permissions": {"defaultMode": "acceptEdits"}}}]),
+    );
+    assert_eq!(filtered(&local), json!({"permissions": {"defaultMode": "acceptEdits"}}));
+    let project = resolved(
+        json!({"permissions": {"defaultMode": "acceptEdits"}}),
+        json!([{"source": "project", "settings": {"permissions": {"defaultMode": "acceptEdits"}}}]),
+    );
+    assert_eq!(filtered(&project), json!({"permissions": {}}));
+}
+
+#[test]
+fn default_mode_set_by_a_user_source_is_kept() {
+    let resolved = resolved(
+        json!({"permissions": {"defaultMode": "auto"}}),
+        json!([
+            {"source": "user", "settings": {"permissions": {"defaultMode": "auto"}}}
+        ]),
+    );
+    assert_eq!(filtered(&resolved), json!({"permissions": {"defaultMode": "auto"}}));
+}

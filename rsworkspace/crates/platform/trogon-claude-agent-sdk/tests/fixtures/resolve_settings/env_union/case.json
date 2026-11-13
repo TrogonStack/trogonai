@@ -1,0 +1,14 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "serverManagedSettings": {
+      "env": {
+        "Path": "/r",
+        "ONLY_REMOTE": "1"
+      }
+    }
+  }
+}

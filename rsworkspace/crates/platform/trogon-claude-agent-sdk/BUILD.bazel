@@ -22,8 +22,10 @@ rust_binary(
 
 workspace_crate(
     name = "trogon-claude-agent-sdk",
-    compile_data = ["README.md"],
+    compile_data = ["README.md"] + glob(["tests/fixtures/fork_ts/*.jsonl"]),
     crate_features = ["test-support"],
+    # resolve_settings_differential reads its fixture tree through
+    # CARGO_MANIFEST_DIR at run time, so it runs only under Cargo.
     integration_tests = {
         "additional_directories": {},
         "agent": {},
@@ -46,6 +48,11 @@ workspace_crate(
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
         "fixed_environment": {},
+        "golden_argv_env": {
+            "compile_data": glob(["tests/support/*.rs"]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "in_memory_session_store": {},
         "json_object": {},
         "max_turns": {},
@@ -105,6 +112,18 @@ workspace_crate(
             "data": [":claude_sdk_fixture"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},
         },
+        "session_files": {},
+        "session_files_ts": {},
+        "session_messages_ts": {},
+        "session_mutations": {},
+        "session_store_conformance": {},
+        "session_store_helpers": {},
+        "session_summary": {},
+        "settings_resolve": {"compile_data": glob(["tests/support/*.rs"])},
+        "shutdown_errors": {
+            "data": [":claude_sdk_fixture"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},
+        },
         "system_adapters": {},
         "system_message": {},
         "task_id": {},
@@ -114,6 +133,11 @@ workspace_crate(
         "tool_rule_storage": {},
         "tool_use_id": {},
         "tool_use_id_storage": {},
+        "transport": {},
+        "upstream_settings": {
+            "compile_data": glob(["tests/fixtures/*.json"]),
+        },
+        "upstream_settings_unions": {},
         "upstream_tool_inputs": {},
         "upstream_tool_inputs_fixtures": {
             "compile_data": glob(["tests/fixtures/*.json"]),

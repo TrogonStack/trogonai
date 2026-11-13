@@ -43,6 +43,7 @@ mod permission;
 mod permission_mode;
 mod permission_update;
 mod process_options;
+mod process_transport;
 mod prompt;
 mod queue_capacity;
 mod run_as;
@@ -73,6 +74,14 @@ mod session_summary;
 mod session_transcript;
 mod setting_source;
 mod settings_input;
+mod settings_resolve;
+mod settings_resolve_env;
+mod settings_resolve_parent;
+mod settings_resolve_platform;
+mod settings_resolve_policy;
+mod settings_resolve_sources;
+mod settings_resolve_tier;
+mod settings_resolve_values;
 mod settings_sandbox;
 mod stderr_tail;
 mod summary_dialect;
@@ -82,6 +91,7 @@ mod tool_name;
 mod tool_rule;
 mod tool_use_id;
 mod transcript_mirror;
+mod transport;
 mod usd_budget;
 mod user_input;
 mod version_check;
@@ -93,7 +103,8 @@ pub use builtin_tool_name::BuiltinToolName;
 pub use cli_discovery::CliNotFoundError;
 pub use cli_path::CliPathError;
 pub use client::{
-    ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_with_adapters,
+    ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_turn_with_transport,
+    query_with_adapters, query_with_transport,
 };
 pub use client_app::{format_client_app, normalize_client_app};
 pub use config_value::ConfigValue;
@@ -189,6 +200,9 @@ pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_ent
 pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
 pub use settings_input::SettingsInput;
+pub use settings_resolve::{
+    ResolveSettingsError, filter_escalating_default_mode, resolve_settings, resolve_settings_with,
+};
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };
@@ -201,6 +215,7 @@ pub use tool_name::ToolName;
 pub use tool_rule::ToolRule;
 pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
+pub use transport::Transport;
 pub use upstream::settings::Settings;
 pub use upstream::settings_resolution::{
     PolicySettingsOrigin, ProvenanceEntry, ResolveSettingsOptions, ResolvedSettingSource, ResolvedSettings,
