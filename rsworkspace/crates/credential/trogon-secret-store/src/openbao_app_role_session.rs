@@ -18,9 +18,10 @@ pub(crate) type OpenBaoClock = Arc<dyn GetNow<Instant = Instant> + Send + Sync>;
 /// An AppRole login held for as long as the process runs.
 ///
 /// The token is renewed ahead of its expiry and replaced by a fresh login when
-/// renewal is refused or the role's max TTL caps it. A token past its usable
-/// life is never sent: when no fresh one can be had, the caller gets
-/// [`SecretStoreError::BackendUnavailable`] instead.
+/// renewal is refused or the role's max TTL caps it. A capped renewal stays in
+/// use while that login is refused, because OpenBao has just vouched for it. A
+/// token past its usable life is never sent: when no fresh one can be had, the
+/// caller gets [`SecretStoreError::BackendUnavailable`] instead.
 pub(crate) struct OpenBaoAppRoleSession {
     approle: OpenBaoAppRole,
     clock: OpenBaoClock,
@@ -67,20 +68,31 @@ impl OpenBaoAppRoleSession {
         http: &reqwest::Client,
         address: &Url,
     ) -> Result<OpenBaoLease, OpenBaoCallError> {
-        if let Some(previous) = previous
-            && previous.can_renew(self.clock.now())
-        {
-            match self.renew(&previous, http, address).await {
-                Ok(renewed) if renewed.ttl() >= previous.ttl() => return Ok(renewed),
-                Ok(renewed) => warn!(
+        let Some(previous) = previous.filter(|lease| lease.can_renew(self.clock.now())) else {
+            return self.login(http, address).await;
+        };
+        let capped = match self.renew(&previous, http, address).await {
+            Ok(renewed) if renewed.ttl() >= previous.ttl() => return Ok(renewed),
+            Ok(renewed) => {
+                warn!(
                     granted_secs = renewed.ttl().as_secs(),
                     requested_secs = previous.ttl().as_secs(),
                     "OpenBao capped the login token renewal at its max TTL; logging in again"
-                ),
-                Err(error) => warn!(error = %error, "OpenBao refused to renew the login token; logging in again"),
+                );
+                renewed
             }
+            Err(error) => {
+                warn!(error = %error, "OpenBao refused to renew the login token; logging in again");
+                return self.login(http, address).await;
+            }
+        };
+        match self.login(http, address).await {
+            Err(error) if capped.is_usable(self.clock.now()) => {
+                warn!(error = %error, "OpenBao refused a fresh login; keeping the capped login token");
+                Ok(capped)
+            }
+            outcome => outcome,
         }
-        self.login(http, address).await
     }
 
     async fn login(&self, http: &reqwest::Client, address: &Url) -> Result<OpenBaoLease, OpenBaoCallError> {

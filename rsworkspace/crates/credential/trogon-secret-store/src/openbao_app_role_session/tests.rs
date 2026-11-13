@@ -143,6 +143,27 @@ async fn a_renewal_capped_by_the_max_ttl_falls_back_to_a_fresh_login() {
 }
 
 #[tokio::test]
+async fn a_capped_renewal_stays_in_use_while_the_fresh_login_is_refused() {
+    let openbao = ScriptedOpenBao::start([grant(FIRST_TOKEN, TTL_SECS, true)]).await;
+    let clock = StepClock::new();
+    let session = started(&openbao, &clock).await;
+    openbao
+        .answer_next([
+            grant(FIRST_TOKEN, TTL_SECS / 2, true),
+            refusal(StatusCode::SERVICE_UNAVAILABLE, "sealed"),
+        ])
+        .await;
+    into_renewal_window(&clock);
+
+    assert_eq!(token(&session, &openbao).await.unwrap(), FIRST_TOKEN);
+    assert_eq!(openbao.paths().await, [LOGIN_PATH, RENEW_PATH, LOGIN_PATH]);
+
+    clock.advance(Duration::from_secs(1));
+    assert_eq!(token(&session, &openbao).await.unwrap(), FIRST_TOKEN);
+    assert_eq!(openbao.paths().await.len(), 3);
+}
+
+#[tokio::test]
 async fn a_token_past_its_usable_life_is_never_sent() {
     let openbao = ScriptedOpenBao::start([grant(FIRST_TOKEN, TTL_SECS, true)]).await;
     let clock = StepClock::new();
