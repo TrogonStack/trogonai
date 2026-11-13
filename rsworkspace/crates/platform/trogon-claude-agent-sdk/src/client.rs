@@ -236,6 +236,34 @@ impl ClaudeSdkClient {
         P: crate::adapters::SpawnProcess<Error = std::io::Error>,
         F: crate::adapters::SessionFileSystem,
     {
+        Self::connect_declaring(options, transport, adapters, false).await
+    }
+
+    /// Connects the browser query: like [`ClaudeSdkClient::connect_with_transport`], with `declare_dialog_kinds`
+    /// sending `supportedDialogKinds: []` the way an empty list does upstream.
+    pub(crate) async fn connect_browser<T: crate::Transport>(
+        options: ClaudeAgentOptions,
+        transport: T,
+        declare_dialog_kinds: bool,
+    ) -> Result<Self, Error> {
+        let adapters: crate::adapters::RuntimeAdapters = crate::adapters::RuntimeAdapters::default();
+        Self::connect_declaring(options, transport, adapters, declare_dialog_kinds).await
+    }
+
+    async fn connect_declaring<T, E, P, F>(
+        mut options: ClaudeAgentOptions,
+        transport: T,
+        adapters: crate::adapters::RuntimeAdapters<E, P, F>,
+        declare_dialog_kinds: bool,
+    ) -> Result<Self, Error>
+    where
+        T: crate::Transport,
+        E: crate::adapters::EnvironmentVariable
+            + crate::adapters::CurrentDirectory<Error = std::io::Error>
+            + crate::adapters::TemporaryDirectory,
+        P: crate::adapters::SpawnProcess<Error = std::io::Error>,
+        F: crate::adapters::SessionFileSystem,
+    {
         let session = Self::prepare_session(
             &mut options,
             &adapters.environment,
@@ -245,7 +273,10 @@ impl ClaudeSdkClient {
         )
         .await?;
         crate::shadow_warning::emit(&options);
-        let initialization = driver::Initialization::new(&options, &adapters.environment)?;
+        let mut initialization = driver::Initialization::new(&options, &adapters.environment)?;
+        if declare_dialog_kinds {
+            initialization.declare_dialog_kinds();
+        }
         Self::start(StartInput {
             options,
             session,
@@ -1082,6 +1113,8 @@ pub struct Query {
     client: Option<ClaudeSdkClient>,
     one_turn: bool,
     result_received: bool,
+    /// The SSE transport's operations, for a query opened with [`crate::browser_query`] over SSE.
+    sse: Option<crate::SseHandle>,
 }
 
 pub async fn query(prompt: impl Into<crate::UserInput>, options: ClaudeAgentOptions) -> Result<Query, Error> {
@@ -1191,10 +1224,25 @@ async fn start_query(
         client: Some(client),
         one_turn: matches!(completion, Completion::Turn),
         result_received: false,
+        sse: None,
     })
 }
 
 impl Query {
+    /// A query over a connected client whose input is streamed separately, ending with the run.
+    pub(crate) fn streaming(client: ClaudeSdkClient, sse: Option<crate::SseHandle>) -> Self {
+        Self {
+            client: Some(client),
+            one_turn: false,
+            result_received: false,
+            sse,
+        }
+    }
+
+    pub(crate) fn sse_handle(&self) -> Option<&crate::SseHandle> {
+        self.sse.as_ref()
+    }
+
     pub fn handle(&self) -> Option<ClientHandle> {
         self.client.as_ref().map(ClaudeSdkClient::handle)
     }
@@ -1210,6 +1258,9 @@ impl Query {
         let message = client.next_message().await?;
         if matches!(message, Some(Message::Result(_))) {
             self.result_received = true;
+        }
+        if let (Some(sse), Some(message)) = (&self.sse, &message) {
+            sse.mark_delivered(message.raw());
         }
         Ok(message)
     }

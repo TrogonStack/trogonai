@@ -349,7 +349,11 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
         let result = match name {
             "read" => match timeout(Duration::from_secs(2), transport.read_message()).await {
                 Err(_) => json!({"timeout": true}),
-                Ok(Ok(Some(message))) => json!({"message": message, "ccr": ccr_json(handle.last_ccr_event())}),
+                Ok(Ok(Some(message))) => {
+                    let ccr = ccr_json(handle.ccr_event(&message));
+                    handle.mark_delivered(&message);
+                    json!({"message": message, "ccr": ccr})
+                }
                 Ok(Ok(None)) => json!({"done": true}),
                 Ok(Err(error)) => json!({"error": error.to_string()}),
             },
@@ -771,5 +775,5 @@ fn expecting_more_responses_than_are_remembered_evicts_the_oldest() {
     }
     assert!(handle.drop_counts().is_empty());
     assert_eq!(handle.last_sequence_num(), None);
-    assert_eq!(handle.last_ccr_event(), None);
+    assert_eq!(handle.ccr_event(&JsonObject::new()), None);
 }

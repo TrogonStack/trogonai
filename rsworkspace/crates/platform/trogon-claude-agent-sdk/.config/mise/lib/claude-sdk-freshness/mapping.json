@@ -3392,7 +3392,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "WebSocketTransport is the browser SDK's WebSocket transport as a Transport implementation, replayed against goldens recorded by running the real class in node (websocket_transport_goldens.mjs): the auth line is sent first, a keep_alive line every 50000ms while the driver reads, inbound text frames are split on newlines with partial lines kept, bad JSON dropped and ccr_event removed, writes go out verbatim, close sends 1000 Normal closure, close codes other than 1000 and 1001 fail with the upstream text, the connect timeout is 15000ms, abort and a not-ready write carry the upstream messages. headers is accepted and ignored by default like the browser class; HeaderDelivery::Handshake opts into sending them on the upgrade request. JSON values that are not objects are dropped because Transport yields objects. The query-level browser options (websocket, sse), SSE and the rest of the browser entrypoint stay out of scope."
+      "rationale": "WebSocketTransport is the browser SDK's WebSocket transport as a Transport implementation, replayed against goldens recorded by running the real class in node (websocket_transport_goldens.mjs): the auth line is sent first, a keep_alive line every 50000ms while the driver reads, inbound text frames are split on newlines with partial lines kept, bad JSON dropped and ccr_event removed, writes go out verbatim, close sends 1000 Normal closure, close codes other than 1000 and 1001 fail with the upstream text, the connect timeout is 15000ms, abort and a not-ready write carry the upstream messages. headers is accepted and ignored by default like the browser class; HeaderDelivery::Handshake opts into sending them on the upgrade request. JSON values that are not objects are dropped because Transport yields objects. The query-level browser options are in browser-entrypoint."
     },
     {
       "id": "browser-sse-transport",
@@ -3492,7 +3492,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "SseTransport is the browser SDK's SSE transport as a Transport implementation, replayed against goldens recorded by running the real class against a local HTTP server (sse_transport_goldens.mjs): the stream is requested with Accept text/event-stream and Last-Event-ID resumes from the cursor, 401, 403 and 404 are permanent while other failures reconnect with a 1000ms doubling backoff capped at 30000ms for five attempts in a row, the connect timeout is 15000ms and a silent stream is reconnected after 45000ms, writes are POSTed in order with a 30000ms timeout, retried with the Retry-After header clamped to 1000..30000ms plus jitter and dropped after three failures in a row, a permanent write failure fails the transport, the queue holds 1000 lines, and abort and close carry the upstream messages. A handler that panics is contained like a handler that throws upstream. The handle methods back the transport accessors, but the query-level browser options (websocket, sse) and the accessors on the query object stay out of scope."
+      "rationale": "SseTransport is the browser SDK's SSE transport as a Transport implementation, replayed against goldens recorded by running the real class against a local HTTP server (sse_transport_goldens.mjs): the stream is requested with Accept text/event-stream and Last-Event-ID resumes from the cursor, 401, 403 and 404 are permanent while other failures reconnect with a 1000ms doubling backoff capped at 30000ms for five attempts in a row, the connect timeout is 15000ms and a silent stream is reconnected after 45000ms, writes are POSTed in order with a 30000ms timeout, retried with the Retry-After header clamped to 1000..30000ms plus jitter and dropped after three failures in a row, a permanent write failure fails the transport, the queue holds 1000 lines, and abort and close carry the upstream messages. A handler that panics is contained like a handler that throws upstream. The handle methods back the transport accessors that browser-entrypoint exposes on the query."
     },
     {
       "id": "browser-entrypoint",
@@ -3504,14 +3504,54 @@
         "typescript": {
           "symbols": [],
           "prefixes": [
-            "browser"
+            "browser",
+            "browser-sdk"
           ]
         }
       },
-      "rust_api": [],
-      "tests": [],
-      "status": "out_of_scope",
-      "rationale": "This TypeScript package entrypoint serves browser/remote bridge or binary-extraction hosting outside the native Rust subprocess contract. Its declaration changes remain visible for review even though no corresponding Rust API is promised."
+      "rust_api": [
+        "browser_query",
+        "BrowserQueryOptions",
+        "BrowserTransport",
+        "BrowserPrompt",
+        "get_sse_drop_counts",
+        "get_sse_last_sequence_num",
+        "get_ccr_event",
+        "suspend_sse_stream",
+        "resume_sse_stream"
+      ],
+      "tests": [
+        {
+          "path": "tests/browser_query.rs",
+          "name": "every_recorded_query_sends_the_recorded_initialize_request"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "dialog_kinds_without_a_handler_fail_before_connecting_with_the_recorded_text"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "the_recorded_transport_errors_stay_unrepresentable_or_have_no_rust_counterpart"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "a_websocket_query_has_no_sse_state"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "a_prompt_that_cannot_be_sent_aborts_the_query"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "an_sse_query_exposes_the_transport_state_through_the_accessors"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "envelopes_and_the_delivered_number_follow_the_consumer_not_the_reads"
+        }
+      ],
+      "status": "supported",
+      "rationale": "browser_query is the browser entrypoint's query(): it connects over the WebSocket or SSE transport, sends an initialize request that carries hooks, the SDK MCP server names, jsonSchema, promptSuggestions and supportedDialogKinds and nothing else (replayed against goldens recorded by running the real browser-sdk.js in node, browser_query_goldens.mjs), streams the prompt in the background and aborts the query when a send fails. Declaring dialog kinds without a handler fails before any connection with the upstream text. The accessors take the Query and return None or false for a WebSocket query. The types the entrypoint re-exports (Query, messages, hooks, MCP servers, elicitation and dialog types, createSdkMcpServer, tool) are the crate's existing equivalents. Differences: the websocket and sse options are the BrowserTransport enum, so neither and both cannot be written; mcpServers that upstream rejects at run time (not an in-process server) cannot be expressed because sdk_mcp_servers only holds in-process servers; and get_ccr_event finds a message's envelope by its uuid, or by equal JSON when it has none, instead of by object identity, because messages are moved to the caller; the map is never trimmed, like the upstream WeakMap, and getSseLastSequenceNum advances when Query::next_message returns the message, as markDelivered does when the consumer receives it (both replayed against recorded goldens with several frames read ahead)."
     },
     {
       "id": "bridge-entrypoint",

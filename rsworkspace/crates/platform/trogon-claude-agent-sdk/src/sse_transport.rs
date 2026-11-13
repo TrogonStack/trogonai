@@ -40,13 +40,46 @@ const UPLOAD_ATTEMPTS: u32 = 3;
 /// How much of an error response is read to find its reason.
 const REASON_BYTES: usize = 4_096;
 
-type Delivery = (JsonObject, Option<SseCcrEvent>);
+type Delivery = JsonObject;
+
+/// TypeScript `envelopesByMessage`: the envelope each durable message arrived in. TypeScript keys a `WeakMap` by the
+/// message object and keeps an entry as long as the message lives. A Rust message is moved to the consumer, so an
+/// entry is found by the message's `uuid` when it has one and by equal JSON when it has none, and entries are kept
+/// for the life of the transport.
+#[derive(Default)]
+struct Envelopes {
+    by_uuid: std::collections::HashMap<String, SseCcrEvent>,
+    unkeyed: Vec<(JsonObject, SseCcrEvent)>,
+}
+
+impl Envelopes {
+    fn record(&mut self, message: &JsonObject, event: SseCcrEvent) {
+        match message.get("uuid").and_then(Value::as_str) {
+            Some(uuid) => {
+                self.by_uuid.insert(uuid.to_owned(), event);
+            }
+            None => self.unkeyed.push((message.clone(), event)),
+        }
+    }
+
+    fn find(&self, message: &JsonObject) -> Option<&SseCcrEvent> {
+        match message.get("uuid").and_then(Value::as_str) {
+            Some(uuid) => self.by_uuid.get(uuid),
+            None => self
+                .unkeyed
+                .iter()
+                .rev()
+                .find(|(delivered, _)| delivered == message)
+                .map(|(_, event)| event),
+        }
+    }
+}
 type Ready = Option<Result<(), SseError>>;
 
 struct State {
     filter: SseFrameFilter,
     exit_error: Option<SseError>,
-    last_ccr_event: Option<SseCcrEvent>,
+    envelopes: Envelopes,
     ready: bool,
     suspended: bool,
     /// Counts suspensions, so a waiting reconnect can tell it was suspended and resumed.
@@ -441,8 +474,15 @@ impl Shared {
     }
 
     fn deliver(&self, message: Value, ccr_event: Option<SseCcrEvent>) {
-        if let (Value::Object(message), Some(events)) = (message, &self.state().events) {
-            let _ = events.send((message, ccr_event));
+        let Value::Object(message) = message else {
+            return;
+        };
+        let mut state = self.state();
+        if let Some(event) = ccr_event {
+            state.envelopes.record(&message, event);
+        }
+        if let Some(events) = &state.events {
+            let _ = events.send(message);
         }
     }
 
@@ -620,7 +660,7 @@ impl SseTransport {
         let state = State {
             filter: SseFrameFilter::new(options.from_sequence_num),
             exit_error: None,
-            last_ccr_event: None,
+            envelopes: Envelopes::default(),
             ready: false,
             suspended: false,
             suspensions: 0,
@@ -706,12 +746,7 @@ impl Transport for SseTransport {
 
     async fn read_message(&mut self) -> Result<Option<JsonObject>, Error> {
         match self.events.recv().await {
-            Some((message, ccr_event)) => {
-                let mut state = self.shared.state();
-                state.filter.mark_delivered(ccr_event.as_ref());
-                state.last_ccr_event = ccr_event;
-                Ok(Some(message))
-            }
+            Some(message) => Ok(Some(message)),
             None => {
                 if std::mem::replace(&mut self.finished, true) {
                     return Ok(None);
@@ -735,6 +770,10 @@ impl Transport for SseTransport {
 
     async fn end_input(&mut self) -> Result<(), Error> {
         Ok(())
+    }
+
+    fn expect_control_response(&mut self, request_id: &str) {
+        self.shared.expect_control_response(request_id);
     }
 }
 
@@ -774,16 +813,25 @@ impl SseHandle {
             .collect()
     }
 
-    /// TypeScript `getSseLastSequenceNum`: the highest sequence number given to the reader, `None` before any.
+    /// TypeScript `getSseLastSequenceNum`: the highest sequence number of a message the consumer was given through
+    /// [`SseHandle::mark_delivered`], or the `from_sequence_num` seed, `None` while that is 0. The transport reading
+    /// a frame does not advance it.
     pub fn last_sequence_num(&self) -> Option<u64> {
         self.shared.state().filter.last_sequence_num()
     }
 
-    /// TypeScript `getCcrEvent`: the delivery envelope of the message [`Transport::read_message`] returned last.
-    /// TypeScript looks an envelope up by message object; the message here is passed by value, so the last one
-    /// stands in for it.
-    pub fn last_ccr_event(&self) -> Option<SseCcrEvent> {
-        self.shared.state().last_ccr_event.clone()
+    /// TypeScript `getCcrEvent`: the envelope of the durable frame `message` arrived in. A message without a `uuid`
+    /// is found by equal JSON, the latest such delivery first.
+    pub fn ccr_event(&self, message: &JsonObject) -> Option<SseCcrEvent> {
+        self.shared.state().envelopes.find(message).cloned()
+    }
+
+    /// TypeScript `markDelivered`: the consumer received `message`, so its sequence number counts for
+    /// [`SseHandle::last_sequence_num`] when it is higher than the current one.
+    pub fn mark_delivered(&self, message: &JsonObject) {
+        let mut state = self.shared.state();
+        let event = state.envelopes.find(message).cloned();
+        state.filter.mark_delivered(event.as_ref());
     }
 }
 

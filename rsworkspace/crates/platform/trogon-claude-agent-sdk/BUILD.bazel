@@ -118,6 +118,7 @@ workspace_crate(
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
+        "browser_query": {"compile_data": ["tests/fixtures/browser_query/cases.json"]},
         "js_stringify_goldens": {"compile_data": ["tests/fixtures/js_stringify/goldens.json"]},
         "sse_frame_filter_goldens": {"compile_data": ["tests/fixtures/sse_frames/sessions.json"]},
         "sse_frames_goldens": {"compile_data": ["tests/fixtures/sse_frames/parser.json"]},
