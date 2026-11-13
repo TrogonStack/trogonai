@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Report Claude SDK upstream compatibility review work"
+set -euo pipefail
+
+root="${MISE_PROJECT_ROOT:?Run this task through mise}"
+exec mise -C "$root/rsworkspace/crates/platform/trogon-claude-agent-sdk" run --skip-tools claude-sdk:freshness -- "$@"
