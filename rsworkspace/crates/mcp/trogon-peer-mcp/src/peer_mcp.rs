@@ -54,11 +54,9 @@ impl<B: EnrollPeer + PreparePeerBatch> PeerMcp<B> {
             }
             "peer_roster" | "peer_send" | "peer_status" | "peer_acknowledge_batch" => {
                 let binding = self.binding.lock().await;
-                if binding.as_ref().and_then(NativeBinding::attachment).is_none() {
-                    Err(PeerMcpError::Unbound)
-                } else {
-                    Err(PeerMcpError::UnsupportedTool)
-                }
+                let current = binding.as_ref().ok_or(PeerMcpError::Unbound)?;
+                current.attachment().ok_or(PeerMcpError::EnrollmentUncertain)?;
+                Err(PeerMcpError::UnsupportedTool)
             }
             _ => Err(PeerMcpError::UnsupportedTool),
         }
