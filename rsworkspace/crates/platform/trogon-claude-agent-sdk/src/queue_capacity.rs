@@ -1,5 +1,5 @@
-/// Rust host queue policy; constructing a value creates no channel.
-/// The defaults are local policy, not upstream SDK requirements.
+/// The size of a queue the caller opted into bounding; constructing a value creates no channel. Both upstream SDKs
+/// leave these queues unbounded, which is what an absent capacity means.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct QueueCapacity(usize);
 
@@ -13,7 +13,8 @@ pub enum QueueCapacityError {
 
 impl QueueCapacity {
     pub const MAX: usize = tokio::sync::Semaphore::MAX_PERMITS;
-    pub const DEFAULT_MESSAGES: Self = Self(256);
+    /// Python's `max_buffer_size=100` message stream.
+    pub const PYTHON_MESSAGES: Self = Self(100);
 
     pub const fn new(value: usize) -> Result<Self, QueueCapacityError> {
         if value == 0 {
