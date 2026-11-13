@@ -104,7 +104,7 @@ pub use agent_name::AgentName;
 pub use builtin_tool_name::BuiltinToolName;
 pub use bundled_cli::{
     NativeCliNotFoundError, NativePackageTarget, NodeModuleLookup, NodeModuleNotFoundError, ResolveNodeModule,
-    find_bundled_cli, find_native_cli,
+    bundled_cli_derives_client_app, find_bundled_cli, find_native_cli, meets_derived_client_app_minimum,
 };
 pub use cli_discovery::CliNotFoundError;
 pub use cli_path::CliPathError;

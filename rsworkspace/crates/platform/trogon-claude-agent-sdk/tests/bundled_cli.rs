@@ -7,8 +7,9 @@ use std::{
 };
 
 use trogon_claude_agent_sdk::{
-    NativePackageTarget, NodeModuleLookup, ResolveNodeModule, adapters::NativeFileSystem, find_bundled_cli,
-    find_native_cli,
+    NativePackageTarget, NodeModuleLookup, ResolveNodeModule,
+    adapters::{NativeFileSystem, NativeHost},
+    bundled_cli_derives_client_app, find_bundled_cli, find_native_cli, meets_derived_client_app_minimum,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -187,4 +188,107 @@ fn host_target_is_a_node_spelling() {
     assert!(!host.platform().is_empty() && !host.arch().is_empty());
     assert_ne!(host.platform(), "macos");
     assert_ne!(host.arch(), "x86_64");
+}
+
+#[test]
+fn derived_client_app_minimum_compares_the_leading_triple_as_a_list() {
+    for version in [
+        "999.0.0",
+        "999.0.1",
+        "999.1.0",
+        "1000.0.0",
+        "999.0.0-beta",
+        "999.0.0 trailing",
+        "999.0.1234567890",
+    ] {
+        assert!(meets_derived_client_app_minimum(version), "{version}");
+    }
+    for version in [
+        "",
+        "2.1.248",
+        "998.9.9",
+        "998.999.999",
+        "999.0",
+        "999",
+        "v999.0.0",
+        " 999.0.0",
+        "\u{feff}999.0.0",
+        "999.0.x",
+        "1234567890.0.0",
+        "999.1234567890.0",
+        "999,0,0",
+    ] {
+        assert!(!meets_derived_client_app_minimum(version), "{version}");
+    }
+}
+
+const QUALIFYING_VERSION: &str = "999.0.0";
+
+fn bundled_install(version_record: Option<&[u8]>) -> Result<(tempfile::TempDir, PathBuf), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let cli = root.path().join("_bundled/claude");
+    touch(&cli)?;
+    if let Some(record) = version_record {
+        std::fs::write(root.path().join("_bundled/claude.version"), record)?;
+    }
+    Ok((root, cli))
+}
+
+fn derives(root: &Path, cli: &Path, pinned: &str) -> bool {
+    bundled_cli_derives_client_app(cli, root, false, pinned, &NativeFileSystem, &NativeHost)
+}
+
+#[test]
+fn the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify() -> TestResult {
+    let (root, cli) = bundled_install(Some(b"999.0.0\n"))?;
+    assert!(derives(root.path(), &cli, QUALIFYING_VERSION));
+    assert!(
+        !derives(root.path(), &cli, "2.1.248"),
+        "a pin below the minimum reads nothing"
+    );
+    assert!(!derives(root.path(), &cli, ""));
+    for record in [
+        &b"2.1.248"[..],
+        b"",
+        b"not a version",
+        b"\xff\xfe999.0.0",
+        b"\xef\xbb\xbf999.0.0",
+    ] {
+        let (root, cli) = bundled_install(Some(record))?;
+        assert!(!derives(root.path(), &cli, QUALIFYING_VERSION), "{record:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_bundled_cli_without_a_record_counts_as_too_old() -> TestResult {
+    let (root, cli) = bundled_install(None)?;
+    assert!(!derives(root.path(), &cli, QUALIFYING_VERSION));
+    Ok(())
+}
+
+#[test]
+fn only_the_executable_found_in_the_bundled_directory_derives_a_label() -> TestResult {
+    let (root, cli) = bundled_install(Some(b"999.0.0"))?;
+    let other = root.path().join("elsewhere/claude");
+    touch(&other)?;
+    std::fs::write(root.path().join("elsewhere/claude.version"), "999.0.0")?;
+    assert!(!derives(root.path(), &other, QUALIFYING_VERSION));
+    assert!(!derives(
+        root.path(),
+        &root.path().join("_bundled/missing"),
+        QUALIFYING_VERSION
+    ));
+    assert!(
+        !bundled_cli_derives_client_app(
+            &cli,
+            root.path(),
+            true,
+            QUALIFYING_VERSION,
+            &NativeFileSystem,
+            &NativeHost
+        ),
+        "claude.exe is the bundled name on Windows, so claude is not it"
+    );
+    Ok(())
 }

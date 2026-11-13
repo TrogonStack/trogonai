@@ -208,6 +208,10 @@ the stdin `initialize` bytes).
   an `Err` from any method ends the run as `Error::Transport` surfaces it.
 - Bundled executables are caller-driven lookups, not part of `connect`.
   `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check.
+  `bundled_cli_derives_client_app` and `meets_derived_client_app_minimum` port
+  Python's version gate for deriving an app label (the pinned CLI version and the
+  `claude.version` record beside the bundled binary must both be `999.0.0` or
+  later); `connect` follows TypeScript and does not call them.
   `find_native_cli` ports TypeScript's platform package selection
   (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`, musl before glibc on musl
   Linux, `-android` packages, `.exe` on win32) over a `ResolveNodeModule`

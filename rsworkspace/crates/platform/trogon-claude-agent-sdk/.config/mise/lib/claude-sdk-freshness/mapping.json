@@ -71,7 +71,9 @@
         "find_native_cli",
         "ResolveNodeModule",
         "NodeModuleLookup",
-        "NativePackageTarget"
+        "NativePackageTarget",
+        "meets_derived_client_app_minimum",
+        "bundled_cli_derives_client_app"
       ],
       "tests": [
         {
@@ -93,10 +95,18 @@
         {
           "name": "linux_orders_the_libc_variants_by_preference",
           "path": "tests/bundled_cli.rs"
+        },
+        {
+          "name": "derived_client_app_minimum_compares_the_leading_triple_as_a_list",
+          "path": "tests/bundled_cli.rs"
+        },
+        {
+          "name": "the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
+          "path": "tests/bundled_cli.rs"
         }
       ],
       "status": "supported",
-      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity. The bundled executable lookups (Python _bundled directory, TypeScript platform packages with musl and Windows or arm variants) are caller-driven helpers in find_bundled_cli and find_native_cli; they are not part of connect's discovery."
+      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity. The bundled executable lookups (Python _bundled directory, TypeScript platform packages with musl and Windows or arm variants) are caller-driven helpers in find_bundled_cli and find_native_cli; they are not part of connect's discovery. Python's bundled-CLI version gate (999.0.0 minimum, claude.version record) and its derived client app trigger are the same kind of helper, meets_derived_client_app_minimum and bundled_cli_derives_client_app; the label itself is not derived and TypeScript, which has neither, stays connect's default."
     },
     {
       "id": "process-errors-and-shutdown",

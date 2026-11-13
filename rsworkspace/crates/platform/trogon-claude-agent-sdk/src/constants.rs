@@ -533,3 +533,10 @@ pub(crate) const BUNDLED_DIRECTORY: &str = "_bundled";
 
 /// npm package name shared by the TypeScript SDK and its platform packages.
 pub(crate) const PACKAGE_SCOPE_NAME: &str = "@anthropic-ai/claude-agent-sdk";
+
+/// File beside the bundled executable that records the version the CLI reported at build time.
+pub(crate) const BUNDLED_CLI_VERSION_FILE: &str = "claude.version";
+
+/// First Claude Code version that keeps the derived client app label from what it spawns. Python keeps it above
+/// every release until one does, so no label is derived before then.
+pub(crate) const DERIVED_CLIENT_APP_MINIMUM_CLAUDE_CODE_VERSION: [u32; 3] = [999, 0, 0];

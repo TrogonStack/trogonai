@@ -270,7 +270,7 @@ class ReviewedMappingTests(unittest.TestCase):
 
     def test_mapping_matches_reviewed_bytes(self):
         ids = bm.validate(self.behaviors, self.pins, self.reviewed_sources())
-        self.assertEqual(len(ids), 75)
+        self.assertEqual(len(ids), 81)
 
 
 if __name__ == "__main__":
