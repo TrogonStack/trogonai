@@ -29,18 +29,38 @@ struct StoredCredential {
     destroy_reason: Option<SecretDestroyReason>,
 }
 
+impl InMemorySecretStoreState {
+    fn next_credential_ref(&self, identity: CredentialIdentity) -> CredentialRef {
+        let key = identity.key();
+        let version = self
+            .entries
+            .keys()
+            .filter(|credential| credential.key() == key)
+            .map(CredentialRef::version)
+            .max()
+            .map_or_else(CredentialVersion::initial, CredentialVersion::next);
+
+        CredentialRef::new(identity, version)
+    }
+}
+
 impl SecretStorePut for InMemorySecretStore {
     type Error = SecretStoreError;
 
     async fn put(&self, identity: CredentialIdentity, value: SecretString) -> Result<CredentialRef, Self::Error> {
         let mut state = self.state.lock().await;
-        let credential = CredentialRef::new(identity, CredentialVersion::initial());
-        let metadata = metadata(&credential, CredentialStatus::Active)?;
+        let credential = state.next_credential_ref(identity);
+        let active_metadata = metadata(&credential, CredentialStatus::Active)?;
+        for (stored_ref, stored) in &mut state.entries {
+            if stored_ref.key() == credential.key() && stored.metadata.status() == CredentialStatus::Active {
+                stored.metadata = metadata(stored_ref, CredentialStatus::Previous)?;
+            }
+        }
         state.entries.insert(
             credential.clone(),
             StoredCredential {
                 material: Some(SecretMaterial::plaintext(value)),
-                metadata,
+                metadata: active_metadata,
                 destroy_reason: None,
             },
         );
