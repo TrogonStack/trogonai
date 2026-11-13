@@ -1272,15 +1272,15 @@
         },
         {
           "path": "tests/mcp_tool_values.rs",
-          "name": "mcp_tool_input_schema_rejects_non_object_declarations"
+          "name": "validated_mcp_tool_input_schema_rejects_non_object_declarations"
         },
         {
           "path": "tests/mcp_tool_values.rs",
-          "name": "mcp_tool_input_schema_rejects_malformed_schema"
+          "name": "validated_mcp_tool_input_schema_rejects_malformed_schema"
         },
         {
           "path": "tests/mcp_tool_values.rs",
-          "name": "mcp_tool_input_schema_rejects_external_references"
+          "name": "validated_mcp_tool_input_schema_rejects_external_references"
         },
         {
           "path": "tests/sdk_tools.rs",
