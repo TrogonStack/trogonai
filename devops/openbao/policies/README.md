@@ -1,12 +1,13 @@
 # OpenBao Credential Policies
 
-The five credential platform roles, written against the path convention
+The credential platform roles, written against the path convention
 `OpenBaoSecretStore` actually uses.
 
-Nothing consumes these yet. The local compose stack runs OpenBao in `-dev` mode
-with a root token, and no service binds to a policy, because the auth method per
-service is still an open decision. These files are the path
-half of that answer; the identity half is what the auth-method decision adds.
+The local compose stack runs OpenBao in `-dev` mode with a root token. The
+secrets service's release path is the one consumer bound to an identity so far:
+it logs in with an AppRole and reads through per-request child tokens, as
+described under [Secrets Service Release Reads](#secrets-service-release-reads).
+The other roles still wait on the auth-method decision for their identity half.
 
 ## Path Convention
 
@@ -79,6 +80,49 @@ Each claim below is asserted by `verify.sh`, not argued from the file contents.
   metadata status before reading data. The "authorized to resolve" half needs
   either per-owner identity templating (commented in `gateway-read.hcl`) or the
   secrets-service resolve authorization from [ADR#0023](../../../docs/adr/0023-secret-management-and-key-custody-direction.md), and neither exists yet.
+
+## Secrets Service Release Reads
+
+`OpenBaoReleaseReader` never reads a credential with its login token. The login
+token carries `secrets_service_login`, which grants no credential path at all:
+only minting through the `secrets_service_release` token role, `renew-self`, and
+`lookup-self`. Each release read mints its own child through that role, carrying
+`secrets_service_release_read` alone, good for the metadata read and the data
+read it makes, and stamped with the release's correlation id in its metadata.
+The child is not an orphan, so revoking the login token severs every child it
+minted.
+
+The setup the reader expects, with `bao` pointed at the server:
+
+```sh
+bao auth enable approle
+
+bao write auth/token/roles/secrets_service_release \
+  allowed_policies=secrets_service_release_read \
+  orphan=false renewable=false token_no_default_policy=true \
+  token_explicit_max_ttl=30s
+
+bao write auth/approle/role/secrets-service \
+  token_policies=secrets_service_login token_no_default_policy=true \
+  token_ttl=60s token_max_ttl=120s
+
+bao write sys/config/auditing/request-headers/x-trogon-correlation-id hmac=false
+```
+
+The last line makes OpenBao write the `x-trogon-correlation-id` header each
+release call sends into its audit log in plaintext. The child token's metadata
+carries the same id under `auth.metadata.correlation_id` whether or not the
+header is registered. Audit devices themselves are declared in the server
+configuration; OpenBao 2.5 no longer enables them through the API.
+
+The secret id reaches the service as a file it reads at startup, so no standing
+OpenBao credential lives in a config file, per
+[ADR#0023](../../../docs/adr/0023-secret-management-and-key-custody-direction.md).
+
+The `OpenBaoReleaseReader` container tests in `trogon-secret-store` load both
+`secrets-service-*.hcl` files as written here and assert that the login token
+reads nothing, that a child reads only under `trogonai/+/credentials/` and only
+twice, and that the audit entry for a read carries the correlation id.
 
 ## Applying
 

@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use trogon_credential_domain::{
-    CredentialIdentity, CredentialMetadata, CredentialRef, CredentialStatus, CredentialVersion,
+    AuditCorrelationId, CredentialIdentity, CredentialMetadata, CredentialRef, CredentialStatus, CredentialVersion,
 };
 use trogon_std::SecretString;
 
 use super::{
-    SecretDestroyReason, SecretMaterial, SecretStoreDestroy, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
-    SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
+    SecretDestroyReason, SecretMaterial, SecretStoreCorrelatedGet, SecretStoreDestroy, SecretStoreError,
+    SecretStoreGet, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
 };
 
 #[derive(Clone, Default)]
@@ -20,6 +20,14 @@ pub struct InMemorySecretStore {
 #[derive(Default)]
 struct InMemorySecretStoreState {
     entries: BTreeMap<CredentialRef, StoredCredential>,
+    correlation_ids: Vec<AuditCorrelationId>,
+}
+
+impl InMemorySecretStore {
+    /// Every correlation id a correlated read was handed, oldest first.
+    pub async fn correlation_ids(&self) -> Vec<AuditCorrelationId> {
+        self.state.lock().await.correlation_ids.clone()
+    }
 }
 
 #[derive(Clone)]
@@ -64,6 +72,19 @@ impl SecretStoreGet for InMemorySecretStore {
                 status,
             }),
         }
+    }
+}
+
+impl SecretStoreCorrelatedGet for InMemorySecretStore {
+    type Error = SecretStoreError;
+
+    async fn get_correlated(
+        &self,
+        credential: &CredentialRef,
+        correlation_id: &AuditCorrelationId,
+    ) -> Result<SecretMaterial, Self::Error> {
+        self.state.lock().await.correlation_ids.push(correlation_id.clone());
+        self.get(credential).await
     }
 }
 

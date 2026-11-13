@@ -385,6 +385,62 @@
       ]
     },
     {
+      "name": "request rejects an overlong correlation id",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/correlationId/value",
+          "value": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "violations": [
+        "at most 128 characters"
+      ]
+    },
+    {
+      "name": "request rejects a correlation id with a space",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/correlationId/value",
+          "value": "audit correlation"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects a correlation id with a line break",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/correlationId/value",
+          "value": "audit\r\nx-injected: 1"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects a correlation id with a non ascii character",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/correlationId/value",
+          "value": "audit-é"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
       "name": "request rejects a requester key that is not an xkey",
       "template": "request",
       "patch": [
@@ -485,6 +541,28 @@
           "op": "replace",
           "path": "/credential/ownerId",
           "value": "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+        }
+      ]
+    },
+    {
+      "name": "request accepts a longest correlation id",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/correlationId/value",
+          "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ]
+    },
+    {
+      "name": "request accepts a correlation id with punctuation",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/correlationId/value",
+          "value": "req:7f3a/b=c~1"
         }
       ]
     }

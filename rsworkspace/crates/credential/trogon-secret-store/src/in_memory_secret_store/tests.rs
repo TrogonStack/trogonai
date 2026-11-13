@@ -350,3 +350,48 @@ async fn rotate_of_a_previous_version_is_unwritable() {
         }
     );
 }
+
+#[tokio::test]
+async fn correlated_get_reads_like_get_and_records_the_correlation_id() {
+    let store = InMemorySecretStore::default();
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+    let credential = store
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot token").unwrap(),
+        )
+        .await
+        .unwrap();
+    let correlation_id = AuditCorrelationId::new("use-1").unwrap();
+
+    let material = store.get_correlated(&credential, &correlation_id).await.unwrap();
+
+    assert_eq!(material.as_plaintext().unwrap().as_str(), "Bot token");
+    assert_eq!(store.correlation_ids().await, vec![correlation_id]);
+}
+
+#[tokio::test]
+async fn correlated_get_of_a_revoked_version_is_unreadable_and_still_recorded() {
+    let store = InMemorySecretStore::default();
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+    let credential = store
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot token").unwrap(),
+        )
+        .await
+        .unwrap();
+    store.revoke(&credential).await.unwrap();
+    let correlation_id = AuditCorrelationId::new("use-2").unwrap();
+
+    let error = store.get_correlated(&credential, &correlation_id).await.unwrap_err();
+
+    assert!(matches!(
+        error,
+        SecretStoreError::Unreadable {
+            status: CredentialStatus::Revoked,
+            ..
+        }
+    ));
+    assert_eq!(store.correlation_ids().await, vec![correlation_id]);
+}

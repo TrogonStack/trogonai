@@ -7,10 +7,14 @@ import "buf/validate/validate.proto";
 // Opaque nonempty identifier minted with a use audit acceptance fact and
 // passed into ResolveForTrustedUse, so the secrets service's record and the
 // provider-facing record join: the dual audit of ADR#0023 Decision 6
-// (ADR#0096 Decision 9). Compared whole, never personal data.
+// (ADR#0096 Decision 9). Compared whole, never personal data. At most 128
+// visible ASCII characters, because the secrets service threads it into the
+// secret store's own request, where it travels as an HTTP header.
 message AuditCorrelationId {
   string value = 1 [
     features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).string.min_len = 1
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).string.max_len = 128,
+    (buf.validate.field).string.pattern = "^[!-~]+$"
   ];
 }
