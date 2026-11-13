@@ -25,7 +25,7 @@ use crate::{
         sort_page, valid_uuid,
     },
     session_mutations::{build_fork_lines, iso_now, partition_fork_entry, py_strip, sanitize_unicode},
-    session_project_key::canonicalize_lenient,
+    session_project_key::canonicalize_lenient_in,
     session_prompt::iso_to_epoch_ms,
     session_summary::summary_entry_to_sdk_info,
     session_transcript::{
@@ -90,10 +90,11 @@ fn project_key(directory: Option<&Path>) -> Result<SessionProjectKey, SessionSto
 }
 
 fn project_path(directory: Option<&Path>) -> String {
-    canonicalize_lenient(
+    canonicalize_lenient_in(
         directory
             .filter(|d| !d.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new(".")),
+        crate::SummaryDialect::TypeScript,
     )
 }
 
