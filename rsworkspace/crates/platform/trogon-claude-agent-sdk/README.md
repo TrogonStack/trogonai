@@ -272,7 +272,7 @@ upstream SDKs).
   as `sdk.mjs` does for its resolved executable. Python never sends it.
 - `user` runs the CLI as the named account (`Popen(user=...)`: the name is
   resolved with libc `getpwnam_r`, so NSS sources apply, an unknown name fails
-  with `getpwnam(): name not found: '<name>'`, and only the uid changes, Unix
+  with `getpwnam(): name not found: '<name>'`, and only the real and effective uid change through `setreuid`, as in CPython, Unix
   only); `run_as_uid` is the numeric form.
 - `extra_args` behave like the upstream dictionaries: a repeated flag keeps its first position and its last value,
   TypeScript lists integer-like flags first in ascending order, and TypeScript writes `--flag=value` for a value
@@ -284,8 +284,7 @@ upstream SDKs).
   arrives whole; `Lines` counts the partial-line limit in characters and trims like `str.rstrip()`.
 - With a `session_store`, `SessionPersistence::Disabled` is refused in the TypeScript dialect with the upstream
   `sessionStore cannot be used with persistSession: false` error.
-- `user` matches Python except that the spawn clears supplementary groups when run as root, because `setreuid`
-  alone would need an unsafe `pre_exec` hook.
+- `debug_stderr` is accepted and ignored, as Python no longer reads it.
 - The inbound line limit `limits.max_buffer_size` is unset by default, as
   TypeScript keeps every line; `Limits::python()` sets Python's 1 MiB
   (`max_buffer_size`, where zero is valid). A longer line, counted in characters without its

@@ -2731,6 +2731,7 @@
             "ClaudeAgentOptions.allowed_tools",
             "ClaudeAgentOptions.client_app",
             "ClaudeAgentOptions.continue_conversation",
+            "ClaudeAgentOptions.debug_stderr",
             "ClaudeAgentOptions.disallowed_tools",
             "ClaudeAgentOptions.extra_args",
             "ClaudeAgentOptions.fork_session",
@@ -2739,7 +2740,8 @@
             "ClaudeAgentOptions.max_turns",
             "ClaudeAgentOptions.resume",
             "ClaudeAgentOptions.stderr",
-            "ClaudeAgentOptions.tools"
+            "ClaudeAgentOptions.tools",
+            "ClaudeAgentOptions.user"
           ],
           "prefixes": []
         },
@@ -2820,32 +2822,14 @@
         {
           "path": "tests/session_summary.rs",
           "name": "eager_flush_appends_every_frame_without_waiting_for_a_flush"
+        },
+        {
+          "path": "src/run_as/tests.rs",
+          "name": "setting_the_uid_to_the_current_one_needs_no_privilege"
         }
       ],
       "status": "supported",
-      "rationale": "Argv tokens and order, the dash rule, extraArgs dictionary semantics (duplicate keys collapse, TypeScript lists integer keys first), the tools preset, empty agent and resume, stderr delivery (raw decoder chunks for TypeScript, trimmed lines for Python), max_buffer_size including zero, client_app precedence and the sessionStore with persistSession false refusal are pinned against goldens captured from the real sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 driving a recording stand-in for the CLI."
-    },
-    {
-      "id": "core-options-gaps",
-      "upstream": {
-        "python": {
-          "symbols": [
-            "ClaudeAgentOptions.user",
-            "ClaudeAgentOptions.debug_stderr"
-          ],
-          "prefixes": []
-        },
-        "typescript": {
-          "symbols": [],
-          "prefixes": []
-        }
-      },
-      "rust_api": [
-        "ClaudeAgentOptions"
-      ],
-      "tests": [],
-      "status": "partial",
-      "rationale": "user resolves the account like Python but the spawn uses std Command::uid, which also clears supplementary groups when run as root, where Python calls setreuid only; matching it needs an unsafe pre_exec hook. debug_stderr is a deprecated option Python no longer reads, so it has no Rust field."
+      "rationale": "Argv tokens and order, the dash rule, extraArgs dictionary semantics (duplicate keys collapse, TypeScript lists integer keys first), the tools preset, empty agent and resume, stderr delivery (raw decoder chunks for TypeScript, trimmed lines for Python), max_buffer_size including zero, client_app precedence and the sessionStore with persistSession false refusal are pinned against goldens captured from the real sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 driving a recording stand-in for the CLI. user resolves the name with getpwnam and switches only the real and effective uid with setreuid in a pre_exec hook, as CPython does; debug_stderr is an accepted no-op."
     }
   ]
 }

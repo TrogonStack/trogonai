@@ -80,10 +80,17 @@ pub(crate) fn command(
         return Err(Error::FileCheckpointingWithSessionStore);
     }
     #[cfg(unix)]
-    if let Some(name) = &options.user {
-        command.uid(crate::run_as::lookup(name).map_err(Error::Io)?);
-    } else if let Some(uid) = options.run_as_uid {
-        command.uid(uid);
+    {
+        let uid = match (&options.user, options.run_as_uid) {
+            (Some(name), _) => Some(crate::run_as::lookup(name).map_err(Error::Io)?),
+            (None, uid) => uid,
+        };
+        if let Some(uid) = uid {
+            // SAFETY: the closure only calls `setreuid`, which is async-signal-safe and allocates nothing.
+            unsafe {
+                command.pre_exec(move || crate::run_as::set_real_and_effective_uid(uid));
+            }
+        }
     }
     command
         .stdin(Stdio::piped())

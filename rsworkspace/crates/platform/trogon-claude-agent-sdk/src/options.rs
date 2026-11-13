@@ -325,10 +325,13 @@ pub struct ClaudeAgentOptions {
     pub extra_args: Vec<ExtraArgument>,
     pub script_runtime: ScriptRuntime,
     /// Python's `user`: the CLI runs as this account (Unix only). The name is looked up in `/etc/passwd`; only the
-    /// uid changes, as with `Popen(user=...)`. Takes precedence over `run_as_uid`.
+    /// real and effective uid change (`setreuid`, no `setgroups`), as with `Popen(user=...)`. Takes precedence over
+    /// `run_as_uid`.
     pub user: Option<String>,
     /// Numeric user id the CLI runs as (Unix only), as `Popen(user=int)` does.
     pub run_as_uid: Option<u32>,
+    /// Python's `debug_stderr`: deprecated, no longer read by the transport. Accepted so options port unchanged.
+    pub debug_stderr: bool,
     /// `thinking` / `thinkingConfig`. Takes precedence over `max_thinking_tokens`.
     pub thinking: Option<crate::ThinkingConfig>,
     /// The deprecated `max_thinking_tokens`. TypeScript treats `0` as disabled thinking; Python forwards it as is.

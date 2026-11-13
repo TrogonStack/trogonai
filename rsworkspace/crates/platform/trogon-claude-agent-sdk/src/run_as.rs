@@ -38,5 +38,16 @@ pub(crate) fn lookup(name: &str) -> io::Result<u32> {
     }
 }
 
+/// What `Popen(user=uid)` runs in the child before exec: `setreuid(uid, uid)` and nothing else, so supplementary
+/// groups stay as they are (`Command::uid` would also call `setgroups`).
+#[cfg(unix)]
+pub(crate) fn set_real_and_effective_uid(uid: u32) -> io::Result<()> {
+    // SAFETY: `setreuid` only takes integers and is async-signal-safe, so it may run between fork and exec.
+    if unsafe { libc::setreuid(uid, uid) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 #[cfg(all(test, unix))]
 mod tests;

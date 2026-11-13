@@ -24,3 +24,10 @@ fn a_name_with_a_nul_byte_is_refused() {
         Some(std::io::ErrorKind::InvalidInput)
     );
 }
+
+#[test]
+fn setting_the_uid_to_the_current_one_needs_no_privilege() -> Result<(), std::io::Error> {
+    // SAFETY: `getuid` takes no arguments and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    super::set_real_and_effective_uid(uid)
+}
