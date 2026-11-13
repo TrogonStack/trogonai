@@ -16,9 +16,15 @@ impl CanonicalizePath for CanonicalPath {
 
 #[test]
 fn project_key_matches_upstream_utf16_replacement() -> Result<(), Box<dyn std::error::Error>> {
+    // TypeScript composes the path to NFC only on macOS; elsewhere the combining mark is replaced on its own.
+    let decomposed_cafe = if cfg!(target_os = "macos") {
+        "-projects-caf-"
+    } else {
+        "-projects-cafe-"
+    };
     for (path, expected) in [
         ("/projects/hello🌻", "-projects-hello--"),
-        ("/projects/cafe\u{301}", "-projects-caf-"),
+        ("/projects/cafe\u{301}", decomposed_cafe),
         ("/projects/hello.world", "-projects-hello-world"),
     ] {
         let key = SessionProjectKey::for_directory_with_filesystem(Path::new(path), &CanonicalPath)?;

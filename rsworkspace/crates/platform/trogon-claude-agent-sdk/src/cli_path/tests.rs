@@ -29,3 +29,20 @@ fn windows_batch_paths_cover_components_streams_and_normalization() {
         assert!(!is_windows_batch_cli(path.as_ref()), "{path}");
     }
 }
+
+#[test]
+fn the_refusal_quotes_the_path_like_python_repr() {
+    let error = super::CliPathError::WindowsBatchScript {
+        path: "C:\\tools\\claude's.cmd".into(),
+    };
+    assert!(error.to_string().starts_with(
+        "Refusing to execute batch script \"C:\\\\tools\\\\claude's.cmd\": Windows runs .bat/.cmd files via cmd.exe,"
+    ));
+    assert_eq!(super::python_repr("a\tb'\"c"), "'a\\tb\\'\"c'");
+}
+
+#[test]
+fn batch_paths_run_unless_the_python_refusal_is_selected() {
+    assert_eq!(super::WindowsBatchCli::default(), super::WindowsBatchCli::Run);
+    assert!(super::reject_windows_batch_cli("claude.cmd".as_ref(), super::WindowsBatchCli::Run).is_ok());
+}
