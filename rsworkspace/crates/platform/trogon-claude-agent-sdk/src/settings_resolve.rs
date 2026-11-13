@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf};
+use std::{io, path::PathBuf, sync::LazyLock};
 
 use serde_json::{Map, Value};
 
@@ -7,11 +7,13 @@ use crate::{
     constants::{DEFAULT_SETTING_SOURCES, ESCALATING_DEFAULT_MODES, SOURCE_ORDER, STRICT_ESCALATING_DEFAULT_MODES},
     settings_dialect::SettingsDialect,
     settings_numbers::normalize_numbers,
+    settings_resolve_connector::skips_repository_settings,
     settings_resolve_platform::{evaluate_policy, read_policy},
     settings_resolve_policy::{PolicyResolution, resolve_policy},
     settings_resolve_sources::{
         local_settings_path, project_settings_path, read_settings_file, resolve_cwd, user_settings_path,
     },
+    settings_resolve_state::ResolverState,
     settings_resolve_values::{SettingsMap, in_schema_order, merge_with_union},
     upstream::{
         settings::Settings,
@@ -110,12 +112,21 @@ fn did_not_load(read_outcome_lost: Option<bool>, mdm_did_not_load: bool, file_di
     }
 }
 
-/// `resolveSettings` upstream, against any host.
+/// `resolveSettings` upstream, against any host, with the module state of a process that starts now.
 pub fn resolve_settings_with<H: SettingsHost>(
     host: &H,
     options: &ResolveSettingsOptions,
 ) -> Result<ResolvedSettings, ResolveSettingsError> {
-    resolve_settings_in_dialect_with(host, options, SettingsDialect::TypeScript)
+    resolve_settings_in_dialect_with_state(host, options, SettingsDialect::TypeScript, &ResolverState::new())
+}
+
+/// `resolveSettings` upstream, against any host, carrying the state upstream keeps between calls.
+pub fn resolve_settings_with_state<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    state: &ResolverState,
+) -> Result<ResolvedSettings, ResolveSettingsError> {
+    resolve_settings_in_dialect_with_state(host, options, SettingsDialect::TypeScript, state)
 }
 
 /// [`resolve_settings_with`] reading numbers like the chosen SDK's JSON parser.
@@ -123,6 +134,16 @@ pub fn resolve_settings_in_dialect_with<H: SettingsHost>(
     host: &H,
     options: &ResolveSettingsOptions,
     dialect: SettingsDialect,
+) -> Result<ResolvedSettings, ResolveSettingsError> {
+    resolve_settings_in_dialect_with_state(host, options, dialect, &ResolverState::new())
+}
+
+/// [`resolve_settings_with_state`] reading numbers like the chosen SDK's JSON parser.
+pub fn resolve_settings_in_dialect_with_state<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    dialect: SettingsDialect,
+    state: &ResolverState,
 ) -> Result<ResolvedSettings, ResolveSettingsError> {
     let cwd = resolve_cwd(host, options.cwd.as_deref()).map_err(ResolveSettingsError::CurrentDirectory)?;
     let allowed = allowed_sources(options);
@@ -163,14 +184,22 @@ pub fn resolve_settings_in_dialect_with<H: SettingsHost>(
                 (Some(path), settings)
             }
             "projectSettings" => {
-                let path = project_settings_path(&cwd);
-                let settings = read_settings_file(host, &path, dialect);
-                (Some(path), settings)
+                if skips_repository_settings(host, state, &cwd) {
+                    (None, None)
+                } else {
+                    let path = project_settings_path(&cwd);
+                    let settings = read_settings_file(host, &path, dialect);
+                    (Some(path), settings)
+                }
             }
             "localSettings" => {
-                let path = local_settings_path(&cwd);
-                let settings = read_settings_file(host, &path, dialect);
-                (Some(path), settings)
+                if skips_repository_settings(host, state, &cwd) {
+                    (None, None)
+                } else {
+                    let path = local_settings_path(&cwd);
+                    let settings = read_settings_file(host, &path, dialect);
+                    (Some(path), settings)
+                }
             }
             "policySettings" => (None, policy_settings.clone()),
             _ => (None, None),
@@ -253,6 +282,8 @@ pub fn resolve_settings_in_dialect_with<H: SettingsHost>(
     serde_json::from_value(Value::Object(result)).map_err(ResolveSettingsError::Decode)
 }
 
+static PROCESS_STATE: LazyLock<ResolverState> = LazyLock::new(ResolverState::new);
+
 /// `resolveSettings` upstream: reads the real host once and merges every enabled source.
 pub async fn resolve_settings(options: &ResolveSettingsOptions) -> Result<ResolvedSettings, ResolveSettingsError> {
     resolve_settings_in_dialect(options, SettingsDialect::TypeScript).await
@@ -264,9 +295,11 @@ pub async fn resolve_settings_in_dialect(
     dialect: SettingsDialect,
 ) -> Result<ResolvedSettings, ResolveSettingsError> {
     let options = options.clone();
-    tokio::task::spawn_blocking(move || resolve_settings_in_dialect_with(&NativeHost, &options, dialect))
-        .await
-        .map_err(ResolveSettingsError::Join)?
+    tokio::task::spawn_blocking(move || {
+        resolve_settings_in_dialect_with_state(&NativeHost, &options, dialect, &PROCESS_STATE)
+    })
+    .await
+    .map_err(ResolveSettingsError::Join)?
 }
 
 /// `filterEscalatingDefaultMode` upstream: drops a `defaultMode` that only a repo-controlled source set.

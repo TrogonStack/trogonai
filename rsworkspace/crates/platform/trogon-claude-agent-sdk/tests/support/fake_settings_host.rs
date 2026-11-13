@@ -10,7 +10,8 @@ use std::{
 
 use trogon_claude_agent_sdk::adapters::{
     CheckReadable, CurrentDirectory, DirectoryEntry, DirectoryEntryKind, EnvironmentVariable, ExecuteFile,
-    ExecuteFileOutcome, ExecuteFileRequest, ExecuteFileStatus, HostIdentity, OperatingSystem, ReadDirectory, ReadFile,
+    ExecuteFileOutcome, ExecuteFileRequest, ExecuteFileStatus, HostIdentity, LinkMetadata, OperatingSystem,
+    ReadDirectory, ReadFile, ReadLink, ReadSymlinkMetadata,
 };
 
 /// A host made of maps, so every platform branch runs on any machine.
@@ -22,6 +23,7 @@ pub struct FakeHost {
     pub files: BTreeMap<PathBuf, Vec<u8>>,
     pub directories: BTreeMap<PathBuf, Vec<DirectoryEntry>>,
     pub unreadable: BTreeSet<PathBuf>,
+    pub links: BTreeMap<PathBuf, PathBuf>,
     pub commands: BTreeMap<String, ExecuteFileOutcome>,
     pub runs: Mutex<Vec<String>>,
 }
@@ -36,6 +38,7 @@ impl FakeHost {
             files: BTreeMap::new(),
             directories: BTreeMap::new(),
             unreadable: BTreeSet::new(),
+            links: BTreeMap::new(),
             commands: BTreeMap::new(),
             runs: Mutex::new(Vec::new()),
         }
@@ -57,6 +60,12 @@ impl FakeHost {
                 })
                 .collect(),
         );
+        self
+    }
+
+    /// A symbolic link at `path` whose text is `target`.
+    pub fn link(mut self, path: &str, target: &str) -> Self {
+        self.links.insert(PathBuf::from(path), PathBuf::from(target));
         self
     }
 
@@ -146,6 +155,49 @@ impl ReadDirectory for FakeHost {
 
     fn read_directory(&self, path: &Path) -> Result<Vec<DirectoryEntry>, io::Error> {
         self.directories.get(path).cloned().ok_or_else(not_found)
+    }
+}
+
+impl ReadSymlinkMetadata for FakeHost {
+    type Error = io::Error;
+
+    fn symlink_metadata(&self, path: &Path) -> Result<LinkMetadata, io::Error> {
+        if let Some(target) = self.links.get(path) {
+            return Ok(LinkMetadata {
+                kind: DirectoryEntryKind::Symlink,
+                len: target.as_os_str().len() as u64,
+            });
+        }
+        if let Some(bytes) = self.files.get(path) {
+            return Ok(LinkMetadata {
+                kind: DirectoryEntryKind::File,
+                len: bytes.len() as u64,
+            });
+        }
+        let holds_something = self
+            .files
+            .keys()
+            .chain(self.links.keys())
+            .chain(self.directories.keys())
+            .any(|held| held.starts_with(path));
+        if holds_something {
+            return Ok(LinkMetadata {
+                kind: DirectoryEntryKind::Directory,
+                len: 0,
+            });
+        }
+        Err(not_found())
+    }
+}
+
+impl ReadLink for FakeHost {
+    type Error = io::Error;
+
+    fn read_link(&self, path: &Path) -> Result<PathBuf, io::Error> {
+        self.links
+            .get(path)
+            .cloned()
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))
     }
 }
 
