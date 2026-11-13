@@ -50,6 +50,8 @@ pub(crate) enum Command {
         completion: Completion,
         response: oneshot::Sender<Result<(), Error>>,
     },
+    /// TypeScript `abortController.abort()`: stop the process now and end the run with an `AbortError`.
+    Abort,
 }
 
 #[derive(Clone, Copy)]
@@ -258,6 +260,11 @@ where
     next_id: u64,
     state: State,
     run_state: RunState,
+    argv_style: crate::ArgvStyle,
+    /// The last `is_error` result, kept while nothing else has arrived since, to turn the exit error into a
+    /// result error the way both upstream SDKs do.
+    last_error_result: Option<JsonObject>,
+    closed: Closed,
     /// The CLI path until the first `system`/`init` message has been checked, then `None`.
     version_check: Option<String>,
 }
@@ -423,6 +430,36 @@ pub(crate) struct SpawnOptions<'a, P, F: crate::adapters::SessionFileSystem> {
     pub process: &'a P,
     pub cli_path: std::path::PathBuf,
     pub inherited: Inherited,
+    pub closed: Closed,
+}
+
+/// Why the process can no longer be written to, shared with every `ClientHandle` once the driver has stopped.
+#[derive(Clone, Default)]
+pub(crate) struct Closed(std::sync::Arc<std::sync::Mutex<Option<ClosedReason>>>);
+
+#[derive(Clone)]
+enum ClosedReason {
+    /// Python: `returncode` is set while `_ready` is still true.
+    Terminated { exit_code: Option<i32> },
+    /// TypeScript: the `exit` event sets `ready = false` before any later write.
+    NotReady,
+}
+
+impl Closed {
+    fn record(&self, reason: ClosedReason) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = Some(reason);
+        }
+    }
+
+    /// The write error for a stopped process, or `None` when the run did not record how it ended.
+    pub(crate) fn write_error(&self) -> Option<Error> {
+        let reason = self.0.lock().ok()?.clone()?;
+        Some(match reason {
+            ClosedReason::Terminated { exit_code } => Error::WriteToTerminatedProcess { exit_code },
+            ClosedReason::NotReady => Error::NotReadyForWriting,
+        })
+    }
 }
 
 pub(crate) fn spawn<P: SpawnProcess<Error = std::io::Error>, F: crate::adapters::SessionFileSystem>(
@@ -438,6 +475,7 @@ pub(crate) fn spawn<P: SpawnProcess<Error = std::io::Error>, F: crate::adapters:
         process: process_provider,
         cli_path,
         inherited,
+        closed,
     } = input;
     let (initialize_request, hook_callbacks, blocking_hooks) = initialize_config(&options)?;
     let mut process = command(&options, &cli_path, &inherited)?;
@@ -445,7 +483,16 @@ pub(crate) fn spawn<P: SpawnProcess<Error = std::io::Error>, F: crate::adapters:
         process.env("CLAUDE_CONFIG_DIR", config_dir);
     }
     crate::cli_path::reject_windows_batch_cli(cli_path.as_os_str())?;
-    let mut child = process_provider.spawn(&mut process).map_err(Error::Spawn)?;
+    let mut child = process_provider.spawn(&mut process).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            match options.cwd.as_ref() {
+                Some(cwd) if !cwd.exists() => Error::WorkingDirectoryMissing(cwd.clone()),
+                _ => Error::CliNotFoundAt(cli_path.clone()),
+            }
+        } else {
+            Error::Spawn(error)
+        }
+    })?;
     let process_id = child.id();
     let stdin = child.stdin.take().ok_or(Error::PipeUnavailable)?;
     let stdout = child.stdout.take().ok_or(Error::PipeUnavailable)?;
@@ -491,6 +538,9 @@ pub(crate) fn spawn<P: SpawnProcess<Error = std::io::Error>, F: crate::adapters:
         next_id: 0,
         state: State::Initializing,
         run_state: RunState::default(),
+        argv_style: options.argv_style,
+        last_error_result: None,
+        closed: closed.clone(),
         version_check: (!crate::version_check::skip_requested(
             inherited
                 .get(std::ffi::OsStr::new("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"))
@@ -519,6 +569,10 @@ where
         self.stdin.take();
         let immediate = primary.is_err() && !matches!(primary, Err(Error::UnexpectedEof));
         let cleanup = self.reap(immediate).await;
+        let exited = cleanup
+            .as_ref()
+            .ok()
+            .map(|(status, _, _)| crate::error::exit_code(status));
         let mirror_cleanup = self.finalize_mirror().await;
         if let Some(materialized) = self.session.as_mut().and_then(|session| session.materialized.take()) {
             materialized.cleanup().await;
@@ -526,9 +580,9 @@ where
         self.stderr.abort();
         let outcome = match cleanup {
             Ok((status, stderr, forced)) => match primary {
-                Err(Error::UnexpectedEof) if !status.success() => Err(Error::Process { status, stderr }),
+                Err(Error::UnexpectedEof) if !status.success() => Err(self.exit_error(status, stderr)),
                 Err(error) => Err(error),
-                Ok(()) if !forced && !status.success() => Err(Error::Process { status, stderr }),
+                Ok(()) if !forced && !status.success() => Err(self.exit_error(status, stderr)),
                 Ok(()) => Ok(()),
             },
             Err(cleanup) => match primary {
@@ -539,6 +593,12 @@ where
                 }),
             },
         };
+        if let Some(exit_code) = exited {
+            self.closed.record(match self.argv_style {
+                crate::ArgvStyle::Python => ClosedReason::Terminated { exit_code },
+                _ => ClosedReason::NotReady,
+            });
+        }
         let outcome = combine_outcomes(outcome, mirror_cleanup);
         for (_, pending) in self.pending.drain() {
             pending.response.send_error(Error::DriverStopped);
@@ -546,6 +606,53 @@ where
         self.commands.close();
         drop(self.messages);
         let _ = terminal.send(outcome);
+    }
+
+    /// Decodes one stdout line. TypeScript skips every line that is not JSON; Python fails on a corrupt line with
+    /// `CLIJSONDecodeError` but drops a corrupt unterminated tail at end of file. A JSON line that is not a valid
+    /// message is a `MessageParseError` carrying the raw object in both.
+    fn decode_frame(&self, frame: &[u8]) -> Result<Option<Frame>, Error> {
+        let error = match wire::parse_frame(frame) {
+            Ok(parsed) => return Ok(Some(parsed)),
+            Err(error) => error,
+        };
+        if let ProtocolError::Json(json) = &error
+            && matches!(
+                json.classify(),
+                serde_json::error::Category::Syntax | serde_json::error::Category::Eof
+            )
+        {
+            if self.argv_style == crate::ArgvStyle::TypeScript || self.frames.last_was_tail() {
+                tracing::debug!("skipping undecodable line from CLI stdout");
+                return Ok(None);
+            }
+            let ProtocolError::Json(json) = error else {
+                return Err(error.into());
+            };
+            return Err(crate::JsonDecodeError::new(frame, json).into());
+        }
+        let data = match serde_json::from_slice::<serde_json::Value>(frame) {
+            Ok(serde_json::Value::Object(object)) => Some(object),
+            _ => None,
+        };
+        Err(crate::MessageParseError::new(error, data).into())
+    }
+
+    /// The error for an unsuccessful exit: the last error result when one is pending (Python always, TypeScript
+    /// when its text is non-empty), otherwise the bare process error.
+    fn exit_error(&mut self, status: std::process::ExitStatus, stderr: StderrTail) -> Error {
+        let exit_code = crate::error::exit_code(&status);
+        if let Some(data) = self.last_error_result.take() {
+            let text = match self.argv_style {
+                crate::ArgvStyle::Python => Some(crate::error::python_error_result_text(&data)),
+                crate::ArgvStyle::TypeScript => crate::error::typescript_error_result_text(&data),
+            };
+            if let Some(text) = text {
+                let message = format!("Claude Code returned an error result: {text}");
+                return crate::ResultError::new(message, data, exit_code).into();
+            }
+        }
+        Error::Process { status, stderr }
     }
 
     async fn event_loop(&mut self) -> Result<(), Error> {
@@ -587,7 +694,8 @@ where
                         }
                         continue;
                     }
-                    self.frame(wire::parse_frame(&frame)?).await?;
+                    let Some(parsed) = self.decode_frame(&frame)? else { continue; };
+                    self.frame(parsed).await?;
                 }
                 flushed = async { match self.mirror_flush.as_mut() { Some(flush) => flush.await, None => pending().await } }, if self.mirror_flush.is_some() => {
                     self.mirror_flush = None;
@@ -659,7 +767,7 @@ where
                 response,
             } => {
                 if self.stdin.is_none() {
-                    let _ = response.send(Err(Error::DriverStopped));
+                    let _ = response.send(Err(Error::NotReadyForWriting));
                     return Ok(());
                 }
                 if self.pending_mcp.is_some() {
@@ -712,7 +820,7 @@ where
             }
             Command::Prompt { input, response } => {
                 if self.stdin.is_none() {
-                    let _ = response.send(Err(Error::DriverStopped));
+                    let _ = response.send(Err(Error::NotReadyForWriting));
                     return Ok(());
                 }
                 if self.run_state.input_done.is_some() {
@@ -750,13 +858,14 @@ where
                 self.run_state.input_done = Some(completion);
                 let _ = response.send(Ok(()));
             }
+            Command::Abort => return Err(crate::AbortError::PROCESS.into()),
         }
         Ok(())
     }
 
     async fn start_control(&mut self, response: ControlResponder, request: serde_json::Value) -> Result<(), Error> {
         if self.stdin.is_none() {
-            response.send_error(Error::DriverStopped);
+            response.send_error(Error::NotReadyForWriting);
             return Ok(());
         }
         if self.pending.len() >= self.limits.max_pending_controls.get() {
@@ -795,6 +904,13 @@ where
                     )
                 {
                     tracing::warn!(%warning, "Claude Code version warning");
+                }
+                match &message {
+                    Message::Result(result) if result.status == crate::ResultStatus::Error => {
+                        self.last_error_result = Some(crate::error::error_result_data(result));
+                    }
+                    Message::System(system) if system.subtype == "session_state_changed" => {}
+                    _ => self.last_error_result = None,
                 }
                 self.run_state.observe(&message, queued_limit, task_limit)?;
                 if matches!(message, Message::Result(_)) {
@@ -1232,27 +1348,77 @@ where
     async fn write(&mut self, frame: serde_json::Value) -> Result<(), Error> {
         let mut bytes = serde_json::to_vec(&frame).map_err(ProtocolError::from)?;
         bytes.push(b'\n');
-        let stdin = self.stdin.as_mut().ok_or(Error::DriverStopped)?;
+        if let Some(error) = self.write_unavailable() {
+            return Err(error);
+        }
+        let stdin = self.stdin.as_mut().ok_or(Error::NotReadyForWriting)?;
         tokio::select! {
             _ = &mut self.shutdown => Err(Error::ShutdownRequested),
-            result = timeout(self.limits.control_timeout.as_duration(), stdin.write_all(&bytes)) => result.map_err(|_| Error::WriteTimeout)?.map_err(Error::Io),
+            result = timeout(self.limits.control_timeout.as_duration(), stdin.write_all(&bytes)) => result.map_err(|_| Error::WriteTimeout)?.map_err(Error::WriteFailed),
         }
     }
 
+    /// Why a write cannot go out, in upstream's order: not ready, then terminated. Python keeps `_ready` after the
+    /// process exits and reports the terminated process with its exit code. TypeScript's `exit` event clears
+    /// `ready`, so a write after an observed exit is "not ready"; its `exited with error` branch is only reachable
+    /// while the process is still running with an exit error recorded, a state neither SDK can enter (Python sets
+    /// `_exit_error` after `returncode`, TypeScript clears `ready` with the error).
+    fn write_unavailable(&mut self) -> Option<Error> {
+        if self.stdin.is_none() {
+            return Some(Error::NotReadyForWriting);
+        }
+        if let Ok(Some(status)) = self.child.try_wait() {
+            return Some(match self.argv_style {
+                crate::ArgvStyle::Python => Error::WriteToTerminatedProcess {
+                    exit_code: crate::error::exit_code(&status),
+                },
+                _ => Error::NotReadyForWriting,
+            });
+        }
+        None
+    }
+
+    /// SIGTERM on Unix, a hard kill where there is no such signal or it cannot be delivered.
+    async fn terminate(&mut self) -> Result<(), Error> {
+        #[cfg(unix)]
+        if let Some(pid) = self.child.id() {
+            let delivered = tokio::process::Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await
+                .is_ok_and(|status| status.success());
+            if delivered {
+                return Ok(());
+            }
+        }
+        self.child.start_kill().map_err(Error::Io)
+    }
+
     async fn reap(&mut self, immediate: bool) -> Result<(std::process::ExitStatus, StderrTail, bool), Error> {
+        // Python's close sequence: stdin is already closed, wait, SIGTERM, wait, SIGKILL, wait.
+        let wait = self.limits.shutdown_timeout.as_duration();
         let mut forced = immediate;
         if immediate && self.child.try_wait().map_err(Error::Io)?.is_none() {
-            self.child.start_kill().map_err(Error::Io)?;
+            self.terminate().await?;
         }
-        let status = match timeout(self.limits.shutdown_timeout.as_duration(), self.child.wait()).await {
+        let status = match timeout(wait, self.child.wait()).await {
             Ok(status) => status.map_err(Error::Io)?,
             Err(_) => {
                 forced = true;
-                self.child.start_kill().map_err(Error::Io)?;
-                timeout(self.limits.shutdown_timeout.as_duration(), self.child.wait())
-                    .await
-                    .map_err(|_| Error::ShutdownTimeout)?
-                    .map_err(Error::Io)?
+                self.terminate().await?;
+                match timeout(wait, self.child.wait()).await {
+                    Ok(status) => status.map_err(Error::Io)?,
+                    Err(_) => {
+                        self.child.start_kill().map_err(Error::Io)?;
+                        timeout(wait, self.child.wait())
+                            .await
+                            .map_err(|_| Error::ShutdownTimeout)?
+                            .map_err(Error::Io)?
+                    }
+                }
             }
         };
         let stderr = match timeout(self.limits.shutdown_timeout.as_duration(), &mut self.stderr).await {
