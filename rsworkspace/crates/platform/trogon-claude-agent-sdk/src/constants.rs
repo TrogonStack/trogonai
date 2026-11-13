@@ -614,3 +614,30 @@ pub(crate) const SETTINGS_REGEXP_REPEAT_LIMIT: u64 = i32::MAX as u64;
 
 /// The variable-name slots of one AWS credential export pair.
 pub(crate) const SETTINGS_AWS_PAIR_SLOTS: [&str; 3] = ["accessKeyIdVar", "secretAccessKeyVar", "sessionTokenVar"];
+
+/// Settings arrays the TypeScript sandbox merge concatenates and de-duplicates (`$et`).
+pub(crate) const SANDBOX_MERGED_LISTS: [&str; 5] = [
+    "filesystem.denyRead",
+    "filesystem.denyWrite",
+    "network.deniedDomains",
+    "credentials.files",
+    "credentials.envVars",
+];
+
+/// Settings objects the TypeScript sandbox merge replaces whole instead of merging (`zet`).
+pub(crate) const SANDBOX_REPLACED_OBJECTS: [&str; 2] = ["ripgrep", "network.tlsTerminate"];
+
+/// Keys the TypeScript sandbox merge never copies (`Bet`).
+pub(crate) const SANDBOX_FORBIDDEN_KEYS: [&str; 3] = ["__proto__", "constructor", "prototype"];
+
+/// Proxy ports dropped from the merged sandbox when the new sandbox sets domain rules (`jet`).
+pub(crate) const SANDBOX_PROXY_PORTS: [&str; 2] = ["httpProxyPort", "socksProxyPort"];
+
+/// The error TypeScript raises for a settings file path combined with the `sandbox` option.
+pub(crate) const SETTINGS_PATH_WITH_SANDBOX_ERROR: &str = "Cannot use both a settings file path and the sandbox option. Include the sandbox configuration in your settings file instead.";
+
+/// Environment variable `sdk.mjs` deletes so a host cannot force agent progress summaries on.
+pub(crate) const AGENT_PROGRESS_SUMMARIES_ENV: &str = "CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES";
+
+/// Python `VERBATIM_PROMPTS_MINIMUM_CLAUDE_CODE_VERSION`: the first CLI that honors `client_composed`.
+pub(crate) const VERBATIM_PROMPTS_MINIMUM: [u32; 3] = [2, 1, 248];

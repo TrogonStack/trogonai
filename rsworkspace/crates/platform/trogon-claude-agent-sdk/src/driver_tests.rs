@@ -99,6 +99,8 @@ impl DriverFixture {
             initialize_expectations: InitializeExpectations::default(),
             initialize_timeout: None,
             version_check: None,
+            verbatim_prompts: false,
+            warn_unsupported_verbatim: false,
             elicitation_handler: None,
             user_dialog_handler: None,
             dialog_kinds: HashSet::new(),
@@ -657,5 +659,56 @@ fn python_initialize_timeout_reads_the_stream_close_variable() -> Result<(), Err
     ] {
         assert_eq!(parse(value).map_err(|error| error.to_string()), Err(message.to_owned()));
     }
+    Ok(())
+}
+
+fn settings(text: &str) -> Option<crate::Settings> {
+    crate::Settings::from_json(text).ok()
+}
+
+fn initialize_golden(name: &str, options: ClaudeAgentOptions) -> Result<(), Error> {
+    let options = ClaudeAgentOptions {
+        argv_style: crate::ArgvStyle::TypeScript,
+        ..options
+    };
+    let (request, _, _) = initialize_config(&options)?;
+    let all: serde_json::Value =
+        serde_json::from_str(include_str!("../tests/fixtures/settings_option/goldens.json")).unwrap_or_default();
+    let want = all["typescript"][name]["initialize"].clone();
+    assert_eq!(request, want, "{name}");
+    assert_eq!(request.to_string(), want.to_string(), "{name}");
+    Ok(())
+}
+
+#[test]
+fn the_initialize_request_carries_managed_settings_after_the_plugins() -> Result<(), Error> {
+    let base = ClaudeAgentOptions {
+        managed_settings_delivery: crate::ManagedSettingsDelivery::Initialize,
+        ..Default::default()
+    };
+    initialize_golden(
+        "managed_initialize",
+        ClaudeAgentOptions {
+            managed_settings: settings(r#"{"permissions":{"allow":["Bash"]},"n":1}"#),
+            ..base.clone()
+        },
+    )?;
+    initialize_golden(
+        "managed_initialize_plugins",
+        ClaudeAgentOptions {
+            managed_settings: settings(r#"{"n":1}"#),
+            plugin_delivery: crate::PluginDelivery::Initialize,
+            plugins: vec![crate::LocalPlugin::new("/p")],
+            ..base.clone()
+        },
+    )?;
+    initialize_golden("managed_initialize_without_settings", base)?;
+    initialize_golden(
+        "managed_argv",
+        ClaudeAgentOptions {
+            managed_settings: settings(r#"{"n":1}"#),
+            ..Default::default()
+        },
+    )?;
     Ok(())
 }

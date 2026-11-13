@@ -17,7 +17,7 @@ use trogon_claude_agent_sdk::{
 )]
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let schema = McpToolInputSchema::new(schema::echo_schema(Some(false))?)?;
+    let schema = McpToolInputSchema::new(schema::echo_schema(Some(false))?);
     let echo = SdkTool::from(SdkToolOptions {
         name: McpToolName::from("echo"),
         description: "Return the supplied text".into(),

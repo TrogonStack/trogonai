@@ -1,6 +1,6 @@
 //! The first-init-message version warning of Python `_check_claude_version` (0.2.181).
 
-use crate::constants::MINIMUM_CLAUDE_CODE_VERSION;
+use crate::constants::{MINIMUM_CLAUDE_CODE_VERSION, VERBATIM_PROMPTS_MINIMUM};
 
 /// Python's `re.match(r"(\d{1,9})\.(\d{1,9})\.(\d{1,9})", version)`: a prefix match.
 pub fn parse_version(version: &str) -> Option<[u32; 3]> {
@@ -27,6 +27,19 @@ pub fn unreported_version_warning(version: Option<&str>, cli_path: &str) -> Opti
     parse_version(reported).is_none().then(|| {
         format!(
             "Claude Code at {cli_path} is too old to report its version, and may be unsupported in the Agent SDK. Minimum required version is {MINIMUM_CLAUDE_CODE_VERSION}. Some features may not work correctly."
+        )
+    })
+}
+
+/// The warning for `verbatim_prompts` with a CLI that is older than 2.1.248 or reports no usable version.
+pub fn unsupported_verbatim_warning(version: Option<&str>, cli_path: &str) -> Option<String> {
+    let supported = version
+        .and_then(parse_version)
+        .is_some_and(|parsed| parsed >= VERBATIM_PROMPTS_MINIMUM);
+    (!supported).then(|| {
+        format!(
+            "verbatim_prompts is enabled, but Claude Code version {} at {cli_path} ignores it: prompts will still have @path mentions expanded and slash commands dispatched. Claude Code 2.1.248 or later is required.",
+            version.filter(|version| !version.is_empty()).unwrap_or("unknown"),
         )
     })
 }

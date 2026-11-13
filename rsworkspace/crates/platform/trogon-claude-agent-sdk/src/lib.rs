@@ -32,6 +32,7 @@ mod environment_plan;
 mod error;
 mod framing;
 mod hooks;
+mod managed_settings_delivery;
 mod mcp_server_name;
 mod mcp_server_options;
 mod mcp_tool_input_schema;
@@ -86,6 +87,8 @@ mod session_summary;
 mod session_transcript;
 mod setting_source;
 mod settings_input;
+mod settings_json;
+mod settings_option;
 mod settings_read;
 mod settings_read_hooks;
 mod settings_read_spec;
@@ -109,6 +112,7 @@ mod shadow_warning;
 mod skills;
 mod stderr_tail;
 mod summary_dialect;
+mod system_prompt;
 mod task_id;
 mod timeout;
 mod tool_name;
@@ -120,6 +124,7 @@ mod usd_budget;
 mod user_input;
 mod version_check;
 mod wire;
+mod workspace_trust;
 
 pub use agent_definition::{AgentDefinition, AgentExecution, AgentMcpServerSpec};
 pub use agent_name::AgentName;
@@ -129,7 +134,7 @@ pub use bundled_cli::{
     bundled_cli_derives_client_app, find_bundled_cli, find_native_cli, meets_derived_client_app_minimum,
 };
 pub use cli_discovery::CliNotFoundError;
-pub use cli_path::CliPathError;
+pub use cli_path::{CliPathError, WindowsBatchCli};
 pub use client::{
     ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_turn_with_transport,
     query_with_adapters, query_with_transport,
@@ -159,6 +164,7 @@ pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
     HookOutputVisibility, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, SyncHookOutput,
 };
+pub use managed_settings_delivery::ManagedSettingsDelivery;
 pub use mcp_server_name::McpServerName;
 pub use mcp_server_options::McpServerOptions;
 pub use mcp_tool_input_schema::{McpToolInputSchema, McpToolInputSchemaError};
@@ -177,7 +183,7 @@ pub use option_error::OptionError;
 pub use options::{
     ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, FileCheckpointing,
     InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, MessageBuffer, PartialMessages, RequestIdExhaustion,
-    SessionFork, SessionPersistence, Shutdown, SystemPrompt, ToolSet,
+    SessionFork, SessionPersistence, Shutdown, SystemPrompt, ToolSet, VerbatimPrompts,
 };
 pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{
@@ -248,6 +254,7 @@ pub use settings_sandbox::{
 };
 pub use stderr_tail::StderrTail;
 pub use summary_dialect::SummaryDialect;
+pub use system_prompt::{CustomPrompt, PresetPrompt};
 pub use task_id::TaskId;
 pub use timeout::{Timeout, TimeoutError};
 pub use tokio_util::sync::CancellationToken;
@@ -264,6 +271,7 @@ pub use upstream::settings_resolution::{
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 pub use user_input::{InputBlock, UserInput};
 pub use version_check::{parse_version, unreported_version_warning};
+pub use workspace_trust::WorkspaceTrust;
 
 /// A JSON object whose schema is owned by an individual tool or upstream event.
 pub type JsonObject = serde_json::Map<String, serde_json::Value>;

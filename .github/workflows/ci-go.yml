@@ -49,3 +49,27 @@ jobs:
 
       - name: Build Go workspace
         run: mise run --skip-tools build:go
+
+  result:
+    # Job names like lint and build repeat across workflows, and a skipped job
+    # passes a required check even when a cancelled run skipped it, so branch
+    # rules require this job instead of each Go job.
+    name: Go result
+    needs: [changes, verify]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Go jobs
+        env:
+          SELECTION_RESULT: ${{ needs.changes.result }}
+          SELECTED: ${{ needs.changes.outputs.go }}
+          JOB_RESULTS: ${{ needs.verify.result }}
+        # A cancelled run also skips jobs, so a skip only passes when selection
+        # succeeded and found nothing to check.
+        run: |
+          for result in $JOB_RESULTS; do
+            if [ "$result" = success ]; then continue; fi
+            if [ "$result" = skipped ] && [ "$SELECTION_RESULT" = success ] && [ "$SELECTED" != true ]; then continue; fi
+            echo "::error::Go jobs ended with $JOB_RESULTS after selection ended with $SELECTION_RESULT"
+            exit 1
+          done
