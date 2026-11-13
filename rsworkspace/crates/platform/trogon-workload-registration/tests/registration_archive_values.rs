@@ -5,8 +5,9 @@ use std::{collections::BTreeSet, num::NonZeroU64, time::Duration};
 use async_nats::jetstream::stream::{Compression, DiscardPolicy, StorageType};
 use bytes::Bytes;
 use ed25519_dalek::SigningKey;
+use trogon_nats::{NatsConfig, NatsTls};
 use trogon_workload_registration::{
-    MAX_SNAPSHOT_BYTES, ProducerConfig, RegistrationArchiveCapacity, RegistrationArchiveConfig,
+    MAX_SNAPSHOT_BYTES, ProducerConfig, RegistrationArchive, RegistrationArchiveCapacity, RegistrationArchiveConfig,
     RegistrationArchiveError, RegistrationArchiveProfile, RegistrationArchiveRole, RegistrationArtifact,
     RegistrationArtifactInput, RegistrationArtifactKind,
 };
@@ -29,6 +30,19 @@ fn archive_config(fence: u64, tenant: &str) -> RegistrationArchiveConfig {
         RegistrationArchiveCapacity::new(RegistrationArtifactKind::BootstrapManifest, 16, 4 * 1024 * 1024).unwrap(),
     )
     .unwrap()
+}
+
+#[tokio::test]
+async fn archive_connection_rejects_insecure_or_unauthenticated_transport_before_dialing() {
+    let config = archive_config(1, "acme");
+    for nats in [
+        NatsConfig::from_url("127.0.0.1:1").with_tls(NatsTls::Disabled),
+        NatsConfig::from_url("127.0.0.1:1"),
+    ] {
+        let error = RegistrationArchive::connect(config.clone(), nats).await.err().unwrap();
+        assert!(matches!(error, RegistrationArchiveError::Transport));
+        assert_eq!(format!("{error:?}"), "archive requires authenticated verified TLS");
+    }
 }
 
 #[test]

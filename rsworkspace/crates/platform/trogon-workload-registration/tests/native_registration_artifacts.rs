@@ -391,6 +391,15 @@ async fn neutral_archive_preserves_ack_bytes_existing_observations_integrity_cap
     assert_eq!(receipt.artifact(), &first);
     assert_eq!(receipt.native_revision().get(), 1);
     let scope = fixture.scope();
+    let native_source = bounded(fixture.admin.get_stream(scope.stream())).await.unwrap();
+    let source_created_at = SystemTime::from(native_source.cached_info().created);
+    assert_eq!(receipt.stream_created_at(), source_created_at);
+    assert_eq!(
+        receipt.source_profile().stream_config(first.kind()).name,
+        native_source.cached_info().config.name
+    );
+    assert!(std::ptr::eq(receipt.source_profile(), fixture.archive.profile()));
+    assert_eq!(format!("{receipt:?}"), "RegistrationArchiveReceipt { .. }");
     let key = NativeKvKey::new(first.digest().to_hex()).unwrap();
     let raw = bounded(fixture.reader.read_kv_sequence(&scope, &key, receipt.native_revision()))
         .await
@@ -409,12 +418,17 @@ async fn neutral_archive_preserves_ack_bytes_existing_observations_integrity_cap
         .unwrap();
     assert_eq!(observed.artifact(), &first);
     assert_eq!(observed.native_revision(), receipt.native_revision());
+    assert_eq!(observed.stream_created_at(), source_created_at);
+    assert!(std::ptr::eq(observed.source_profile(), receipt.source_profile()));
+    assert_eq!(format!("{observed:?}"), "RegistrationArtifactObservation { .. }");
     observed.revalidate_original().await.unwrap();
     let before_duplicate = fixture.head().await;
     match fixture.archive.create_once(first.clone()).await.unwrap() {
         RegistrationArchiveCreate::ExistingExact(existing) => {
             assert_eq!(existing.artifact(), &first);
             assert_eq!(existing.native_revision(), receipt.native_revision());
+            assert_eq!(existing.stream_created_at(), source_created_at);
+            assert!(std::ptr::eq(existing.source_profile(), receipt.source_profile()));
             existing.revalidate_original().await.unwrap();
         }
         RegistrationArchiveCreate::Acknowledged(_) => panic!("an existing exact record cannot synthesize another ACK"),

@@ -16,6 +16,8 @@ use trogon_nats::jetstream::{
 };
 use trogon_nats::{NatsAuth, NatsConfig, NatsTls, NatsToken, connect_once_with_reconnect_quarantine};
 
+mod original_evidence;
+
 #[path = "registration_archive_create.rs"]
 mod registration_archive_create;
 #[path = "registration_archive_receipt.rs"]
@@ -29,16 +31,27 @@ pub use registration_archive_receipt::RegistrationArchiveReceipt;
 use registration_archive_source::RegistrationArchiveSource;
 pub use registration_artifact_observation::RegistrationArtifactObservation;
 
+#[cfg(test)]
+mod tests;
+
 pub struct RegistrationArchive {
     context: Context,
     profile: RegistrationArchiveProfile,
     connection: RegistrationConnection,
     sources: [RegistrationArchiveSource; 2],
+    #[cfg(test)]
+    test_gates: Option<Arc<tests::ArchiveTestGates>>,
 }
 async fn bounded<T>(deadline: Instant, operation: impl Future<Output = Result<T, Error>>) -> Result<T, Error> {
     tokio::time::timeout_at(deadline.into(), operation)
         .await
         .map_err(Error::Deadline)?
+}
+fn require_time_remaining(deadline: Instant) -> Result<(), Error> {
+    if Instant::now() >= deadline {
+        return Err(Error::DeadlineExpired);
+    }
+    Ok(())
 }
 impl RegistrationArchive {
     pub async fn connect(config: RegistrationArchiveConfig, nats: NatsConfig) -> Result<Arc<Self>, Error> {
@@ -80,9 +93,7 @@ impl RegistrationArchive {
                     .map_err(Error::Bucket)?;
                 connection.check().map_err(Error::Source)?;
                 profile.check(&bucket.stream.cached_info().config, kind)?;
-                if Instant::now() >= deadline {
-                    return Err(Error::DeadlineExpired);
-                }
+                require_time_remaining(deadline)?;
                 sources.push(RegistrationArchiveSource {
                     kind,
                     created: bucket.stream.cached_info().created.into(),
@@ -95,6 +106,8 @@ impl RegistrationArchive {
                 profile,
                 connection,
                 sources,
+                #[cfg(test)]
+                test_gates: None,
             }))
         })
         .await
@@ -109,9 +122,7 @@ impl RegistrationArchive {
             .ok_or(Error::Profile)
     }
     fn check_remaining(&self, deadline: Instant) -> Result<(), Error> {
-        if Instant::now() >= deadline {
-            return Err(Error::DeadlineExpired);
-        }
+        require_time_remaining(deadline)?;
         self.connection.check().map_err(Error::Source)
     }
     async fn inspect(&self, kind: RegistrationArtifactKind, deadline: Instant) -> Result<Info, Error> {
@@ -223,9 +234,7 @@ impl RegistrationArchive {
         let deadline = Instant::now() + crate::constants::OPERATION_TIMEOUT;
         let kind = artifact.kind();
         if let Some((existing, revision)) = self.read(kind, artifact.digest(), None, deadline).await? {
-            if existing != artifact {
-                return Err(Error::Integrity);
-            }
+            original_evidence::require_original_evidence(&artifact, &existing, revision, None)?;
             self.check_remaining(deadline)?;
             return Ok(RegistrationArchiveCreate::ExistingExact(
                 RegistrationArtifactObservation::from_native(
@@ -254,10 +263,13 @@ impl RegistrationArchive {
         );
         let source_created = self.source(kind)?.created;
         self.check_remaining(deadline)?;
-        let native_revision = match tokio::time::timeout_at(
-            deadline.into(),
-            conditional_native_kv_update(&self.context, request),
-        )
+        let native_revision = match tokio::time::timeout_at(deadline.into(), async {
+            #[cfg(test)]
+            if let Some(gates) = &self.test_gates {
+                gates.before_native_write().await;
+            }
+            conditional_native_kv_update(&self.context, request).await
+        })
         .await
         {
             Err(error) => return Err(Error::WriteDeadline(error)),
@@ -265,17 +277,24 @@ impl RegistrationArchive {
             Ok(Err(error)) => return Err(Error::WriteUncertain(error)),
             Ok(Ok(revision)) => revision,
         };
-        let verified = self
-            .read(kind, artifact.digest(), Some(native_revision), deadline)
-            .await
-            .and_then(|record| record.ok_or(Error::Missing))
-            .and_then(|(stored, revision)| {
-                if stored == artifact && revision == native_revision {
+        let verified = async {
+            #[cfg(test)]
+            if let Some(gates) = &self.test_gates {
+                bounded(deadline, async {
+                    gates.after_native_ack().await;
+                    Ok(())
+                })
+                .await?;
+            }
+            self.read(kind, artifact.digest(), Some(native_revision), deadline)
+                .await
+                .and_then(|record| record.ok_or(Error::Missing))
+                .and_then(|(stored, revision)| {
+                    original_evidence::require_original_evidence(&artifact, &stored, revision, Some(native_revision))?;
                     self.check_remaining(deadline)
-                } else {
-                    Err(Error::Integrity)
-                }
-            });
+                })
+        }
+        .await;
         if let Err(source) = verified {
             return Err(Error::AcknowledgedButUnusable {
                 native_revision,
