@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use crate::{Error, JsonObject};
+use crate::{Error, JsonObject, McpWireIds};
 
 /// Raw I/O with a Claude Code process or service, the Rust form of Python's `Transport` abstract class.
 ///
@@ -33,6 +33,16 @@ pub trait Transport: Send + 'static {
     /// A transport that wraps a process reports an unsuccessful exit as [`Error::Process`] from this method or
     /// from [`Transport::close`]; the driver turns it into the same result error upstream raises.
     fn read_message(&mut self) -> impl Future<Output = Result<Option<JsonObject>, Error>> + Send;
+
+    /// The `mcp_message` ids of the object [`Transport::read_message`] returned last, as the line spelled them.
+    ///
+    /// Python reads ids with `json.loads`, so an id can be an integer of any size, which a `JsonObject` cannot
+    /// hold. A transport that reads lines can scan each one with [`crate::McpWireScan`], parse
+    /// `McpWireScan::frame`, and return `McpWireScan::into_ids` here. The default reports none, so a message keeps
+    /// the ids its `JsonObject` holds.
+    fn take_wire_ids(&mut self) -> Option<McpWireIds> {
+        None
+    }
 
     /// Python `close`: release the connection and clean up. It must bound its own waits.
     fn close(&mut self) -> impl Future<Output = Result<(), Error>> + Send;

@@ -194,7 +194,15 @@ cancelled call with `-32800`. Both dialects validate `clientInfo.icons` and
 `capabilities.elicitation` (`form` and `url`) like the pinned schemas: zod issues
 for TypeScript (unknown icon keys are stripped, `elicitation.url` must be an
 object or array), the generic `-32602` for Python (`null` is accepted for every
-optional field). The server keeps and echoes neither. Custom
+optional field). The server keeps and echoes neither. In the Python dialect a request id round-trips
+exactly as `json.loads` and `json.dumps` keep it: integers of any size and `-0`
+are echoed digit for digit, and floats, booleans, `null` and nested values are
+not request ids, so a found server acknowledges them without one. A custom
+`Transport` that reads lines can keep the ids by scanning each line with
+`McpWireScan` and returning `McpWireScan::into_ids` from
+`Transport::take_wire_ids`. The TypeScript dialect keeps `JSON.parse` numbers,
+so an id beyond `Number.MAX_SAFE_INTEGER` is echoed as the double it rounds to.
+Custom
 `SdkMcpServer`/`SdkMcpSession` implementations can add methods; the built-in
 server does not expose server-initiated client requests.
 [The SDK tools example](examples/sdk_tools.rs) registers an echo tool.

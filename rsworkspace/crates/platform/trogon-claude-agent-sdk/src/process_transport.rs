@@ -195,6 +195,8 @@ pub(crate) struct ProcessTransport {
     /// TypeScript's `endInput` ends the stream but keeps the transport ready, so a later write is dropped without
     /// an error (`[ProcessTransport] Dropping write to ended stdin stream`).
     input_ended: bool,
+    /// The `mcp_message` ids of the line `read_message` returned last, for the Python dialect.
+    wire_ids: Option<crate::McpWireIds>,
 }
 
 impl ProcessTransport {
@@ -251,6 +253,7 @@ impl ProcessTransport {
             closed,
             forced: false,
             input_ended: false,
+            wire_ids: None,
         })
     }
 
@@ -414,8 +417,18 @@ impl Transport for ProcessTransport {
                 }
                 continue;
             }
-            match serde_json::from_slice::<JsonObject>(&frame) {
-                Ok(object) => return Ok(Some(object)),
+            // Python reads the ids of an `mcp_message` with `json.loads`; the scan keeps their exact text and
+            // hands `serde_json` the line with those ids replaced by `null`.
+            let scan = if self.argv_style == ArgvStyle::Python {
+                crate::McpWireScan::new(&frame)
+            } else {
+                crate::McpWireScan::new(&[])
+            };
+            match serde_json::from_slice::<JsonObject>(scan.frame(&frame)) {
+                Ok(object) => {
+                    self.wire_ids = scan.into_ids();
+                    return Ok(Some(object));
+                }
                 Err(error) => {
                     if self.argv_style == ArgvStyle::TypeScript || self.frames.last_was_tail() {
                         tracing::debug!("skipping undecodable line from CLI stdout");
@@ -425,6 +438,10 @@ impl Transport for ProcessTransport {
                 }
             }
         }
+    }
+
+    fn take_wire_ids(&mut self) -> Option<crate::McpWireIds> {
+        self.wire_ids.take()
     }
 
     /// Closes stdin, then waits for the process with the escalation described on `reap`. An unsuccessful exit the

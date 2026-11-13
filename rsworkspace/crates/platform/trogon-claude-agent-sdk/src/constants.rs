@@ -1172,3 +1172,12 @@ pub(crate) const REMOTE_TOOL_SUBTYPES: [&str; 4] = [
 
 /// The longest tool name the TypeScript `McpServer` registers without printing a warning.
 pub(crate) const MCP_TS_TOOL_NAME_MAX_LENGTH: usize = 128;
+
+/// Python 3.11+ refuses to convert an integer of more than this many digits.
+pub(crate) const PYTHON_INTEGER_DIGIT_LIMIT: usize = 4300;
+
+/// Nesting beyond this is refused instead of recursing without bound when a request id is scanned.
+pub(crate) const RAW_JSON_MAX_DEPTH: usize = 200;
+
+/// The prefix of the placeholder text a request id that a `Value` cannot hold stands for until it is written.
+pub(crate) const PYTHON_ID_MARKER_PREFIX: &str = "\u{0}pyid:";

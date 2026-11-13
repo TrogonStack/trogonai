@@ -282,6 +282,8 @@ where
     mirror_flush: Option<MirrorBarrier>,
     deferred_messages: VecDeque<(Message, Option<MirrorBarrier>)>,
     next_id: u64,
+    /// The `mcp_message` ids of the line just read, until the Python `mcp_message` handler takes them.
+    wire_ids: Option<crate::McpWireIds>,
     state: State,
     run_state: RunState,
     argv_style: crate::ArgvStyle,
@@ -677,6 +679,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         mirror_flush: None,
         deferred_messages: VecDeque::new(),
         next_id: 0,
+        wire_ids: None,
         state: State::Initializing,
         run_state: RunState::default(),
         argv_style: options.argv_style,
@@ -824,6 +827,7 @@ where
                         self.finish_mirror().await?;
                         return if matches!(self.state, State::Running | State::Initializing) || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
                     };
+                    self.wire_ids = self.transport.take_wire_ids();
                     let parsed = self.decode_message(message)?;
                     self.frame(parsed).await?;
                 }
@@ -1698,6 +1702,7 @@ where
         server_name: Option<serde_json::Value>,
         message: Option<serde_json::Value>,
     ) -> Result<(), Error> {
+        let ids = self.wire_ids.take().unwrap_or_default();
         let truthy = crate::python_json::is_truthy;
         let (Some(server_name), Some(message)) = (server_name.filter(truthy), message.filter(truthy)) else {
             return self
@@ -1708,17 +1713,19 @@ where
                 .await;
         };
         // The `assert isinstance` checks fail with an `AssertionError` whose text is empty.
-        let (serde_json::Value::String(server_name), serde_json::Value::Object(message)) = (server_name, message)
+        let (serde_json::Value::String(server_name), serde_json::Value::Object(mut message)) = (server_name, message)
         else {
             return self.write_response(wire::callback_error_response(&id, "")).await;
         };
+        ids.apply_to(&mut message);
         let Some(session) = self
             .sdk_mcp_servers
             .get(&crate::McpServerName::from(server_name.as_str()))
             .cloned()
         else {
-            let mcp_response =
+            let mut mcp_response =
                 crate::mcp_routing::python_error(&message, -32601, format!("Server '{server_name}' not found"));
+            ids.echo(&mut mcp_response);
             return self
                 .write_response(wire::success_response(&id, McpResponsePayload { mcp_response }))
                 .await;
@@ -1731,12 +1738,13 @@ where
         let response_id = id.clone();
         let fallback = wire::callback_error_response(&id, "SDK MCP request timed out").map(Some);
         self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-            let mcp_response = match session.request(message.clone(), callback_signal).await {
+            let mut mcp_response = match session.request(message.clone(), callback_signal).await {
                 Ok(Some(response)) => serde_json::Value::Object(response),
                 Ok(None) => crate::mcp_routing::python_acknowledgment(),
                 Err(crate::McpServerError::Protocol(text)) => crate::mcp_routing::python_error(&message, -32603, text),
                 Err(error) => crate::mcp_routing::python_error(&message, -32603, error.to_string()),
             };
+            ids.echo(&mut mcp_response);
             wire::success_response(&response_id, McpResponsePayload { mcp_response }).map(Some)
         });
         Ok(())
@@ -1858,7 +1866,7 @@ where
         // Each SDK writes its own JSON spelling: TypeScript `JSON.stringify`, Python `json.dumps`.
         let mut text = match self.argv_style {
             crate::ArgvStyle::TypeScript => crate::js_json::to_string(&frame),
-            crate::ArgvStyle::Python => crate::python_json::to_string(&frame),
+            crate::ArgvStyle::Python => crate::python_json::to_string(&frame).map(crate::mcp_wire_ids::splice_markers),
         }
         .map_err(ProtocolError::from)?;
         text.push('\n');
