@@ -290,6 +290,12 @@ async fn t10_a_missing_executable_is_reported_by_path_and_a_missing_cwd_by_direc
         error.to_string(),
         "Claude Code not found at: /nonexistent-claude-sdk-test/claude"
     );
+    assert_eq!(
+        error.typescript_message().as_deref(),
+        Some(
+            "Claude Code native binary not found at /nonexistent-claude-sdk-test/claude. Please ensure Claude Code is installed via native installer or specify a valid path with options.pathToClaudeCodeExecutable."
+        )
+    );
 
     let mut missing_cwd = options("normal", ArgvStyle::Python)?;
     missing_cwd.cwd = Some(PathBuf::from("/nonexistent-claude-sdk-test/cwd"));

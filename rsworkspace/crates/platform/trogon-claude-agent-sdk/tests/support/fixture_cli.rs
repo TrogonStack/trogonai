@@ -374,6 +374,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         io::stderr().write_all(b"diagnostic-tail")?;
                         std::process::exit(7);
                     }
+                    "failure-secret" => {
+                        let secret = format!("sk-{}", "Ab1".repeat(8));
+                        io::stderr().write_all(format!("rejected key {secret} at startup\n").as_bytes())?;
+                        std::process::exit(7);
+                    }
                     "error-result-exit" => {
                         emit(
                             json!({"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"fixture-session","errors":["  boom  ", "", "second"],"api_error_status":529}),

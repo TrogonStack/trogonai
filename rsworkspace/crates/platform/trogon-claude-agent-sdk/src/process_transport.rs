@@ -32,7 +32,7 @@ use crate::{
 
 /// TypeScript's `endsWith` test is case-sensitive and works on the whole path string; Python has no script
 /// runtime, so its dialect keeps the lenient extension check.
-fn is_script(path: &Path, style: ArgvStyle) -> bool {
+pub(crate) fn is_script(path: &Path, style: ArgvStyle) -> bool {
     match style {
         ArgvStyle::TypeScript => {
             let path = path.to_string_lossy();
@@ -226,13 +226,13 @@ impl ProcessTransport {
                     _ => Error::CliNotFoundAt(cli_path.clone()),
                 }
             } else {
-                Error::Spawn(error)
+                Error::Spawn(crate::error::launch_failure(&cli_path, error))
             }
         })?;
         let stdin = child.stdin.take().ok_or(Error::PipeUnavailable)?;
         let stdout = child.stdout.take().ok_or(Error::PipeUnavailable)?;
         let stderr = child.stderr.take().ok_or(Error::PipeUnavailable)?;
-        let stderr_tail = SharedTail::new(options.limits.stderr_tail);
+        let stderr_tail = SharedTail::new(options.limits.stderr_tail, options.argv_style == ArgvStyle::TypeScript);
         let stderr = tokio::spawn(drain_stderr_with(
             stderr,
             stderr_tail.clone(),

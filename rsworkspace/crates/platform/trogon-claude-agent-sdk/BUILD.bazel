@@ -35,6 +35,7 @@ workspace_crate(
         "tests/fixtures/probe_ts/*.jsonl",
         "tests/fixtures/sdk_mcp/*.json",
         "tests/fixtures/settings_option/*.json",
+        "tests/fixtures/stderr_redaction/*.json",
         "tests/fixtures/websocket_transport/*.json",
     ]),
     crate_features = ["test-support"],

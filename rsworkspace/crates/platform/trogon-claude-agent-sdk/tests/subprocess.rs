@@ -529,6 +529,25 @@ async fn process_failure_preserves_status_and_bounded_stderr() -> TestResult {
 }
 
 #[tokio::test]
+async fn process_failure_message_redacts_secrets_from_the_stderr_tail() -> TestResult {
+    let mut client = ClaudeSdkClient::connect(options("failure-secret")?).await?;
+    client.send_prompt(Prompt::from("failure")).await?;
+    let error = loop {
+        match client.next_message().await {
+            Ok(Some(_)) => {}
+            Err(error) => break error,
+            Ok(None) => return Err(std::io::Error::other("missing error").into()),
+        }
+    };
+    assert_eq!(
+        error.typescript_message().as_deref(),
+        Some("Claude Code process exited with code 7. stderr: rejected key <token> at startup")
+    );
+    client.disconnect().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn consumer_lag_fails_with_a_bounded_queue() -> TestResult {
     let mut options = options("queue-overflow")?;
     options.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(QueueCapacity::new(1)?);
