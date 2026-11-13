@@ -1,3 +1,5 @@
+use crate::python_json::float_repr;
+
 /// A `--max-budget-usd` amount, sent to the CLI the way the upstream SDKs send it.
 ///
 /// Neither upstream SDK validates the amount: `UsdBudget::new` keeps any `f64`, including negative
@@ -49,8 +51,8 @@ impl From<f64> for UsdBudget {
     }
 }
 
-/// CPython `float.__repr__`: the shortest round-trip digits, fixed notation when the decimal point
-/// falls between `1e-4` and `1e16`, scientific notation with a two-digit exponent otherwise.
+/// CPython `str(float)`, which is `float.__repr__`: `nan`, `inf` and `-inf` for the non-finite values, otherwise
+/// the shortest round-trip digits with a tie kept on the even digit, as `json.dumps` prints a finite float.
 fn python_float_repr(value: f64) -> String {
     if value.is_nan() {
         return "nan".to_owned();
@@ -58,36 +60,7 @@ fn python_float_repr(value: f64) -> String {
     if value.is_infinite() {
         return if value < 0.0 { "-inf" } else { "inf" }.to_owned();
     }
-    let sign = if value.is_sign_negative() { "-" } else { "" };
-    if value == 0.0 {
-        return format!("{sign}0.0");
-    }
-    let scientific = format!("{:e}", value.abs());
-    let Some((mantissa, exponent)) = scientific.split_once('e') else {
-        return scientific;
-    };
-    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
-    let point = exponent.parse::<i32>().map_or(1, |exponent| exponent + 1);
-    let count = digits.len() as i32;
-    let body = if -4 < point && point <= 16 {
-        if point <= 0 {
-            format!("0.{}{digits}", "0".repeat(point.unsigned_abs() as usize))
-        } else if count <= point {
-            format!("{digits}{}.0", "0".repeat((point - count) as usize))
-        } else {
-            format!("{}.{}", &digits[..point as usize], &digits[point as usize..])
-        }
-    } else {
-        let power = point - 1;
-        let sign_char = if power < 0 { '-' } else { '+' };
-        let fraction = if count > 1 {
-            format!(".{}", &digits[1..])
-        } else {
-            String::new()
-        };
-        format!("{}{fraction}e{sign_char}{:02}", &digits[..1], power.unsigned_abs())
-    };
-    format!("{sign}{body}")
+    float_repr(value)
 }
 
 #[cfg(test)]
