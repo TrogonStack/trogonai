@@ -1646,11 +1646,11 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "WindowsBatchCli::Run is the default, so a .bat or .cmd path starts as in TypeScript; WindowsBatchCli::Refuse selects Python's refusal with its message as CliPathError::WindowsBatchScript."
+        "reason": "WindowsBatchCli::Run is the default, so a .bat or .cmd path starts as in TypeScript; WindowsBatchCli::Refuse selects Python's refusal, which fires only on Windows and quotes the path as Python's repr does, as CliPathError::WindowsBatchScript. Paths and refusal text captured from the real Python package on each platform pin both sides."
       },
       "contracts": [
         "windows_batch_cli::windows_batch_cli_is_spawned_by_default",
-        "windows_batch_cli::windows_batch_cli_is_refused_before_spawn"
+        "windows_batch_cli::the_python_refusal_spawns_off_windows_as_python_does"
       ],
       "rust": [
         "src/cli_path.rs",

@@ -118,8 +118,11 @@ waits without a deadline, like TypeScript, unless a hook is set to block on
 failure or managed settings are sent, which arms 660 seconds and reports
 `Error::InitializeNotConfirmed`, or `Error::ManagedSettingsNotConfirmed` when
 only managed settings armed it.
-`InitializeTimeout::Python` reads `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` with a 60
-second floor. This is separate from how long a model turn may execute.
+`InitializeTimeout::Python` reads `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` as Python's
+`int()` does, Unicode digits and whitespace, underscores, the 4300 digit limit
+and float overflow included, and its invalid value error quotes the value as
+Python's `repr` does. The wait has a 60 second floor. This is separate from how
+long a model turn may execute.
 
 The initialization exchange is internal to `connect()`. It configures the
 protocol and checks requested blocking-hook support before returning the
