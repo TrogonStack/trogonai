@@ -7911,6 +7911,7 @@ dependencies = [
  "trogon-secret-store",
  "trogon-std",
  "trogonai-proto",
+ "url",
  "uuid",
 ]
 

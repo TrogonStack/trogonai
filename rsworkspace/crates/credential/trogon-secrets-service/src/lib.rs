@@ -54,6 +54,8 @@ mod fixtures;
 #[cfg(any(test, feature = "test-support"))]
 mod in_memory_credential_states;
 mod jetstream_credential_states;
+mod openbao_address;
+mod openbao_address_error;
 mod owner_holding;
 #[cfg(any(test, feature = "test-support"))]
 mod recording_release_audit;
@@ -113,6 +115,8 @@ pub use denial_record::DenialRecord;
 #[cfg(any(test, feature = "test-support"))]
 pub use in_memory_credential_states::InMemoryCredentialStates;
 pub use jetstream_credential_states::JetStreamCredentialStates;
+pub use openbao_address::OpenBaoAddress;
+pub use openbao_address_error::OpenBaoAddressError;
 pub use owner_holding::OwnerHolding;
 #[cfg(any(test, feature = "test-support"))]
 pub use recording_release_audit::RecordingReleaseAudit;
