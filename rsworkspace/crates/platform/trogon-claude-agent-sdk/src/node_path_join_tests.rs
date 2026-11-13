@@ -1,6 +1,7 @@
 use serde_json::Value;
 
-use super::{PathStyle, join};
+use super::{NoProcess, PathStyle, join};
+use crate::node_path::NodeProcess;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -40,4 +41,10 @@ fn the_host_style_follows_the_target_platform() {
         PathStyle::Posix
     };
     assert_eq!(PathStyle::host(), expected);
+}
+
+#[test]
+fn the_join_process_has_no_working_directory_or_environment() {
+    assert_eq!(NoProcess.cwd(), Ok(Vec::new()));
+    assert_eq!(NoProcess.env(&[0x48]), None);
 }
