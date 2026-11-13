@@ -7888,6 +7888,8 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "buffa",
+ "buffa-types",
+ "grpc-nats-micro",
  "nkeys",
  "thiserror 2.0.21",
  "time",

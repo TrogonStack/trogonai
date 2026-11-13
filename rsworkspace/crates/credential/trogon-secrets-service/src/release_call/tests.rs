@@ -1,49 +1,20 @@
 use buffa::MessageField;
 use nkeys::{KeyPair, XKey};
 use trogon_credential_domain::{InjectionLocation, ReleaseHostError};
-use trogonai_proto::connections::types::v1alpha1::AuditCorrelationId as WireCorrelationId;
-use trogonai_proto::policy::egress_permissions::v1alpha1::EgressHost;
+use trogonai_proto::secrets::exchange::v1alpha1::ReleaseLocation;
 use trogonai_proto::secrets::exchange::v1alpha1::release_location::Value;
-use trogonai_proto::secrets::exchange::v1alpha1::{CredentialAddress, ReleaseLocation, RequesterXkey};
 
 use super::*;
 use crate::TenantAccount;
-use crate::fixtures::{CORRELATION_ID, HEADER, HOST, OWNER, RUNTIME_SERVICE, identity, request, tenant};
-
-const PORT: u32 = 8443;
+use crate::fixtures::{HOST, release_subject, release_wire, request, tenant};
 
 fn caller(tenant: &TenantAccount) -> ReleaseCaller {
-    ReleaseCaller::from_subject(&format!(
-        "{tenant}.secrets.v1.service.{RUNTIME_SERVICE}.SecretExchangeService.ResolveForRelease"
-    ))
-    .unwrap()
-}
-
-fn wire(requester_xkey: &str) -> ResolveForReleaseRequest {
-    ResolveForReleaseRequest {
-        credential: MessageField::some(CredentialAddress {
-            credential_id: identity().key().credential_id().to_string(),
-            owner_id: OWNER.to_owned(),
-        }),
-        destination_host: MessageField::some(EgressHost {
-            host: HOST.to_owned(),
-            port: PORT,
-        }),
-        location: MessageField::some(ReleaseLocation {
-            value: Some(Value::Header(HEADER.to_owned())),
-        }),
-        correlation_id: MessageField::some(WireCorrelationId {
-            value: CORRELATION_ID.to_owned(),
-        }),
-        requester_xkey: MessageField::some(RequesterXkey {
-            public_key: requester_xkey.to_owned(),
-        }),
-    }
+    ReleaseCaller::from_subject(&release_subject(tenant)).unwrap()
 }
 
 fn read(edit: impl FnOnce(&mut ResolveForReleaseRequest)) -> Result<ReleaseCall, ReleaseCallError> {
     let tenant = tenant();
-    let mut wire = wire(&XKey::new().public_key());
+    let mut wire = release_wire(&XKey::new().public_key());
     edit(&mut wire);
     ReleaseCall::from_wire(&caller(&tenant), wire)
 }
@@ -203,7 +174,7 @@ fn a_requester_xkey_on_the_pattern_is_left_for_the_release_to_judge() {
 fn a_call_takes_its_caller_from_the_subject_and_the_rest_from_the_payload() {
     let tenant = tenant();
     let xkey = XKey::new().public_key();
-    let call = ReleaseCall::from_wire(&caller(&tenant), wire(&xkey)).unwrap();
+    let call = ReleaseCall::from_wire(&caller(&tenant), release_wire(&xkey)).unwrap();
     assert_eq!(call.request(), &request(&tenant));
     assert_eq!(call.requester_xkey(), xkey);
 }

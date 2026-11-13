@@ -18,3 +18,9 @@ pub const UNBUNDLED_GENERATION: u64 = 0;
 /// name such a destination alike. The release is still recorded; only the
 /// spelling of where is replaced.
 pub(crate) const DESTINATION_TOO_LONG_NAME: &str = "destination_too_long";
+
+/// How long the service works on one release before it answers
+/// `UNAVAILABLE`. It is shorter than the caller's two second default, so a
+/// slow store or stream reaches the caller as a typed failure it backs off
+/// from rather than as its own timeout.
+pub const RELEASE_DEADLINE: Duration = Duration::from_millis(1500);
