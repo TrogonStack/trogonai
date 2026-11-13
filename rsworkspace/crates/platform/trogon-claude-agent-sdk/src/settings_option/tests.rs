@@ -101,7 +101,7 @@ fn expect_python(name: &str, options: ClaudeAgentOptions) {
             let error = error.split(" Expecting ").next().unwrap_or(error);
             assert!(got.starts_with("Failed to load settings: "), "{name}: {got}");
             if error.contains("[Errno") {
-                assert_eq!(got, format!("{error}"), "{name}");
+                assert_eq!(got, error, "{name}");
             }
         }
         None => {
