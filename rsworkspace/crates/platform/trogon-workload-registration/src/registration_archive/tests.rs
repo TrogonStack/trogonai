@@ -185,6 +185,29 @@ impl NativeArchiveFixture {
             .await?,
         );
         let mut archive = RegistrationArchive::connect(config, writer_config).await?;
+        {
+            let baseline = manifest(b"ordinary original created with inert default fault gates")?;
+            let RegistrationArchiveCreate::Acknowledged(receipt) = archive.create_once(baseline.clone()).await? else {
+                return Err(io::Error::other("fresh ordinary archive did not acknowledge its original").into());
+            };
+            assert_eq!(receipt.artifact(), &baseline);
+            assert_eq!(receipt.native_revision(), NonZeroU64::MIN);
+            let (scope, key) = archive.binding(baseline.kind(), baseline.digest())?;
+            let reader = StrictNativeStreamReader::new(
+                competing.clone(),
+                NonZeroUsize::new(baseline.kind().maximum_bytes())
+                    .ok_or_else(|| io::Error::other("zero artifact bound"))?,
+                OPERATION_TIMEOUT,
+            )?;
+            let stored = timeout(
+                OPERATION_TIMEOUT,
+                reader.read_kv_sequence(&scope, &key, receipt.native_revision()),
+            )
+            .await??
+            .ok_or_else(|| io::Error::other("ordinary acknowledged original is absent"))?;
+            assert_eq!(stored.payload, *baseline.bytes());
+            assert_eq!(stored.sequence, receipt.native_revision().get());
+        }
         let gates = Arc::new(ArchiveTestGates::default());
         Arc::get_mut(&mut archive)
             .ok_or_else(|| io::Error::other("new archive has an unexpected owner"))?
