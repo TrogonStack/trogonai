@@ -1,0 +1,1 @@
+{"allowedMcpServers":[{"serverName":"bad name"},{"serverName":"ok"},5,{"serverUrl":"https://a.example"}],"deniedMcpServers":[{"serverName":" a"},{"serverName":"x","unknown":1},{"serverCommand":["c"]}]}
