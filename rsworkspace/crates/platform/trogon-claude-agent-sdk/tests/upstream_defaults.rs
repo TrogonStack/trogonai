@@ -8,9 +8,9 @@ use std::{
 use tokio::time::timeout;
 use trogon_claude_agent_sdk::{
     ClaudeAgentOptions, ClaudeSdkClient, DuplicateControlRequests, Error, InitializeTimeout, InputAfterFinish, Limits,
-    MessageBuffer, MirrorFailureError, Prompt, QueueCapacity, RequestIdExhaustion, SessionEntry, SessionKey,
-    SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreLimits, SessionStoreOptions, Shutdown, Timeout,
-    TranscriptMirror,
+    MessageBuffer, MirrorFailureError, Prompt, QueueCapacity, RequestIdExhaustion, RunEndTimeout, SessionEntry,
+    SessionKey, SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreLimits, SessionStoreOptions, Shutdown,
+    Timeout, TranscriptMirror,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -55,7 +55,7 @@ fn the_default_limits_are_the_typescript_sdk() {
     assert_eq!(limits.callback_timeout, None);
     assert_eq!(limits.write_timeout, None);
     assert_eq!(limits.shutdown, Shutdown::TypeScript);
-    assert_eq!(limits.run_end_timeout.as_duration(), Duration::from_millis(600_000));
+    assert_eq!(limits.run_end_timeout, RunEndTimeout::TypeScript);
     assert_eq!(limits.duplicate_control_requests, DuplicateControlRequests::Skip);
     assert_eq!(limits.request_id_exhaustion, RequestIdExhaustion::Wrap);
     assert_eq!(limits.input_after_finish, InputAfterFinish::Write);
@@ -74,6 +74,7 @@ fn the_python_preset_selects_the_python_sdk_values() {
     assert_eq!(limits.control_timeout, Some(Timeout::new(Duration::from_secs(60))));
     assert_eq!(limits.initialize_timeout, InitializeTimeout::Python);
     assert_eq!(limits.shutdown, Shutdown::Python);
+    assert_eq!(limits.run_end_timeout, RunEndTimeout::Python);
     assert_eq!(limits.duplicate_control_requests, DuplicateControlRequests::RunBoth);
     assert_eq!(limits.write_timeout, None);
     assert_eq!(limits.callback_timeout, None);

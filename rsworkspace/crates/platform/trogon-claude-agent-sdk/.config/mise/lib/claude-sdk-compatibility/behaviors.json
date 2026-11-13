@@ -167,6 +167,46 @@
       ]
     },
     {
+      "id": "s44-run-end-ceiling-environment",
+      "concept": "Run-end ceiling read from the environment",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 61,
+        "line_end": 87,
+        "sha256": "58dabd55a8073d6cdb94aef41ce6d92af1294fa2b5805191c998d010a48862f5"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function gd(e){let t=String(e).trim();return wC(t)??parseInt(t,10)}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 157,
+        "span_after": 0,
+        "sha256": "00b3a1232adfd9164c6b87be62417a8b07dad76b4af4f0b51b1d940eb1313cae"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS sets the run-end ceiling, 0 for no limit, clamped to 2^31-1 ms, default 600000. TypeScript reads it from the child environment with exponent, grouped-digit and leading-digit spellings; Python reads options.env then os.environ with int()."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "The default dialect follows TypeScript; Limits::python() selects Python's int() parse and lookup order, and RunEndTimeout::Fixed is an opt-in override."
+      },
+      "contracts": [
+        "run_end_ceiling_golden::typescript_matches_the_real_sdk_on_the_table",
+        "run_end_ceiling_golden::python_matches_the_real_package_on_the_table",
+        "run_end_ceiling_golden::typescript_matches_the_real_sdk_on_every_code_point",
+        "run_end_ceiling_golden::python_matches_the_real_package_on_every_code_point",
+        "run_end_ceiling::typescript_ends_the_run_at_the_ceiling_in_options_env",
+        "run_end_ceiling::python_ends_the_run_at_the_ceiling_in_options_env"
+      ],
+      "rust": [
+        "src/run_end_ceiling.rs",
+        "src/options.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
       "id": "s06-hooks-not-applied",
       "concept": "initialize answered with hooks_applied false",
       "python": {
