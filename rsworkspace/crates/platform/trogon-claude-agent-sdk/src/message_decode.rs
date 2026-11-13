@@ -16,7 +16,7 @@ mod python;
 /// What one message line becomes.
 pub(crate) enum Decoded {
     /// A message for the caller.
-    Message(Message),
+    Message(Box<Message>),
     /// TypeScript consumes `keep_alive` before anything else sees it.
     KeepAlive,
     /// Python `parse_message` returned `None`: the run still counts the message, the caller never sees it.
@@ -50,7 +50,7 @@ pub(crate) fn decode(raw: &JsonObject, mode: MessageDecoding) -> Result<Decoded,
             }
         }
     }
-    Ok(Decoded::Message(typed(raw, mode)))
+    Ok(Decoded::Message(Box::new(typed(raw, mode))))
 }
 
 /// The message as its Rust struct, or [`Message::Unknown`] when its type has none or its values do not fit it.

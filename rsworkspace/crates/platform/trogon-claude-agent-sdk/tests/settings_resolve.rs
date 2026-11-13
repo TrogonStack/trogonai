@@ -161,6 +161,52 @@ fn remote_policy_outranks_the_managed_file() {
 }
 
 #[test]
+fn managed_tier_merge_preserves_replacement_shallow_objects_and_array_precedence() {
+    let host = FakeHost::linux().file(
+        "/etc/claude-code/managed-settings.json",
+        r#"{
+            "fallbackModel": ["file-fallback"],
+            "managedMcpServers": {
+                "shared": {"command": "file", "args": ["file-only"]},
+                "file": {"command": "file"}
+            },
+            "allowedProviders": ["vertex"],
+            "permissions": {"allow": ["Bash(file)", "Bash(shared)"]}
+        }"#,
+    );
+    let result = resolve(
+        &host,
+        json!({
+            "settingSources": [],
+            "serverManagedSettings": {
+                "managedSourcesBehavior": "merge",
+                "fallbackModel": ["remote-fallback"],
+                "managedMcpServers": {
+                    "shared": {"command": "remote"},
+                    "remote": {"command": "remote"}
+                },
+                "allowedProviders": ["bedrock"],
+                "permissions": {"allow": ["Bash(remote)", "Bash(shared)"]}
+            }
+        }),
+    );
+    assert_eq!(result["effective"]["fallbackModel"], json!(["remote-fallback"]));
+    assert_eq!(
+        result["effective"]["managedMcpServers"],
+        json!({
+            "shared": {"command": "remote"},
+            "file": {"command": "file"},
+            "remote": {"command": "remote"}
+        })
+    );
+    assert_eq!(result["effective"]["allowedProviders"], json!(["bedrock"]));
+    assert_eq!(
+        result["effective"]["permissions"]["allow"],
+        json!(["Bash(remote)", "Bash(shared)", "Bash(file)"])
+    );
+}
+
+#[test]
 fn parent_managed_settings_contribute_only_restrictive_keys() {
     let result = resolve(
         &FakeHost::linux(),
