@@ -129,13 +129,10 @@ fn validate_name(value: &str) -> Result<(), InjectionLocationError> {
     Ok(())
 }
 
-/// RFC 9110 field-name token characters.
+/// The RFC 9110 field-name token characters an audit record name also holds,
+/// so the release record carries the header name it was released for whole.
 fn is_header_token_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric()
-        || matches!(
-            ch,
-            '!' | '#' | '$' | '%' | '&' | '\'' | '*' | '+' | '-' | '.' | '^' | '_' | '`' | '|' | '~'
-        )
+    ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.' | '_' | '~')
 }
 
 fn is_query_name_char(ch: char) -> bool {

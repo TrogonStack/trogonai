@@ -5,8 +5,10 @@
 /// passed into ResolveForTrustedUse, so the secrets service's record and the
 /// provider-facing record join: the dual audit of ADR#0023 Decision 6
 /// (ADR#0096 Decision 9). Compared whole, never personal data. At most 128
-/// visible ASCII characters, because the secrets service threads it into the
-/// secret store's own request, where it travels as an HTTP header.
+/// characters, drawn from those an audit record name holds, so the secrets
+/// service's record and the provider-facing record each carry it whole. The
+/// secrets service also threads it into the secret store's own request, where
+/// it still travels unescaped as an HTTP header.
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]

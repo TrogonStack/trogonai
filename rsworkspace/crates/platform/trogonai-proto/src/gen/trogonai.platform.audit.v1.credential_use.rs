@@ -19,6 +19,11 @@ pub struct CredentialUse {
     /// Field 2: `credential`
     #[serde(rename = "credential", with = "::buffa::json_helpers::proto_string")]
     pub credential: ::buffa::alloc::string::String,
+    /// The binding the credential was used under. An injection names the
+    /// connection binding that placed it. A release serves no connection binding,
+    /// because the credential's own release policy binds it to a runtime service,
+    /// destination and location, so a release names the credential itself.
+    ///
     /// Field 3: `binding_id`
     #[serde(
         rename = "bindingId",
@@ -43,6 +48,15 @@ pub struct CredentialUse {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub decision_record_id: ::core::option::Option<::buffa::alloc::string::String>,
+    /// Where in the outbound request the credential is placed, as header:{name},
+    /// query:{name} or body:{path}. A location, never the value placed there.
+    ///
+    /// Field 6: `location`
+    #[serde(
+        rename = "location",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub location: ::core::option::Option<::buffa::alloc::string::String>,
 }
 impl ::core::fmt::Debug for CredentialUse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -52,6 +66,7 @@ impl ::core::fmt::Debug for CredentialUse {
             .field("binding_id", &self.binding_id)
             .field("destination", &self.destination)
             .field("decision_record_id", &self.decision_record_id)
+            .field("location", &self.location)
             .finish()
     }
 }
@@ -81,6 +96,16 @@ impl CredentialUse {
         value: impl Into<::buffa::alloc::string::String>,
     ) -> Self {
         self.decision_record_id = Some(value.into());
+        self
+    }
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::location`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_location(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.location = Some(value.into());
         self
     }
 }
@@ -116,6 +141,9 @@ impl ::buffa::Message for CredentialUse {
         if let Some(ref v) = self.decision_record_id {
             size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
+        if let Some(ref v) = self.location {
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -133,6 +161,9 @@ impl ::buffa::Message for CredentialUse {
         }
         if let Some(ref v) = self.decision_record_id {
             ::buffa::types::put_string_field(5u32, v, buf);
+        }
+        if let Some(ref v) = self.location {
+            ::buffa::types::put_string_field(6u32, v, buf);
         }
     }
     fn merge_field(
@@ -191,6 +222,18 @@ impl ::buffa::Message for CredentialUse {
                     buf,
                 )?;
             }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(
+                    self
+                        .location
+                        .get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -203,6 +246,7 @@ impl ::buffa::Message for CredentialUse {
         self.binding_id.clear();
         self.destination = ::core::option::Option::None;
         self.decision_record_id = ::core::option::Option::None;
+        self.location = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for CredentialUse {

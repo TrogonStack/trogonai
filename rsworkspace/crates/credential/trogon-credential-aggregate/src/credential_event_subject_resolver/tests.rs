@@ -50,6 +50,18 @@ fn dotted_project_ids_stay_a_single_subject_token() {
 }
 
 #[test]
+fn the_project_token_is_the_token_the_projects_subjects_carry() {
+    let resolver = CredentialEventSubjectResolver::for_owner(&owner("acme.prod")).unwrap();
+    let token = credential_project_token(&owner("acme.prod")).unwrap();
+
+    assert_eq!(token.as_str(), "acme~prod");
+    assert_eq!(
+        resolver.scope().as_prefix(),
+        format!("{CREDENTIAL_EVENT_SUBJECT_PREFIX}.{token}.")
+    );
+}
+
+#[test]
 fn a_dotted_project_cannot_reach_into_another_projects_subtree() {
     let dotted = credential_event_subject(&stream_id("acme.prod")).unwrap();
     let other = CredentialEventSubjectResolver::for_owner(&owner("acme")).unwrap();

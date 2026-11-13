@@ -15,6 +15,11 @@ pub struct CredentialUseView<'a> {
     ///
     /// Field 2: `credential`
     pub credential: &'a str,
+    /// The binding the credential was used under. An injection names the
+    /// connection binding that placed it. A release serves no connection binding,
+    /// because the credential's own release policy binds it to a runtime service,
+    /// destination and location, so a release names the credential itself.
+    ///
     /// Field 3: `binding_id`
     pub binding_id: &'a str,
     /// Where the credential went, as a host or other registry-style name.
@@ -25,6 +30,11 @@ pub struct CredentialUseView<'a> {
     ///
     /// Field 5: `decision_record_id`
     pub decision_record_id: ::core::option::Option<&'a str>,
+    /// Where in the outbound request the credential is placed, as header:{name},
+    /// query:{name} or body:{path}. A location, never the value placed there.
+    ///
+    /// Field 6: `location`
+    pub location: ::core::option::Option<&'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -124,6 +134,13 @@ impl<'a> ::buffa::MessageView<'a> for CredentialUseView<'a> {
                 )?;
                 view.decision_record_id = Some(::buffa::types::borrow_str(&mut cur)?);
             }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.location = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -149,6 +166,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialUseView<'a> {
             binding_id: self.binding_id.to_string(),
             destination: self.destination.map(|s| s.to_string()),
             decision_record_id: self.decision_record_id.map(|s| s.to_string()),
+            location: self.location.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -171,6 +189,9 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialUseView<'a> {
         if let Some(ref v) = self.decision_record_id {
             size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
+        if let Some(ref v) = self.location {
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
+        }
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -189,6 +210,9 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialUseView<'a> {
         }
         if let Some(ref v) = self.decision_record_id {
             ::buffa::types::put_string_field(5u32, v, buf);
+        }
+        if let Some(ref v) = self.location {
+            ::buffa::types::put_string_field(6u32, v, buf);
         }
     }
 }
@@ -224,6 +248,9 @@ impl<'__a> ::serde::Serialize for CredentialUseView<'__a> {
         }
         if let ::core::option::Option::Some(__v) = self.decision_record_id {
             __map.serialize_entry("decisionRecordId", __v)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.location {
+            __map.serialize_entry("location", __v)?;
         }
         __map.end()
     }
@@ -328,6 +355,11 @@ impl CredentialUseOwnedView {
     pub fn credential(&self) -> &'_ str {
         self.0.reborrow().credential
     }
+    /// The binding the credential was used under. An injection names the
+    /// connection binding that placed it. A release serves no connection binding,
+    /// because the credential's own release policy binds it to a runtime service,
+    /// destination and location, so a release names the credential itself.
+    ///
     /// Field 3: `binding_id`
     #[must_use]
     pub fn binding_id(&self) -> &'_ str {
@@ -346,6 +378,14 @@ impl CredentialUseOwnedView {
     #[must_use]
     pub fn decision_record_id(&self) -> ::core::option::Option<&'_ str> {
         self.0.reborrow().decision_record_id
+    }
+    /// Where in the outbound request the credential is placed, as header:{name},
+    /// query:{name} or body:{path}. A location, never the value placed there.
+    ///
+    /// Field 6: `location`
+    #[must_use]
+    pub fn location(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().location
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<CredentialUseView<'static>>>
