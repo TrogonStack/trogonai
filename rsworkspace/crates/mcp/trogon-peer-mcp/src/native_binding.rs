@@ -64,7 +64,6 @@ impl NativeBinding {
         response: &v1::EnrollResponse,
         config: &ConnectorConfig,
     ) -> Result<AttachmentRef, PeerMcpError> {
-        self.enrollment = EnrollmentState::Replied;
         let peer_id = response.peer_id.as_deref().ok_or(PeerMcpError::InvalidEnrollment)?;
         let peer_id = PeerId::parse(peer_id).map_err(PeerMcpError::InvalidEnrollmentIdentity)?;
         let lease = response.attachment.as_option().ok_or(PeerMcpError::InvalidEnrollment)?;
@@ -112,6 +111,7 @@ impl NativeBinding {
             }
             None => self.attachment = Some(watch::channel(attachment.clone()).0),
         }
+        self.enrollment = EnrollmentState::Replied;
         Ok(attachment)
     }
 }

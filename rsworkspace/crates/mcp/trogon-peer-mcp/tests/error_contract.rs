@@ -232,6 +232,81 @@ async fn served_codes_distinguish_typed_failures_with_the_same_safe_message() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn served_failed_reenrollment_reports_uncertainty_without_losing_the_reserved_session() {
+    for failed_work in [Work::Fail, Work::Pending] {
+        let backend = Backend::new(Work::Ready, Work::Ready);
+        let observed = backend.clone();
+        let (server_transport, client_transport) = tokio::io::duplex(32 * 1024);
+        let server = tokio::spawn(async move {
+            adapter(backend)
+                .serve(server_transport)
+                .await
+                .expect("server")
+                .waiting()
+                .await
+                .expect("shutdown")
+        });
+        let client = ().serve(client_transport).await.expect("client");
+        let roster = || request("peer_roster", json!({}));
+        let result = client.call_tool(roster()).await.expect("unbound roster");
+        assert_code(&serde_json::to_value(result).expect("wire JSON"), "unbound");
+        let first = client.call_tool(prompt("native_b")).await.expect("initial hook");
+        assert_ne!(serde_json::to_value(first).expect("wire JSON")["isError"], true);
+
+        *observed.enroll_work.lock().expect("enroll work") = failed_work;
+        let failed = client.call_tool(prompt("native_b")).await.expect("failed hook");
+        let failed = serde_json::to_value(failed).expect("wire JSON");
+        assert_code(
+            &failed,
+            if matches!(failed_work, Work::Fail) {
+                "enroll"
+            } else {
+                "prompt_deadline"
+            },
+        );
+        for (name, arguments) in [
+            ("peer_roster", json!({})),
+            (
+                "peer_send",
+                json!({"recipient_peer_id":"a".repeat(64),"idempotency_key":"stable_key","text":"body"}),
+            ),
+            ("peer_status", json!({"idempotency_key":"stable_key"})),
+            ("peer_acknowledge_batch", json!({"batch_id":"batch_1"})),
+        ] {
+            let result = client
+                .call_tool(request(name, arguments))
+                .await
+                .expect("suspended model tool");
+            let result = serde_json::to_value(result).expect("wire JSON");
+            assert_code(&result, "enrollment_uncertain");
+            assert_eq!(
+                result["content"][0]["text"],
+                "Peer enrollment is unconfirmed; lease expiry remains the fallback."
+            );
+        }
+        let changed = client
+            .call_tool(prompt("native_other"))
+            .await
+            .expect("reserved session");
+        assert_code(
+            &serde_json::to_value(changed).expect("wire JSON"),
+            "native_session_changed",
+        );
+        assert_eq!(observed.enrollments.lock().expect("enrollments").len(), 2);
+        assert_eq!(observed.preparations.lock().expect("preparations").len(), 1);
+
+        *observed.enroll_work.lock().expect("enroll work") = Work::Ready;
+        let retried = client.call_tool(prompt("native_b")).await.expect("same-session retry");
+        assert_ne!(serde_json::to_value(retried).expect("wire JSON")["isError"], true);
+        let result = client.call_tool(roster()).await.expect("resumed roster");
+        assert_code(&serde_json::to_value(result).expect("wire JSON"), "roster");
+        assert_eq!(observed.preparations.lock().expect("preparations").len(), 2);
+        client.cancel().await.expect("close client");
+        server.await.expect("server task");
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn served_prompt_deadline_has_a_safe_stable_code() {
     let result = served(Backend::new(Work::Pending, Work::Ready), vec![prompt("native_b")]).await;
     assert_code(&result[0], "prompt_deadline");
