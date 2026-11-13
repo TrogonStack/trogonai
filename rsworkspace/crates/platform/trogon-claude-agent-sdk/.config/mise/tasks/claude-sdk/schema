@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Regenerate the settings schema description from the pinned upstream Claude SDK bundle"
+#MISE description="Regenerate the settings schema description and the recorded settings probes from the pinned upstream Claude SDK bundle"
 #MISE depends=["claude-sdk:install"]
 set -euo pipefail
 
@@ -9,3 +9,4 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 python3 "$lib/fetch_pinned_typescript.py" "$scratch/package"
 node "$lib/generate_settings_schema.mjs" --package "$scratch/package" --out "$root/src/upstream/settings_schema.json" "$@"
+node "$lib/generate_restrict_probes.mjs" --package "$scratch/package" --out "$root/src/upstream/settings_restrict_probes.json" "$@"

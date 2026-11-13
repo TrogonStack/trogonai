@@ -12,7 +12,7 @@ use crate::{
         MODEL_OVERRIDES_KEY, REPLACED_ADMIN_ARRAY_KEYS, RESTRICTIVE_RULES, SANDBOX_PLATFORMS_PATH,
         STRICT_PLUGIN_ONLY_KEY,
     },
-    settings_resolve_values::{SettingsMap, get_path, omit, union_arrays},
+    settings_resolve_values::{SettingsMap, get_path, omit, set_path, union_arrays},
     settings_schema::schema,
 };
 
@@ -24,35 +24,6 @@ fn replaced_array(key: &str) -> bool {
 /// Whether the extracted upstream merge description spreads this key's object instead of merging it deeply.
 fn shallow_object(key: &str) -> bool {
     schema().is_some_and(|schema| schema.merge_spec().shallow_objects.iter().any(|listed| listed == key))
-}
-
-/// `Qt` upstream: sets (or, with `None`, removes) the value at `path`, copying each object on the way and pruning
-/// objects that a removal leaves empty.
-fn set_path(map: &mut SettingsMap, path: &[&str], value: Option<&Value>) {
-    let Some((first, rest)) = path.split_first() else {
-        return;
-    };
-    if rest.is_empty() {
-        match value {
-            Some(value) => {
-                map.insert((*first).to_owned(), value.clone());
-            }
-            None => {
-                map.shift_remove(*first);
-            }
-        }
-        return;
-    }
-    let mut child = match map.get(*first) {
-        Some(Value::Object(existing)) => existing.clone(),
-        _ => SettingsMap::new(),
-    };
-    set_path(&mut child, rest, value);
-    if value.is_none() && child.is_empty() {
-        map.shift_remove(*first);
-    } else {
-        map.insert((*first).to_owned(), Value::Object(child));
-    }
 }
 
 /// What a lower tier contributes: no helpers, identity or environment keys, no `permissions.defaultMode`, and its

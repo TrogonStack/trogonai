@@ -24,6 +24,7 @@ workspace_crate(
     name = "trogon-claude-agent-sdk",
     compile_data = [
         "README.md",
+        "src/upstream/settings_restrict_probes.json",
         "src/upstream/settings_schema.json",
     ] + glob([
         "tests/fixtures/fork_ts/*.jsonl",

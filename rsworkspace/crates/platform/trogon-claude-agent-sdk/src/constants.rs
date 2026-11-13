@@ -799,6 +799,78 @@ pub(crate) const RESTRICTIVE_RULES: [(&[&str], &[&str]); 72] = [
     (&["isolation", "persistHome"], &["false"]),
 ];
 
+/// The ranked value of a restrictive rule whose restrictive value is `true` itself (`restrictive: true` in `Go()`).
+pub(crate) const RESTRICTIVE_TRUE: &str = "true";
+
+/// Keys the restriction of a user-writable policy file never keeps from the file as written (`yJ` upstream).
+pub(crate) const RESTRICT_SKIPPED_KEYS: [&str; 2] = ["disableAllHooks", "disableReplyCheck"];
+
+/// Path the restriction pins to `false` when a policy file turns attribution off.
+pub(crate) const RESTRICT_ATTRIBUTION_PATH: [&str; 2] = ["attribution", "sessionUrl"];
+
+/// Permission keys a restricted policy file keeps.
+pub(crate) const RESTRICT_PERMISSION_KEYS: [&str; 4] =
+    ["deny", "ask", "disableBypassPermissionsMode", "disableAutoMode"];
+
+/// Keys a restricted policy file keeps as written (`cXe` upstream).
+pub(crate) const RESTRICT_COPIED_KEYS: [&str; 15] = [
+    "allowedMcpServers",
+    "deniedMcpServers",
+    "allowManagedMcpServersOnly",
+    "disabledMcpjsonServers",
+    "allowManagedHooksOnly",
+    "allowedHttpHookUrls",
+    "strictKnownMarketplaces",
+    "allowedMarketplaces",
+    "blockedMarketplaces",
+    "strictPluginOnlyCustomization",
+    "availableModels",
+    "enforceAvailableModels",
+    "availableModelsMatch",
+    "deniedModels",
+    "allowedProviders",
+];
+
+/// Sandbox filesystem keys a restricted policy file keeps.
+pub(crate) const RESTRICT_FILESYSTEM_KEYS: [&str; 3] = ["denyRead", "denyWrite", "allowManagedReadPathsOnly"];
+
+/// Sandbox network keys a restricted policy file keeps.
+pub(crate) const RESTRICT_NETWORK_KEYS: [&str; 3] = ["deniedDomains", "strictAllowlist", "allowManagedDomainsOnly"];
+
+/// Sandbox credential keys a restricted policy file keeps.
+pub(crate) const RESTRICT_CREDENTIAL_KEYS: [&str; 2] = ["files", "envVars"];
+
+/// Paths the restriction always drops (`p8e` upstream).
+pub(crate) const RESTRICT_DROPPED_PATHS: [&[&str]; 3] = [
+    &["allowedHttpHookUrls"],
+    &["httpHookAllowedEnvVars"],
+    &["isolation", "required"],
+];
+
+/// Credential lists the restriction rewrites into deny entries, with the field each entry names (`p5` upstream).
+pub(crate) const RESTRICT_DENY_ENTRY_LISTS: [(&[&str], &str); 2] = [
+    (&["sandbox", "credentials", "files"], "path"),
+    (&["sandbox", "credentials", "envVars"], "name"),
+];
+
+/// Permission lists the restriction drops negated path rules from.
+pub(crate) const RESTRICT_PERMISSION_LISTS: [&[&str]; 2] = [&["permissions", "deny"], &["permissions", "ask"]];
+
+/// Rule prefixes whose negated path form (`!path` or `./!path`) the restriction drops (`If` upstream).
+pub(crate) const RESTRICT_NEGATABLE_RULE_PREFIXES: [&str; 2] = ["Read(", "Edit("];
+
+/// Plugin the organization policy-mod options belong to (`hu` upstream).
+pub(crate) const SECURITY_PLUGIN_ID: &str = "cc-plugin-sec-default@builtin";
+
+/// Earlier names of the security plugin whose options still count, read before the current one (`N4` upstream).
+pub(crate) const LEGACY_SECURITY_PLUGIN_IDS: [&str; 1] = ["sec-default@builtin"];
+
+/// Security plugin options a restricted policy file keeps (`qy.policyModOptions` upstream).
+pub(crate) const POLICY_MOD_OPTIONS: [&str; 1] = ["allowManagedModsOnly"];
+
+/// Marketplace of the plugins that ship with the CLI (`YS` upstream).
+pub(crate) const BUILTIN_PLUGIN_MARKETPLACE: &str = "builtin";
+
 /// Settings key that pins the organization a login must belong to.
 pub(crate) const LOGIN_ORGANIZATION_KEY: &str = "forceLoginOrgUUID";
 
