@@ -193,8 +193,10 @@ async fn injected_process_runs_protocol_and_closes_input_on_disconnect() -> Resu
         env: trogon_claude_agent_sdk::Environment::from([("SDK_TEST_SENTINEL".into(), "child-value".into())]),
         ..ClaudeAgentOptions::default()
     };
-    options.limits.control_timeout = trogon_claude_agent_sdk::Timeout::new(std::time::Duration::from_secs(2))?;
-    options.limits.shutdown_timeout = trogon_claude_agent_sdk::Timeout::new(std::time::Duration::from_secs(5))?;
+    options.limits.control_timeout = Some(trogon_claude_agent_sdk::Timeout::new(std::time::Duration::from_secs(2)));
+    options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(trogon_claude_agent_sdk::Timeout::new(
+        std::time::Duration::from_secs(5),
+    ));
     let adapters = RuntimeAdapters {
         environment: FixedEnvironment {
             directory: PathBuf::from("unused-directory"),
@@ -446,7 +448,7 @@ async fn dropping_owner_shuts_down_even_when_command_handle_survives() -> TestRe
     observer.wait_for(ScriptedProcessEvent::StdinClosed).await?;
     assert!(matches!(
         handle.mcp_status().await,
-        Err(trogon_claude_agent_sdk::Error::DriverStopped)
+        Err(trogon_claude_agent_sdk::Error::NotReadyForWriting)
     ));
     Ok(())
 }
@@ -473,12 +475,41 @@ impl TrackedEnvironment {
         }
     }
 
+    /// Session-related accesses only: the SDK also reads these names to plan the child's own environment
+    /// (entrypoint, version, debug and session-state markers, `PATH`, `HOME`), which is not session lookup.
     fn accesses(&self) -> io::Result<Vec<EnvironmentAccess>> {
+        const LAUNCH_VARIABLES: [&str; 7] = [
+            "CLAUDE_CODE_ENTRYPOINT",
+            "CLAUDE_AGENT_SDK_VERSION",
+            "CLAUDE_CODE_SDK_READS_SESSION_STATE",
+            "DEBUG_CLAUDE_AGENT_SDK",
+            "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK",
+            "PATH",
+            "USERPROFILE",
+        ];
+        let mut home_reads_skipped = true;
         Ok(self
             .accesses
             .lock()
             .map_err(|_| io::Error::other("environment tracking poisoned"))?
-            .clone())
+            .iter()
+            .filter(|access| match access {
+                EnvironmentAccess::Variable(key) => {
+                    let key = key.to_string_lossy();
+                    if LAUNCH_VARIABLES.contains(&key.as_ref()) {
+                        return false;
+                    }
+                    // The launch capture reads HOME once, before any session lookup.
+                    if key == "HOME" && home_reads_skipped {
+                        home_reads_skipped = false;
+                        return false;
+                    }
+                    true
+                }
+                _ => true,
+            })
+            .cloned()
+            .collect())
     }
 
     fn record(&self, access: EnvironmentAccess) -> io::Result<()> {
@@ -791,7 +822,7 @@ async fn s12_outbound_prompts_and_controls_are_never_capped_by_the_inbound_frame
     let (process, harness) = ScriptedProcessSpawner::new();
     let server = tokio::spawn(serve_controls(harness));
     let mut options = ClaudeAgentOptions::default();
-    options.limits.max_frame_bytes = std::num::NonZeroUsize::new(1024).ok_or("invalid limit")?;
+    options.limits.max_buffer_size = Some(std::num::NonZeroUsize::new(1024).ok_or("invalid limit")?);
     let client = ClaudeSdkClient::connect_with_adapters(options, process_adapters(process)).await?;
     client.send_prompt(Prompt::from("x".repeat(2048))).await?;
     let replacement = BTreeMap::from([(
