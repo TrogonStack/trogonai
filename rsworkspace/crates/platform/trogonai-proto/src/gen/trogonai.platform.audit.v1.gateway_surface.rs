@@ -12,6 +12,9 @@ pub enum GatewaySurface {
     GATEWAY_SURFACE_A2A_INGRESS = 1i32,
     /// The egress proxy admitting an agent's outbound connection.
     GATEWAY_SURFACE_EGRESS = 2i32,
+    /// The secrets service deciding whether a runtime service receives a
+    /// credential.
+    GATEWAY_SURFACE_SECRETS_RELEASE = 3i32,
 }
 impl GatewaySurface {
     ///Idiomatic alias for [`Self::GATEWAY_SURFACE_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -23,6 +26,9 @@ impl GatewaySurface {
     ///Idiomatic alias for [`Self::GATEWAY_SURFACE_EGRESS`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const Egress: Self = Self::GATEWAY_SURFACE_EGRESS;
+    ///Idiomatic alias for [`Self::GATEWAY_SURFACE_SECRETS_RELEASE`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const SecretsRelease: Self = Self::GATEWAY_SURFACE_SECRETS_RELEASE;
 }
 impl ::core::default::Default for GatewaySurface {
     fn default() -> Self {
@@ -123,6 +129,7 @@ impl ::buffa::Enumeration for GatewaySurface {
             0i32 => ::core::option::Option::Some(Self::GATEWAY_SURFACE_UNSPECIFIED),
             1i32 => ::core::option::Option::Some(Self::GATEWAY_SURFACE_A2A_INGRESS),
             2i32 => ::core::option::Option::Some(Self::GATEWAY_SURFACE_EGRESS),
+            3i32 => ::core::option::Option::Some(Self::GATEWAY_SURFACE_SECRETS_RELEASE),
             _ => ::core::option::Option::None,
         }
     }
@@ -134,6 +141,7 @@ impl ::buffa::Enumeration for GatewaySurface {
             Self::GATEWAY_SURFACE_UNSPECIFIED => "GATEWAY_SURFACE_UNSPECIFIED",
             Self::GATEWAY_SURFACE_A2A_INGRESS => "GATEWAY_SURFACE_A2A_INGRESS",
             Self::GATEWAY_SURFACE_EGRESS => "GATEWAY_SURFACE_EGRESS",
+            Self::GATEWAY_SURFACE_SECRETS_RELEASE => "GATEWAY_SURFACE_SECRETS_RELEASE",
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -147,6 +155,9 @@ impl ::buffa::Enumeration for GatewaySurface {
             "GATEWAY_SURFACE_EGRESS" => {
                 ::core::option::Option::Some(Self::GATEWAY_SURFACE_EGRESS)
             }
+            "GATEWAY_SURFACE_SECRETS_RELEASE" => {
+                ::core::option::Option::Some(Self::GATEWAY_SURFACE_SECRETS_RELEASE)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -155,6 +166,7 @@ impl ::buffa::Enumeration for GatewaySurface {
             Self::GATEWAY_SURFACE_UNSPECIFIED,
             Self::GATEWAY_SURFACE_A2A_INGRESS,
             Self::GATEWAY_SURFACE_EGRESS,
+            Self::GATEWAY_SURFACE_SECRETS_RELEASE,
         ]
     }
 }
