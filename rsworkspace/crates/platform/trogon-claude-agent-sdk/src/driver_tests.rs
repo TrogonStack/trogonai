@@ -486,10 +486,13 @@ fn a_derived_client_app_reaches_the_overlay_environment_unless_a_label_exists() 
 #[tokio::test(start_paused = true)]
 async fn the_request_counter_wraps_by_default() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
+    fixture.driver.argv_style = crate::ArgvStyle::Python;
     fixture.driver.next_id = u64::MAX;
-    let _ = fixture.driver.next_request_id()?;
+    let id = fixture.driver.next_request_id()?;
+    assert!(id.as_str().starts_with("req_0_"));
     assert_eq!(fixture.driver.next_id, 0);
-    let _ = fixture.driver.next_request_id()?;
+    let id = fixture.driver.next_request_id()?;
+    assert!(id.as_str().starts_with("req_1_"));
     assert_eq!(fixture.driver.next_id, 1);
     fixture.finish().await
 }
