@@ -120,6 +120,18 @@ fn append_skips_empty_stubs_and_searches_every_project() -> TestResult {
 }
 
 #[test]
+fn append_treats_a_lone_empty_stub_as_not_found() -> TestResult {
+    let f = fixture(&[])?;
+    let stub = f.dir.join(format!("{SESSION}.jsonl"));
+    assert!(matches!(
+        f.files.tag_session(SESSION, Some("keep"), None),
+        Err(SessionMutationError::NotFound { .. })
+    ));
+    assert_eq!(fs::metadata(&stub)?.len(), 0);
+    Ok(())
+}
+
+#[test]
 fn delete_removes_the_transcript_and_subagent_directory() -> TestResult {
     let f = fixture(&transcript())?;
     let subagents = f.dir.join(SESSION).join("subagents");

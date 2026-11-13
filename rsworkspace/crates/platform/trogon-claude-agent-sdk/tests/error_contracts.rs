@@ -47,6 +47,17 @@ fn control_timeout_diagnostics_identify_each_wire_operation() {
 }
 
 #[test]
+fn write_to_terminated_process_renders_both_upstream_texts() {
+    for exit_code in [Some(7), None] {
+        let error = Error::WriteToTerminatedProcess { exit_code };
+        assert!(!error.to_string().is_empty());
+        assert!(error.typescript_message().is_some_and(|message| !message.is_empty()));
+        assert!(error.source().is_none());
+        assert_eq!(error.exit_code(), None);
+    }
+}
+
+#[test]
 fn protocol_failures_retain_typed_sources_and_safe_context() -> TestResult {
     let failures = [
         (
