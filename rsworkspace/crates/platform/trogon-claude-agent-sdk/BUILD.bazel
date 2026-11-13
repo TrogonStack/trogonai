@@ -114,6 +114,10 @@ workspace_crate(
         "tool_rule_storage": {},
         "tool_use_id": {},
         "tool_use_id_storage": {},
+        "upstream_tool_inputs": {},
+        "upstream_tool_inputs_fixtures": {
+            "compile_data": glob(["tests/fixtures/*.json"]),
+        },
         "usd_budget": {},
         "user_input": {},
         "user_message": {},
