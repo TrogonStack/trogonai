@@ -17,6 +17,7 @@ fn stream_events_keep_raw_event_values_and_parent_identity() -> Result<(), Box<d
         event: event.clone(),
         additional_fields: fields.clone(),
         parent_tool_use_id: Some(ToolUseId::from("parent-one")),
+        raw: JsonObject::new(),
     };
     let copied = message.clone();
     assert_eq!(copied.uuid, "stream-one");
