@@ -480,10 +480,13 @@ customizations when supported.
 `Limits::default()` matches the TypeScript SDK: no stdout line cap, the last
 2048 UTF-16 units of stderr kept for process errors, unbounded queues, no
 control, write or callback timeout, and an initialize deadline of 660 seconds
-only when a hook is set to block on failure. `Limits::python()` selects the
+only when a hook is set to block on failure, and a run-end wait read from
+`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` the way TypeScript reads it (600 seconds
+when unset, zero for no limit). `Limits::python()` selects the
 Python SDK's values: a 1 MiB line cap, a 60 second control wait, a 100 message
-buffer that stops reading stdout while full, and its initialize wait and
-shutdown ladder. Every other bound (pending controls, inbound callbacks, tracked
+buffer that stops reading stdout while full, and its initialize wait, shutdown
+ladder and `int()` parse of that variable. `RunEndTimeout::Fixed` opts into a
+fixed run-end wait. Every other bound (pending controls, inbound callbacks, tracked
 tasks, queued inputs, a failing message queue, command queue room) is opt-in and
 keeps its typed error. Stderr debug output omits its contents. `QueueCapacity`
 validates Tokio's range; `Timeout::checked` rejects zero and values past 24

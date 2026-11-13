@@ -121,6 +121,38 @@ pub enum InitializeTimeout {
     Fixed(Timeout),
 }
 
+/// How long after the last result a run with no idle state waits before it ends quietly.
+///
+/// Both upstream SDKs read `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, with a default of 600 seconds, zero for no limit,
+/// and a clamp to 2^31 - 1 milliseconds; they disagree on what the variable may spell and where it is read.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum RunEndTimeout {
+    /// TypeScript: the variable in the child environment this SDK builds, so `ClaudeAgentOptions::env` when it
+    /// replaces the inherited environment and the process environment otherwise. Whole numbers in exponent form
+    /// such as `1e3`, a thousands separator as in `1,000` or `1_000`, and the leading digits of `12abc` all count.
+    #[default]
+    TypeScript,
+    /// Python: `ClaudeAgentOptions::env` first, then the process environment, parsed with `int()`: whitespace
+    /// around the number, Unicode decimal digits, and single underscores between digits. Text `int()` refuses and
+    /// negative numbers are the default.
+    Python,
+    /// Opt-in: this wait, whatever the environment says. Zero ends the run at once.
+    Fixed(Timeout),
+}
+
+impl RunEndTimeout {
+    /// The ceiling this selection applies for the variable's value, with `None` for no limit. Anything that does
+    /// not parse is the 600 second default, as is an unset variable.
+    #[must_use]
+    pub fn for_variable(self, value: Option<&str>) -> Option<std::time::Duration> {
+        match self {
+            Self::TypeScript => crate::run_end_ceiling::typescript(value),
+            Self::Python => crate::run_end_ceiling::python(value),
+            Self::Fixed(timeout) => Some(timeout.as_duration()),
+        }
+    }
+}
+
 /// How the process is stopped once stdin is closed.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Shutdown {
@@ -203,8 +235,8 @@ pub struct Limits {
     pub write_timeout: Option<Timeout>,
     pub shutdown: Shutdown,
     /// `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` in both upstream SDKs: with no idle state after the last result, the
-    /// run ends this long after it.
-    pub run_end_timeout: Timeout,
+    /// run ends this long after it. Read from the environment by default, as each upstream SDK does.
+    pub run_end_timeout: RunEndTimeout,
     pub duplicate_control_requests: DuplicateControlRequests,
     pub request_id_exhaustion: RequestIdExhaustion,
     pub input_after_finish: InputAfterFinish,
@@ -217,7 +249,8 @@ impl Limits {
     pub const PYTHON_MAX_BUFFER_SIZE: usize = 1024 * 1024;
 
     /// Python's values: a 60-second control wait, a 1 MiB line cap, a 100-message buffer with backpressure, its
-    /// initialize wait and shutdown ladder, no stderr tail, and duplicate control requests that all run.
+    /// initialize wait, shutdown ladder and run-end ceiling parse, no stderr tail, and duplicate control requests
+    /// that all run.
     pub fn python() -> Self {
         Self {
             max_buffer_size: Some(Self::PYTHON_MAX_BUFFER_SIZE),
@@ -226,6 +259,7 @@ impl Limits {
             control_timeout: Some(Timeout::default()),
             initialize_timeout: InitializeTimeout::Python,
             shutdown: Shutdown::Python,
+            run_end_timeout: RunEndTimeout::Python,
             duplicate_control_requests: DuplicateControlRequests::RunBoth,
             ..Self::default()
         }
@@ -265,7 +299,7 @@ impl Default for Limits {
             callback_timeout: None,
             write_timeout: None,
             shutdown: Shutdown::TypeScript,
-            run_end_timeout: Timeout::new(std::time::Duration::from_millis(600_000)),
+            run_end_timeout: RunEndTimeout::TypeScript,
             duplicate_control_requests: DuplicateControlRequests::Skip,
             request_id_exhaustion: RequestIdExhaustion::Wrap,
             input_after_finish: InputAfterFinish::Write,

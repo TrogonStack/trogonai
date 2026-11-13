@@ -100,6 +100,7 @@ impl DriverFixture {
                 .to_value()?,
             initialize_expectations: InitializeExpectations::default(),
             initialize_timeout: None,
+            run_end: Some(Duration::from_millis(600_000)),
             version_check: None,
             latest_commands: LatestCommands::default(),
             verbatim_prompts: false,

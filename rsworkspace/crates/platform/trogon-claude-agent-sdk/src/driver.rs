@@ -330,6 +330,7 @@ where
     initialize_request: serde_json::Value,
     initialize_expectations: InitializeExpectations,
     initialize_timeout: Option<Duration>,
+    run_end: Option<Duration>,
     elicitation_handler: Option<Arc<dyn crate::ElicitationHandler>>,
     user_dialog_handler: Option<Arc<dyn crate::UserDialogHandler>>,
     oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
@@ -574,6 +575,8 @@ pub(crate) struct Initialization {
     hook_callbacks: HashMap<String, HookCallback>,
     expectations: InitializeExpectations,
     timeout: Option<Duration>,
+    /// The run-end ceiling, or `None` when the environment asks for no limit.
+    run_end: Option<Duration>,
 }
 
 impl Initialization {
@@ -597,6 +600,7 @@ impl Initialization {
             hook_callbacks,
             expectations,
             timeout,
+            run_end: crate::run_end_ceiling::resolve(options, environment),
         })
     }
 }
@@ -728,6 +732,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         initialize_request: initialization.request,
         initialize_expectations: initialization.expectations,
         initialize_timeout: initialization.timeout,
+        run_end: initialization.run_end,
         elicitation_handler: options.elicitation_handler,
         user_dialog_handler: options.user_dialog_handler,
         oauth_token_handler: options.oauth_token_handler,
@@ -871,7 +876,7 @@ where
                 && !matches!(self.run_state.session_state, Some(SessionState::RequiresAction));
             if between_turns && self.input_open() {
                 if self.run_state.deadline.is_none() {
-                    self.run_state.deadline = Instant::now().checked_add(self.limits.run_end_timeout.as_duration());
+                    self.run_state.deadline = self.run_end.and_then(|ceiling| Instant::now().checked_add(ceiling));
                 }
             } else {
                 self.run_state.deadline = None;
@@ -946,7 +951,7 @@ where
                     if let Some(error) = self.expired_control() { return Err(error); }
                 }
                 _ = async { match run_deadline { Some(deadline) => sleep_until(deadline).await, None => pending::<()>().await } } => {
-                    tracing::debug!(timeout = ?self.limits.run_end_timeout.as_duration(), "no idle state after the last result; ending the run");
+                    tracing::debug!(timeout = ?self.run_end, "no idle state after the last result; ending the run");
                     self.run_state.deadline = None;
                     self.end_input().await;
                 }

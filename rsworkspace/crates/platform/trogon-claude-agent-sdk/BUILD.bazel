@@ -156,6 +156,13 @@ workspace_crate(
         },
         "result_message": {},
         "resume": {},
+        "run_end_ceiling": {
+            "data": [":claude_sdk_fixture"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},
+        },
+        "run_end_ceiling_golden": {
+            "compile_data": glob(["tests/fixtures/run_end_ceiling/*.json"]),
+        },
         "runtime_adapters": {
             "compile_data": glob(["tests/support/*.rs"]),
             "data": [":claude_sdk_relay"],
