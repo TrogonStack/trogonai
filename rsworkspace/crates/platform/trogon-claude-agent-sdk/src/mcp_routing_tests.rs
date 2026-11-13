@@ -91,3 +91,55 @@ fn typescript_not_an_object_names_the_value_like_v8() {
         "Cannot use 'in' operator to search for 'method' in 7"
     );
 }
+
+#[test]
+fn tools_list_changed_needs_no_id_and_that_exact_method() -> TestResult {
+    let changed = |value| Ok::<_, serde_json::Error>(is_tools_list_changed(&object(value)?));
+    assert!(changed(
+        json!({"jsonrpc":"2.0","method":"notifications/tools/list_changed"})
+    )?);
+    assert!(!changed(
+        json!({"jsonrpc":"2.0","id":5,"method":"notifications/tools/list_changed"})
+    )?);
+    assert!(!changed(
+        json!({"jsonrpc":"2.0","id":null,"method":"notifications/tools/list_changed"})
+    )?);
+    assert!(!changed(
+        json!({"jsonrpc":"2.0","method":"notifications/resources/list_changed"})
+    )?);
+    Ok(())
+}
+
+/// The `sdk.mjs` 0.3.323 manifests of two servers with tools, captured with and without a
+/// `notifications/tools/list_changed` from `s` before `initialize`: the changed server keeps only its
+/// `initializeResult` and the other is untouched.
+#[test]
+fn changed_manifests_keep_only_the_initialize_result_like_the_typescript_golden() -> TestResult {
+    let golden: Value = serde_json::from_str(include_str!("../tests/fixtures/sdk_mcp/mcp_message_routing.json"))?;
+    let manifests = |name: &str| {
+        golden["cases"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|case| case["name"] == name)
+            .map(|case| case["initialize_manifests"].clone())
+    };
+    let captured = manifests("manifests_with_tools_are_captured_unchanged").ok_or("unchanged case")?;
+    assert!(captured["s"]["toolsListResult"].is_object());
+    let expected =
+        manifests("tools_list_changed_before_initialize_drops_the_tools_list_manifest").ok_or("changed case")?;
+    assert!(expected["s"].get("toolsListResult").is_none());
+    let mut request = json!({"sdkMcpServerManifests": captured.clone()});
+    trim_changed_manifests(&mut request, &std::collections::BTreeSet::from(["s".to_owned()]));
+    assert_eq!(request["sdkMcpServerManifests"], expected);
+    assert_eq!(
+        serde_json::to_string(&request["sdkMcpServerManifests"])?,
+        serde_json::to_string(&expected)?
+    );
+    let untouched = manifests("tools_list_changed_with_an_id_keeps_the_manifest").ok_or("id case")?;
+    assert_eq!(untouched, captured);
+    let mut none = json!({"sdkMcpServerManifests": captured.clone()});
+    trim_changed_manifests(&mut none, &std::collections::BTreeSet::new());
+    assert_eq!(none["sdkMcpServerManifests"], captured);
+    Ok(())
+}

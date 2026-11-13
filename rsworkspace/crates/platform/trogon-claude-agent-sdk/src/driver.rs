@@ -235,6 +235,12 @@ pub(crate) struct McpRouting {
     tasks: JoinSet<()>,
     outbound: tokio::sync::mpsc::UnboundedSender<McpTransportEvent>,
     inbound: tokio::sync::mpsc::UnboundedReceiver<McpTransportEvent>,
+    /// `initializeHasBeenWritten`: set once the first `initialize` request has been written.
+    initialize_written: bool,
+    /// `afterInitialize`: forwarded frames waiting for the `initialize` request, in order.
+    held: std::collections::VecDeque<serde_json::Value>,
+    /// `sdkMcpToolsChangedDuringCapture`: servers that announced a tool list change before `initialize`.
+    tools_changed: std::collections::BTreeSet<String>,
 }
 
 impl McpRouting {
@@ -264,6 +270,9 @@ impl McpRouting {
             tasks: JoinSet::new(),
             outbound,
             inbound,
+            initialize_written: false,
+            held: std::collections::VecDeque::new(),
+            tools_changed: std::collections::BTreeSet::new(),
         }
     }
 }
@@ -1003,8 +1012,18 @@ where
     async fn command(&mut self, command: Command) -> Result<(), Error> {
         match command {
             Command::Initialize { response } => {
-                self.start_control(ControlResponder::Initialize(response), self.initialize_request.clone())
-                    .await?;
+                let mut request = self.initialize_request.clone();
+                crate::mcp_routing::trim_changed_manifests(&mut request, &self.mcp.tools_changed);
+                self.mcp.tools_changed.clear();
+                let started = self
+                    .start_control(ControlResponder::Initialize(response), request)
+                    .await;
+                // `finally { markInitializeWritten() }`: forwarded frames go out behind the request, in order.
+                self.mcp.initialize_written = true;
+                started?;
+                while let Some(frame) = self.mcp.held.pop_front() {
+                    self.write_response(Ok(frame)).await?;
+                }
             }
             Command::SetMcpServers {
                 external,
@@ -1678,8 +1697,15 @@ where
             message: &message,
         }
         .to_value()?;
-        self.write_response(wire::control_request(&id, request, self.argv_style))
-            .await
+        let frame = wire::mcp_forward(&id, request)?;
+        if !self.mcp.initialize_written {
+            if crate::mcp_routing::is_tools_list_changed(&message) {
+                self.mcp.tools_changed.insert(server);
+            }
+            self.mcp.held.push_back(frame);
+            return Ok(());
+        }
+        self.write_response(Ok(frame)).await
     }
 
     /// The Python `Query` `mcp_message`: a missing field fails the control request, and everything else is

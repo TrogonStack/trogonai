@@ -690,6 +690,8 @@ async fn mcp_message_routes_like_the_typescript_query() -> TestResult {
 /// replies, each after its `delay_ms` or, with none, as the answer to the call itself.
 struct ScriptedMcpServer {
     received: Arc<Mutex<Vec<Value>>>,
+    /// What the transport sends as it connects, before the SDK has written `initialize`.
+    connect_send: Vec<JsonObject>,
 }
 
 struct ScriptedMcpSession {
@@ -701,6 +703,9 @@ struct ScriptedMcpSession {
 impl SdkMcpServer for ScriptedMcpServer {
     fn open_session(&self) -> Arc<dyn SdkMcpSession> {
         let (outbound, inbound) = tokio::sync::mpsc::unbounded_channel();
+        for message in &self.connect_send {
+            let _ = outbound.send(message.clone());
+        }
         Arc::new(ScriptedMcpSession {
             received: self.received.clone(),
             outbound,
@@ -779,6 +784,12 @@ async fn mcp_message_routing_replays_the_typescript_golden() -> TestResult {
                 McpServerName::from(server.as_str().unwrap_or("s")),
                 Arc::new(ScriptedMcpServer {
                     received: received.clone(),
+                    connect_send: case["connect_send"][server.as_str().unwrap_or("s")]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|message| message.as_object().cloned())
+                        .collect(),
                 }),
             );
         }
@@ -787,11 +798,15 @@ async fn mcp_message_routing_replays_the_typescript_golden() -> TestResult {
             tokio::time::sleep(Duration::from_millis(step["wait_ms"].as_u64().unwrap_or(0))).await;
             cli.send(step["frame"].clone()).await?;
         }
+        let mut forwarded = case["expect_text"].as_array().cloned().unwrap_or_default().into_iter();
         for expected in case["expect"].as_array().cloned().unwrap_or_default() {
             let mut frame = cli.read().await?;
             if frame["type"] == "control_request" {
-                let id = frame["request_id"].as_str().unwrap_or_default();
-                assert!(is_uuid(id), "{name}: {id}");
+                let id = frame["request_id"].as_str().unwrap_or_default().to_owned();
+                assert!(is_uuid(&id), "{name}: {id}");
+                // The forwarded frame keeps upstream's key order, `type`, `request_id`, `request`.
+                let text = serde_json::to_string(&frame)?.replace(&id, "<uuid>");
+                assert_eq!(Value::String(text), forwarded.next().unwrap_or(Value::Null), "{name}");
                 frame["request_id"] = json!("<uuid>");
             }
             assert_eq!(frame, expected, "{name}");

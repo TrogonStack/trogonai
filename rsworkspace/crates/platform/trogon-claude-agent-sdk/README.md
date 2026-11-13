@@ -182,8 +182,12 @@ control request is never answered. It has no timeout on that wait. A message a
 server sends with no waiter for its id (a notification, a request to the client,
 a repeated or unmatched response; see `SdkMcpSession::take_outbound`) goes to
 the CLI as an `mcp_message` control request under a random UUID, except a late
-`sdk-manifest-capture:` reply, which is dropped. Closing writes nothing for the
-requests still waiting. Python fails the
+`sdk-manifest-capture:` reply, which is dropped. The forwarded frame is written
+as `{type, request_id, request}`, and is held until the `initialize` request has
+been written, then flushed in order. A `notifications/tools/list_changed`
+without an `id` forwarded before that point marks its server, and the
+`initialize` request then keeps only the `initializeResult` of that server's
+manifest. Closing writes nothing for the requests still waiting. Python fails the
 request when the server name or message is missing, and answers an unknown
 server or an undeliverable message with a JSON-RPC error under the message's
 id.

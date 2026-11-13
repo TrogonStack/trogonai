@@ -117,6 +117,16 @@ impl<'a> InitializeRequest<'a> {
     }
 }
 
+/// The `mcp_message` request `sdk.mjs` `sendMcpServerMessageToCli` writes: `{type, request_id, request}`, a
+/// different key order from its other control requests.
+#[derive(Serialize)]
+pub(crate) struct TypeScriptMcpForward<'a, T> {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub request_id: &'a str,
+    pub request: T,
+}
+
 #[derive(Serialize)]
 #[serde(tag = "subtype", rename_all = "snake_case")]
 pub(crate) enum RequestPayload<'a> {

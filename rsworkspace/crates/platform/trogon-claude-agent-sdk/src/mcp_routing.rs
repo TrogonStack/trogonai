@@ -9,6 +9,33 @@ pub(crate) fn typescript_expects_response(message: &JsonObject) -> bool {
     message.contains_key("method") && message.get("id").is_some_and(|id| !id.is_null())
 }
 
+/// `sdk.mjs` `H8`: a message with no `id` key whose method is `notifications/tools/list_changed`.
+pub(crate) fn is_tools_list_changed(message: &JsonObject) -> bool {
+    !message.contains_key("id")
+        && message.get("method").and_then(Value::as_str) == Some("notifications/tools/list_changed")
+}
+
+/// `sdk.mjs` `initialize`: a server whose tools changed while the manifests were captured keeps only its
+/// `initializeResult`, so the CLI lists its tools again over the control channel.
+pub(crate) fn trim_changed_manifests(request: &mut Value, changed: &std::collections::BTreeSet<String>) {
+    let Some(manifests) = request.get_mut("sdkMcpServerManifests").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for server in changed {
+        let Some(manifest) = manifests.get_mut(server).and_then(Value::as_object_mut) else {
+            continue;
+        };
+        if !manifest.contains_key("toolsListResult") {
+            continue;
+        }
+        let initialize = manifest.remove("initializeResult");
+        manifest.clear();
+        if let Some(initialize) = initialize {
+            manifest.insert("initializeResult".into(), initialize);
+        }
+    }
+}
+
 /// The acknowledgment `sdk.mjs` answers a message it does not wait on with.
 pub(crate) fn typescript_acknowledgment() -> Value {
     Value::Object(JsonObject::from_iter([
