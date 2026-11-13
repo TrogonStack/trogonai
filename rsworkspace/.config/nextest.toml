@@ -1,0 +1,5 @@
+# CI logs show only failures; a passing test prints nothing.
+[profile.ci]
+status-level = "fail"
+final-status-level = "fail"
+failure-output = "immediate-final"

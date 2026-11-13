@@ -94,6 +94,15 @@ test('initial pushes select every check without comparing a nonexistent commit',
   }
 });
 
+test('manual dispatch selects every check without consulting the API', (t) => {
+  const f = fixture(t);
+  const result = f.run('workflow_dispatch', {});
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.values, { rust: 'true', go: 'true', proto: 'true', changes: '["rust","go","proto"]' });
+  assert.deepEqual(result.calls, []);
+  failed(f.run('schedule', {}));
+});
+
 test('push uses NUL paths and recognizes deleted ownership after a real rename', (t) => {
   const f = fixture(t); const before = f.git('rev-parse', 'HEAD');
   f.write('notes/moved.txt', '');

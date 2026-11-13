@@ -1,11 +1,11 @@
 use std::io;
 
 use futures_util::stream;
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimBucket, ClaimBucketBinding, ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore,
     StreamMaxAge,
 };
+use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_std::NonZeroDuration;
 
 use super::*;
@@ -15,7 +15,7 @@ fn config() -> DiscordConfig {
     DiscordConfig {
         bot_token: Some(DiscordBotToken::new("fixture-token").unwrap()),
         intents: twilight_model::gateway::Intents::GUILDS,
-        subject_prefix: NatsToken::new("discord").unwrap(),
+        subject_prefix: DottedNatsToken::new("discord").unwrap(),
         stream_name: NatsToken::new("DISCORD").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(5).unwrap(),

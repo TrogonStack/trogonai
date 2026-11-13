@@ -13,7 +13,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 use tracing::{info, instrument, warn};
-use trogon_nats::NatsToken;
+use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
@@ -39,7 +39,7 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     webhook_secret: TelegramWebhookSecret,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
 
@@ -50,7 +50,7 @@ struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
     runtime_key: RuntimeIntegrationKey,
     integration_id: SourceIntegrationId,
     registered_credentials: TelegramRegisteredWebhookCredentials,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
 
@@ -240,7 +240,7 @@ where
 
 async fn publish_verified_update<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
     body: Bytes,
 ) -> StatusCode {

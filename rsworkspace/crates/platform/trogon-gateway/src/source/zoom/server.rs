@@ -13,7 +13,7 @@ use axum::{
 };
 use serde::Serialize;
 use tracing::{info, instrument, warn};
-use trogon_nats::NatsToken;
+use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
@@ -61,7 +61,7 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 
 async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: &ClaimCheckPublisher<P, S>,
-    subject_prefix: &NatsToken,
+    subject_prefix: &DottedNatsToken,
     timestamp: &str,
     reason: RejectReason,
     body: Bytes,
@@ -88,7 +88,7 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock> {
     publisher: ClaimCheckPublisher<P, S>,
     clock: C,
     secret_token: ZoomSecretToken,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     timestamp_tolerance: NonZeroDuration,
     nats_ack_timeout: NonZeroDuration,
 }

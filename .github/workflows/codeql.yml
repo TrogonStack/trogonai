@@ -21,6 +21,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # GitHub checks every job of the called workflow against this, even the
+      # runner job this workflow skips, and refuses to start without it.
+      id-token: write
     with:
       filters: .github/filters/codeql.yml
   analyze:
@@ -49,3 +52,23 @@ jobs:
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           category: '/language:${{ matrix.language }}'
+  result:
+    # Languages without changes have no matrix entry and never report a check,
+    # so branch rules require this job instead of each language.
+    name: CodeQL result
+    needs: [changes, analyze]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CodeQL analysis
+        env:
+          SELECTION_RESULT: ${{ needs.changes.result }}
+          SELECTED_LANGUAGES: ${{ needs.changes.outputs.changes }}
+          ANALYZE_RESULT: ${{ needs.analyze.result }}
+        # A cancelled run also skips analysis, so a skip only passes when
+        # selection succeeded and found no languages to analyze.
+        run: |
+          if [ "$ANALYZE_RESULT" = success ]; then exit 0; fi
+          if [ "$ANALYZE_RESULT" = skipped ] && [ "$SELECTION_RESULT" = success ] && [ "$SELECTED_LANGUAGES" = '[]' ]; then exit 0; fi
+          echo "::error::CodeQL analysis ended with $ANALYZE_RESULT after language selection ended with $SELECTION_RESULT"
+          exit 1

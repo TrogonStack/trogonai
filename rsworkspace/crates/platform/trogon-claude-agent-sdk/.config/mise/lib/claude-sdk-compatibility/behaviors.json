@@ -1,0 +1,2389 @@
+{
+  "version": 1,
+  "rows": [
+    {
+      "id": "s01-session-entry-pass-through",
+      "concept": "Transcript mirror entries are opaque JSON blobs",
+      "python": {
+        "file": "src/claude_agent_sdk/types.py",
+        "line_start": 1905,
+        "line_end": 1912,
+        "sha256": "cebc46ab7362ca5a6d02ecc01e7d4e02a47f1d7e65908cf18b1be0a61b0147d5"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"transcript_mirror\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 20,
+        "span_after": 70,
+        "sha256": "f67d7ec1bc9176162198f17b814642a1eb92221ea6033bf053a20f50931d4a9d"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Mirror entries pass through without validation; a malformed entry never fails the frame."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "session_failure_contracts::s01_session_entries_accept_any_json_object_and_redact_contents"
+      ],
+      "rust": [
+        "src/session_entry.rs",
+        "src/wire.rs"
+      ]
+    },
+    {
+      "id": "s02-non-json-stdout",
+      "concept": "Non-JSON CLI stdout lines",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 213,
+        "line_end": 235,
+        "sha256": "82674a3b8e39ff834085da7b9c07508d6d4b24ef16533cbc6f80472e502db608"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Non-JSON stdout",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 60,
+        "sha256": "724eb2414aeecfd605805181d2e29f219b237739288822374175ebcd4cbf3780"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Both skip non-JSON lines. Python raises on a line that starts with '{' and does not parse; TypeScript logs and skips every unparseable line."
+      },
+      "decision": {
+        "kind": "follow-python",
+        "reason": "With line framing a corrupt '{' line is a lost protocol message, such as a control_response, so skipping it silently can hang a pending request. Non-JSON noise is still skipped."
+      },
+      "contracts": [
+        "subprocess::s02_non_json_stdout_lines_are_skipped"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/wire.rs"
+      ]
+    },
+    {
+      "id": "s03-unmatched-control-response",
+      "concept": "control_response with an unknown request_id",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 427,
+        "line_end": 439,
+        "sha256": "59d0038a51d3ca3caf78e96774cf5482a958dd0789647abd88423d51a866ed16"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"control_response\"",
+        "occurrence": 0,
+        "occurrences": 3,
+        "span_before": 30,
+        "span_after": 420,
+        "sha256": "7ef142a5b7d65e80235c910cd4cd7454cafa6f76ce7cfb1d0839e1cd974092bd"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "An unmatched control_response is not an error; TypeScript buffers up to 1024 for awaitControlResponse, Python drops it."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "runtime_failure_contracts::s03_s04_unknown_control_responses_and_session_states_do_not_end_the_session"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "s04-unknown-session-state",
+      "concept": "session_state_changed with an unknown state",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 953,
+        "line_end": 959,
+        "sha256": "076790a30ef97729490ec67d216e870579fca60e6f02f188a29ce5940c1a995e"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"session_state_changed\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 30,
+        "span_after": 140,
+        "sha256": "924b90435ae7acf55451f645445196b1098e4a1237276ed2faf6bb41ade83f51"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Any state value is stored; only 'idle' ends the run."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "runtime_failure_contracts::s03_s04_unknown_control_responses_and_session_states_do_not_end_the_session"
+      ],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s05-run-end-ceiling",
+      "concept": "No idle state after the last result",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 1058,
+        "line_end": 1062,
+        "sha256": "de5202b6434ed3922f5afb647929cb1d182f9c8883dfce67e192a78e66600a86"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "ms after the last result, ending the run",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 110,
+        "span_after": 50,
+        "sha256": "d4e7d1456ec778820278ace5a3f84818c0d0059e0406e866e35190f1aa78d457"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "When the run-end ceiling expires the run ends normally with a debug log, not an error."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "subprocess::s05_a_missing_idle_state_ends_the_run_quietly_at_the_ceiling"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "s06-hooks-not-applied",
+      "concept": "initialize answered with hooks_applied false",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 375,
+        "line_end": 389,
+        "sha256": "d57f1bda393d69de89568df3ec9927d2814f63320e58279498dd456a0716b7f6"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "does not honor onFailure on hook matchers",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 160,
+        "span_after": 330,
+        "sha256": "6288385db68c5aad209cf1eade9d7af711d51b6d0ebf1ebff2167805079bc40a"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "hooks_applied false is an error only when a hook is set to block on failure."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "runtime_features::s06_continue_hooks_tolerate_a_session_that_did_not_apply_them"
+      ],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s07-mcp-reinitialize",
+      "concept": "Repeated MCP initialize on a live SDK server",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/sdk_mcp_bridge.py",
+        "line_start": 13,
+        "line_end": 15,
+        "sha256": "d314d1e8461a4f43c0e9efce7cc37b9017064969c099511fe81d6277bf674547"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "async _oninitialize(",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 320,
+        "sha256": "92e7576785b4625d03dfba5fb061a4b1525715f54dac2226b00c72485bdc1d19"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A second initialize is accepted and renegotiates the protocol version."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "value_contracts::s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_reinitialize"
+      ],
+      "rust": [
+        "src/sdk_mcp_server.rs"
+      ]
+    },
+    {
+      "id": "s08-mcp-initialized-gating",
+      "concept": "Requests before notifications/initialized",
+      "python": {
+        "status": "absent",
+        "reason": "Delegated to the mcp Python package, which is outside the pinned SDK sources."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "async _oninitialize(",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 320,
+        "sha256": "92e7576785b4625d03dfba5fb061a4b1525715f54dac2226b00c72485bdc1d19"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The SDK MCP server does not gate requests on notifications/initialized."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "value_contracts::s08_local_mcp_discovery_does_not_wait_for_the_initialized_notice_and_supports_empty_registries"
+      ],
+      "rust": [
+        "src/sdk_mcp_server.rs"
+      ]
+    },
+    {
+      "id": "s09-mcp-initialize-params",
+      "concept": "initialize parameter validation",
+      "python": {
+        "status": "absent",
+        "reason": "Delegated to the mcp Python package, which is outside the pinned SDK sources."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "async _oninitialize(",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 320,
+        "sha256": "92e7576785b4625d03dfba5fb061a4b1525715f54dac2226b00c72485bdc1d19"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "initialize params are schema-checked for presence and type only; empty strings are accepted."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "value_contracts::s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_reinitialize"
+      ],
+      "rust": [
+        "src/sdk_mcp_server.rs"
+      ]
+    },
+    {
+      "id": "s10-mcp-protocol-versions",
+      "concept": "MCP protocol version negotiation",
+      "python": {
+        "status": "absent",
+        "reason": "Delegated to the mcp Python package, which is outside the pinned SDK sources."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"2024-10-07\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 70,
+        "span_after": 2,
+        "sha256": "ef1af33f781fe535f15907e755ccc7771f4e612fd87c97669000d9c4077af8bb"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The requested version is echoed when supported (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07), else the latest."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "value_contracts::s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_reinitialize"
+      ],
+      "rust": [
+        "src/constants.rs",
+        "src/sdk_mcp_server.rs"
+      ]
+    },
+    {
+      "id": "s11-mcp-tool-name-format",
+      "concept": "SDK MCP tool names outside the naming standard",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not check tool names."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Tool registration will proceed",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 200,
+        "span_after": 60,
+        "sha256": "f9f4e745afad4ee138ad23a7a12499b9edb89cc875a5b3ae7279a165a1dc949d"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "An invalid tool name produces a warning; the tool is still registered and listed."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "value_contracts::s11_local_mcp_lists_tools_whose_names_upstream_only_warns_about"
+      ],
+      "rust": [
+        "src/sdk_mcp_server.rs"
+      ]
+    },
+    {
+      "id": "s12-outbound-prompt-size",
+      "concept": "Size of outbound user messages",
+      "python": {
+        "file": "src/claude_agent_sdk/client.py",
+        "line_start": 288,
+        "line_end": 306,
+        "sha256": "31f83e8c71b623d493625480125554425c46a7c1087eca2b2784b97d4c4922e2"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "[Query.streamInput] Starting to process input stream",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 520,
+        "sha256": "bc5ffe95ef140369072521fdc443c7a14831eb36fc8c73c97c84b29a9a38e8db"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "User messages are serialized and written without a size cap."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "runtime_adapters::s12_outbound_prompts_and_controls_are_never_capped_by_the_inbound_frame_limit"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/options.rs"
+      ]
+    },
+    {
+      "id": "s13-hook-callback-count",
+      "concept": "Number of registered hook callbacks",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 326,
+        "line_end": 340,
+        "sha256": "9f24f38bdd0f8876ef715351e57bb693cfc70d878ecaa85bde7e6237f188bb45"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "hookCallbackIds",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 300,
+        "span_after": 60,
+        "sha256": "ef188aa9f5eaa10b1ac0273317e80e44e2d31e04848e82ecd0c5ebe28fcd542f"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Hook callbacks are registered without a count limit."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "runtime_failure_contracts::s13_empty_hooks_are_ignored_and_hook_callback_count_is_unbounded"
+      ],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s14-tool-list-arguments",
+      "concept": "tools, allowedTools and disallowedTools argv",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 541,
+        "line_end": 566,
+        "sha256": "479069eb36f4a7eab2e79fade36c255755925777fa643ca06612b249ceec1477"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"--tools\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 170,
+        "span_after": 60,
+        "sha256": "db11172b3dff7b3c339408a348e84490485e6e8fcf8bc5588ee26b7656da61f9"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Tool lists are joined with ',' and passed through without entry validation."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "subprocess::s14_tool_names_pass_through_to_the_cli_unvalidated"
+      ],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s15-prompt-while-running",
+      "concept": "Sending a prompt while a turn is running",
+      "python": {
+        "file": "src/claude_agent_sdk/client.py",
+        "line_start": 288,
+        "line_end": 306,
+        "sha256": "31f83e8c71b623d493625480125554425c46a7c1087eca2b2784b97d4c4922e2"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "[Query.streamInput] Starting to process input stream",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 520,
+        "sha256": "bc5ffe95ef140369072521fdc443c7a14831eb36fc8c73c97c84b29a9a38e8db"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Prompts are written whenever the caller sends them; the CLI queues them."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "runtime_failure_contracts::s15_input_sent_during_a_turn_is_written_and_closed_input_stays_recoverable"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "s16-interrupt-receipt",
+      "concept": "interrupt control response shape",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 821,
+        "line_end": 823,
+        "sha256": "33b13a8d59766c1a753fd48b32bd4fc207f259eeff7af245e083773e108ebc8a"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "subtype:\"interrupt\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 300,
+        "sha256": "93caf4cfdabb4b4bb668a351fe7246b2c661e0ccd051cbf247ae36fac1ee4e06"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The interrupt response is never fatal; TypeScript filters non-string entries, Python ignores the body."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "value_contracts::s16_interrupt_receipts_never_fail_on_a_malformed_queue_report"
+      ],
+      "rust": [
+        "src/control.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s17-permission-mode-values",
+      "concept": "Unknown permission modes",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 825,
+        "line_end": 832,
+        "sha256": "b365023e81ba7f44753254c9b785f99bc3e7cab88425d67df17e0fb5eda8374e"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"set_permission_mode\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 20,
+        "sha256": "00573ded8eb865495aeb37eaae924116331ae49385214b67a74ca6404038eb54"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Permission modes pass through untyped; unknown values are not rejected."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "permission_mode::s17_unknown_permission_modes_round_trip_unchanged"
+      ],
+      "rust": [
+        "src/permission_mode.rs",
+        "src/permission_update.rs",
+        "src/wire.rs"
+      ]
+    },
+    {
+      "id": "s18-user-input-blocks",
+      "concept": "User input content validation",
+      "python": {
+        "file": "src/claude_agent_sdk/client.py",
+        "line_start": 288,
+        "line_end": 306,
+        "sha256": "31f83e8c71b623d493625480125554425c46a7c1087eca2b2784b97d4c4922e2"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "[Query.streamInput] Starting to process input stream",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 520,
+        "sha256": "bc5ffe95ef140369072521fdc443c7a14831eb36fc8c73c97c84b29a9a38e8db"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "User input is written verbatim; the CLI and API validate content."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "value_contracts::s18_structured_input_blocks_pass_through_unvalidated"
+      ],
+      "rust": [
+        "src/user_input.rs"
+      ]
+    },
+    {
+      "id": "s19-mirror-pending-thresholds",
+      "concept": "Transcript mirror pending entry and byte thresholds",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transcript_mirror_batcher.py",
+        "line_start": 77,
+        "line_end": 94,
+        "sha256": "daaff9c87d51d9422e7b91ee7cb9bc03143919c542c853d888256e41a17cc458"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "SessionStore.append() timed out",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 1150,
+        "span_after": 0,
+        "sha256": "990f1575605973ba930aa88daadc65f75b8fc7a8d2f6508e0dca9651f1036b8d"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Exceeding the pending thresholds (500 entries, 1 MiB) triggers an eager flush; nothing is rejected."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "runtime_failure_contracts::m13_s19_unmappable_and_oversized_mirror_frames_are_never_rejected",
+        "session_failure_contracts::s19_mirror_never_rejects_frames_and_drains_eagerly_past_the_pending_budget"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/session_store.rs",
+        "src/transcript_mirror.rs"
+      ]
+    },
+    {
+      "id": "s20-mirror-failure-reporting",
+      "concept": "Transcript mirror append failure",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 292,
+        "line_end": 308,
+        "sha256": "502ae58fb5f17513a794ab8cf2d105912f01af23a26e85f9fd2dfef2a61eeaeb"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"mirror_error\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 80,
+        "sha256": "020bd286980a30775323d2e49b15083f4c7d60267f61900e9e243898d6f32cd3"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A failed append is reported as a system mirror_error message; the run outcome is unaffected."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "runtime_sessions::s20_a_final_mirror_failure_does_not_fail_disconnect"
+      ],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s21-config-dir-mismatch",
+      "concept": "CLAUDE_CONFIG_DIR differs from the session store config directory",
+      "python": {
+        "status": "absent",
+        "reason": "Python always mirrors from the subprocess config dir and has no custom spawn hook to warn about."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "ensure the subprocess CLAUDE_CONFIG_DIR matches the parent",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 70,
+        "span_after": 120,
+        "sha256": "68fbc903dc33f0375d384b3593b1efedb1a6a4848e8432baff77778c3f935c3c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A possible mismatch is at most a warning, never an error."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "runtime_adapters::s21_conflicting_config_warns_and_keeps_the_child_value"
+      ],
+      "rust": [
+        "src/client.rs"
+      ]
+    },
+    {
+      "id": "s22-resume-non-uuid",
+      "concept": "Resume with a non-UUID session id",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/session_resume.py",
+        "line_start": 155,
+        "line_end": 159,
+        "sha256": "6110f1f8882d831cb0189339a36761863dc470c2d024f74412407d8dc9c48535"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "claude-resume-",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 260,
+        "span_after": 0,
+        "sha256": "d08247be1ee37ea810ee6d436a577ed254bb0788e8cb06cea033d4dfb0edb327"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A non-UUID resume id skips store materialization and leaves --resume to the CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "session_filesystem::s22_a_non_uuid_resume_id_skips_materialization"
+      ],
+      "rust": [
+        "src/session_resume.rs"
+      ]
+    },
+    {
+      "id": "s23-resume-empty-entry",
+      "concept": "Resume of a session with no stored entries",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/session_resume.py",
+        "line_start": 254,
+        "line_end": 265,
+        "sha256": "7b634071a1855d5efb4a0322fd0b5c8d167fd586b01d5842a7b69d8f7226de88"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "claude-resume-",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 260,
+        "span_after": 0,
+        "sha256": "d08247be1ee37ea810ee6d436a577ed254bb0788e8cb06cea033d4dfb0edb327"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A missing or empty stored session materializes nothing and is not an error."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "session_filesystem::s23_a_missing_or_empty_stored_session_skips_materialization"
+      ],
+      "rust": [
+        "src/session_resume.rs"
+      ]
+    },
+    {
+      "id": "s24-unsafe-subkeys",
+      "concept": "Unsafe subkeys returned by list_subkeys",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/session_resume.py",
+        "line_start": 547,
+        "line_end": 556,
+        "sha256": "c9b873de16a6cb4f7a2ad3d594ab8ec9b40b00af70d336c6db95af54a49c0cc5"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "skipping unsafe subpath from listSubkeys",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 150,
+        "span_after": 30,
+        "sha256": "a244fb112df641bc1c40f081d269e61724f3e083fbe6101092ffdc7c290b6304"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Unsafe subpaths (empty, absolute, '..', escaping the session dir) are skipped with a warning."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "session_filesystem::s24_unsafe_subkeys_from_the_store_are_skipped"
+      ],
+      "rust": [
+        "src/session_path_component.rs",
+        "src/session_resume.rs",
+        "src/session_subpath.rs"
+      ]
+    },
+    {
+      "id": "s25-transcript-path-shape",
+      "concept": "Transcript path to session key",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/session_store.py",
+        "line_start": 177,
+        "line_end": 194,
+        "sha256": "d2a7a9aa61aac994557799225ac7baf69a756c27903670906f24c1fa61f87664"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"agent_metadata\"",
+        "occurrence": 0,
+        "occurrences": 3,
+        "span_before": 0,
+        "span_after": 420,
+        "sha256": "9782fb65800bea8a8496a1a4c9406602fe6fcebba2b841396be7563872f34fd4"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Two parts ending in .jsonl give a main key; four or more parts give a subpath key with .jsonl stripped."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "session_failure_contracts::s25_transcript_paths_below_a_session_map_to_subpaths"
+      ],
+      "rust": [
+        "src/session_key.rs"
+      ]
+    },
+    {
+      "id": "s26-latest-resume-non-uuid",
+      "concept": "Continue when the newest listed session id is not a UUID",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/session_resume.py",
+        "line_start": 287,
+        "line_end": 293,
+        "sha256": "c6496b885a249f7f2ff20892161e4bfc3b862c172b3e0d57b8244594f2e1fd8a"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Options.continue with sessionStore requires store.listSessions to be implemented",
+        "occurrence": 1,
+        "occurrences": 2,
+        "span_before": 0,
+        "span_after": 300,
+        "sha256": "58e78633ec3fb950e261a46c4e6a95ed9a5ff057d06b0bd04f44fd95c71f90d4"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python skips the candidate and tries the next newest. TypeScript takes the newest entry only, so a non-UUID newest id starts a fresh session."
+      },
+      "decision": {
+        "kind": "follow-python",
+        "reason": "Python matches the CLI's own --continue filter and resumes the newest valid session instead of silently starting fresh."
+      },
+      "contracts": [
+        "session_filesystem::s26_latest_resume_walks_newest_first_past_unusable_candidates"
+      ],
+      "rust": [
+        "src/session_resume.rs"
+      ]
+    },
+    {
+      "id": "s27-permission-suggestion-values",
+      "concept": "Unknown permission suggestion destinations, behaviors and update types",
+      "python": {
+        "file": "src/claude_agent_sdk/types.py",
+        "line_start": 201,
+        "line_end": 220,
+        "sha256": "602fd9d0a2d742b2d23f90b5d460acb0dba724e448d233bba3255f9901a072d7"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "suggestions:e.request.permission_suggestions",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 60,
+        "sha256": "6ac9c324251ce565269fed5c86b7a787bc70cd6dff290baeb43e784448259455"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Neither SDK validates suggestion values. TypeScript passes permission_suggestions raw to canUseTool; Python accepts any string for type, destination, behavior and mode, so an unrecognized suggestion reaches the callback and round-trips verbatim into updatedPermissions."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "permission_values::unknown_permission_update_values_are_preserved_verbatim",
+        "value_contracts::unknown_permission_values_pass_through_and_malformed_updates_fail_at_the_typed_boundary",
+        "runtime_failure_contracts::unknown_permission_suggestion_values_reach_the_callback_and_round_trip"
+      ],
+      "rust": [
+        "src/permission_update.rs",
+        "src/wire.rs"
+      ]
+    },
+    {
+      "id": "s28-malformed-permission-request",
+      "concept": "Structurally malformed permission suggestions and requests",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 615,
+        "line_end": 629,
+        "sha256": "2029f8006e9f9d33ed9ff4b185a01ac12812b140baf883b005a61527e3d5d78d"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "suggestions:e.request.permission_suggestions",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 160,
+        "sha256": "838b7439c389a0d8e1d38b82c026183abfbbf5222d71d2f747e1ade915035695"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python decodes every suggestion, so a structurally broken one (a missing type, rules that are not a list) or a missing tool_name raises inside the control handler, which answers that request with an error response while the session continues. TypeScript forwards the raw suggestions to canUseTool without decoding them, so nothing fails."
+      },
+      "decision": {
+        "kind": "follow-python",
+        "reason": "A typed suggestion cannot represent a broken object, so the request is answered with an error response instead of reaching the callback, and neither the session nor other requests are affected."
+      },
+      "contracts": [
+        "permission_values::structurally_malformed_permission_updates_are_rejected",
+        "runtime_failure_contracts::malformed_permission_requests_get_an_error_response_and_the_session_continues"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/permission_update.rs",
+        "src/wire.rs"
+      ]
+    },
+    {
+      "id": "w1-mirror-retry-errors",
+      "concept": "Which transcript mirror append errors are retried",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transcript_mirror_batcher.py",
+        "line_start": 180,
+        "line_end": 212,
+        "sha256": "f8aac057b595679028f1607da09c72ff6fac5a8f950f9ada4b5de5d95b3aac67"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "SessionStore.append() timed out",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 230,
+        "sha256": "66a4bdfd531eef8408f1612fad507a466d3c1eb3c3e03d4cdc49252dd53aa9c2"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Every non-timeout append error is retried, three attempts with 200 ms and 800 ms backoff."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "session_failure_contracts::w1_mirror_retries_every_backend_error_and_coalesces_failure_overflow"
+      ],
+      "rust": [
+        "src/constants.rs",
+        "src/session_store.rs",
+        "src/transcript_mirror.rs"
+      ]
+    },
+    {
+      "id": "w2-store-with-file-checkpointing",
+      "concept": "session_store combined with file checkpointing",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/session_store_validation.py",
+        "line_start": 40,
+        "line_end": 45,
+        "sha256": "2ef5aa968622d7b62c0a6ab248060c0f8fdc0f77924789937cfd34fedbed23f2"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "enableFileCheckpointing is not yet supported with sessionStore",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 20,
+        "span_after": 100,
+        "sha256": "c69983680ceb126a16f17fa240e53077462d1681563bfda2801e0e0e32f449aa"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Configuring a session store together with file checkpointing is rejected before spawn."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "subprocess::w2_file_checkpointing_with_a_session_store_is_refused"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "w3-resume-temp-dir",
+      "concept": "Where store-backed resume transcripts are materialized",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/session_resume.py",
+        "line_start": 167,
+        "line_end": 170,
+        "sha256": "424a8ce7e4e6522c3f7727855aa674247494c28646d41af28fe44d2302f6858c"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "claude-resume-",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 30,
+        "span_after": 220,
+        "sha256": "e492cdcb202af5a5a2b169c8e9d75db4e8ee273fe5c6c256b4ecb645a514b7b7"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Transcripts are written to a fresh temp dir that becomes the subprocess CLAUDE_CONFIG_DIR, on every platform."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "session_filesystem::w3_a_failed_optional_configuration_copy_is_removed_and_resume_continues",
+        "session_filesystem::w3_an_unreadable_optional_configuration_file_is_skipped",
+        "session_filesystem::w3_cleanup_gives_up_after_bounded_attempts_without_failing",
+        "session_filesystem::w3_cleanup_retries_a_busy_directory_and_then_removes_it",
+        "session_filesystem::w3_dropping_the_runtime_removes_the_temporary_directory_once",
+        "session_filesystem::w3_keychain_credentials_are_requested_only_without_configured_auth",
+        "session_filesystem::w3_resume_copies_auth_and_settings_without_refresh_tokens_or_plugins",
+        "session_filesystem::w3_resume_materializes_into_a_private_temporary_directory_and_cleanup_removes_it",
+        "session_filesystem::w3_temporary_root_creation_failure_is_reported_without_a_lease",
+        "session_filesystem::w3_transcript_write_failure_removes_the_partial_temporary_directory",
+        "session_store::w3_resume_leaves_an_existing_caller_transcript_untouched"
+      ],
+      "rust": [
+        "src/adapters/environment.rs",
+        "src/adapters/filesystem.rs",
+        "src/constants.rs",
+        "src/session_resume.rs"
+      ]
+    },
+    {
+      "id": "m01-duplicate-sdk-tool",
+      "concept": "Two SDK MCP tools with the same name",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 604,
+        "line_end": 618,
+        "sha256": "dba81afce1cc8420d31dcfc63e5b65d58a7f047dc2f6bada1862d36d3525d83b"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "is already registered`",
+        "occurrence": 5,
+        "occurrences": 8,
+        "span_before": 90,
+        "span_after": 30,
+        "sha256": "d83c47d12b01d2c77ca30b71c230e1c5d68da0f6fc39e85aa0919e95001a5560"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript throws 'Tool <name> is already registered'. Python keeps the last handler and lists both tools."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "A duplicate name makes tools/list and tools/call disagree in Python; rejecting at registration is the only unambiguous outcome."
+      },
+      "contracts": [
+        "sdk_tools::m01_exact_duplicate_tool_names_are_rejected_with_the_validated_name"
+      ],
+      "rust": [
+        "src/sdk_tools.rs"
+      ]
+    },
+    {
+      "id": "m02-unknown-sdk-tool",
+      "concept": "tools/call for an unknown tool",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 620,
+        "line_end": 627,
+        "sha256": "120881c1ad6eea1e66f4064d6ae2392f167a01c582914630197b27a6ec07acee"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Input validation error: Invalid arguments for tool",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 1500,
+        "span_after": 0,
+        "sha256": "be91179bafba586e50a2b5e598bc269ca0d9bf33eda62cc5097398dbe7ef289b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "An unknown tool returns an isError tool result naming the tool, not a JSON-RPC error."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "value_contracts::m02_m03_local_mcp_reports_tool_failures_as_error_results_before_invoking_tools"
+      ],
+      "rust": [
+        "src/sdk_mcp_server.rs"
+      ]
+    },
+    {
+      "id": "m03-sdk-tool-arguments",
+      "concept": "tools/call arguments that fail the input schema",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 632,
+        "sha256": "0fa69433fbf5c59db302f48147e58dc307ef3031bc8abba6ff2a102a05a8e519"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Input validation error: Invalid arguments for tool",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 400,
+        "span_after": 80,
+        "sha256": "375251652a1fe819d0f12115b89cde33ff72777fc67eb2cb2fa2bfca3316ea33"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Invalid arguments return an isError tool result with an input validation message, not a JSON-RPC error."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "value_contracts::m02_m03_local_mcp_reports_tool_failures_as_error_results_before_invoking_tools"
+      ],
+      "rust": [
+        "src/sdk_mcp_server.rs"
+      ]
+    },
+    {
+      "id": "m04-jsonrpc-id",
+      "concept": "JSON-RPC request id type",
+      "python": {
+        "status": "absent",
+        "reason": "Delegated to the mcp Python package, which is outside the pinned SDK sources."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"io.modelcontextprotocol/related-task\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 100,
+        "sha256": "348732e08d469f3d92047abe0b35c24614ca7523ac73ecc910f47ee66f66df19"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A request id is a string or an integer."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/sdk_mcp_server.rs"
+      ]
+    },
+    {
+      "id": "m05-blocking-hooks-unsupported",
+      "concept": "Blocking hooks against a responder without onFailure support",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 375,
+        "line_end": 382,
+        "sha256": "75ead8e68089f16bc2059cabf2bac7e4f4f0465b9dcf62306b192738e6417f42"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "does not honor onFailure on hook matchers",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 160,
+        "span_after": 0,
+        "sha256": "0c80695abae409362dc96aa54db299bbb2d25bb5a263292fd8c9e3d9fe9457fc"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Initialize fails when a blocking hook is configured and hook_on_failure_supported is not true."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "m06-control-request-timeout",
+      "concept": "Waiting for a control_response",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 765,
+        "line_end": 780,
+        "sha256": "d82a0d796122e2209fea5f0a403abe6015d8e3ea55fc08bebe7247fc1339dfcd"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Control request aborted",
+        "occurrence": 0,
+        "occurrences": 2,
+        "span_before": 120,
+        "span_after": 120,
+        "sha256": "312b3567436db9a84e9e3143d4323a0037e15657d5e17ccb77ea86b83596bc78"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python times out after 60 s by default. TypeScript waits until the response arrives, the abort signal fires, or the query closes."
+      },
+      "decision": {
+        "kind": "follow-python",
+        "reason": "A CLI that never answers would otherwise hang the session; a bounded wait turns that into a typed error."
+      },
+      "contracts": [
+        "subprocess::missing_control_reply_times_out"
+      ],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "m07-control-rejected",
+      "concept": "control_response with an error subtype",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 430,
+        "line_end": 438,
+        "sha256": "d25269dfae23c0f3ffb5dc6d2418cb36771b19d55938d4d6422834cc5609bc7e"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Claude Code control request failed",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 90,
+        "span_after": 40,
+        "sha256": "8d7e1f6a1a487455dc6db042c2d0f87e39b470925dfdcf32714dfbcf39da48b5"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "An error subtype rejects the pending request with the CLI's error message."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "m08-inbound-frame-limit",
+      "concept": "Size of one inbound stdout message",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 1065,
+        "line_end": 1073,
+        "sha256": "25220afa8f0f949ff30edb7b31ef75ca7ff11e96e3e09fe32651febde5a078f0"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Non-JSON stdout",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 430,
+        "span_after": 0,
+        "sha256": "922a7ed61827dbac40222e5ae1fbea78fb8cedb8fa150fc61247a17e6ba53243"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python rejects a message over max_buffer_size (1 MiB default). TypeScript reads lines with node:readline and no length limit."
+      },
+      "decision": {
+        "kind": "follow-python",
+        "reason": "An unbounded line lets a misbehaving CLI exhaust memory; the limit is configurable for large messages."
+      },
+      "contracts": [
+        "subprocess::oversized_frame_is_rejected"
+      ],
+      "rust": [
+        "src/framing.rs"
+      ]
+    },
+    {
+      "id": "m09-store-load-timeout",
+      "concept": "SessionStore load timeout",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/session_resume.py",
+        "line_start": 149,
+        "line_end": 149,
+        "sha256": "34c571ba2fd67c85b6917759e46ee61732a61a667b55c62cebccf0271a724eef"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "claude-resume-",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 260,
+        "span_after": 0,
+        "sha256": "d08247be1ee37ea810ee6d436a577ed254bb0788e8cb06cea033d4dfb0edb327"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Store loads time out after 60000 ms by default."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/session_resume.rs"
+      ]
+    },
+    {
+      "id": "m10-mirror-timeout-not-retried",
+      "concept": "Retrying a timed-out mirror append",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transcript_mirror_batcher.py",
+        "line_start": 188,
+        "line_end": 202,
+        "sha256": "c42707e8a9c477911ba0b35c43dbe4706290ebd47c0c1a49f7c3210ca0738f20"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "SessionStore.append() timed out",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 230,
+        "sha256": "66a4bdfd531eef8408f1612fad507a466d3c1eb3c3e03d4cdc49252dd53aa9c2"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A timed-out append is not retried because the in-flight call may still land."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/transcript_mirror.rs"
+      ]
+    },
+    {
+      "id": "m11-latest-resume-sidechain",
+      "concept": "Continue when the newest session is a sidechain",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/session_resume.py",
+        "line_start": 287,
+        "line_end": 297,
+        "sha256": "76c54418e7b824a8b907e4bfbf6b9319d60de02345727f2d2182bbcd5f0dfdaa"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Options.continue with sessionStore requires store.listSessions to be implemented",
+        "occurrence": 1,
+        "occurrences": 2,
+        "span_before": 0,
+        "span_after": 300,
+        "sha256": "58e78633ec3fb950e261a46c4e6a95ed9a5ff057d06b0bd04f44fd95c71f90d4"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python walks newest to oldest and skips sessions whose first entry has isSidechain true. TypeScript resumes the newest listed session."
+      },
+      "decision": {
+        "kind": "follow-python",
+        "reason": "Sidechain transcripts often have the newest mtime; skipping them resumes the user's conversation rather than a subagent's, as the CLI's own --continue does."
+      },
+      "contracts": [],
+      "rust": [
+        "src/session_resume.rs"
+      ]
+    },
+    {
+      "id": "m12-project-key-sanitize",
+      "concept": "Project key derivation",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/sessions.py",
+        "line_start": 104,
+        "line_end": 114,
+        "sha256": "6990ab4657c2ff5debe3cad7ffb5b50e9a76e6760e69cd71facd2285427ebdb1"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "/[^a-zA-Z0-9]/g",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 160,
+        "span_after": 120,
+        "sha256": "37b89939ad5867be2731186f3143d4cbbbbcc6fa3cf40f6b691752e33546415c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Non-alphanumerics become '-'; keys over 200 chars are truncated and suffixed with a base36 hash."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/session_project_key.rs"
+      ]
+    },
+    {
+      "id": "m13-invalid-transcript-path",
+      "concept": "Mirror frame whose file path is outside the projects dir",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transcript_mirror_batcher.py",
+        "line_start": 166,
+        "line_end": 177,
+        "sha256": "41e91602a379a630a95d9c20fd79802dc516c85f129c5288e3aeda7087a2a961"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "dropping mirror frame: filePath",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 100,
+        "span_after": 120,
+        "sha256": "6c86f4eefffe90b864c7a6c3432dafcdd757f823eed1cb46f7bf6ec44cc32ebd"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The frame is dropped with a warning."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "runtime_failure_contracts::m13_s19_unmappable_and_oversized_mirror_frames_are_never_rejected"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/transcript_mirror.rs"
+      ]
+    },
+    {
+      "id": "m14-continue-requires-list-sessions",
+      "concept": "continue with a store lacking list_sessions",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/session_store_validation.py",
+        "line_start": 28,
+        "line_end": 38,
+        "sha256": "0f0b7c9ffa169be76993e13d29fe9b3ebe7aa59f57a39a7088f1178d542f84f3"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Options.continue with sessionStore requires store.listSessions to be implemented",
+        "occurrence": 0,
+        "occurrences": 2,
+        "span_before": 40,
+        "span_after": 0,
+        "sha256": "a627589c07e7d3c130aae5486004d42ec66f54176f1bf6b0a42fbe6abf29aec5"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "continue without an explicit resume requires the store to implement list_sessions."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/session_store.rs"
+      ]
+    },
+    {
+      "id": "r01-queue-capacity",
+      "concept": "Queue capacity bounds",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "No queue capacity setting exists upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Bounded channels need a nonzero capacity within the semaphore permit limit."
+      },
+      "contracts": [],
+      "rust": [
+        "src/queue_capacity.rs"
+      ]
+    },
+    {
+      "id": "r02-timeout-bounds",
+      "concept": "Timeout value bounds",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Timeouts are not range-checked upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "A zero or multi-day timeout is a configuration error that would fire instantly or never."
+      },
+      "contracts": [],
+      "rust": [
+        "src/timeout.rs"
+      ]
+    },
+    {
+      "id": "r03-usd-budget",
+      "concept": "max budget value",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 562,
+        "line_end": 563,
+        "sha256": "e0a39434998bceb62f39e109e205dfa73582df97c620b10354dc5239caa343ed"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"--max-budget-usd\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 30,
+        "span_after": 10,
+        "sha256": "c04aa0d3cd293ac753ceb6fc3c9e75ac4c69fb72181e1f16fa6b6e8414454b6c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The budget is passed to the CLI without validation."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "A non-finite or negative budget cannot be rendered as a meaningful CLI argument."
+      },
+      "contracts": [],
+      "rust": [
+        "src/usd_budget.rs"
+      ]
+    },
+    {
+      "id": "r04-cli-batch-script",
+      "concept": "CLI path that is a .bat or .cmd script",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 414,
+        "line_end": 426,
+        "sha256": "54022ffc8773e108a89250f9f0214329dac899376aef665f27a03aedfeed9227"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves and spawns the CLI path without a batch-script guard."
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python refuses .bat and .cmd CLI paths on Windows. TypeScript spawns them."
+      },
+      "decision": {
+        "kind": "follow-python",
+        "reason": "cmd.exe re-parses batch script arguments and has no reliable escaping, so runtime arguments can inject commands."
+      },
+      "contracts": [
+        "windows_batch_cli::windows_batch_cli_is_refused_before_spawn"
+      ],
+      "rust": [
+        "src/cli_path.rs"
+      ]
+    },
+    {
+      "id": "r05-write-timeout",
+      "concept": "Timeout on a stdin write",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Writes to the CLI are not time-bounded upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "A stalled CLI stdin must not block the driver forever."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r06-command-queue-timeout",
+      "concept": "Timeout waiting for the client command queue",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "No client command queue exists upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "The client talks to the driver task through a bounded queue that must not block callers forever."
+      },
+      "contracts": [],
+      "rust": [
+        "src/client.rs"
+      ]
+    },
+    {
+      "id": "r07-shutdown-timeouts",
+      "concept": "Shutdown and stderr drain timeouts",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Shutdown waits are not bounded the same way upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Teardown must finish even when the CLI or its stderr pipe stalls."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r08-stderr-tail",
+      "concept": "Retained stderr tail size",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "No retained stderr tail bound exists upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Only a 64 KiB tail is kept for error reports so a chatty CLI cannot grow memory."
+      },
+      "contracts": [],
+      "rust": [
+        "src/framing.rs"
+      ]
+    },
+    {
+      "id": "r09-request-id-exhausted",
+      "concept": "Control request id exhaustion",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Upstream request ids are random strings that never run out."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Rust uses a counter for request ids, which needs a defined overflow outcome."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r10-not-initialized",
+      "concept": "Sending before initialize or after input closed",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Upstream awaits initialization implicitly and has no typed closed-input error."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Typed errors replace implicit waits so misuse is visible to callers."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r11-pending-control-limit",
+      "concept": "Outstanding outbound control requests",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Outstanding control requests are unbounded upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Bounds memory held by pending requests against an unresponsive CLI."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r12-incoming-callback-limit",
+      "concept": "Outstanding inbound SDK callbacks",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Inbound callbacks are unbounded upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Bounds concurrent callback tasks a misbehaving CLI can start."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r13-message-queue-full",
+      "concept": "Deferred message queue capacity",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Upstream message buffers are unbounded."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Bounds memory when the caller stops reading messages."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r14-too-many-tasks",
+      "concept": "Tracked background tasks",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Tracked tasks are unbounded upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Caps tracked task ids at 256 so task notifications cannot grow memory without bound."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r15-too-many-inputs",
+      "concept": "Queued turns",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Queued prompts are unbounded upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Bounds queued turns held by the driver."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r16-duplicate-control-request",
+      "concept": "Inbound control_request with a duplicate id",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Duplicate inbound request ids are not detected upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Two callbacks answering one id would send conflicting responses."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r17-duplicate-mcp-server",
+      "concept": "Same MCP server name in SDK and external maps",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Upstream keeps one server map, so a duplicate name cannot be expressed."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Rust splits SDK and external servers into two maps; a name in both would be ambiguous."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r18-mcp-update-in-progress",
+      "concept": "Concurrent MCP server updates",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Concurrent updates are not serialized upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Overlapping mcp_set_servers calls could apply out of order."
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "r19-mcp-url",
+      "concept": "External MCP server URL",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"--mcp-config\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 30,
+        "sha256": "b5a0b701d34f6f5b5abff3ff491cd110d2c565154cca586774edecf79d7e7d5f"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Server configs are serialized to --mcp-config verbatim."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Rejects non-http(s) schemes, embedded credentials and fragments before they reach argv."
+      },
+      "contracts": [],
+      "rust": [
+        "src/mcp_url.rs"
+      ]
+    },
+    {
+      "id": "r20-mcp-tool-input-schema",
+      "concept": "SDK MCP tool input schema type",
+      "python": {
+        "status": "absent",
+        "reason": "Python sends the declared schema through the mcp package Tool model, which is outside the pinned sources."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "\"tools/list\"",
+        "occurrence": 0,
+        "occurrences": 3,
+        "span_before": 260,
+        "span_after": 0,
+        "sha256": "f47a6bc651ffe5390382d02a46fd7e00c249669674146b2b26d0c75ec614240c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The MCP tool schema declares inputSchema with type 'object'."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Checked at construction so an invalid schema fails before the server starts."
+      },
+      "contracts": [],
+      "rust": [
+        "src/mcp_tool_input_schema.rs"
+      ]
+    },
+    {
+      "id": "r21-output-schema-ref",
+      "concept": "External $ref in output schemas",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Output schemas are passed through upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Prevents remote schema resolution from a caller-supplied document."
+      },
+      "contracts": [],
+      "rust": [
+        "src/output_schema.rs"
+      ]
+    },
+    {
+      "id": "r22-extension-kind",
+      "concept": "Extension input block kind and fields",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "No typed extension blocks exist upstream."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/user_input.rs"
+      ]
+    },
+    {
+      "id": "r23-message-origin-kind",
+      "concept": "Reserved kind field in message origin",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Origins are passed through upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "The kind field is the serde tag; a caller value would collide with it."
+      },
+      "contracts": [],
+      "rust": [
+        "src/message_origin.rs"
+      ]
+    },
+    {
+      "id": "r24-session-key-safe",
+      "concept": "Session key component safety",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Upstream relies on UUID checks and subpath skipping instead of a key type."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Keys become path components, so the type refuses traversal at construction."
+      },
+      "contracts": [],
+      "rust": [
+        "src/session_key.rs"
+      ]
+    },
+    {
+      "id": "r25-resume-limits",
+      "concept": "Resume entry, byte and subkey limits",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Store loads are unbounded upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Bounds memory and disk written from an untrusted store."
+      },
+      "contracts": [],
+      "rust": [
+        "src/session_resume.rs",
+        "src/session_store.rs"
+      ]
+    },
+    {
+      "id": "r26-transcript-write-safety",
+      "concept": "Exclusive, no-follow transcript writes",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Upstream writes into a fresh private temp dir, so no collision checks are needed."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/session_resume.rs"
+      ]
+    },
+    {
+      "id": "r27-config-dir-safety",
+      "concept": "Config directory presence and path safety",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Upstream creates its own temp config dir."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Resume copies auth files from the caller or environment config dir into its temp dir, so a relative path or a missing home directory is a typed error instead of resolving against the working directory."
+      },
+      "contracts": [],
+      "rust": [
+        "src/session_resume.rs"
+      ]
+    },
+    {
+      "id": "r28-mirror-queue-full",
+      "concept": "Transcript mirror queue full or closed",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The upstream mirror batcher is not a bounded queue."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/transcript_mirror.rs"
+      ]
+    },
+    {
+      "id": "r29-mirror-flush-timeout",
+      "concept": "Bound on the final mirror flush",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The final flush is not separately bounded upstream."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Shutdown must not wait indefinitely on a slow store."
+      },
+      "contracts": [],
+      "rust": [
+        "src/transcript_mirror.rs"
+      ]
+    },
+    {
+      "id": "r30-suppressed-failure-cap",
+      "concept": "Retained mirror failure records",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no equivalent bound."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no equivalent bound."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Upstream keeps no failure records."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Caps retained failures so a failing store cannot grow memory."
+      },
+      "contracts": [],
+      "rust": [
+        "src/transcript_mirror.rs"
+      ]
+    },
+    {
+      "id": "s29-hook-matcher-omitted",
+      "concept": "Hook registration without a matcher",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 337,
+        "line_end": 340,
+        "sha256": "98bb703ed72a36c70a3eede335d3bb0d260ae078642d235d05b9f8146060e027"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "hookCallbackIds:l,timeout:a.timeout",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 60,
+        "sha256": "df356e3dba8b13b6529c86138e00cf57a56e3ecb78494a175cb757812ad97f08"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python always sends the matcher key and sends null when no matcher is set. TypeScript sends the key as undefined, which JSON serialization drops, so the registration has no matcher key."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "The TypeScript type declares matcher as an optional string, so null is outside the declared shape. Omitting the key sends only values the type allows."
+      },
+      "contracts": [
+        "value_contracts::callback_configuration_debug_reports_structure_without_callback_or_input_details"
+      ],
+      "rust": [
+        "src/hooks.rs"
+      ]
+    },
+    {
+      "id": "s30-user-dialog-without-handler",
+      "concept": "User dialog request that no handler answers",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 706,
+        "line_end": 706,
+        "sha256": "47b4d262ff9e80b6a31d236f4b13efcd4599933d21aa1a58f138f552632ee399"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "No onUserDialog handler for request_user_dialog",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 250,
+        "span_after": 300,
+        "sha256": "61933b7902d6497974205322b9fca582b3302cb6067a67a1b1efcee6fea52a04"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python has no user dialog support, so the request reaches its unsupported subtype branch and is answered with an error response. TypeScript with no handler, or a handler that returns null, deliberately sends no response so a capable client can answer."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "An answer from this client would pre-empt another client that can show the dialog, and an error would end the dialog for the user. The session continues without a response."
+      },
+      "contracts": [
+        "runtime_failure_contracts::a_declared_dialog_without_a_handler_does_not_emit_a_response"
+      ],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s31-bundled-cli-python-lookup",
+      "concept": "Bundled Claude Code executable beside the Python package",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 330,
+        "line_end": 343,
+        "sha256": "f161f93044d567459ac107e9071547b615df8d87b9951c0f812dcbdd0aa4d0c8"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves a platform package instead of a bundled directory."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Python checks <package>/_bundled/claude (claude.exe on Windows) before any other discovery and accepts it only when it exists and is a file."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "A Rust crate ships no binary and has no package directory, so find_bundled_cli takes the directory that holds _bundled from the caller and is not part of connect's discovery."
+      },
+      "contracts": [
+        "bundled_cli::bundled_cli_is_a_file_under_the_bundled_directory"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "s32-native-cli-platform-package",
+      "concept": "Native executable from the platform optional dependency package",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources bundle the binary in the wheel and never resolve npm packages."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function A8(e,t={})",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 397,
+        "sha256": "c90347975dc7fa5928971e981735552414c263652ec0fd7f4f6aad134672d04b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript resolves <package>-<platform>-<arch>/claude (claude.exe on win32) through Node module resolution, tries the musl variant first on musl Linux and the glibc one first otherwise, uses a dedicated linux-<arch>-android package for Android, skips a candidate whose resolution throws or whose file is missing, and fails with a message naming the platform when none is found."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Node module resolution is a ResolveNodeModule adapter with a default that searches the same relative node_modules, NODE_PATH and home or prefix directories. Musl is read from the compile target because a Rust process has no Node process report."
+      },
+      "contracts": [
+        "bundled_cli::linux_orders_the_libc_variants_by_preference",
+        "bundled_cli::other_platforms_have_one_package_and_only_windows_adds_exe",
+        "bundled_cli::a_resolved_path_must_exist_and_later_candidates_are_tried",
+        "bundled_cli::a_miss_names_the_platform_and_the_upstream_remedy",
+        "bundled_cli::lookup_directories_follow_node_order",
+        "bundled_cli::lookup_resolves_the_nearest_file_to_its_canonical_path"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "s33-bundled-cli-version-gate",
+      "concept": "Minimum version a bundled Claude Code record must meet to derive an app label",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 1145,
+        "line_end": 1151,
+        "sha256": "5b7b54ba56bab28391913c221dabce6d252d6839e4be66d2629105e48491b3be"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no derived client app minimum and reads no version record."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The recorded version must start with major.minor.patch (up to nine digits each) and that triple, compared as a list, must not be below 999.0.0 (DERIVED_CLIENT_APP_MINIMUM_CLAUDE_CODE_VERSION). Nothing qualifies until upstream lowers the minimum."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bundled_cli::derived_client_app_minimum_compares_the_leading_triple_as_a_list"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "s34-bundled-cli-derived-client-app-trigger",
+      "concept": "Bundled Claude Code executable as the trigger for a derived client app label",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 1120,
+        "line_end": 1143,
+        "sha256": "d00e58fde9505de93e02121f775054f1e6bbc6ee531256aaf6695058e469abda"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs derives no client app label from the executable that it spawns."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A label is derived only when the SDK package pin (__cli_version__) meets the minimum, the spawned CLI is the bundled executable, and the claude.version file beside it records a version that meets the minimum. Any other CLI counts as too old, a bundled one with no readable record does too, and a failure to read never breaks connect."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "bundled_cli_derives_client_app answers the trigger for a caller-supplied package root and pin, because a Rust crate has no package directory or __cli_version__. connect asks it only when ClaudeAgentOptions::client_app_derivation names a BundledCli, so TypeScript's behavior stays the default, and the label names this crate because Rust has no Python distribution metadata."
+      },
+      "contracts": [
+        "bundled_cli::the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
+        "bundled_cli::a_bundled_cli_without_a_record_counts_as_too_old",
+        "bundled_cli::only_the_executable_found_in_the_bundled_directory_derives_a_label"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
+    }
+  ]
+}

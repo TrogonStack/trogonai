@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "python": {
+    "repository": "anthropics/claude-agent-sdk-python",
+    "revision": "22b8eb9c19adfa78759b79e22bd664a57843bb06",
+    "files": {
+      "src/claude_agent_sdk/__init__.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/__init__.py",
+        "sha256": "1582188cfc10ce1eb3892a6e7c6d5639cdb0cca5e9e6ef1a1f5ebf68b75a072b",
+        "bytes": 28105
+      },
+      "src/claude_agent_sdk/_internal/query.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/query.py",
+        "sha256": "e7d9d31d070d55e1f6d94a6b4331ef22ccd8742282e0823e1564aa1c382c8f4c",
+        "bytes": 58306
+      },
+      "src/claude_agent_sdk/_internal/sdk_mcp_bridge.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/sdk_mcp_bridge.py",
+        "sha256": "5520af384b0d67f93a36450ccd8f752459ee50d88afb1754e5638577e4b230d7",
+        "bytes": 17337
+      },
+      "src/claude_agent_sdk/_internal/session_resume.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/session_resume.py",
+        "sha256": "0dd9ab8d14b7641a46d166423844cf11adbfa7b8e1f1bf63c696f581f91e8726",
+        "bytes": 24137
+      },
+      "src/claude_agent_sdk/_internal/session_store.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/session_store.py",
+        "sha256": "7c65f885209a5abc5c9d07d0a2fb5be3189fdd0c9207782f7b5ed46ddd1931a1",
+        "bytes": 7501
+      },
+      "src/claude_agent_sdk/_internal/session_store_validation.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/session_store_validation.py",
+        "sha256": "191b169b65e9116b6ffdcc215dfc2644db2ab9c3854b88b23206ee4f27580ba4",
+        "bytes": 1663
+      },
+      "src/claude_agent_sdk/_internal/sessions.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/sessions.py",
+        "sha256": "5faa6011b0559bb2ccbe0e54ec9dea029418001da04013a67c6d107ebd192419",
+        "bytes": 81385
+      },
+      "src/claude_agent_sdk/_internal/transcript_mirror_batcher.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/transcript_mirror_batcher.py",
+        "sha256": "41692fcd5a90ed6f0ab5dae4646149543d6ddd743bf9ee3dc8cd912304905ba8",
+        "bytes": 9485
+      },
+      "src/claude_agent_sdk/_internal/transport/subprocess_cli.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "sha256": "c532d7a6421854cc09f51b64750a998b4542ab08e3195a1fee88c5e669d4318e",
+        "bytes": 53835
+      },
+      "src/claude_agent_sdk/client.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/client.py",
+        "sha256": "980f956d963338b39f4fd5224e69594eb513bfda37e5b215cf94bb0499ea047c",
+        "bytes": 26948
+      },
+      "src/claude_agent_sdk/types.py": {
+        "url": "https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/types.py",
+        "sha256": "47ae0b7f91dd95d099a0cedacc51bc61b0a320ebe1dd2ab3d4543691b2afdfa6",
+        "bytes": 108632
+      }
+    }
+  },
+  "typescript": {
+    "package": "@anthropic-ai/claude-agent-sdk",
+    "version": "0.3.323",
+    "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.323.tgz",
+    "integrity": "sha512-GXIczMzzceNWB+bIImK59hWOQoBWZtSw+AESPc/qbAWmmHM8Wrqb5KvTwWZ07CmjyC/KcPC47nOLxxyHlWqKPA==",
+    "members": {
+      "package/sdk.mjs": {
+        "sha256": "9350483cd0434c18c13745d7ca2630acd4ef29c6c2f0038b5a061f7e8c0fdb78",
+        "bytes": 1420658
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE description="Build a container image's release binary on the runner and stage it under OUTPUT_DIR/IMAGE_ARCH for the Dockerfile prebuilt target"
+set -euo pipefail
+
+: "${SERVICE:?SERVICE is required}"
+: "${IMAGE_ARCH:?IMAGE_ARCH is required}"
+: "${OUTPUT_DIR:?OUTPUT_DIR is required}"
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/rsworkspace"
+
+# Strip after linking: a strip profile override would change how every
+# dependency is fingerprinted and miss the shared release cache.
+cargo build --locked --release --package "$SERVICE" --bin "$SERVICE"
+install -D -m 0755 "target/release/$SERVICE" "$OUTPUT_DIR/$IMAGE_ARCH/$SERVICE"
+strip --strip-all "$OUTPUT_DIR/$IMAGE_ARCH/$SERVICE"

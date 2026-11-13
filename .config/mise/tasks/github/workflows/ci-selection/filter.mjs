@@ -83,6 +83,8 @@ try {
       requireValue(names.every(filePath));
       return names;
     });
+  } else if (env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
+    selectAll = true;
   } else {
     throw new Error('Unsupported selection event');
   }

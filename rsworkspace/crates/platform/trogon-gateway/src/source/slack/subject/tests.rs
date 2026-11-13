@@ -1,7 +1,7 @@
 use super::*;
 
-fn prefix() -> NatsToken {
-    NatsToken::new("slack").unwrap()
+fn prefix() -> DottedNatsToken {
+    DottedNatsToken::new("slack").unwrap()
 }
 
 #[test]

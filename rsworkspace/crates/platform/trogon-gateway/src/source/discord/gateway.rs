@@ -5,7 +5,7 @@ use bytes::Bytes;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use tracing::{debug, info, warn};
-use trogon_nats::NatsToken;
+use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
 
 use super::config::DiscordConfig;
@@ -40,12 +40,16 @@ struct GatewayPayload<'a> {
 
 pub struct GatewayBridge<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: Duration,
 }
 
 impl<P: JetStreamPublisher, S: ObjectStorePut> GatewayBridge<P, S> {
-    pub fn new(publisher: ClaimCheckPublisher<P, S>, subject_prefix: NatsToken, nats_ack_timeout: Duration) -> Self {
+    pub fn new(
+        publisher: ClaimCheckPublisher<P, S>,
+        subject_prefix: DottedNatsToken,
+        nats_ack_timeout: Duration,
+    ) -> Self {
         Self {
             publisher,
             subject_prefix,

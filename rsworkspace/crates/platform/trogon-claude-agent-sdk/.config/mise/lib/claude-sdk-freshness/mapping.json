@@ -1,0 +1,2341 @@
+{
+  "schema_version": 1,
+  "features": [
+    {
+      "id": "native-options",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": [
+            "ClaudeAgentOptions"
+          ]
+        },
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "Options",
+            "core.Options"
+          ]
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions",
+        "adapters::EnvironmentVariable",
+        "adapters::CurrentDirectory"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "structured_input_and_declarative_configuration_reach_the_cli"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "explicit_store_config_and_working_directory_short_circuit_environment_lookups"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "missing_config_variable_falls_back_to_injected_home_in_order"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Native options are explicitly selected. Aggregate mapping does not claim every option exists; unmapped option behavior remains review work."
+    },
+    {
+      "id": "configuration-preservation",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.cli_path",
+            "ClaudeAgentOptions.cwd",
+            "ClaudeAgentOptions.model"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.pathToClaudeCodeExecutable",
+            "Options.cwd",
+            "Options.model",
+            "core.Options.pathToClaudeCodeExecutable",
+            "core.Options.cwd",
+            "core.Options.model"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.cli_path",
+        "ClaudeAgentOptions.cwd",
+        "ClaudeAgentOptions.model",
+        "find_bundled_cli",
+        "find_native_cli",
+        "ResolveNodeModule",
+        "NodeModuleLookup",
+        "NativePackageTarget",
+        "meets_derived_client_app_minimum",
+        "bundled_cli_derives_client_app"
+      ],
+      "tests": [
+        {
+          "path": "tests/public_api.rs",
+          "name": "configuration_preserves_upstream_optional_values"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "unrestricted_model_and_cli_path_reach_process_adapter"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "injected_process_runs_protocol_and_closes_input_on_disconnect"
+        },
+        {
+          "name": "bundled_cli_is_a_file_under_the_bundled_directory",
+          "path": "tests/bundled_cli.rs"
+        },
+        {
+          "name": "linux_orders_the_libc_variants_by_preference",
+          "path": "tests/bundled_cli.rs"
+        },
+        {
+          "name": "derived_client_app_minimum_compares_the_leading_triple_as_a_list",
+          "path": "tests/bundled_cli.rs"
+        },
+        {
+          "name": "the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
+          "path": "tests/bundled_cli.rs"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity. The bundled executable lookups (Python _bundled directory, TypeScript platform packages with musl and Windows or arm variants) are caller-driven helpers in find_bundled_cli and find_native_cli; they are not part of connect's discovery. Python's bundled-CLI version gate (999.0.0 minimum, claude.version record) and its derived client app trigger are the same kind of helper, meets_derived_client_app_minimum and bundled_cli_derives_client_app; connect asks them only through the Python-dialect client_app_derivation option, so TypeScript, which has neither, stays connect's default."
+    },
+    {
+      "id": "process-errors-and-shutdown",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ProcessError",
+            "ResultError",
+            "CLIConnectionError",
+            "CLINotFoundError"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "AbortError",
+            "core.AbortError"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "Error",
+        "AbortError",
+        "ResultError"
+      ],
+      "tests": [
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t04_process_error_display_is_the_python_text_and_typescript_text_is_available"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "e05_q13_python_replaces_the_exit_error_with_the_result_error"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "e05_typescript_uses_errors_and_keeps_the_process_error_when_the_text_is_blank"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t03_typescript_skips_a_corrupt_line_and_python_fails_on_it"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t03_a_corrupt_end_of_stream_tail_is_dropped_by_both_styles"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t10_a_missing_executable_is_reported_by_path_and_a_missing_cwd_by_directory"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "abort_stops_the_process_and_ends_the_run_with_an_abort_error"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "e03_json_decode_error_carries_the_line_and_the_original_error"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "e04_message_parse_error_carries_the_raw_data"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t14_a_write_after_stdin_closed_is_not_ready_or_terminated"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t14_a_write_after_abort_is_the_operation_aborted_error"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t14_a_write_after_the_cli_exited_with_an_error_reports_the_upstream_state"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data."
+    },
+    {
+      "id": "permission-modes",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "PermissionMode",
+            "ClaudeAgentOptions.permission_mode"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "PermissionMode",
+            "Options.permissionMode",
+            "core.PermissionMode",
+            "core.Options.permissionMode"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "PermissionMode",
+        "ClaudeAgentOptions.permission_mode"
+      ],
+      "tests": [
+        {
+          "path": "tests/permission_mode.rs",
+          "name": "permission_modes_round_trip_upstream_literals"
+        },
+        {
+          "path": "tests/permission_mode.rs",
+          "name": "permission_mode_remains_unset_until_explicitly_selected"
+        },
+        {
+          "path": "tests/permission_mode.rs",
+          "name": "s17_unknown_permission_modes_round_trip_unchanged"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "optional_permission_and_settings_choices_reach_process_arguments"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The exact default/acceptEdits/plan/bypassPermissions/dontAsk/auto literals round-trip, and unknown modes are forwarded unchanged without Rust-side validation. None omits the CLI flag; Some(Default) emits default explicitly. Fixtures establish serialization and argument behavior, not the CLI permission policy."
+    },
+    {
+      "id": "setting-sources",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "SettingSource",
+            "ClaudeAgentOptions.setting_sources"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "SettingSource",
+            "Options.settingSources",
+            "core.SettingSource",
+            "core.Options.settingSources"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SettingSource",
+        "ClaudeAgentOptions.setting_sources"
+      ],
+      "tests": [
+        {
+          "path": "tests/setting_sources.rs",
+          "name": "setting_sources_round_trip_upstream_literals"
+        },
+        {
+          "path": "tests/setting_sources.rs",
+          "name": "setting_sources_reject_unsupported_values"
+        },
+        {
+          "path": "tests/setting_sources.rs",
+          "name": "setting_sources_preserve_optional_list_semantics"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "optional_permission_and_settings_choices_reach_process_arguments"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "argv_binds_values_and_forwards_cwd"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Exact user/project/local literals and optional ordered lists preserve omission, empty lists and duplicates. None omits --setting-sources; Some([]) emits --setting-sources=. Pinned Python docs and TypeScript Options docs describe inheritance on omission and filesystem isolation for an empty list. Skills-driven defaults and live CLI behavior are outside this scoped mapping."
+    },
+    {
+      "id": "client-lifecycle",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeSDKClient.connect",
+            "ClaudeSDKClient.disconnect"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.close",
+            "core.Query.close"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeSdkClient.connect",
+        "ClaudeSdkClient.disconnect"
+      ],
+      "tests": [
+        {
+          "path": "tests/public_api.rs",
+          "name": "connect_waits_for_initialization_and_disconnect_closes_input"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "injected_process_runs_protocol_and_closes_input_on_disconnect"
+        }
+      ],
+      "status": "rust_difference",
+      "rationale": "Rust follows Python lifecycle names with an async connect factory and consuming async disconnect(self), rather than methods on an existing Python client. TypeScript Query.close is the cleanup counterpart. Memory-process fixtures require initialization before returning an owner and verify the child input is closed on disconnect; named references alone do not prove test execution or native conformance."
+    },
+    {
+      "id": "interactive-client",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": [
+            "ClaudeSDKClient"
+          ]
+        },
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "Query",
+            "core.Query"
+          ]
+        }
+      },
+      "rust_api": [
+        "ClaudeSdkClient",
+        "ClientHandle"
+      ],
+      "tests": [
+        {
+          "path": "tests/subprocess.rs",
+          "name": "interactive_client_reuses_one_process_for_multiple_turns"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Rust separates process ownership, cloneable controls and message consumption. Only explicitly mapped operations have focused evidence."
+    },
+    {
+      "id": "full-run-query",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "query"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "query",
+            "core.query"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "query",
+        "query_turn",
+        "Query"
+      ],
+      "tests": [
+        {
+          "path": "tests/subprocess.rs",
+          "name": "query_preserves_background_continuation_until_idle"
+        },
+        {
+          "path": "tests/runtime_sessions.rs",
+          "name": "coalesced_input_count_ends_the_run_after_one_result"
+        },
+        {
+          "path": "tests/runtime_sessions.rs",
+          "name": "explicit_turn_helper_keeps_the_single_result_contract"
+        },
+        {
+          "path": "tests/runtime_failure_contracts.rs",
+          "name": "a_startup_failure_is_reported_beside_the_error_that_stopped_the_session"
+        }
+      ],
+      "status": "supported",
+      "rationale": "query follows a full run; query_turn exposes the first-result boundary. Fixture evidence covers background continuation and coalesced queued input; live inference remains separate."
+    },
+    {
+      "id": "queued-input",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.streamInput",
+            "core.Query.streamInput"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.stream_input",
+        "ClientHandle.send_input",
+        "ClientHandle.finish_input"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_sessions.rs",
+          "name": "coalesced_input_count_ends_the_run_after_one_result"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Streaming and queued structured sends are exposed through a cloneable handle. Completion semantics use reported queue/session state and have older-CLI limits."
+    },
+    {
+      "id": "interrupt-receipts",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeSDKClient.interrupt"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.interrupt",
+            "core.Query.interrupt"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.interrupt",
+        "ClientHandle.interrupt_cancel_queued",
+        "InterruptReceipt"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Typed Rust receipts preserve legacy absence and reported queue/cancel metadata; no exact Python return-type equivalence is intended."
+    },
+    {
+      "id": "set-model",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeSDKClient.set_model"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.setModel",
+            "core.Query.setModel"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.set_model"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+    },
+    {
+      "id": "set-permission-mode",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeSDKClient.set_permission_mode"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.setPermissionMode",
+            "core.Query.setPermissionMode"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.set_permission_mode"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+    },
+    {
+      "id": "rewind-files",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeSDKClient.rewind_files"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.rewindFiles",
+            "core.Query.rewindFiles"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.rewind_files"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+    },
+    {
+      "id": "mcp-status",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeSDKClient.get_mcp_status"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.mcpServerStatus",
+            "core.Query.mcpServerStatus"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.mcp_status"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+    },
+    {
+      "id": "mcp-reconnect",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeSDKClient.reconnect_mcp_server"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.reconnectMcpServer",
+            "core.Query.reconnectMcpServer"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.reconnect_mcp_server"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+    },
+    {
+      "id": "mcp-toggle",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeSDKClient.toggle_mcp_server"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.toggleMcpServer",
+            "core.Query.toggleMcpServer"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.toggle_mcp_server"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+    },
+    {
+      "id": "context-usage",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeSDKClient.get_context_usage"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.getContextUsage",
+            "core.Query.getContextUsage"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.context_usage"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+    },
+    {
+      "id": "stop-task",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeSDKClient.stop_task"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.stopTask",
+            "core.Query.stopTask"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.stop_task"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+    },
+    {
+      "id": "dynamic-mcp",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.setMcpServers",
+            "core.Query.setMcpServers"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.set_mcp_servers"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_sessions.rs",
+          "name": "retained_mcp_server_keeps_the_existing_connection_session"
+        },
+        {
+          "path": "tests/runtime_sessions.rs",
+          "name": "dynamic_mcp_replacement_installs_handlers_and_rejection_keeps_previous"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Dynamic updates preserve existing same-name embedded sessions; remove and re-add to replace a registry."
+    },
+    {
+      "id": "initialization",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeSDKClient.get_server_info"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.initializationResult",
+            "core.Query.initializationResult"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeSdkClient.connection_info",
+        "ConnectionInfo",
+        "ConnectionInfo.as_json"
+      ],
+      "tests": [
+        {
+          "path": "tests/subprocess.rs",
+          "name": "connected_client_exposes_cached_lossless_metadata"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "malformed_initialization_is_rejected"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Rust exposes a cached, typed connection snapshot with capability flags and lossless raw metadata; not every upstream convenience projection is modeled."
+    },
+    {
+      "id": "budget",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.max_budget_usd"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.maxBudgetUsd",
+            "core.Options.maxBudgetUsd"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.max_budget_usd"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "structured_input_and_declarative_configuration_reach_the_cli"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Explicit typed Rust option is wired to CLI arguments or initialization. Fixture proves configuration transport; native inference behavior is not inferred."
+    },
+    {
+      "id": "output-schema",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.output_format"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.outputFormat",
+            "core.Options.outputFormat"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.output_schema"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "structured_input_and_declarative_configuration_reach_the_cli"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Explicit typed Rust option is wired to CLI arguments or initialization. Fixture proves configuration transport; native inference behavior is not inferred."
+    },
+    {
+      "id": "effort",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.effort"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.effort",
+            "core.Options.effort"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.effort"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "structured_input_and_declarative_configuration_reach_the_cli"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Explicit typed Rust option is wired to CLI arguments or initialization. Fixture proves configuration transport; native inference behavior is not inferred."
+    },
+    {
+      "id": "file-checkpointing",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.enable_file_checkpointing"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.enableFileCheckpointing",
+            "core.Options.enableFileCheckpointing"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.file_checkpointing"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "structured_input_and_declarative_configuration_reach_the_cli"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Explicit typed Rust option is wired to CLI arguments or initialization. Fixture proves configuration transport; native inference behavior is not inferred."
+    },
+    {
+      "id": "agents",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.agents"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.agents",
+            "core.Options.agents"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.agents"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "structured_input_and_declarative_configuration_reach_the_cli"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Explicit typed Rust option is wired to CLI arguments or initialization. Fixture proves configuration transport; native inference behavior is not inferred."
+    },
+    {
+      "id": "agent-definition",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": [
+            "AgentDefinition"
+          ]
+        },
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "AgentDefinition",
+            "core.AgentDefinition"
+          ]
+        }
+      },
+      "rust_api": [
+        "AgentDefinition",
+        "AgentExecution",
+        "AgentMcpServerSpec"
+      ],
+      "tests": [
+        {
+          "path": "src/agent_definition_tests.rs",
+          "name": "agent_uses_initialize_field_names"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Rust represents background execution and names with enums/value objects. Core agent initialization is tested; aggregate declaration equality is not assumed."
+    },
+    {
+      "id": "permission-callback",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.can_use_tool",
+            "CanUseTool"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.canUseTool",
+            "CanUseTool",
+            "core.Options.canUseTool",
+            "core.CanUseTool"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ToolPermissionHandler",
+        "ToolPermissionRequest",
+        "PermissionDecision"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "permission_context_and_updates_round_trip_through_the_callback"
+        },
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "cancelled_permission_exposes_its_signal_to_the_host"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Host permission callbacks preserve context, typed updates and cancellation signals. CLI rules can authorize before consulting the host."
+    },
+    {
+      "id": "permission-types",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": [
+            "PermissionResult",
+            "PermissionResultAllow",
+            "PermissionResultDeny",
+            "PermissionUpdate",
+            "ToolPermissionContext"
+          ]
+        },
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "PermissionResult",
+            "PermissionUpdate",
+            "PermissionRuleValue",
+            "McpServerProvenance",
+            "core.PermissionResult",
+            "core.PermissionUpdate",
+            "core.PermissionRuleValue",
+            "core.McpServerProvenance"
+          ]
+        }
+      },
+      "rust_api": [
+        "PermissionDecision",
+        "PermissionUpdate",
+        "ToolPermissionRequest",
+        "PermissionUpdateDestination"
+      ],
+      "tests": [
+        {
+          "path": "src/permission_update_tests.rs",
+          "name": "permission_updates_round_trip_and_reject_partial_rules"
+        },
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "permission_context_and_updates_round_trip_through_the_callback"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Rust validates decisions and update rules and retains JSON extension fields. Review nested upstream context and union changes rather than assuming identical type names imply equivalence."
+    },
+    {
+      "id": "hooks",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.hooks",
+            "HookCallback",
+            "HookMatcher",
+            "HookInput",
+            "HookJSONOutput"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.hooks",
+            "HookCallback",
+            "HookCallbackMatcher",
+            "HookInput",
+            "HookJSONOutput",
+            "core.Options.hooks",
+            "core.HookCallback",
+            "core.HookCallbackMatcher",
+            "core.HookInput",
+            "core.HookJSONOutput"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "HookRegistration",
+        "HookRequest",
+        "HookOutput",
+        "HookFailureMode"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "blocking_hook_is_registered_and_answered_through_the_public_client"
+        },
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "blocking_hook_refuses_a_cli_without_failure_capability"
+        },
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "blocking_hook_refuses_a_session_that_did_not_apply_it"
+        },
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "s06_continue_hooks_tolerate_a_session_that_did_not_apply_them"
+        },
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "continue_hook_does_not_require_blocking_failure_capability"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Hook routing/cancellation and fail-closed blocking registration exist. Inputs retain event-specific JSON; typed output coverage is deliberately narrower than upstream event-specific structures."
+    },
+    {
+      "id": "hook-events",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "types.HookEvent"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "HookEvent",
+            "core.HookEvent"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "HookEvent"
+      ],
+      "tests": [
+        {
+          "path": "src/hooks_tests.rs",
+          "name": "hook_output_uses_wire_names_and_typed_decisions"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Event enum mirrors the reviewed named events; added/removed literal members always require review."
+    },
+    {
+      "id": "elicitation",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.onElicitation",
+            "OnElicitation",
+            "core.Options.onElicitation",
+            "core.OnElicitation"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ElicitationHandler",
+        "ElicitationRequest",
+        "ElicitationResponse"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "elicitation_callback_returns_a_typed_form_response"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Cancellation-aware typed callback returns form/URL elicitation responses; fixture verifies the wire round trip."
+    },
+    {
+      "id": "user-dialog",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.onUserDialog",
+            "Options.supportedDialogKinds",
+            "OnUserDialog",
+            "core.Options.onUserDialog",
+            "core.Options.supportedDialogKinds",
+            "core.OnUserDialog"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "UserDialogHandler",
+        "UserDialogRequest",
+        "UserDialogResponse",
+        "DialogKind"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "declared_user_dialog_calls_the_handler"
+        },
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "saturated_callbacks_do_not_settle_undeclared_dialog"
+        },
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "duplicate_id_does_not_settle_undeclared_dialog"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Only declared dialog kinds invoke handlers or receive responses, including saturated and duplicate-ID cases."
+    },
+    {
+      "id": "embedded-mcp",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "create_sdk_mcp_server",
+            "tool",
+            "SdkMcpTool",
+            "McpSdkServerConfig"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "createSdkMcpServer",
+            "tool",
+            "McpSdkServerConfigWithInstance",
+            "core.createSdkMcpServer",
+            "core.tool",
+            "core.McpSdkServerConfigWithInstance"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "LocalMcpServer",
+        "LocalMcpServerOptions",
+        "SdkTool",
+        "SdkToolOptions",
+        "SdkMcpServer",
+        "SdkMcpSession",
+        "McpToolName",
+        "McpToolInputSchema",
+        "McpToolInputSchemaError",
+        "SdkTools",
+        "SdkToolsError"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "embedded_mcp_server_keeps_its_session_across_rpc_calls"
+        },
+        {
+          "path": "src/sdk_mcp_server_tests.rs",
+          "name": "server_retains_initialize_and_runs_typed_tool"
+        },
+        {
+          "path": "tests/mcp_tool_values.rs",
+          "name": "mcp_tool_name_accepts_ascii_boundaries"
+        },
+        {
+          "path": "tests/mcp_tool_values.rs",
+          "name": "mcp_tool_name_preserves_any_text_for_the_advertising_boundary"
+        },
+        {
+          "path": "tests/mcp_tool_values.rs",
+          "name": "mcp_tool_input_schema_preserves_json_and_validates_arguments"
+        },
+        {
+          "path": "tests/mcp_tool_values.rs",
+          "name": "mcp_tool_input_schema_rejects_non_object_declarations"
+        },
+        {
+          "path": "tests/mcp_tool_values.rs",
+          "name": "mcp_tool_input_schema_rejects_malformed_schema"
+        },
+        {
+          "path": "tests/mcp_tool_values.rs",
+          "name": "mcp_tool_input_schema_rejects_external_references"
+        },
+        {
+          "path": "tests/sdk_tools.rs",
+          "name": "unique_tool_names_are_accepted"
+        },
+        {
+          "path": "tests/sdk_tools.rs",
+          "name": "case_distinct_tool_names_remain_distinct"
+        },
+        {
+          "path": "tests/sdk_tools.rs",
+          "name": "m01_exact_duplicate_tool_names_are_rejected_with_the_validated_name"
+        },
+        {
+          "path": "tests/sdk_tools.rs",
+          "name": "duplicate_error_identifies_the_repeated_name_after_unique_tools"
+        },
+        {
+          "path": "tests/sdk_tools.rs",
+          "name": "an_empty_iterator_creates_an_empty_collection"
+        },
+        {
+          "path": "tests/sdk_tools.rs",
+          "name": "default_and_single_tool_construction_are_infallible"
+        },
+        {
+          "path": "tests/sdk_tools.rs",
+          "name": "server_lists_and_dispatches_every_validated_tool_in_name_order"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Rust supports persistent per-client tool registry sessions, initialize/list/call/ping and schema validation. Tool names are forwarded as given without Rust-side name validation (the CLI validates), object input schemas are validated, and the immutable SdkTools collection rejects duplicate exact names before infallible LocalMcpServer assembly. Empty and single-tool collections are infallible; multi-tool collection validation returns a typed error naming the duplicate. Full server-initiated MCP client requests and every protocol method are not implemented."
+    },
+    {
+      "id": "external-mcp",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.mcp_servers",
+            "McpServerConfig"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.mcpServers",
+            "McpServerConfig",
+            "McpServerConfigForProcessTransport",
+            "core.Options.mcpServers",
+            "core.McpServerConfig",
+            "core.McpServerConfigForProcessTransport"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "McpServerOptions",
+        "McpUrl",
+        "McpServerName"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "structured_input_and_declarative_configuration_reach_the_cli"
+        }
+      ],
+      "status": "partial",
+      "rationale": "External stdio/HTTP/SSE declarations are supported with typed URL/name validation. Upstream inline/path conveniences and extra server configuration are not all represented."
+    },
+    {
+      "id": "session-store",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": [
+            "SessionStore",
+            "InMemorySessionStore"
+          ]
+        },
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "SessionStore",
+            "InMemorySessionStore",
+            "core.SessionStore",
+            "core.InMemorySessionStore"
+          ]
+        }
+      },
+      "rust_api": [
+        "SessionStore",
+        "InMemorySessionStore",
+        "SessionKey",
+        "SessionEntry",
+        "InMemorySessionStore::with_clock",
+        "adapters::WallClock",
+        "SessionRuntime::prepare_with_adapters",
+        "SessionPreparationOptions",
+        "adapters::SessionFileSystem",
+        "SessionProjectKey::for_directory_with_filesystem",
+        "SessionStore::supports",
+        "SessionStore::list_session_summaries",
+        "SessionSummaryEntry",
+        "SummaryDialect",
+        "fold_session_summary",
+        "summary_entry_to_sdk_info",
+        "SdkSessionInfo",
+        "InMemorySessionStore::with_summary_dialect",
+        "testing::run_session_store_conformance",
+        "testing::ConformanceOptions"
+      ],
+      "tests": [
+        {
+          "path": "tests/session_store.rs",
+          "name": "store_preserves_order_deep_values_and_load_isolation"
+        },
+        {
+          "path": "tests/session_store.rs",
+          "name": "projects_sessions_and_subpaths_are_isolated_and_delete_cascades"
+        },
+        {
+          "path": "tests/session_store.rs",
+          "name": "repeated_stable_uuids_are_stored_again_like_upstream_reference_stores"
+        },
+        {
+          "path": "tests/session_clock.rs",
+          "name": "injected_wall_clock_sets_exact_session_timestamp"
+        },
+        {
+          "path": "tests/session_clock.rs",
+          "name": "repeated_and_backward_wall_time_keeps_session_timestamps_strictly_increasing"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "injected_session_adapters_resolve_resume_and_clean_up"
+        },
+        {
+          "path": "tests/session_filesystem.rs",
+          "name": "w3_resume_materializes_into_a_private_temporary_directory_and_cleanup_removes_it"
+        },
+        {
+          "path": "tests/session_filesystem.rs",
+          "name": "w3_transcript_write_failure_removes_the_partial_temporary_directory"
+        },
+        {
+          "path": "tests/session_project_key.rs",
+          "name": "project_key_matches_upstream_utf16_replacement"
+        },
+        {
+          "path": "tests/session_store_conformance.rs",
+          "name": "in_memory_store_satisfies_every_contract_with_the_typescript_summary_layout"
+        },
+        {
+          "path": "tests/session_store_conformance.rs",
+          "name": "in_memory_store_satisfies_every_contract_with_the_python_summary_layout"
+        },
+        {
+          "path": "tests/session_store_conformance.rs",
+          "name": "a_required_only_store_passes_without_optional_operations"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "folding_latches_set_once_fields_and_overwrites_last_wins_fields"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "the_typescript_layout_uses_camel_case_keys_and_honors_relocated_entries"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "the_in_memory_store_keeps_summaries_in_step_with_listings"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Rust implements append/load/list_sessions/list_session_summaries/list_subkeys/delete, an upstream-equivalent conformance suite, and summary folding in both the TypeScript (default) and Python layouts. Optional operations are declared through SessionStore::supports because Rust cannot detect trait method overrides. Wall time and transcript filesystem operations can be replaced through static adapters; memory fixtures cover resume materialization, cleanup of the temporary directory and removal of a partially written temporary directory on failure."
+    },
+    {
+      "id": "store-resume",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.session_store",
+            "ClaudeAgentOptions.session_store_flush",
+            "ClaudeAgentOptions.load_timeout_ms"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.sessionStore",
+            "core.Options.sessionStore"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SessionStoreOptions",
+        "SessionRuntime",
+        "StoreResume",
+        "TranscriptMirror",
+        "SessionPreparationOptions",
+        "adapters::SessionFileSystem",
+        "SessionStoreFlush",
+        "MirrorSizeEstimate",
+        "Error::ContinueRequiresListSessions"
+      ],
+      "tests": [
+        {
+          "path": "tests/session_store.rs",
+          "name": "resume_materializes_main_subagents_and_metadata_without_touching_credentials"
+        },
+        {
+          "path": "tests/runtime_sessions.rs",
+          "name": "each_result_waits_for_its_own_mirror_fence_and_controls_progress"
+        },
+        {
+          "path": "tests/session_store.rs",
+          "name": "timed_out_mirror_append_is_reported_and_never_retried"
+        },
+        {
+          "path": "tests/session_filesystem.rs",
+          "name": "w3_cleanup_retries_a_busy_directory_and_then_removes_it"
+        },
+        {
+          "path": "tests/session_store.rs",
+          "name": "delayed_flush_wait_keeps_the_original_deadline"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "eager_flush_appends_every_frame_without_waiting_for_a_flush"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "the_python_size_estimate_counts_ascii_escapes_where_typescript_counts_code_units"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "st06_continue_conversation_requires_a_store_that_lists_sessions"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Store resume materialization is Unix-only; long project paths can need project_key override. Per-result mirrors are bounded and retry only explicit definite noncommit failures."
+    },
+    {
+      "id": "structured-input",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "UserMessage",
+            "ContentBlock"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "SDKUserMessage",
+            "core.SDKUserMessage"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "UserInput",
+        "InputBlock",
+        "MessageId"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "structured_input_and_declarative_configuration_reach_the_cli"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Rust validates text/image/document/tool-result input and permits explicit future extensions; upstream message types also contain output/history details beyond the prompt constructor."
+    },
+    {
+      "id": "message-metadata",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": [
+            "AssistantMessage",
+            "ResultMessage",
+            "MessageOrigin"
+          ]
+        },
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "SDKAssistantMessage",
+            "SDKResultMessage",
+            "SDKResultSuccess",
+            "SDKResultError",
+            "core.SDKAssistantMessage",
+            "core.SDKResultMessage",
+            "core.SDKResultSuccess",
+            "core.SDKResultError"
+          ]
+        }
+      },
+      "rust_api": [
+        "AssistantMessage",
+        "ResultMessage",
+        "MessageOrigin"
+      ],
+      "tests": [
+        {
+          "path": "tests/subprocess.rs",
+          "name": "known_message_metadata_survives_decoding"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Known identity/origin/stop/terminal/model-usage/permission metadata and extension fields survive decoding. Nested usage/denial payloads remain JSON, with no claim of identical upstream type modeling."
+    },
+    {
+      "id": "future-messages",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "Message",
+            "SystemMessage",
+            "StreamEvent"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "SDKMessage",
+            "SDKSystemMessage",
+            "SDKPartialAssistantMessage",
+            "core.SDKMessage",
+            "core.SDKSystemMessage",
+            "core.SDKPartialAssistantMessage"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "Message",
+        "SystemMessage",
+        "StreamEvent"
+      ],
+      "tests": [
+        {
+          "path": "src/wire_tests.rs",
+          "name": "future_informational_messages_are_preserved"
+        },
+        {
+          "path": "src/wire_tests.rs",
+          "name": "malformed_known_content_does_not_become_unknown"
+        }
+      ],
+      "status": "rust_difference",
+      "rationale": "Rust has explicit unknown informational/content variants and typed malformed-known errors. JSON retention preserves data but does not automatically implement newly added behavior."
+    },
+    {
+      "id": "isolation-defaults",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.strict_mcp_config"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.strictMcpConfig",
+            "core.Options.strictMcpConfig"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "McpDiscovery"
+      ],
+      "tests": [
+        {
+          "path": "tests/subprocess.rs",
+          "name": "argv_binds_values_and_forwards_cwd"
+        }
+      ],
+      "status": "rust_difference",
+      "rationale": "Rust disables MCP discovery unless McpDiscovery::CliDefault is selected. This intentional discovery default differs from upstream; filesystem setting sources separately inherit CLI defaults when omitted."
+    },
+    {
+      "id": "environment",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.env"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.env",
+            "core.Options.env"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.env",
+        "ClaudeAgentOptions.client_app_derivation",
+        "adapters::EnvironmentVariable",
+        "adapters::CurrentDirectory"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "structured_input_and_declarative_configuration_reach_the_cli"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "child_config_override_precedes_environment_and_accepts_matching_store_config"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "ordinary_connection_never_reads_session_environment_or_current_directory"
+        },
+        {
+          "path": "src/client_app_derivation/tests.rs",
+          "name": "derives_this_crate_for_a_qualifying_bundled_cli"
+        }
+      ],
+      "status": "rust_difference",
+      "rationale": "Rust overlays inherited environment, matching Python; TypeScript supplied env replaces its subprocess environment. This difference must remain visible in maintenance review. Injectable environment providers control SDK lookups, not implicit native child-environment inheritance. The Python-dialect client_app_derivation option reproduces CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP with the same trigger (a bundled CLI whose pin and recorded claude.version are at least 999.0.0), the same variable and the same name/version format, but names the application with this crate's package name and version because Rust has no Python distribution metadata to look up; TypeScript derives none, which is the default."
+    },
+    {
+      "id": "session-convenience",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "list_sessions",
+            "get_session_info",
+            "get_session_messages",
+            "list_subagents",
+            "get_subagent_messages",
+            "delete_session",
+            "fork_session",
+            "rename_session",
+            "tag_session",
+            "import_session_to_store"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "listSessions",
+            "getSessionInfo",
+            "getSessionMessages",
+            "listSubagents",
+            "getSubagentMessages",
+            "deleteSession",
+            "forkSession",
+            "renameSession",
+            "tagSession",
+            "importSessionToStore",
+            "core.listSessions",
+            "core.getSessionInfo",
+            "core.getSessionMessages",
+            "core.listSubagents",
+            "core.getSubagentMessages",
+            "core.deleteSession",
+            "core.forkSession",
+            "core.renameSession",
+            "core.tagSession",
+            "core.importSessionToStore"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SessionFiles",
+        "ListSessionsOptions",
+        "MessagePage",
+        "SessionMutationError",
+        "ForkSessionResult",
+        "SessionStoreHelperError",
+        "StoreListOptions",
+        "ImportOptions",
+        "list_sessions",
+        "get_session_info",
+        "get_session_messages",
+        "list_subagents",
+        "get_subagent_messages",
+        "rename_session",
+        "tag_session",
+        "delete_session",
+        "fork_session",
+        "list_sessions_from_store",
+        "get_session_info_from_store",
+        "get_session_messages_from_store",
+        "list_subagents_from_store",
+        "get_subagent_messages_from_store",
+        "rename_session_via_store",
+        "tag_session_via_store",
+        "delete_session_via_store",
+        "fork_session_via_store",
+        "import_session_to_store"
+      ],
+      "tests": [
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "info_and_messages_read_back_from_the_store"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "rename_tag_and_delete_go_through_the_store"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "fork_copies_the_conversation_under_a_new_id"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "list_uses_summaries_with_pagination"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "list_gap_fills_sessions_missing_from_summaries"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "subagents_list_and_read_with_parent_metadata"
+        },
+        {
+          "path": "tests/session_store_helpers.rs",
+          "name": "import_replays_the_transcript_subagents_and_sidecars"
+        },
+        {
+          "path": "tests/session_mutations.rs",
+          "name": "rename_appends_a_title_that_listing_reads_back"
+        }
+      ],
+      "status": "partial",
+      "rationale": "All eleven session functions are exposed in both forms: filesystem (SessionFiles methods and free functions, Python semantics plus the TypeScript newest-first tie-break by session id) and store-backed (the *_from_store readers, *_via_store mutations and import_session_to_store). Store listing uses summary sidecars with gap-fill and degrades to per-session loads, and project keys follow the TypeScript sanitization the mirror uses. Known differences: JSON key order of forked entries follows serde_json; Rust writes raw UTF-8 where Python json.dumps escapes non-ASCII; store keys use the TypeScript path sanitization (Python differs only for non-BMP paths over 200 characters); custom stores must override SessionStore::supports to opt in to optional operations. TypeScript-only behaviors are not replicated: includeSystemMessages, includeProgrammatic, continued-in sessions, custom-title sidecars, worktree ownership checks, the TypeScript chain and relink algorithm, and the TypeScript store-backed listSessions. Core storage operations are mapped separately."
+    },
+    {
+      "id": "advanced-native-options",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.fallback_model",
+            "ClaudeAgentOptions.betas",
+            "ClaudeAgentOptions.settings",
+            "ClaudeAgentOptions.skills",
+            "ClaudeAgentOptions.sandbox",
+            "ClaudeAgentOptions.thinking",
+            "ClaudeAgentOptions.task_budget"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.fallbackModel",
+            "Options.betas",
+            "Options.settings",
+            "Options.skills",
+            "Options.sandbox",
+            "Options.thinking",
+            "Options.taskBudget",
+            "core.Options.fallbackModel",
+            "core.Options.betas",
+            "core.Options.settings",
+            "core.Options.skills",
+            "core.Options.sandbox",
+            "core.Options.thinking",
+            "core.Options.taskBudget"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [],
+      "tests": [],
+      "status": "deferred",
+      "rationale": "Fallback/beta/custom settings/skills/sandbox/thinking/task-budget conveniences require individual Rust design and behavioral evidence; they are not enabled by aggregate configuration support."
+    },
+    {
+      "id": "plugins",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.plugins"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.plugins",
+            "Options.pluginDelivery",
+            "core.Options.plugins",
+            "core.Options.pluginDelivery"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.plugins",
+        "ClaudeAgentOptions.plugin_delivery",
+        "LocalPlugin",
+        "PluginDelivery"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "plugins_reach_the_cli_by_argv_or_by_the_initialize_request"
+        }
+      ],
+      "status": "supported",
+      "rationale": "TypeScript passes --plugin-dir=PATH or --plugin-dir-no-mcp=PATH per plugin, or with pluginDelivery initialize and at least one plugin passes --await-initialize and sends the plugins in the initialize request; Python passes the two-token --plugin-dir PATH and has no delivery option, so PluginDelivery is ignored with ArgvStyle::Python. The upstream 'Invalid pluginDelivery' and 'Unsupported plugin type' errors cannot occur because the Rust types admit only the valid variants."
+    },
+    {
+      "id": "advanced-controls",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.setMcpPermissionModeOverride",
+            "Query.setMaxThinkingTokens",
+            "Query.applyFlagSettings",
+            "core.Query.setMcpPermissionModeOverride",
+            "core.Query.setMaxThinkingTokens",
+            "core.Query.applyFlagSettings"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [],
+      "tests": [],
+      "status": "deferred",
+      "rationale": "Additional upstream controls remain separate implementation/review work; runtime-hash changes also require review of control semantics."
+    },
+    {
+      "id": "custom-transport",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "Transport"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.spawnClaudeCodeProcess",
+            "core.Options.spawnClaudeCodeProcess"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "adapters::RuntimeAdapters",
+        "adapters::SpawnProcess",
+        "adapters::TokioProcessSpawner",
+        "Transport",
+        "ClaudeSdkClient::connect_with_adapters",
+        "ClaudeSdkClient::connect_with_transport",
+        "ClaudeSdkClient::connect_with_transport_and_adapters",
+        "query_with_adapters",
+        "query_turn_with_adapters",
+        "query_with_transport",
+        "query_turn_with_transport"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "injected_process_runs_protocol_and_closes_input_on_disconnect"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "injected_spawn_failure_preserves_its_typed_source_and_is_not_retried"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "missing_process_pipes_return_typed_error_and_drop_the_spawned_child"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "cancelling_connect_after_initialization_request_closes_input"
+        },
+        {
+          "path": "tests/runtime_adapters.rs",
+          "name": "dropping_owner_shuts_down_even_when_command_handle_survives"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_custom_transport_drives_a_full_session_through_the_trait"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_the_end_of_the_message_stream_ends_the_run"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_transport_error_from_connect_is_returned_unchanged"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_transport_error_from_read_ends_the_run_and_kills_the_peer"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_write_error_from_the_transport_reaches_the_caller"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_an_abort_kills_the_transport_before_closing_it"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "q01_query_with_a_transport_writes_the_prompt_after_initialize_and_ends_input"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "q01_a_one_turn_query_stops_after_the_first_result"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirror"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The public Transport trait is Python's Transport (connect, write, read_message in place of read_messages, close, is_ready, end_input) with a provided kill for TypeScript's abort. ClaudeSdkClient::connect_with_transport, query_with_transport and query_turn_with_transport inject one; the subprocess implementation is the default and the SpawnProcess adapter stays TypeScript's spawnClaudeCodeProcess. A custom transport gets no CLI discovery, argument list or store-backed resume materialization (the mirror still runs), as upstream."
+    },
+    {
+      "id": "browser-entrypoint",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "browser"
+          ]
+        }
+      },
+      "rust_api": [],
+      "tests": [],
+      "status": "out_of_scope",
+      "rationale": "This TypeScript package entrypoint serves browser/remote bridge or binary-extraction hosting outside the native Rust subprocess contract. Its declaration changes remain visible for review even though no corresponding Rust API is promised."
+    },
+    {
+      "id": "bridge-entrypoint",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "bridge"
+          ]
+        }
+      },
+      "rust_api": [],
+      "tests": [],
+      "status": "out_of_scope",
+      "rationale": "This TypeScript package entrypoint serves browser/remote bridge or binary-extraction hosting outside the native Rust subprocess contract. Its declaration changes remain visible for review even though no corresponding Rust API is promised."
+    },
+    {
+      "id": "extract-entrypoint",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "extract"
+          ]
+        }
+      },
+      "rust_api": [],
+      "tests": [],
+      "status": "out_of_scope",
+      "rationale": "This TypeScript package entrypoint serves browser/remote bridge or binary-extraction hosting outside the native Rust subprocess contract. Its declaration changes remain visible for review even though no corresponding Rust API is promised."
+    },
+    {
+      "id": "user-tool-result-json",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "UserMessage.tool_use_result"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "SDKUserMessage.tool_use_result",
+            "core.SDKUserMessage.tool_use_result"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "UserMessage.tool_use_result"
+      ],
+      "tests": [
+        {
+          "path": "tests/subprocess.rs",
+          "name": "compatibility_user_tool_result_distinguishes_omitted_and_explicit_null"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "compatibility_user_tool_result_retains_all_json_kinds"
+        }
+      ],
+      "status": "rust_difference",
+      "rationale": "Rust retains JSON null, boolean, number, string, array and object tool results, with omission distinct from explicit null. Python annotates an optional dictionary; TypeScript unknown is broader than JSON. Public scripted-process regressions prove Rust wire retention, not native upstream runtime conformance."
+    },
+    {
+      "id": "partial-event-envelope-metadata",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "SDKPartialAssistantMessage.ttft_ms",
+            "SDKPartialAssistantMessage.user_message_uuid",
+            "SDKPartialAssistantMessage.user_message_uuids",
+            "SDKPartialAssistantMessage.resume_reason",
+            "core.SDKPartialAssistantMessage.ttft_ms",
+            "core.SDKPartialAssistantMessage.user_message_uuid",
+            "core.SDKPartialAssistantMessage.user_message_uuids",
+            "core.SDKPartialAssistantMessage.resume_reason"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "StreamEvent.additional_fields"
+      ],
+      "tests": [
+        {
+          "path": "tests/subprocess.rs",
+          "name": "compatibility_stream_event_retains_outer_metadata_separately"
+        }
+      ],
+      "status": "partial",
+      "rationale": "Timing, user-message correlation, resume reason and future envelope metadata survive Rust wire decoding in additional_fields, separately from event. Values remain raw JSON rather than typed upstream fields; retention does not implement their behavior or prove native runtime parity."
+    },
+    {
+      "id": "settings-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "Settings",
+            "core.Settings"
+          ]
+        }
+      },
+      "rust_api": [
+        "Settings",
+        "SettingsInput",
+        "upstream::settings"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "every_field_family_round_trips_its_upstream_shaped_fixtures"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "every_field_family_re_encodes_byte_identically_in_original_and_reversed_key_order"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "fixtures_cover_every_top_level_key_upstream_declares"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "unknown_top_level_keys_survive_in_place_and_in_order"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "the_permissions_object_keeps_undeclared_keys_and_unlisted_modes"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "settings_input_names_the_three_upstream_forms"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "each_hook_handler_kind_decodes_into_its_own_variant"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "each_marketplace_source_kind_decodes_into_its_own_variant"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "an_unlisted_marketplace_source_survives_as_raw_json"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "status_line_ssh_configs_and_plugin_configs_round_trip_with_unknown_members"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Settings is generated from the pinned declarations: all 182 declared top-level keys, every nested object, string-literal union and object union, the $schema key and the open index signature. Unknown keys and key order survive a decode then encode byte for byte, and a string-literal value upstream does not list is kept. Nothing is validated. Python has no Settings type; its settings option is a path or JSON string, which SettingsInput distinguishes explicitly. Wiring Settings into Options.settings is mapped separately. Hook handler kinds, marketplace and plugin sources, statusLine, sshConfigs, enabledPlugins and pluginConfigs are generated unions: a union picks the member that re-encodes to the same JSON with the fewest undeclared keys and unlisted string-literal values, so a discriminant selects its own member, and anything else is kept as raw JSON."
+    },
+    {
+      "id": "settings-sandbox",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "SandboxSettings",
+            "core.SandboxSettings",
+            "SandboxNetworkConfig",
+            "core.SandboxNetworkConfig",
+            "SandboxFilesystemConfig",
+            "core.SandboxFilesystemConfig",
+            "SandboxCredentialsConfig",
+            "core.SandboxCredentialsConfig",
+            "SandboxIgnoreViolations",
+            "core.SandboxIgnoreViolations"
+          ]
+        }
+      },
+      "rust_api": [
+        "SandboxSettings",
+        "SandboxNetworkConfig",
+        "SandboxFilesystemConfig",
+        "SandboxCredentialsConfig",
+        "SandboxIgnoreViolations"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "python_sandbox_dicts_map_byte_for_byte_onto_the_typed_sandbox"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "typescript_only_sandbox_keys_and_unknown_keys_are_kept"
+        }
+      ],
+      "status": "supported",
+      "rationale": "TypeScript declares the sandbox types as Zod inferences, which equal the generated sandbox property of Settings (16 keys, open object); the Rust names alias those types. Python SandboxSettings and SandboxNetworkConfig TypedDicts use a subset of the same keys, and fixtures show them re-encoding byte for byte. Python has no filesystem or credentials TypedDict, so those are TypeScript only."
+    },
+    {
+      "id": "settings-resolution-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "ResolvedSettings",
+            "core.ResolvedSettings",
+            "ProvenanceEntry",
+            "core.ProvenanceEntry",
+            "PolicySettingsOrigin",
+            "core.PolicySettingsOrigin",
+            "ResolvedSettingSource",
+            "core.ResolvedSettingSource",
+            "ResolveSettingsOptions",
+            "core.ResolveSettingsOptions",
+            "SDKSettingsParseError",
+            "core.SDKSettingsParseError"
+          ]
+        }
+      },
+      "rust_api": [
+        "ResolvedSettings",
+        "ProvenanceEntry",
+        "ResolvedSettingSource",
+        "PolicySettingsOrigin",
+        "ResolveSettingsOptions",
+        "SDKSettingsParseError",
+        "upstream::settings_resolution"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "resolved_settings_round_trip_with_provenance_and_machine_policy"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "every_policy_origin_and_source_name_decodes_and_unknown_ones_are_kept"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "resolve_options_and_parse_errors_round_trip"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The result, option and error shapes of resolveSettings are generated from the pinned declarations and keep unknown keys and unlisted source names. The resolveSettings function itself is mapped separately. Python has no equivalent types."
+    },
+    {
+      "id": "settings-resolution-functions",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "resolveSettings",
+            "filterEscalatingDefaultMode",
+            "core.resolveSettings",
+            "core.filterEscalatingDefaultMode"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "resolve_settings",
+        "resolve_settings_with",
+        "filter_escalating_default_mode",
+        "ResolveSettingsError",
+        "adapters::SettingsHost",
+        "adapters::NativeHost",
+        "adapters::ExecuteFile"
+      ],
+      "tests": [
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "cascade_merges_in_precedence_order_with_array_union_and_recursion"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "sources_list_each_non_empty_source_low_to_high"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "empty_setting_sources_skip_every_filesystem_source"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "explicit_cwd_selects_the_project_files"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "config_dir_variable_moves_the_user_file"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "invalid_and_non_object_files_are_skipped_without_failing"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "managed_file_wins_and_reports_its_origin"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "managed_drop_ins_merge_in_code_unit_order_after_the_base_file"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "unreadable_managed_file_reports_did_not_load"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "remote_policy_outranks_the_managed_file"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "parent_managed_settings_contribute_only_restrictive_keys"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "plist_policy_is_read_with_plutil_on_macos"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "registry_policy_is_read_with_reg_on_windows"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "a_busy_registry_read_is_reported_but_a_missing_key_is_not"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "wsl_without_the_inherit_flag_ignores_the_windows_side"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "wsl_with_the_inherit_flag_reads_the_windows_side_first"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "escalating_default_mode_from_a_project_source_is_dropped"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "accept_edits_from_a_local_source_survives_but_not_from_a_project_source"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "default_mode_set_by_a_user_source_is_kept"
+        },
+        {
+          "path": "tests/resolve_settings_differential.rs",
+          "name": "rust_matches_the_pinned_typescript_resolver_byte_for_byte"
+        }
+      ],
+      "status": "partial",
+      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 19 fixture trees (mise run claude-sdk:resolve-diff). Partial until the listed gaps close: schema value normalization (invalid rule drops, catch defaults) and nested key order, pre-parse key aliases, managedSourcesBehavior merge mode, cloud and org mode, the git-ignored cwd check and the MDM re-read throttle. Python has no equivalent."
+    }
+  ]
+}

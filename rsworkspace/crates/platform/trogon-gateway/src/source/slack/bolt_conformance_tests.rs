@@ -11,7 +11,7 @@ use trogon_nats::jetstream::{
     ClaimBucket, ClaimBucketBinding, ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore,
     StreamMaxAge,
 };
-use trogon_nats::{AdvancedMockNatsClient, NatsToken};
+use trogon_nats::{AdvancedMockNatsClient, DottedNatsToken, NatsToken};
 use trogon_std::NonZeroDuration;
 use trogon_std::time::FixedEpochClock;
 
@@ -418,7 +418,7 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 
 fn gateway_config(transport: SlackTransportConfig) -> SlackConfig {
     SlackConfig {
-        subject_prefix: NatsToken::new(SUBJECT_PREFIX).expect("valid token"),
+        subject_prefix: DottedNatsToken::new(SUBJECT_PREFIX).expect("valid token"),
         stream_name: NatsToken::new("SLACK").expect("valid token"),
         stream_max_age: StreamMaxAge::from_secs(3600).expect("valid max age"),
         ack_budget: AckBudget::default(),

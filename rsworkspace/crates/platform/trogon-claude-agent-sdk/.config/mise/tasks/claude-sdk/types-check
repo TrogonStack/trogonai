@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Fail when the checked-in generated types differ from the pinned upstream declarations"
+#MISE depends=["claude-sdk:install"]
+set -euo pipefail
+
+root="${MISE_PROJECT_ROOT:?Run this task through mise}"
+lib="$root/.config/mise/lib/claude-sdk-freshness"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+python3 "$lib/fetch_pinned_typescript.py" "$scratch/package"
+node "$lib/generate_types.mjs" --typescript-package "$scratch/package" --config "$lib/types.json" --out-root "$root" --check
+node "$lib/synthesize_fixtures.mjs" --typescript-package "$scratch/package" --config "$lib/types.json" --out-root "$root" --check
+node "$lib/generate_settings_schema.mjs" --package "$scratch/package" --out "$root/src/upstream/settings_schema.json" --check
