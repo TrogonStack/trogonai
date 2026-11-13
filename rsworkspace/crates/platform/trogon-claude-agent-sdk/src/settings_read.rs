@@ -253,7 +253,7 @@ fn filter_remote_control(document: &mut Map<String, Value>, spec: &ReadSpec, pol
     let Some(entry) = document.get_mut("remoteControl") else {
         return;
     };
-    if !entry.is_object() {
+    let Some(control) = entry.as_object_mut() else {
         if policy_source {
             let mut restrictive = Map::new();
             restrictive.insert("shareHostProfile".to_owned(), Value::from("off"));
@@ -261,9 +261,6 @@ fn filter_remote_control(document: &mut Map<String, Value>, spec: &ReadSpec, pol
         } else {
             document.shift_remove("remoteControl");
         }
-        return;
-    }
-    let Some(control) = entry.as_object_mut() else {
         return;
     };
     if policy_source && control.keys().any(|name| name != "shareHostProfile") {
@@ -341,10 +338,7 @@ pub(crate) fn sanitize_policy_document(text: &str) -> Option<SettingsMap> {
     let mut document = parse_object(text, SettingsDialect::TypeScript)?;
     let schema = schema()?;
     sanitize(&mut document, schema, schema.read_spec(), true);
-    match js_property_order(Value::Object(document)) {
-        Value::Object(ordered) => Some(ordered),
-        _ => None,
-    }
+    js_property_order(Value::Object(document)).as_object().cloned()
 }
 
 #[cfg(test)]
