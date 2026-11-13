@@ -112,6 +112,35 @@ pub(crate) fn get_path<'a>(settings: &'a SettingsMap, path: &[&str]) -> Option<&
     Some(current)
 }
 
+/// `Qt` upstream: sets (or, with `None`, removes) the value at `path`, copying each object on the way and pruning
+/// objects that a removal leaves empty.
+pub(crate) fn set_path(map: &mut SettingsMap, path: &[&str], value: Option<&Value>) {
+    let Some((first, rest)) = path.split_first() else {
+        return;
+    };
+    if rest.is_empty() {
+        match value {
+            Some(value) => {
+                map.insert((*first).to_owned(), value.clone());
+            }
+            None => {
+                map.shift_remove(*first);
+            }
+        }
+        return;
+    }
+    let mut child = match map.get(*first) {
+        Some(Value::Object(existing)) => existing.clone(),
+        _ => SettingsMap::new(),
+    };
+    set_path(&mut child, rest, value);
+    if value.is_none() && child.is_empty() {
+        map.shift_remove(*first);
+    } else {
+        map.insert((*first).to_owned(), Value::Object(child));
+    }
+}
+
 /// Reorders a settings document the way the upstream schema parse does: schema keys first in
 /// schema order, then every other key in its original order.
 pub(crate) fn in_schema_order(settings: &SettingsMap) -> SettingsMap {
