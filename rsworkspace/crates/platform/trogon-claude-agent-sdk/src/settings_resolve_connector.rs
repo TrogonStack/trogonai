@@ -76,7 +76,7 @@ fn holds_ignore_marker<H: ConnectorHost>(host: &H, path: &Path) -> Result<bool, 
     }
     let bytes = host.read_file(path)?;
     let head = &bytes[..bytes.len().min(4)];
-    Ok(CONNECTOR_GITIGNORE_MARKERS.iter().any(|marker| *marker == head))
+    Ok(CONNECTOR_GITIGNORE_MARKERS.contains(&head))
 }
 
 /// `n7e` upstream: the `.gitignore` of a connector download folder ignores everything, a download left a temporary
