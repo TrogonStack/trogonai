@@ -135,7 +135,7 @@ impl InFlight {
         let outcome = match rereads {
             PolicyRereads::Inline => Outcome::Ended(Some(Box::new(read_host(host, started)))),
             PolicyRereads::Background => {
-                let (sender, receiver) = mpsc::channel();
+                let (sender, receiver) = mpsc::sync_channel(1);
                 let reader = host.clone();
                 let spawned = thread::Builder::new().spawn(move || {
                     let _ = sender.send(read_host(&reader, started));
