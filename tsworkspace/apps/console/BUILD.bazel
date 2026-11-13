@@ -93,6 +93,7 @@ vitest_bin.vitest_test(
         ":sources",
         "//tsworkspace:node_modules/vitest",
     ],
+    env = {"VITE_PRESERVE_SYMLINKS": "1"},
 )
 
 oxlint_bin.oxlint_test(
