@@ -119,6 +119,10 @@ pub enum Error {
     /// TypeScript `AbortError`.
     #[error(transparent)]
     Aborted(#[from] AbortError),
+    /// A failure reported by a custom [`crate::Transport`], carried unchanged. Python lets a transport raise any
+    /// exception and the SDK propagates it as is.
+    #[error(transparent)]
+    Transport(Box<dyn std::error::Error + Send + Sync>),
     #[error("Claude Code closed stdout before completing the current operation")]
     UnexpectedEof,
     #[error("the message queue filled; consume messages or increase its capacity")]

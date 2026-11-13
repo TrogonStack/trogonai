@@ -43,6 +43,7 @@ mod permission;
 mod permission_mode;
 mod permission_update;
 mod process_options;
+mod process_transport;
 mod prompt;
 mod queue_capacity;
 mod run_as;
@@ -90,6 +91,7 @@ mod tool_name;
 mod tool_rule;
 mod tool_use_id;
 mod transcript_mirror;
+mod transport;
 mod usd_budget;
 mod user_input;
 mod version_check;
@@ -101,7 +103,8 @@ pub use builtin_tool_name::BuiltinToolName;
 pub use cli_discovery::CliNotFoundError;
 pub use cli_path::CliPathError;
 pub use client::{
-    ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_with_adapters,
+    ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_turn_with_transport,
+    query_with_adapters, query_with_transport,
 };
 pub use client_app::{format_client_app, normalize_client_app};
 pub use config_value::ConfigValue;
@@ -212,6 +215,7 @@ pub use tool_name::ToolName;
 pub use tool_rule::ToolRule;
 pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
+pub use transport::Transport;
 pub use upstream::settings::Settings;
 pub use upstream::settings_resolution::{
     PolicySettingsOrigin, ProvenanceEntry, ResolveSettingsOptions, ResolvedSettingSource, ResolvedSettings,

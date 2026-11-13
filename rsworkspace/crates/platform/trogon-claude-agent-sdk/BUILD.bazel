@@ -133,6 +133,7 @@ workspace_crate(
         "tool_rule_storage": {},
         "tool_use_id": {},
         "tool_use_id_storage": {},
+        "transport": {},
         "upstream_settings": {
             "compile_data": glob(["tests/fixtures/*.json"]),
         },

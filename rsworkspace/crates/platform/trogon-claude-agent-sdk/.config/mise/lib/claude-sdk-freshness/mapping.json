@@ -1835,9 +1835,14 @@
         "adapters::RuntimeAdapters",
         "adapters::SpawnProcess",
         "adapters::TokioProcessSpawner",
+        "Transport",
         "ClaudeSdkClient::connect_with_adapters",
+        "ClaudeSdkClient::connect_with_transport",
+        "ClaudeSdkClient::connect_with_transport_and_adapters",
         "query_with_adapters",
-        "query_turn_with_adapters"
+        "query_turn_with_adapters",
+        "query_with_transport",
+        "query_turn_with_transport"
       ],
       "tests": [
         {
@@ -1859,10 +1864,46 @@
         {
           "path": "tests/runtime_adapters.rs",
           "name": "dropping_owner_shuts_down_even_when_command_handle_survives"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_custom_transport_drives_a_full_session_through_the_trait"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_the_end_of_the_message_stream_ends_the_run"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_transport_error_from_connect_is_returned_unchanged"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_transport_error_from_read_ends_the_run_and_kills_the_peer"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_a_write_error_from_the_transport_reaches_the_caller"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t15_an_abort_kills_the_transport_before_closing_it"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "q01_query_with_a_transport_writes_the_prompt_after_initialize_and_ends_input"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "q01_a_one_turn_query_stops_after_the_first_result"
+        },
+        {
+          "path": "tests/transport.rs",
+          "name": "t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirror"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust supports statically dispatched process creation (the spawner returns the tokio child unchanged) while the shared driver owns protocol initialization and cleanup. Python Transport and the TypeScript spawn callback have different contracts; equivalent arbitrary transport and platform behavior remain unverified."
+      "status": "supported",
+      "rationale": "The public Transport trait is Python's Transport (connect, write, read_message in place of read_messages, close, is_ready, end_input) with a provided kill for TypeScript's abort. ClaudeSdkClient::connect_with_transport, query_with_transport and query_turn_with_transport inject one; the subprocess implementation is the default and the SpawnProcess adapter stays TypeScript's spawnClaudeCodeProcess. A custom transport gets no CLI discovery, argument list or store-backed resume materialization (the mirror still runs), as upstream."
     },
     {
       "id": "browser-entrypoint",
