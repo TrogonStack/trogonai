@@ -21,12 +21,12 @@ fn a_block_rust_cannot_type_stays_in_the_message() -> Result<(), ProtocolError> 
     let frame = br#"{"type":"assistant","message":{"model":"test","content":[{"type":"tool_use","id":"id","name":"Bash","input":null}]}}"#;
     for mode in [MessageDecoding::TypeScript, MessageDecoding::Python] {
         let object = serde_json::from_slice(frame)?;
-        let Frame::Message(Message::Assistant(message)) = parse_value(&object, mode)? else {
-            panic!("expected an assistant message");
-        };
-        assert!(
-            matches!(&message.content[..], [crate::ContentBlock::Unknown { kind, data }] if kind == "tool_use" && data["input"].is_null())
-        );
+        assert!(matches!(
+            parse_value(&object, mode)?,
+            Frame::Message(Message::Assistant(message))
+                if matches!(&message.content[..], [crate::ContentBlock::Unknown { kind, data }]
+                    if kind == "tool_use" && data["input"].is_null())
+        ));
     }
     Ok(())
 }
