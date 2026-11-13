@@ -323,6 +323,7 @@ async fn permission_callback_can_replace_tool_input() -> TestResult {
         PermissionDecision::Allow {
             updated_input: Some(input),
             updated_permissions: None,
+            decision_classification: None,
         }
     }));
     let mut client = ClaudeSdkClient::connect(options).await?;

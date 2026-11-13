@@ -241,22 +241,41 @@ pub(crate) struct TypeScriptControlRequest<'a, T> {
 #[derive(Serialize)]
 #[serde(tag = "subtype", rename_all = "snake_case")]
 pub(crate) enum CallbackResponse<'a, T> {
-    Success { request_id: &'a str, response: T },
-    Error { request_id: &'a str, error: &'a str },
+    Success {
+        request_id: &'a str,
+        response: T,
+    },
+    Error {
+        request_id: &'a str,
+        error: &'a str,
+        /// TypeScript adds the code of its own `RE` errors only.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error_code: Option<&'a str>,
+    },
 }
 
+/// A `PermissionResult` in the order a host writes its fields, then the `toolUseID` TypeScript spreads after them.
 #[derive(Serialize)]
 #[serde(tag = "behavior", rename_all = "snake_case")]
-pub(crate) enum PermissionResponsePayload {
+pub(crate) enum PermissionResponsePayload<'a> {
     Allow {
-        #[serde(rename = "updatedInput")]
-        updated_input: JsonObject,
+        #[serde(rename = "updatedInput", skip_serializing_if = "Option::is_none")]
+        updated_input: Option<JsonObject>,
         #[serde(rename = "updatedPermissions", skip_serializing_if = "Option::is_none")]
         updated_permissions: Option<Vec<Value>>,
+        #[serde(rename = "decisionClassification", skip_serializing_if = "Option::is_none")]
+        decision_classification: Option<&'static str>,
+        #[serde(rename = "toolUseID", skip_serializing_if = "Option::is_none")]
+        tool_use_id: Option<&'a str>,
     },
     Deny {
         message: String,
-        interrupt: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        interrupt: Option<bool>,
+        #[serde(rename = "decisionClassification", skip_serializing_if = "Option::is_none")]
+        decision_classification: Option<&'static str>,
+        #[serde(rename = "toolUseID", skip_serializing_if = "Option::is_none")]
+        tool_use_id: Option<&'a str>,
     },
 }
 

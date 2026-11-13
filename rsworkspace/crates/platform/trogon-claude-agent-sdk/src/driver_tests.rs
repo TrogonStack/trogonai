@@ -310,7 +310,7 @@ async fn a_stale_panicked_callback_cannot_terminate_the_current_session() -> Res
         id.clone(),
         crate::CancellationToken::new(),
         Some(Duration::from_secs(1)),
-        wire::callback_error_response(&id, "fallback"),
+        wire::callback_error_response(&id, "fallback").map(Some),
         async { std::panic::resume_unwind(Box::new("scripted stale callback failure")) },
     );
     timeout(Duration::from_secs(1), async {
@@ -623,7 +623,7 @@ async fn a_duplicate_in_flight_request_is_skipped_or_run_by_policy() -> Result<(
         id.clone(),
         crate::CancellationToken::new(),
         None,
-        wire::callback_error_response(&id, "fallback"),
+        wire::callback_error_response(&id, "fallback").map(Some),
         pending(),
     );
     assert!(!fixture.driver.admit_callback(&id).await?);

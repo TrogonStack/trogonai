@@ -3400,6 +3400,43 @@
       "rust": [
         "src/argv.rs"
       ]
+    },
+    {
+      "id": "c15-permission-answer-shape",
+      "concept": "The can_use_tool answer built from the callback result",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 646,
+        "line_end": 667,
+        "sha256": "e3d91982842087feb184eb026b649cf3b1ce525f31d1f49855f490f2ebcf8326"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "if(r===null)return qu;return{...r,toolUseID:e.request.tool_use_id}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "10551af066bce8d6d8274f773e93539ed47fbeefa48bdb2927ab424b7aec9b68"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript writes the callback result as returned, in its key order, with toolUseID appended when the request carried one, so decisionClassification and an omitted updatedInput survive. Python rebuilds the answer: allow always carries updatedInput (the original input when the callback gave none), deny carries interrupt only when true, and updatedPermissions use PermissionUpdate.to_dict key order."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "The TypeScript shape is the default; ArgvStyle::Python writes the Python shape byte for byte."
+      },
+      "contracts": [
+        "golden_inbound_control::permission_decisions_are_written_byte_for_byte",
+        "golden_inbound_control::python_permission_answers_echo_the_original_input",
+        "golden_inbound_control::permission_requests_carry_every_typescript_context_field"
+      ],
+      "rust": [
+        "src/permission.rs",
+        "src/permission_update.rs",
+        "src/wire.rs"
+      ]
     }
   ]
 }

@@ -154,6 +154,20 @@ TypeScript returns `undefined`, `decode()` reads the generated type).
 | `background_tasks(Option<ToolUseId>) -> bool` | not applicable | `backgroundTasks` (`true` for an absent `backgrounded`; a non-boolean is `Error::Protocol` here) |
 | `Error::ControlRejected`, `ControlRejectionError::error_code` | `Exception(error)` (no code) | `error_code` kept when it matches `/^[a-z][a-z0-9_]{0,63}$/` |
 
+## Inbound control requests
+
+Answers match `sdk.mjs` by default and `claude_agent_sdk` under
+`ArgvStyle::Python`.
+
+| Rust | Python | TypeScript |
+| --- | --- | --- |
+| `ToolPermissionRequest` | `ToolPermissionContext` (suggestions, tool use, agent, blocked path, decision reason, title, display name, description) | `canUseTool` options; `decisionReasonType`, `decisionReasonCode`, `serverPolicyAskOnly`, `plugin`, `serverPrompt`, `computerFolder` and `matchedAskRule` only when well typed, otherwise kept in `additional_fields` |
+| `PermissionDecision::Allow` | `PermissionResultAllow` (`updatedInput` falls back to the original input) | result written as returned with `toolUseID` appended |
+| `PermissionDecision::Deny`, `DenialDisposition` | `PermissionResultDeny` (`interrupt` only when true) | result written as returned with `toolUseID` appended |
+| `PermissionDecisionClassification` | not applicable | `decisionClassification` |
+| `PermissionDecision::AnsweredOutOfBand` | `TypeError` error response | `null`: no response |
+| `PermissionUpdate` in `updatedPermissions` | `PermissionUpdate.to_dict` (`type`, `destination`, then the fields); an update without a destination is a `PermissionUpdate::Unknown` raw object | the update in declaration order |
+
 ## Messages
 
 | Rust | Python | TypeScript |

@@ -122,11 +122,16 @@ controls depend on installed CLI support.
 
 ## Callbacks and MCP
 
-`ToolPermissionHandler` receives request/tool identities, suggestions, MCP
-provenance and prompt context, plus a cancellation signal. Typed allow decisions
-can replace input and update permission rules. Absent handlers deny host
-permission requests; an opted-in `limits.callback_timeout` denies, and cancellation
-suppresses a late reply.
+`ToolPermissionHandler` receives every TypeScript `canUseTool` option:
+request and tool identities, suggestions, MCP provenance, the decision reason
+with its type and code, the matched ask rule, the computer folder, plugin and
+server prompt, plus a cancellation signal. A field of the wrong type stays in
+`additional_fields`. Decisions carry updated input, permission updates,
+interrupt and a decision classification; `AnsweredOutOfBand` writes nothing.
+Answers match `sdk.mjs` byte for byte by default and `claude_agent_sdk` under
+`ArgvStyle::Python`. Absent handlers deny host permission requests; an
+opted-in `limits.callback_timeout` denies, and cancellation suppresses a late
+reply.
 The CLI can authorize tools through its own permission mode or rules before
 consulting the host.
 Suggestions keep unknown destinations, behaviors and update types verbatim, so

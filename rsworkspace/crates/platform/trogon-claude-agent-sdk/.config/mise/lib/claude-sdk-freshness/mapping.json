@@ -1100,10 +1100,18 @@
         {
           "path": "tests/runtime_features.rs",
           "name": "cancelled_permission_exposes_its_signal_to_the_host"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "permission_requests_carry_every_typescript_context_field"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "permission_decisions_are_written_byte_for_byte"
         }
       ],
       "status": "supported",
-      "rationale": "Host permission callbacks preserve context, typed updates and cancellation signals. CLI rules can authorize before consulting the host."
+      "rationale": "can_use_tool answers match sdk.mjs 0.3.323 and claude_agent_sdk 0.2.181 byte for byte in each ArgvStyle. TypeScript appends toolUseID, keeps decisionClassification and writes nothing for AnsweredOutOfBand; Python echoes the original input on allow and rejects a null result with its TypeError text. Handlers receive cancellation signals. CLI rules can authorize before consulting the host."
     },
     {
       "id": "permission-types",
@@ -1134,9 +1142,16 @@
       },
       "rust_api": [
         "PermissionDecision",
+        "PermissionDecisionClassification",
+        "DenialDisposition",
         "PermissionUpdate",
+        "PermissionRuleValue",
+        "PermissionBehavior",
+        "PermissionUpdateDestination",
         "ToolPermissionRequest",
-        "PermissionUpdateDestination"
+        "McpServerProvenance",
+        "ComputerFolder",
+        "MatchedAskRule"
       ],
       "tests": [
         {
@@ -1146,10 +1161,22 @@
         {
           "path": "tests/runtime_features.rs",
           "name": "permission_context_and_updates_round_trip_through_the_callback"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "permission_requests_carry_every_typescript_context_field"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "permission_decisions_are_written_byte_for_byte"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "python_permission_answers_echo_the_original_input"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust validates decisions and update rules and retains JSON extension fields. Review nested upstream context and union changes rather than assuming identical type names imply equivalence."
+      "status": "supported",
+      "rationale": "ToolPermissionRequest carries every TypeScript canUseTool option (decisionReasonType, decisionReasonCode, serverPolicyAskOnly, plugin, serverPrompt, computerFolder, matchedAskRule and the rest) and the Python ToolPermissionContext fields. Lenient fields are read only when well typed, as sdk.mjs does, and a value of the wrong type stays in additional_fields instead of being dropped. PermissionDecision covers PermissionResult allow/deny with updatedInput, updatedPermissions, interrupt and decisionClassification, plus the null result (AnsweredOutOfBand). Updates are written in each SDK's key order (TypeScript type/fields/destination, Python to_dict type/destination/fields). A Python PermissionUpdate without a destination is sent through PermissionUpdate::Unknown with its raw object, which reproduces to_dict's bytes."
     },
     {
       "id": "hooks",

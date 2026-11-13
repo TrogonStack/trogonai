@@ -403,6 +403,7 @@ async fn permission_context_and_updates_round_trip_through_the_callback() -> Tes
             PermissionDecision::Allow {
                 updated_input: None,
                 updated_permissions: Some(request.suggestions),
+                decision_classification: None,
             }
         }));
         let mut client = ClaudeSdkClient::connect(options).await?;

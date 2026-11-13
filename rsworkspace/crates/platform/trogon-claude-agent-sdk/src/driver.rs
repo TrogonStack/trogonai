@@ -230,7 +230,8 @@ impl ControlResponder {
     }
 }
 
-type CallbackOutput = (ControlRequestId, Result<serde_json::Value, ProtocolError>);
+/// The response a callback writes; `None` when the request stays unanswered.
+type CallbackOutput = (ControlRequestId, Result<Option<serde_json::Value>, ProtocolError>);
 
 type McpSessions = indexmap::IndexMap<crate::McpServerName, Arc<dyn crate::SdkMcpSession>>;
 
@@ -841,7 +842,7 @@ where
                         Some(Ok((task_id, (id, response)))) if self.callback_handles.get(&id).is_some_and(|handle| handle.id() == task_id) => {
                             self.callback_handles.remove(&id);
                             self.callback_signals.remove(&id);
-                            self.write_response(response).await?;
+                            self.write_callback_response(response).await?;
                         }
                         Some(Ok((task_id, (id, response)))) if self.detached_callbacks.remove(&task_id).is_some() => {
                             // Python's `finally` pops the request id whichever task holds it, so the live task
@@ -850,7 +851,7 @@ where
                                 let signal = self.callback_signals.remove(&id).unwrap_or_default();
                                 self.detached_callbacks.insert(handle.id(), signal);
                             }
-                            self.write_response(response).await?;
+                            self.write_callback_response(response).await?;
                         }
                         Some(Err(error)) if error.is_cancelled() => {}
                         Some(Err(error)) if self.detached_callbacks.contains_key(&error.id()) || self.callback_handles.values().any(|handle| handle.id() == error.id()) => return Err(Error::CallbackTask(error)),
@@ -1296,23 +1297,30 @@ where
                     if !self.admit_callback(&id).await? {
                         return Ok(());
                     }
+                    let style = self.argv_style;
                     let input = request.input.clone();
+                    let tool_use_id = request.tool_use_id.clone();
                     let signal = request.signal.clone();
                     if let Some(handler) = self.handler.clone() {
                         let callback_id = id.clone();
                         let fallback = wire::permission_response(
                             &id,
                             input.clone(),
+                            tool_use_id.as_ref(),
                             PermissionDecision::deny("Permission callback timed out"),
+                            style,
                         );
                         self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-                            wire::permission_response(&callback_id, input, handler.decide(request).await)
+                            let decision = handler.decide(*request).await;
+                            wire::permission_response(&callback_id, input, tool_use_id.as_ref(), decision, style)
                         });
                     } else {
-                        self.write_response(wire::permission_response(
+                        self.write_callback_response(wire::permission_response(
                             &id,
                             input,
+                            tool_use_id.as_ref(),
                             PermissionDecision::deny("No permission handler is available"),
+                            style,
                         ))
                         .await?;
                     }
@@ -1336,11 +1344,13 @@ where
                             signal: signal.clone(),
                         };
                         let response_id = id.clone();
-                        let fallback = wire::callback_error_response(&id, "SDK hook callback timed out");
+                        let fallback = wire::callback_error_response(&id, "SDK hook callback timed out").map(Some);
                         self.spawn_callback(id, signal, callback.timeout, fallback, async move {
                             match callback.handler.call(request).await {
-                                Ok(output) => wire::success_response(&response_id, output.to_wire_json()?),
-                                Err(_) => wire::callback_error_response(&response_id, "SDK hook callback failed"),
+                                Ok(output) => wire::success_response(&response_id, output.to_wire_json()?).map(Some),
+                                Err(_) => {
+                                    wire::callback_error_response(&response_id, "SDK hook callback failed").map(Some)
+                                }
                             }
                         });
                     } else {
@@ -1358,13 +1368,15 @@ where
                         let signal = crate::CancellationToken::new();
                         let callback_signal = signal.clone();
                         let response_id = id.clone();
-                        let fallback = wire::callback_error_response(&id, "SDK MCP request timed out");
+                        let fallback = wire::callback_error_response(&id, "SDK MCP request timed out").map(Some);
                         self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
                             match server.request(message, callback_signal).await {
                                 Ok(response) => {
-                                    wire::success_response(&response_id, McpResponsePayload::new(response)?)
+                                    wire::success_response(&response_id, McpResponsePayload::new(response)?).map(Some)
                                 }
-                                Err(_) => wire::callback_error_response(&response_id, "SDK MCP request failed"),
+                                Err(_) => {
+                                    wire::callback_error_response(&response_id, "SDK MCP request failed").map(Some)
+                                }
                             }
                         });
                     } else {
@@ -1405,13 +1417,14 @@ where
                             crate::ElicitationResponse::Cancel
                                 .to_wire_json()
                                 .map_err(ProtocolError::from)?,
-                        );
+                        )
+                        .map(Some);
                         self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
                             let response = handler
                                 .call(request)
                                 .await
                                 .unwrap_or(crate::ElicitationResponse::Cancel);
-                            wire::success_response(&response_id, response.to_wire_json()?)
+                            wire::success_response(&response_id, response.to_wire_json()?).map(Some)
                         });
                     } else {
                         self.write_response(wire::success_response(
@@ -1447,13 +1460,14 @@ where
                         crate::UserDialogResponse::Cancelled
                             .to_wire_json()
                             .map_err(ProtocolError::from)?,
-                    );
+                    )
+                    .map(Some);
                     self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
                         let response = handler
                             .call(request)
                             .await
                             .unwrap_or(crate::UserDialogResponse::Cancelled);
-                        wire::success_response(&response_id, response.to_wire_json()?)
+                        wire::success_response(&response_id, response.to_wire_json()?).map(Some)
                     });
                 }
                 (IncomingControl::OAuthTokenRefresh { kind, token_state }, _) => {
@@ -1655,10 +1669,10 @@ where
         id: ControlRequestId,
         signal: crate::CancellationToken,
         deadline: Option<Duration>,
-        fallback: Result<serde_json::Value, ProtocolError>,
+        fallback: Result<Option<serde_json::Value>, ProtocolError>,
         future: Fut,
     ) where
-        Fut: Future<Output = Result<serde_json::Value, ProtocolError>> + Send + 'static,
+        Fut: Future<Output = Result<Option<serde_json::Value>, ProtocolError>> + Send + 'static,
     {
         let callback_id = id.clone();
         let callback_signal = signal.clone();
@@ -1677,6 +1691,17 @@ where
         });
         self.callback_handles.insert(id.clone(), handle);
         self.callback_signals.insert(id, signal);
+    }
+
+    /// Writes a callback's answer, if it has one.
+    async fn write_callback_response(
+        &mut self,
+        response: Result<Option<serde_json::Value>, ProtocolError>,
+    ) -> Result<(), Error> {
+        match response.transpose() {
+            Some(frame) => self.write_response(frame).await,
+            None => Ok(()),
+        }
     }
 
     async fn write_response(&mut self, frame: Result<serde_json::Value, ProtocolError>) -> Result<(), Error> {
