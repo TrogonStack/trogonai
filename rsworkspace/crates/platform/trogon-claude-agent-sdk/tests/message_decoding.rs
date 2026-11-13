@@ -89,8 +89,8 @@ async fn run(message: &Value, decoding: MessageDecoding) -> Result<Outcome, Box<
         message_decoding: decoding,
         ..ClaudeAgentOptions::default()
     };
-    options.limits.control_timeout = Timeout::new(Duration::from_secs(2))?;
-    options.limits.shutdown_timeout = Timeout::new(Duration::from_secs(5))?;
+    options.limits.control_timeout = Some(Timeout::checked(Duration::from_secs(2))?);
+    options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(Timeout::checked(Duration::from_secs(5))?);
     let (process, harness) = ScriptedProcessSpawner::new();
     let mut cli = ScriptedCli::from(harness);
     let adapters = RuntimeAdapters {

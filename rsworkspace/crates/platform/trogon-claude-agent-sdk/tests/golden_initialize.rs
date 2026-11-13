@@ -135,14 +135,14 @@ fn captured_hooks() -> Result<Vec<HookRegistration>, TimeoutError> {
             event: HookEvent::PreToolUse,
             matcher: Some("Bash".into()),
             callbacks: vec![noop_hook(), noop_hook()],
-            timeout: Some(Timeout::new(Duration::from_secs(30))?),
+            timeout: Some(Timeout::checked(Duration::from_secs(30))?),
             on_failure: Some(HookFailureMode::Block),
         },
         HookRegistration {
             event: HookEvent::PreToolUse,
             matcher: None,
             callbacks: Vec::new(),
-            timeout: Some(Timeout::new(Duration::from_millis(1500))?),
+            timeout: Some(Timeout::checked(Duration::from_millis(1500))?),
             on_failure: None,
         },
     ])
