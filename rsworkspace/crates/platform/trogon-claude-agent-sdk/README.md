@@ -253,10 +253,13 @@ upstream SDKs).
   and the other initialize-only options against captured upstream bytes).
   `ArgvStyle::Python` emits Python `0.2.181` argv. The two
   upstream SDKs disagree, so both are exposed and TypeScript is the default.
-- `EnvironmentMode::Overlay` (default, Python): inherited environment, then
-  `options.env`. `Replace` (TypeScript with `options.env`): only `options.env`
-  plus the SDK defaults. `Inherit` (TypeScript without `options.env`).
-  `CLAUDECODE` is removed unless `ClaudeCodeMarker::Keep` is chosen.
+- `EnvironmentMode::TypeScript` (default) replaces the inherited environment with
+  `options.env` when it has entries and inherits it otherwise, as TypeScript
+  `0.3.323` does. `Replace` and `Inherit` pick either branch explicitly (`Replace`
+  with an empty `options.env` is TypeScript's explicit `env: {}`). `Overlay`
+  (Python): inherited environment, then `options.env`. `CLAUDECODE` is removed in
+  `Overlay` unless `ClaudeCodeMarker::Keep` is chosen, and kept otherwise unless
+  `ClaudeCodeMarker::Remove` is chosen.
   `CLAUDE_CODE_ENTRYPOINT` defaults to `sdk-trogon-rs` and is configurable.
   `CLAUDE_CODE_SDK_READS_SESSION_STATE=1` is added unless a case-insensitive match
   exists; the inherited check covers only the variable names the SDK captures.

@@ -214,9 +214,15 @@ pub enum Error {
     DialogKindsWithoutHandler,
     #[error("SDK configuration could not be encoded")]
     InvalidConfiguration,
-    #[error("file checkpointing is not yet supported with a session store")]
+    /// File checkpointing together with a session store. `Display` is TypeScript's text, `python_message`
+    /// Python's.
+    #[error(
+        "enableFileCheckpointing is not yet supported with sessionStore (backup blobs are not mirrored, so rewindFiles() fails after a store-backed resume)."
+    )]
     FileCheckpointingWithSessionStore,
-    #[error("continue_conversation with a session store requires the store to support listing sessions")]
+    /// `continue` against a session store that cannot list sessions. `Display` is TypeScript's text,
+    /// `python_message` Python's.
+    #[error("Options.continue with sessionStore requires store.listSessions to be implemented")]
     ContinueRequiresListSessions,
     /// Python's text for a control request that went unanswered for the configured wait.
     #[error("Control request timeout: {operation}")]
@@ -292,6 +298,19 @@ impl Error {
         match self {
             Self::Process { status, .. } => exit_code(status),
             Self::Result(result) => result.exit_code(),
+            _ => None,
+        }
+    }
+
+    /// Python's text for the errors whose `Display` is TypeScript's and whose wording differs between the two SDKs.
+    pub fn python_message(&self) -> Option<&'static str> {
+        match self {
+            Self::FileCheckpointingWithSessionStore => Some(
+                "session_store cannot be combined with enable_file_checkpointing (checkpoints are local-disk only and would diverge from the mirrored transcript)",
+            ),
+            Self::ContinueRequiresListSessions => {
+                Some("continue_conversation with session_store requires the store to implement list_sessions()")
+            }
             _ => None,
         }
     }

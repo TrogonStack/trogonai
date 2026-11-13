@@ -232,6 +232,7 @@ async fn hooks_omit_on_failure_when_unset() -> Result<(), Box<dyn std::error::Er
 #[tokio::test]
 async fn overlay_environment_matches_python() -> Result<(), Box<dyn std::error::Error>> {
     let mut options = base();
+    options.environment_mode = EnvironmentMode::Overlay;
     options.cwd = Some("work".into());
     options.client_app = Some("my-app/1.2.3".into());
     options.trace_context = Some(TraceContext {
