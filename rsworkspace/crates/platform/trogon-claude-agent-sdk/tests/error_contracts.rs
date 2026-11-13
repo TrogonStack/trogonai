@@ -35,6 +35,7 @@ fn control_timeout_diagnostics_identify_each_wire_operation() {
         (ControlOperation::ContextUsage, "get_context_usage"),
         (ControlOperation::McpReconnect, "mcp_reconnect"),
         (ControlOperation::McpToggle, "mcp_toggle"),
+        (ControlOperation::McpReadResource, "mcp_read_resource"),
         (ControlOperation::StopTask, "stop_task"),
         (ControlOperation::BackgroundTasks, "background_tasks"),
         (ControlOperation::McpSetServers, "mcp_set_servers"),

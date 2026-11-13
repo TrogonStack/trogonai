@@ -98,7 +98,10 @@ confirmed only log a warning. Non-empty `supported_dialog_kinds` without a
 The handle provides interrupt receipts, model and permission changes, rewind,
 MCP status/reconnect/toggle/replacement, context usage and task controls. Legacy
 interrupt replies remain distinct from reported empty queues. Newer controls
-depend on installed CLI support.
+depend on installed CLI support. `read_mcp_resource` follows TypeScript
+`readMcpResource`: Claude Code reads the `ui://` resource, and the reply's
+`response` field is returned as sent, without a shape check, or `None` when the
+reply has none, where TypeScript returns `undefined`.
 
 ## Callbacks and MCP
 

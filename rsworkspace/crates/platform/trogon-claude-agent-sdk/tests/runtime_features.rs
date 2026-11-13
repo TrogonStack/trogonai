@@ -97,6 +97,81 @@ async fn typed_controls_preserve_receipts_and_use_exact_wire_operations() -> Tes
     Ok(())
 }
 
+/// TypeScript `readMcpResource` sends `{subtype, serverName, uri}` and resolves with the response as sent.
+#[tokio::test]
+async fn read_mcp_resource_sends_the_typescript_request_and_returns_the_response() -> TestResult {
+    let mut client = ClaudeSdkClient::connect(options("controls")?).await?;
+    let response = client
+        .handle()
+        .read_mcp_resource(McpServerName::from("local"), "ui://local/app")
+        .await?
+        .ok_or("the reply carries a response")?;
+    assert_eq!(
+        serde_json::to_string(response.as_json())?,
+        r#"{"contents":[{"uri":"ui://local/app","mimeType":"text/html;profile=mcp-app","text":"<p>app</p>","_meta":{"ui":{"csp":{}}}}],"extra":true}"#
+    );
+    let request = timeout(Duration::from_secs(3), async {
+        loop {
+            if let Some(Message::System(message)) = client.next_message().await?
+                && message.subtype == "control_observed"
+            {
+                return Ok::<_, trogon_claude_agent_sdk::Error>(message.data["request"].clone());
+            }
+        }
+    })
+    .await??;
+    assert_eq!(
+        serde_json::to_string(&request)?,
+        r#"{"subtype":"mcp_read_resource","serverName":"local","uri":"ui://local/app"}"#
+    );
+    client.disconnect().await?;
+    Ok(())
+}
+
+/// `readMcpResource` returns the reply's `response` field as sent: `undefined` when it is missing, and `null` or
+/// any other value unchanged.
+#[tokio::test]
+async fn read_mcp_resource_returns_none_for_a_reply_without_a_response() -> TestResult {
+    let client = ClaudeSdkClient::connect(options("controls")?).await?;
+    let missing = client
+        .handle()
+        .read_mcp_resource(McpServerName::from("local"), "ui://local/none")
+        .await?;
+    assert_eq!(missing, None);
+    let null = client
+        .handle()
+        .read_mcp_resource(McpServerName::from("local"), "ui://local/null")
+        .await?
+        .ok_or("a null response is still a response")?;
+    assert_eq!(null.as_json(), &Value::Null);
+    let text = client
+        .handle()
+        .read_mcp_resource(McpServerName::from("local"), "ui://local/text")
+        .await?
+        .ok_or("a text response is still a response")?;
+    assert_eq!(serde_json::to_string(text.as_json())?, r#""as sent""#);
+    assert_eq!(text.contents(), None);
+    client.disconnect().await?;
+    Ok(())
+}
+
+/// A `readMcpResource` reply with an error subtype rejects the call, as TypeScript rejects its promise.
+#[tokio::test]
+async fn read_mcp_resource_rejects_when_claude_code_answers_with_an_error() -> TestResult {
+    let client = ClaudeSdkClient::connect(options("controls")?).await?;
+    let rejected = client
+        .handle()
+        .read_mcp_resource(McpServerName::from("local"), "https://local/app")
+        .await;
+    let Err(Error::ControlRejected { operation, rejection }) = &rejected else {
+        return Err(format!("expected a rejection, got {rejected:?}").into());
+    };
+    assert_eq!(*operation, trogon_claude_agent_sdk::ControlOperation::McpReadResource);
+    assert_eq!(rejection.message(), "fixture reads ui:// resources only");
+    client.disconnect().await?;
+    Ok(())
+}
+
 fn blocking_hook() -> HookRegistration {
     HookRegistration {
         event: HookEvent::PreToolUse,

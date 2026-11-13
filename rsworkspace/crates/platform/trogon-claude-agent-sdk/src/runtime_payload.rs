@@ -148,6 +148,11 @@ pub(crate) enum RequestPayload<'a> {
         server_name: &'a str,
         enabled: bool,
     },
+    McpReadResource {
+        #[serde(rename = "serverName")]
+        server_name: &'a str,
+        uri: &'a str,
+    },
     StopTask {
         task_id: &'a str,
     },

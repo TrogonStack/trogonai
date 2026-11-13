@@ -54,7 +54,8 @@ pub(crate) enum IncomingControl {
 }
 
 pub(crate) enum ControlResponse {
-    Success(Value),
+    /// The `response` field, `None` when the success frame has none.
+    Success(Option<Value>),
     Error(String),
 }
 
@@ -149,8 +150,8 @@ enum ControlResponseWire {
     #[serde(rename = "success")]
     Success {
         request_id: String,
-        #[serde(default)]
-        response: Value,
+        #[serde(default, deserialize_with = "present")]
+        response: Option<Value>,
     },
     #[serde(rename = "error")]
     Error { request_id: String, error: String },
@@ -159,6 +160,11 @@ enum ControlResponseWire {
 #[derive(Deserialize)]
 struct CancelWire {
     request_id: String,
+}
+
+/// Keeps a `null` field apart from a missing one: a present field is `Some`, even when it is `null`.
+fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(deserializer).map(Some)
 }
 
 fn decode<T: serde::de::DeserializeOwned>(data: JsonObject) -> Result<T, ProtocolError> {

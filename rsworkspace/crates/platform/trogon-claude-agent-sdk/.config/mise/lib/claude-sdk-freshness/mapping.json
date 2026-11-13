@@ -623,6 +623,42 @@
       "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
     },
     {
+      "id": "mcp-read-resource",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Query.readMcpResource",
+            "core.Query.readMcpResource"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClientHandle.read_mcp_resource",
+        "McpReadResourceResponse"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "read_mcp_resource_sends_the_typescript_request_and_returns_the_response"
+        },
+        {
+          "path": "tests/control_values.rs",
+          "name": "mcp_read_resource_response_keeps_the_response_as_sent"
+        },
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "read_mcp_resource_returns_none_for_a_reply_without_a_response"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The control request bytes and the unvalidated response field, including undefined when the reply has none, match TypeScript readMcpResource. Python has no equivalent."
+    },
+    {
       "id": "context-usage",
       "upstream": {
         "python": {
