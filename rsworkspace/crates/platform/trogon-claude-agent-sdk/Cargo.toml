@@ -29,7 +29,7 @@ sha2 = { workspace = true }
 icu_collator = "=2.4.0"
 unicode-normalization = "=0.1.26"
 unicode-general-category = "=1.1.0"
-futures-util = { workspace = true }
+futures-util = { workspace = true, features = ["sink"] }
 tracing = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
