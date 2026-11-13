@@ -215,3 +215,30 @@ fn fork_derives_titles_from_existing_custom_titles_and_rejects_empty_sources() -
     ));
     Ok(())
 }
+
+#[test]
+fn fork_keeps_source_key_order_and_selects_the_escaping() -> TestResult {
+    let mut lines = transcript();
+    lines[0] = json!({"type":"user","uuid":U1,"parentUuid":null,"sessionId":SESSION,"slug":"s","zebra":1,
+                      "alpha":2,"teamName":"t","message":{"role":"user","content":"caf\u{e9} \u{1f600}"}});
+    let f = fixture(&lines)?;
+
+    let utf8 = f.files.fork_session(SESSION, None, None, None)?.session_id;
+    let body = fs::read_to_string(f.dir.join(format!("{}.jsonl", utf8.as_str())))?;
+    let first = body.lines().next().ok_or("empty")?;
+    assert!(first.contains("caf\u{e9} \u{1f600}"));
+    let zebra = first.find("\"zebra\"").ok_or("zebra")?;
+    let alpha = first.find("\"alpha\"").ok_or("alpha")?;
+    assert!(first.find("\"type\"").ok_or("type")? < zebra && zebra < alpha);
+    assert!(!first.contains("teamName") && !first.contains("\"slug\""));
+
+    let ascii = f
+        .files
+        .fork_session_with(SESSION, None, None, None, trogon_claude_agent_sdk::JsonEscaping::Ascii)?
+        .session_id;
+    let body = fs::read_to_string(f.dir.join(format!("{}.jsonl", ascii.as_str())))?;
+    let first = body.lines().next().ok_or("empty")?;
+    assert!(first.contains("caf\\u00e9 \\ud83d\\ude00"));
+    assert!(first.is_ascii());
+    Ok(())
+}

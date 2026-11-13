@@ -618,9 +618,15 @@ pub async fn fork_session_via_store(
             &mut replacements,
         );
     }
-    let (forked, lines) = build_fork_lines(transcript, replacements, session_id, up_to, title, || {
-        derive_title_from_entries(&loaded)
-    })?;
+    let (forked, lines) = build_fork_lines(
+        transcript,
+        replacements,
+        session_id,
+        up_to,
+        title,
+        || derive_title_from_entries(&loaded),
+        crate::JsonEscaping::Utf8,
+    )?;
 
     let entries = lines
         .iter()

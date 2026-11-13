@@ -40,6 +40,11 @@ pub struct ListSessionsOptions {
     pub offset: usize,
     /// Include sessions of the sibling git worktrees of `directory`.
     pub include_worktrees: bool,
+    /// Keep sessions started by the SDKs or a daemon. Only TypeScript rules filter them, so the setting is
+    /// ignored under [`SummaryDialect::Python`].
+    pub include_programmatic: bool,
+    /// Which upstream SDK's rules read the config directory.
+    pub dialect: SummaryDialect,
 }
 
 impl Default for ListSessionsOptions {
@@ -49,6 +54,8 @@ impl Default for ListSessionsOptions {
             limit: None,
             offset: 0,
             include_worktrees: true,
+            include_programmatic: true,
+            dialect: SummaryDialect::TypeScript,
         }
     }
 }
@@ -87,6 +94,9 @@ impl SessionFiles {
 
     /// Lists sessions newest first, with ties broken by session id so pages are stable.
     pub fn list_sessions(&self, options: &ListSessionsOptions) -> Vec<SdkSessionInfo> {
+        if options.dialect == SummaryDialect::TypeScript {
+            return self.list_sessions_ts(options);
+        }
         let sessions = match options
             .directory
             .as_deref()
@@ -100,6 +110,19 @@ impl SessionFiles {
 
     /// Reads one session's metadata, or `None` when it is missing, a sidechain, or has nothing to summarize.
     pub fn get_session_info(&self, session_id: &str, directory: Option<&Path>) -> Option<SdkSessionInfo> {
+        self.get_session_info_with(session_id, directory, SummaryDialect::TypeScript)
+    }
+
+    /// [`SessionFiles::get_session_info`] under the selected upstream SDK's rules.
+    pub fn get_session_info_with(
+        &self,
+        session_id: &str,
+        directory: Option<&Path>,
+        dialect: SummaryDialect,
+    ) -> Option<SdkSessionInfo> {
+        if dialect == SummaryDialect::TypeScript {
+            return self.get_session_info_ts(session_id, directory);
+        }
         let session_id = valid_uuid(session_id)?;
         let file_name = format!("{session_id}.jsonl");
         if let Some(directory) = directory.filter(|directory| !directory.as_os_str().is_empty()) {
@@ -420,7 +443,7 @@ pub(crate) struct LiteSessionFile {
 }
 
 /// Stats a session file and reads its first and last 64 KiB, or `None` when it is empty or unreadable.
-fn read_session_lite(path: &Path) -> Option<LiteSessionFile> {
+pub(crate) fn read_session_lite(path: &Path) -> Option<LiteSessionFile> {
     let mut file = File::open(path).ok()?;
     let metadata = file.metadata().ok()?;
     let size = metadata.len();
@@ -452,14 +475,14 @@ fn read_session_lite(path: &Path) -> Option<LiteSessionFile> {
     })
 }
 
-fn unescape_json_string(raw: &str) -> String {
+pub(crate) fn unescape_json_string(raw: &str) -> String {
     if !raw.contains('\\') {
         return raw.to_owned();
     }
     serde_json::from_str::<String>(&format!("\"{raw}\"")).unwrap_or_else(|_| raw.to_owned())
 }
 
-fn string_end(text: &str, value_start: usize) -> (Option<usize>, usize) {
+pub(crate) fn string_end(text: &str, value_start: usize) -> (Option<usize>, usize) {
     let bytes = text.as_bytes();
     let mut i = value_start;
     while i < bytes.len() {
@@ -473,7 +496,7 @@ fn string_end(text: &str, value_start: usize) -> (Option<usize>, usize) {
 }
 
 /// First `"key":"value"` string value, without parsing, so it works on truncated lines.
-fn extract_json_string_field(text: &str, key: &str) -> Option<String> {
+pub(crate) fn extract_json_string_field(text: &str, key: &str) -> Option<String> {
     for pattern in [format!("\"{key}\":\""), format!("\"{key}\": \"")] {
         let Some(index) = text.find(&pattern) else { continue };
         let value_start = index + pattern.len();
@@ -502,6 +525,10 @@ pub(crate) fn extract_last_json_string_field(text: &str, key: &str) -> Option<St
 }
 
 pub(crate) fn extract_first_prompt_from_head(head: &str) -> String {
+    extract_first_prompt_from_head_with(head, SummaryDialect::Python)
+}
+
+pub(crate) fn extract_first_prompt_from_head_with(head: &str, dialect: SummaryDialect) -> String {
     let mut command_fallback: Option<String> = None;
     for line in head.split('\n') {
         if !(line.contains("\"type\":\"user\"") || line.contains("\"type\": \"user\"")) {
@@ -518,7 +545,7 @@ pub(crate) fn extract_first_prompt_from_head(head: &str) -> String {
         let Ok(Value::Object(entry)) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        if let Some(prompt) = entry_first_prompt(SummaryDialect::Python, &entry, &mut command_fallback) {
+        if let Some(prompt) = entry_first_prompt(dialect, &entry, &mut command_fallback) {
             return prompt;
         }
     }
@@ -578,9 +605,17 @@ pub(crate) fn parse_session_info_from_lite(
 
 /// Runs `git worktree list --porcelain` in `cwd` with upstream's five second limit. Empty when git is missing or
 /// `cwd` is not in a repository.
-fn worktree_paths(cwd: &str) -> Vec<String> {
+pub(crate) fn worktree_paths(cwd: &str) -> Vec<String> {
     let Ok(mut child) = Command::new("git")
-        .args(["worktree", "list", "--porcelain"])
+        .args([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=",
+            "worktree",
+            "list",
+            "--porcelain",
+        ])
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

@@ -53,6 +53,39 @@ pub struct ForkSessionResult {
     pub session_id: SessionId,
 }
 
+/// How non-ASCII characters are written when a fork is serialized to disk.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum JsonEscaping {
+    /// Raw UTF-8, as TypeScript `JSON.stringify`.
+    #[default]
+    Utf8,
+    /// `\uXXXX` escapes with surrogate pairs, as Python `json.dumps` with its default `ensure_ascii`.
+    Ascii,
+}
+
+impl JsonEscaping {
+    pub(crate) fn render(self, value: &Value) -> String {
+        let text = value.to_string();
+        match self {
+            Self::Utf8 => text,
+            Self::Ascii => {
+                let mut out = String::with_capacity(text.len());
+                for ch in text.chars() {
+                    if ch.is_ascii() {
+                        out.push(ch);
+                    } else {
+                        let mut units = [0_u16; 2];
+                        for unit in ch.encode_utf16(&mut units) {
+                            out.push_str(&format!("\\u{unit:04x}"));
+                        }
+                    }
+                }
+                out
+            }
+        }
+    }
+}
+
 const TRANSCRIPT_TYPES: [&str; 5] = ["user", "assistant", "attachment", "system", "progress"];
 
 impl SessionFiles {
@@ -68,11 +101,14 @@ impl SessionFiles {
         if stripped.is_empty() {
             return Err(SessionMutationError::EmptyTitle);
         }
-        let line = compact_line(&[
-            ("type", Value::from("custom-title")),
-            ("customTitle", Value::from(stripped)),
-            ("sessionId", Value::from(session_id)),
-        ]);
+        let line = compact_line(
+            &[
+                ("type", Value::from("custom-title")),
+                ("customTitle", Value::from(stripped)),
+                ("sessionId", Value::from(session_id)),
+            ],
+            JsonEscaping::Utf8,
+        );
         self.append_to_session(session_id, &line, directory)
     }
 
@@ -94,11 +130,14 @@ impl SessionFiles {
             }
             None => String::new(),
         };
-        let line = compact_line(&[
-            ("type", Value::from("tag")),
-            ("tag", Value::from(tag)),
-            ("sessionId", Value::from(session_id)),
-        ]);
+        let line = compact_line(
+            &[
+                ("type", Value::from("tag")),
+                ("tag", Value::from(tag)),
+                ("sessionId", Value::from(session_id)),
+            ],
+            JsonEscaping::Utf8,
+        );
         self.append_to_session(session_id, &line, directory)
     }
 
@@ -131,6 +170,18 @@ impl SessionFiles {
         directory: Option<&Path>,
         up_to_message_id: Option<&str>,
         title: Option<&str>,
+    ) -> Result<ForkSessionResult, SessionMutationError> {
+        self.fork_session_with(session_id, directory, up_to_message_id, title, JsonEscaping::default())
+    }
+
+    /// [`SessionFiles::fork_session`] with a selectable serialization of non-ASCII text.
+    pub fn fork_session_with(
+        &self,
+        session_id: &str,
+        directory: Option<&Path>,
+        up_to_message_id: Option<&str>,
+        title: Option<&str>,
+        escaping: JsonEscaping,
     ) -> Result<ForkSessionResult, SessionMutationError> {
         let session_id = checked_session_id(session_id)?;
         if let Some(message_id) = up_to_message_id.filter(|id| !id.is_empty())
@@ -166,6 +217,7 @@ impl SessionFiles {
             up_to_message_id.filter(|id| !id.is_empty()),
             title,
             derive_title,
+            escaping,
         )?;
 
         let fork_path = project_dir.join(format!("{forked}.jsonl"));
@@ -252,10 +304,10 @@ fn try_append(path: &Path, data: &str) -> std::io::Result<bool> {
 }
 
 /// A compact JSON object whose keys keep the given order, so scanners that match a literal line prefix keep working.
-fn compact_line(fields: &[(&str, Value)]) -> String {
+fn compact_line(fields: &[(&str, Value)], escaping: JsonEscaping) -> String {
     let body: Vec<String> = fields
         .iter()
-        .map(|(key, value)| format!("{}:{value}", Value::from(*key)))
+        .map(|(key, value)| format!("{}:{}", escaping.render(&Value::from(*key)), escaping.render(value)))
         .collect();
     format!("{{{}}}\n", body.join(","))
 }
@@ -406,6 +458,7 @@ pub(crate) fn build_fork_lines(
     up_to_message_id: Option<&str>,
     title: Option<&str>,
     derive_title: impl FnOnce() -> Option<String>,
+    escaping: JsonEscaping,
 ) -> Result<(String, Vec<String>), SessionMutationError> {
     let no_messages = || SessionMutationError::NoMessages(session_id.to_owned());
     let mut transcript: Vec<JsonObject> = transcript
@@ -500,20 +553,23 @@ pub(crate) fn build_fork_lines(
         source.insert("messageUuid".into(), Value::from(uuid_of(original)));
         forked.insert("forkedFrom".into(), Value::Object(source));
         for key in ["teamName", "agentName", "slug", "sourceToolAssistantUUID"] {
-            forked.remove(key);
+            forked.shift_remove(key);
         }
-        lines.push(Value::Object(forked).to_string());
+        lines.push(escaping.render(&Value::Object(forked)));
     }
 
     if !content_replacements.is_empty() {
         lines.push(
-            compact_line(&[
-                ("type", Value::from("content-replacement")),
-                ("sessionId", Value::from(forked_session_id.clone())),
-                ("replacements", Value::Array(content_replacements)),
-                ("uuid", Value::from(uuid::Uuid::new_v4().to_string())),
-                ("timestamp", Value::from(now.clone())),
-            ])
+            compact_line(
+                &[
+                    ("type", Value::from("content-replacement")),
+                    ("sessionId", Value::from(forked_session_id.clone())),
+                    ("replacements", Value::Array(content_replacements)),
+                    ("uuid", Value::from(uuid::Uuid::new_v4().to_string())),
+                    ("timestamp", Value::from(now.clone())),
+                ],
+                escaping,
+            )
             .trim_end()
             .to_owned(),
         );
@@ -525,13 +581,16 @@ pub(crate) fn build_fork_lines(
         .map(str::to_owned)
         .unwrap_or_else(|| format!("{} (fork)", derive_title().unwrap_or_else(|| "Forked session".into())));
     lines.push(
-        compact_line(&[
-            ("type", Value::from("custom-title")),
-            ("sessionId", Value::from(forked_session_id.clone())),
-            ("customTitle", Value::from(fork_title)),
-            ("uuid", Value::from(uuid::Uuid::new_v4().to_string())),
-            ("timestamp", Value::from(now)),
-        ])
+        compact_line(
+            &[
+                ("type", Value::from("custom-title")),
+                ("sessionId", Value::from(forked_session_id.clone())),
+                ("customTitle", Value::from(fork_title)),
+                ("uuid", Value::from(uuid::Uuid::new_v4().to_string())),
+                ("timestamp", Value::from(now)),
+            ],
+            escaping,
+        )
         .trim_end()
         .to_owned(),
     );
