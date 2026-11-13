@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(HookOutput::block("Shell commands are disabled for this session."))
             })],
             timeout: None,
-            on_failure: HookFailureMode::Block,
+            on_failure: Some(HookFailureMode::Block),
         }],
         ..ClaudeAgentOptions::default()
     };

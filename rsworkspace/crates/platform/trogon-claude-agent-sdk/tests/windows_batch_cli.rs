@@ -10,7 +10,7 @@ use std::{
 };
 use tokio::process::{Child, Command};
 use trogon_claude_agent_sdk::{
-    ClaudeAgentOptions, ClaudeSdkClient, CliPathError, Error,
+    ClaudeAgentOptions, ClaudeSdkClient, CliPathError, Error, WindowsBatchCli,
     adapters::{NativeFileSystem, RuntimeAdapters, SpawnProcess, TokioProcessSpawner},
     test_support::FixedEnvironment,
 };
@@ -28,7 +28,7 @@ impl SpawnProcess for CountingSpawner {
     }
 }
 
-/// Refuse every Windows batch path before the process adapter can spawn anything.
+/// With the Python refusal selected, refuse every Windows batch path before the process adapter can spawn anything.
 #[tokio::test]
 async fn windows_batch_cli_is_refused_before_spawn() -> Result<(), Box<dyn std::error::Error>> {
     for path in [
@@ -50,6 +50,7 @@ async fn windows_batch_cli_is_refused_before_spawn() -> Result<(), Box<dyn std::
         let result = ClaudeSdkClient::connect_with_adapters(
             ClaudeAgentOptions {
                 cli_path: Some(path.into()),
+                windows_batch_cli: WindowsBatchCli::Refuse,
                 ..ClaudeAgentOptions::default()
             },
             RuntimeAdapters {
@@ -63,10 +64,35 @@ async fn windows_batch_cli_is_refused_before_spawn() -> Result<(), Box<dyn std::
         )
         .await;
         assert!(
-            matches!(result, Err(Error::CliPath(CliPathError::WindowsBatchScript))),
+            matches!(result, Err(Error::CliPath(CliPathError::WindowsBatchScript { .. }))),
             "{path}"
         );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
+    Ok(())
+}
+
+/// The TypeScript SDK spawns batch scripts, so the default hands them to the process adapter.
+#[tokio::test]
+async fn windows_batch_cli_is_spawned_by_default() -> Result<(), Box<dyn std::error::Error>> {
+    let process = CountingSpawner::default();
+    let calls = process.0.clone();
+    let result = ClaudeSdkClient::connect_with_adapters(
+        ClaudeAgentOptions {
+            cli_path: Some("missing-fixture-claude.cmd".into()),
+            ..ClaudeAgentOptions::default()
+        },
+        RuntimeAdapters {
+            environment: FixedEnvironment {
+                directory: PathBuf::from("unused-directory"),
+                variables: Default::default(),
+            },
+            process,
+            filesystem: NativeFileSystem,
+        },
+    )
+    .await;
+    assert!(!matches!(result, Err(Error::CliPath(_))));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     Ok(())
 }
