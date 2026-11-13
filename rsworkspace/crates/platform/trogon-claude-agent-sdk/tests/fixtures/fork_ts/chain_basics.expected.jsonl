@@ -1,0 +1,11 @@
+{"type":"user","uuid":"id-1","parentUuid":null,"sessionId":"id-5","timestamp":"t1","message":{"role":"user","content":"hi"},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"u1"}}
+{"type":"assistant","uuid":"id-3","parentUuid":"id-1","sessionId":"id-5","timestamp":"t2","message":{"role":"assistant","content":"yo"},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"a1"}}
+{"type":"user","uuid":"id-4","parentUuid":"id-3","sessionId":"id-5","timestamp":"2023-11-14T22:13:20.123Z","forkedFrom":{"sessionId":"s0","messageUuid":"u2"},"logicalParentUuid":"id-3","isSidechain":false,"message":{"role":"user","content":"again"}}
+{"type":"content-replacement","sessionId":"id-5","replacements":[{"id":"r1"}],"uuid":"id-6","timestamp":"2023-11-14T22:13:20.123Z"}
+{"type":"atis-latch","sessionId":"id-5","atis":"abc"}
+{"type":"tools-used","sessionId":"id-5","tools":["Bash","Read"]}
+{"type":"data-flow-records","v":1,"sessionId":"id-5","records":[{"tool_name":"Bash","tool_use_id":"tu1","server":{"type":"unknown"},"source":{"type":"file","id":null},"touched":{"kind":"memory","id":"m","action":"read"}},{"event_id":"e1","inner_call_index":2,"no_message":true}],"snapshot":true}
+{"type":"data-flow-incomplete","v":1,"sessionId":"id-5"}
+{"type":"derived-from","v":1,"sessionId":"id-5","sessions":[{"type":"claude_code_session","id":"old","via":"fork"},{"type":"unknown","id":null,"via":"fork"},{"type":"claude_code_session","id":"anc","via":"fork"},{"type":"claude_code_session","id":"s0","via":"fork"}]}
+{"type":"relocated","sessionId":"id-5","relocatedCwd":"/new"}
+{"type":"custom-title","sessionId":"id-5","customTitle":"Derived (fork)","uuid":"id-7","timestamp":"2023-11-14T22:13:20.123Z"}

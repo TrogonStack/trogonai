@@ -70,10 +70,14 @@ await `disconnect()`. Cleanup needs a running Tokio runtime; the child also has 
 
 ## Messages and controls
 
-Known messages retain identity, origin, stop/terminal reasons, usage, permission
-denials and additional fields when reported. Nested upstream usage and denial
-payloads remain JSON. Unknown informational messages and content blocks remain
-explicit variants; malformed known fields cause typed protocol errors.
+Every message keeps the object the CLI wrote (`Message::raw`), and
+`Message::to_sdk_message` types it as the TypeScript `SDKMessage` generated from
+the pinned declarations. `message_decoding` picks the upstream decoder:
+`MessageDecoding::TypeScript` (the default) yields every message, unknown types
+and shapes Rust cannot type included as `Message::Unknown`; `MessageDecoding::Python`
+skips unknown types and raises `Error::MessageParse` with Python's text for a known
+message missing a key. Goldens from both pinned SDKs pin the two modes; see
+[Message data](docs/reference/message-data.md#decoding).
 
 `Message::Result` and `HookOutput::Sync` box their payloads to keep enum values
 compact when another dependency enables `serde_json`'s `preserve_order` feature.
@@ -83,7 +87,14 @@ Pattern matching exposes the same fields through the box.
 `connection_info()` borrows the cached `ConnectionInfo` from that handshake,
 including support flags and additional metadata. Reading it is non-fallible and
 sends no protocol messages; `ConnectionInfo::as_json()` retains the original
-response, including omitted or explicitly null fields.
+response, including omitted or explicitly null fields. Like both upstream SDKs,
+the response is not validated: a known field of an unexpected type reads as
+absent, and under `ArgvStyle::Python` a response that is not an object reads as
+`{}`. The initialize checks follow `sdk.mjs` in its order: blocking hooks need
+`hook_on_failure_supported`, then `hooks_applied` must not be `false`, then sent
+managed settings need `managed_settings_applied`; plugins that were not
+confirmed only log a warning. Non-empty `supported_dialog_kinds` without a
+`user_dialog_handler` is refused before the CLI starts.
 The handle provides interrupt receipts, model and permission changes, rewind,
 MCP status/reconnect/toggle/replacement, context usage and task controls. Legacy
 interrupt replies remain distinct from reported empty queues. Newer controls
@@ -94,7 +105,8 @@ depend on installed CLI support.
 `ToolPermissionHandler` receives request/tool identities, suggestions, MCP
 provenance and prompt context, plus a cancellation signal. Typed allow decisions
 can replace input and update permission rules. Absent handlers deny host
-permission requests; timeout denies, and cancellation suppresses a late reply.
+permission requests; an opted-in `limits.callback_timeout` denies, and cancellation
+suppresses a late reply.
 The CLI can authorize tools through its own permission mode or rules before
 consulting the host.
 Suggestions keep unknown destinations, behaviors and update types verbatim, so
@@ -120,8 +132,11 @@ metadata, input schema and async handler. Construct its `McpToolName` and
 `McpToolInputSchema` first. `McpToolName` stores any text; `LocalMcpServer::from`
 logs a warning for a name outside the MCP protocol limits (one to 128 ASCII
 letters, digits, underscores, hyphens or periods), and `tools/list` still lists it.
-`McpToolInputSchema` enforces a valid object input schema. `SdkTool::from` then
-assembles its inputs without returning an error.
+`McpToolInputSchema::new` keeps any schema verbatim, as both upstream SDKs do;
+a call to a tool whose schema does not compile returns that error as the tool
+result. `McpToolInputSchema::validated` opts in to requiring a compiling object
+schema without external references. `SdkTool::from` then assembles its inputs
+without returning an error.
 `LocalMcpServerOptions.tools` requires an immutable `SdkTools` collection.
 Use `tool.into()` for one tool, `SdkTools::default()` for none, or
 `SdkTools::new([first, second])?` to reject duplicate names when assembling
@@ -169,6 +184,146 @@ docs both describe omission as loading all CLI sources and an empty list as
 disabling filesystem settings. Rust preserves `None`, `Some(vec![])`, and caller
 order when building CLI arguments.
 
+### Process launch
+
+The launch contract is pinned by `tests/golden_argv_env.rs` (argv and environment)
+and `tests/golden_initialize.rs` (the stdin `initialize` bytes, captured from both
+upstream SDKs).
+
+- Control requests follow the dialect. `ArgvStyle::TypeScript` sends
+  `{"request_id":...,"type":"control_request","request":...}` with the id
+  `Math.random().toString(36).substring(2,15)` produces. `ArgvStyle::Python`
+  sends `{"type": "control_request", "request_id": "req_N_xxxxxxxx", ...}` and
+  writes every stdin line the way `json.dumps` does (spaced separators, `\uXXXX`
+  escapes for non-ASCII, Python float spelling).
+
+- `ArgvStyle::TypeScript` (default) emits TypeScript `0.3.323` argv: `--flag=value`
+  spelling, upstream flag order, and the system prompt inside the `initialize`
+  request (`systemPrompt` defaults to `[""]`; a preset with an append sends
+  `appendSystemPrompt`; `tests/initialize_options.rs` pins every system prompt form
+  and the other initialize-only options against captured upstream bytes).
+  `ArgvStyle::Python` emits Python `0.2.181` argv. The two
+  upstream SDKs disagree, so both are exposed and TypeScript is the default.
+- `EnvironmentMode::Overlay` (default, Python): inherited environment, then
+  `options.env`. `Replace` (TypeScript with `options.env`): only `options.env`
+  plus the SDK defaults. `Inherit` (TypeScript without `options.env`).
+  `CLAUDECODE` is removed unless `ClaudeCodeMarker::Keep` is chosen.
+  `CLAUDE_CODE_ENTRYPOINT` defaults to `sdk-trogon-rs` and is configurable.
+  `CLAUDE_CODE_SDK_READS_SESSION_STATE=1` is added unless a case-insensitive match
+  exists; the inherited check covers only the variable names the SDK captures.
+- `McpDiscovery` defaults to `CliDefault`; `--strict-mcp-config` is emitted only for
+  the explicit `Disabled` opt-in. `--permission-prompt-tool stdio` is sent only
+  when a tool permission handler exists. `HookRegistration::on_failure` is an
+  `Option` and the wire field is omitted when unset.
+- `ClaudeSdkClient::connect` discovers the CLI in Python's order when `cli_path` is
+  omitted (no bundled binary exists in this crate); a miss is `CliNotFoundError`
+  with Python's hint text. `connect_with_adapters` never discovers, matching
+  Python's custom transport and TypeScript's `spawnClaudeCodeProcess`: its
+  spawner receives `claude` when `cli_path` is omitted.
+- `Transport` is Python's transport interface: `connect`, `write`, `read_message`
+  (one object per call, `None` at the end of the stream, in place of Python's
+  `read_messages` iterator), `close`, `is_ready` and `end_input`, plus a provided
+  `kill` that `abort()` calls before `close` (TypeScript's abort signal). It is a
+  generic bound, not a trait object. `ClaudeSdkClient::connect_with_transport`,
+  `connect_with_transport_and_adapters`, `query_with_transport` and
+  `query_turn_with_transport` inject one; the subprocess implementation is the
+  default and stays crate-private. A custom transport gets no CLI discovery, no
+  argument list and no store-backed resume materialization, while the session
+  store mirror still runs, as in Python. `read_message` must be cancel safe, and
+  an `Err` from any method ends the run as `Error::Transport` surfaces it.
+- Bundled executables are caller-driven lookups, not part of `connect`.
+  `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check.
+  `bundled_cli_derives_client_app` and `meets_derived_client_app_minimum` port
+  Python's version gate for deriving an app label (the pinned CLI version and the
+  `claude.version` record beside the bundled binary must both be `999.0.0` or
+  later); `connect` asks them only through the Python dialect
+  `client_app_derivation` option and otherwise follows TypeScript.
+  `find_native_cli` ports TypeScript's platform package selection
+  (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`, musl before glibc on musl
+  Linux, `-android` packages, `.exe` on win32) over a `ResolveNodeModule`
+  adapter; `NodeModuleLookup` is the default and searches Node's `node_modules`,
+  `NODE_PATH`, home and prefix directories. Musl comes from the compile target
+  (`NativePackageTarget::host`) because a Rust process has no Node process report.
+- Failures follow upstream. A missing executable is `Error::CliNotFoundAt`, a missing
+  `cwd` is `Error::WorkingDirectoryMissing`, any other spawn failure is
+  `Error::Spawn` ("Failed to start Claude Code: ..."). `Error::Process` displays
+  Python's `ProcessError` text, exposes `exit_code()` (negated signal number on
+  Unix) and `typescript_message()` for TypeScript's text. When the CLI exits
+  unsuccessfully after an `is_error` result, the error is `Error::Result`
+  (`ResultError`): Python's text always, TypeScript's text when it is non-empty.
+  `abort()` stops the process and ends the run with `Error::Aborted`
+  (`AbortError`). Closing follows `limits.shutdown`: TypeScript's ladder by
+  default (stdin close, 2 seconds, SIGTERM, SIGKILL 5 seconds later without
+  waiting), Python's 5/5/5 second ladder, or `Shutdown::Strict`, which reports
+  `Error::ShutdownTimeout` and `Error::StderrDrainTimeout`.
+- Writes fail with distinct errors in upstream's order: `Error::NotReadyForWriting`
+  after stdin is closed (and, in the TypeScript style, after the process exited,
+  where the exit event clears `ready`), `Error::WriteToTerminatedProcess` after an
+  exit in the Python style (with the exit code), `Error::WriteFailed` for an I/O
+  failure and `Error::Aborted` after `abort()`.
+- Non-JSON stdout: `ArgvStyle::TypeScript` skips every undecodable line. Python
+  style skips lines that do not start with `{` and fails on a corrupt line with
+  `Error::JsonDecode` (the line and the original error), except that a corrupt
+  unterminated tail at end of file is dropped. With `MessageDecoding::Python`, a
+  known message missing a key Python reads is `Error::MessageParse`, carrying the
+  raw object.
+- `ArgvStyle::TypeScript` appends `--await-initialize` through extra arguments
+  when `connect` resumes or continues without `cli_path` and without `sdk-url`,
+  as `sdk.mjs` does for its resolved executable. Python never sends it.
+- `user` runs the CLI as the named account (`Popen(user=...)`: the name is
+  resolved with libc `getpwnam_r`, so NSS sources apply, an unknown name fails
+  with `getpwnam(): name not found: '<name>'`, and only the uid changes, Unix
+  only); `run_as_uid` is the numeric form.
+- The inbound line limit `limits.max_buffer_size` is unset by default, as
+  TypeScript keeps every line; `Limits::python()` sets Python's 1 MiB
+  (`max_buffer_size`). A longer line, counted in characters without its
+  newline, is `Error::JsonDecode` with the line `JSON message exceeded maximum
+  buffer size of N bytes` and `JsonDecodeSourceError::BufferExceeded`.
+- In `ArgvStyle::TypeScript`, `end_input` leaves the transport ready, so a later
+  write is dropped without an error, as `endInput` does; `close` ends that.
+- `plugins` and `plugin_delivery` map `plugins` and `pluginDelivery`: TypeScript
+  passes `--plugin-dir=PATH` (`--plugin-dir-no-mcp=PATH` with
+  `skip_mcp_discovery`) or, for `PluginDelivery::Initialize` with at least one
+  plugin, `--await-initialize` and the plugins in the `initialize` request;
+  Python passes `--plugin-dir PATH` and ignores the delivery.
+- `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` is removed from the child environment.
+  `ClaudeAgentOptions::client_app_derivation` (Python dialect, off by default
+  like TypeScript) sets it with Python's trigger: the resolved `cli_path` is the
+  executable `find_bundled_cli` finds under the `BundledCli` package root, its
+  `pinned_version` and the `claude.version` file beside it are both `999.0.0`
+  or later, and no explicit `CLAUDE_AGENT_SDK_CLIENT_APP`
+  exists in `client_app`, `env` or the inherited environment. The value is
+  `name/version` for this crate, standing in for the Python distribution
+  metadata Rust does not have.
+- Not expressible: the `Cannot write to terminated process` and `exited with error` write
+  branches are unreachable upstream because the `exit` event clears readiness
+  first. `cli_path` or `PATH` discovery is the Rust equivalent.
+- Runtime options map `thinking`, `maxThinkingTokens`, `taskBudget`, `betas`,
+  `fallbackModel`, `permissionPromptToolName`, `includeHookEvents`, `sessionId`,
+  `resumeSessionAt`, `resumeDropsTurn` and `skills` in both dialects with the
+  upstream flag order. `permission_prompts`, `channels`, `debug`, `debug_file`,
+  `allow_dangerously_skip_permissions` and `project_config_root` exist only in
+  TypeScript and are ignored by `ArgvStyle::Python`. In TypeScript `connect`
+  also adds the derived per-process `--debug-file` when none is set. `skills`
+  appends `Skill` or `Skill(name)` to the allowed tools, Python also defaults
+  `--setting-sources=user,project`, and an explicit list reaches the
+  `initialize` request. A callback together with `permission_prompt_tool_name`
+  is refused, TypeScript refuses a fallback model equal to the model, and
+  Python refuses an enabled thinking config without a budget. The shadow
+  advisory for `bypassPermissions` or allowed tools is reported through
+  `tracing`.
+- `settings` (a path, JSON text or a `Settings` object), `sandbox`,
+  `managed_settings` and `managed_settings_delivery` follow both dialects.
+  TypeScript serializes objects with `JSON.stringify` bytes and merges the
+  sandbox into the settings document (a settings file path together with a
+  sandbox is refused); Python reads the settings file relative to the working
+  directory, replaces the `sandbox` key and writes `json.dumps` text. Managed
+  settings go by `--managed-settings` or, with
+  `ManagedSettingsDelivery::Initialize`, in the `initialize` request; the Python
+  dialect ignores them.
+- Deferred to other tracks: remote `--sdk-url` transports, flag settings and
+  `updateSettings`.
+
 Model strings and paths are stored without extra identifier restrictions.
 `env` values are `ConfigValue`s, which convert from strings as `Sensitive`;
 debug output lists every variable name, shows values the caller marks `Plain`,
@@ -176,7 +331,8 @@ and prints sensitive values as `<redacted>`. MCP stdio arguments and
 environment values and HTTP or SSE header values follow the same rule.
 `ModelName` keeps the model out of debug output, so options debug output shows
 every other setting without listing fields by hand.
-Windows batch paths are refused only at process start.
+A Windows `.bat` or `.cmd` CLI path starts, as in TypeScript;
+`WindowsBatchCli::Refuse` selects Python's refusal at process start.
 Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L93)
 and [`disconnect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L607)
 on an existing client. Rust intentionally uses an async factory for `connect`
@@ -186,21 +342,52 @@ uses `Query` and `WarmQuery` with `close()` instead.
 
 Options include programmatic agents, model/effort, tool rules, budget, output
 schema, checkpointing, environment, additional directories, resume and fork.
-`OutputSchema` compiles locally and rejects nonlocal references. `UsdBudget`
-rejects nonfinite/negative values. Rewind requires checkpointing and CLI support.
+`OutputSchema::new` and `UsdBudget::new` keep any value and pass it on, as both
+upstream SDKs do; `OutputSchema::validated` and `UsdBudget::checked` opt in to
+rejecting nonlocal references and nonfinite or negative amounts. Rewind
+requires checkpointing and CLI support.
 
 The default system prompt is empty; choose `SystemPrompt::ClaudeCode` for the
-CLI preset. Filesystem settings inherit CLI defaults when `setting_sources` is
+CLI preset. `SystemPrompt` also carries a list of texts, the custom and preset
+objects with `snapshot` and `exclude_dynamic_sections`, and Python's prompt
+file; a form that only one dialect has is refused in the other. `verbatim_prompts`
+marks each user message `client_composed`. Filesystem settings inherit CLI defaults when `setting_sources` is
 `None`; `Some(vec![])` disables user/project/local settings. Explicit lists retain
-caller order and duplicates. MCP discovery is disabled unless selected through
-`McpDiscovery::CliDefault`. `Customizations::Bare` disables further CLI
+caller order and duplicates. MCP discovery follows the CLI default, as upstream
+does, unless `McpDiscovery::Disabled` is selected. `Customizations::Bare` disables further CLI
 customizations when supported.
 
-Frames, stderr, queues and outstanding controls have configurable bounds. A full
-message queue produces `Error::MessageQueueFull`; control handling progresses
-independently of message consumption. Stderr debug output omits its contents.
-`QueueCapacity` validates Tokio's range; positive `Timeout` values are bounded
-at 24 hours.
+`Limits::default()` matches the TypeScript SDK: no stdout line cap, the last
+2048 UTF-16 units of stderr kept for process errors, unbounded queues, no
+control, write or callback timeout, and an initialize deadline of 660 seconds
+only when a hook is set to block on failure. `Limits::python()` selects the
+Python SDK's values: a 1 MiB line cap, a 60 second control wait, a 100 message
+buffer that stops reading stdout while full, and its initialize wait and
+shutdown ladder. Every other bound (pending controls, inbound callbacks, tracked
+tasks, queued inputs, a failing message queue, command queue room) is opt-in and
+keeps its typed error. Stderr debug output omits its contents. `QueueCapacity`
+validates Tokio's range; `Timeout::checked` rejects zero and values past 24
+hours.
+
+## Settings
+
+`Settings` is generated from the pinned TypeScript declarations: every declared key is a
+typed field, and keys it does not declare are kept in order. `Settings::from_json` then
+`to_json` reproduces the input byte for byte. `SettingsInput` names the three forms the
+`--settings` value takes: `Path`, `Json` and `Inline(Settings)`. Nothing is validated.
+`SandboxSettings` and its parts, `ResolvedSettings`, `ProvenanceEntry`, `ResolvedSettingSource`,
+`PolicySettingsOrigin`, `ResolveSettingsOptions` and `SDKSettingsParseError` carry the upstream
+names; Python sandbox dicts decode and encode through the sandbox types unchanged.
+
+`resolve_settings` ports TypeScript `resolveSettings`: the user, project, local and flag sources
+cascade with array union, and the managed policy comes from the first tier that has settings
+(remote, macOS plist via `plutil`, Windows registry via `reg query`, `/etc/claude-code`, the
+parent process). The result carries per-key provenance and `machinePolicy.didNotLoad`.
+`resolve_settings_with` runs it against any `SettingsHost`, so tests inject files, variables and
+command output. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
+`claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
+byte for byte. Integers above 2^53 read like `JSON.parse` by default; `resolve_settings_in_dialect`
+and `resolve_settings_in_dialect_with` take `SettingsDialect::Python` to keep them exact. Gaps: schema value normalization, and cloud and org mode.
 
 ## External session stores
 
@@ -242,7 +429,8 @@ The references are Python SDK
 and published TypeScript SDK `0.3.319`, paired with CLI `2.1.319`.
 This independent Rust implementation does not provide TypeScript browser/bridge
 hosting, every upstream convenience option or the complete MCP server protocol.
-Windows requires a native executable; batch scripts are refused.
+Windows batch scripts start as in TypeScript unless `WindowsBatchCli::Refuse`
+is selected.
 
 ```sh
 mise exec -- cargo test --locked -p trogon-claude-agent-sdk --all-features

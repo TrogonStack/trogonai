@@ -1,0 +1,6 @@
+{
+  "model": "managed-model",
+  "env": {
+    "M": "1"
+  }
+}

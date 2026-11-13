@@ -31,53 +31,83 @@ impl From<Option<bool>> for FeatureSupport {
     }
 }
 
+/// The initialize response, read the way both upstream SDKs read it: neither validates it, so a field of an
+/// unexpected type reads as absent here and stays untouched in [`ConnectionInfo::as_json`].
 #[derive(Clone, Debug, Default)]
 pub struct ConnectionInfo {
     pub commands: Vec<JsonObject>,
     pub models: Vec<JsonObject>,
     pub agents: Vec<JsonObject>,
     pub account: Option<JsonObject>,
+    pub output_style: Option<String>,
+    pub available_output_styles: Option<Vec<String>>,
     pub hooks_applied: FeatureSupport,
     pub hook_on_failure_supported: FeatureSupport,
+    pub plugins_applied: FeatureSupport,
+    /// Whether the managed settings sent in the initialize request were applied.
+    pub managed_settings_applied: FeatureSupport,
+    /// What became of each `sdkMcpServerManifests` entry, keyed by SDK MCP server name.
+    pub sdk_mcp_manifests_parked: Option<std::collections::BTreeMap<String, String>>,
     pub claude_code_version: Option<String>,
+    pub fast_mode_state: Option<String>,
+    pub fast_mode_disabled_reason: Option<String>,
+    /// Response fields this type does not name.
     pub additional_fields: JsonObject,
-    raw: JsonObject,
+    raw: serde_json::Value,
 }
 
-#[derive(Deserialize)]
-struct ConnectionInfoWire {
-    #[serde(default)]
-    commands: Vec<JsonObject>,
-    #[serde(default)]
-    models: Vec<JsonObject>,
-    #[serde(default)]
-    agents: Vec<JsonObject>,
-    account: Option<JsonObject>,
-    hooks_applied: Option<bool>,
-    hook_on_failure_supported: Option<bool>,
-    claude_code_version: Option<String>,
-    #[serde(flatten)]
-    additional_fields: JsonObject,
-}
+const CONNECTION_INFO_FIELDS: &[&str] = &[
+    "commands",
+    "models",
+    "agents",
+    "account",
+    "output_style",
+    "available_output_styles",
+    "hooks_applied",
+    "hook_on_failure_supported",
+    "plugins_applied",
+    "managed_settings_applied",
+    "sdk_mcp_manifests_parked",
+    "claude_code_version",
+    "fast_mode_state",
+    "fast_mode_disabled_reason",
+];
 
 impl ConnectionInfo {
-    pub fn from_json(value: JsonObject) -> Result<Self, serde_json::Error> {
-        let wire: ConnectionInfoWire = serde_json::from_value(value.clone().into())?;
-        Ok(Self {
-            commands: wire.commands,
-            models: wire.models,
-            agents: wire.agents,
-            account: wire.account,
-            hooks_applied: wire.hooks_applied.into(),
-            hook_on_failure_supported: wire.hook_on_failure_supported.into(),
-            claude_code_version: wire.claude_code_version,
-            additional_fields: wire.additional_fields,
+    /// Reads an initialize response. Any JSON value is accepted, as upstream accepts it.
+    pub fn from_json(value: serde_json::Value) -> Self {
+        let empty = JsonObject::new();
+        let object = value.as_object().unwrap_or(&empty);
+        fn field<T: serde::de::DeserializeOwned>(object: &JsonObject, key: &str) -> Option<T> {
+            object.get(key).and_then(|value| T::deserialize(value).ok())
+        }
+        let support = |key: &str| FeatureSupport::from(object.get(key).and_then(serde_json::Value::as_bool));
+        Self {
+            commands: field(object, "commands").unwrap_or_default(),
+            models: field(object, "models").unwrap_or_default(),
+            agents: field(object, "agents").unwrap_or_default(),
+            account: field(object, "account"),
+            output_style: field(object, "output_style"),
+            available_output_styles: field(object, "available_output_styles"),
+            hooks_applied: support("hooks_applied"),
+            hook_on_failure_supported: support("hook_on_failure_supported"),
+            plugins_applied: support("plugins_applied"),
+            managed_settings_applied: support("managed_settings_applied"),
+            sdk_mcp_manifests_parked: field(object, "sdk_mcp_manifests_parked"),
+            claude_code_version: field(object, "claude_code_version"),
+            fast_mode_state: field(object, "fast_mode_state"),
+            fast_mode_disabled_reason: field(object, "fast_mode_disabled_reason"),
+            additional_fields: object
+                .iter()
+                .filter(|(key, _)| !CONNECTION_INFO_FIELDS.contains(&key.as_str()))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
             raw: value,
-        })
+        }
     }
 
-    /// The original handshake snapshot, preserving omitted versus explicitly null fields.
-    pub fn as_json(&self) -> &JsonObject {
+    /// The response exactly as the CLI sent it, preserving omitted versus explicitly null fields.
+    pub fn as_json(&self) -> &serde_json::Value {
         &self.raw
     }
 }

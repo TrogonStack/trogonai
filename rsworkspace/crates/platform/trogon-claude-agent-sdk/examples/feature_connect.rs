@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tool = SdkTool::from(SdkToolOptions {
         name: McpToolName::from("echo"),
         description: "Return the supplied text".into(),
-        input_schema: McpToolInputSchema::new(schema::echo_schema(None)?)?,
+        input_schema: McpToolInputSchema::new(schema::echo_schema(None)?),
         handler: Arc::new(|request: McpToolRequest| async move {
             Ok(McpToolOutput::text(
                 request.arguments["text"].as_str().unwrap_or_default(),
@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             matcher: None,
             callbacks: vec![Arc::new(|_: HookRequest| async { Ok(HookOutput::default()) })],
             timeout: None,
-            on_failure: HookFailureMode::Block,
+            on_failure: Some(HookFailureMode::Block),
         }],
         sdk_mcp_servers: BTreeMap::from([(name, Arc::new(server) as Arc<dyn SdkMcpServer>)]),
         ..ClaudeAgentOptions::default()
