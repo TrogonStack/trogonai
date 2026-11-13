@@ -1,8 +1,11 @@
 use serde_json::Value;
 
 use crate::{
-    constants::{ALLOW_LIST_KEYS, PARENT_RESTRICT_FALSE_KEYS, PARENT_RESTRICT_TRUE_KEYS},
-    settings_resolve_values::{SettingsMap, get_path, pick},
+    constants::{
+        ALLOW_LIST_GATES, ALLOW_LIST_KEYS, MCP_SERVER_ALLOW_LIST_KEY, PARENT_RESTRICT_FALSE_KEYS,
+        PARENT_RESTRICT_TRUE_KEYS,
+    },
+    settings_resolve_values::{SettingsMap, get_path, omit, pick},
 };
 
 fn is_true(settings: &SettingsMap, key: &str) -> bool {
@@ -33,47 +36,111 @@ fn hooks_disabled(settings: &SettingsMap) -> bool {
     ) && settings.get("disableAllHooks") != Some(&Value::String("false".into()))
 }
 
-/// The admin-held facts `zP` checks the parent against (`ia` upstream).
-struct AdminFacts {
+fn is_set_true(settings: Option<&SettingsMap>, key: &str) -> bool {
+    settings.is_some_and(|settings| is_true(settings, key))
+}
+
+/// `Fs` upstream: the admin tiers, or a parent that the admin slot does not overrule, keep MCP servers to the managed
+/// list.
+pub(crate) fn mcp_servers_managed_only(
+    slot: Option<&SettingsMap>,
+    tiers: &[SettingsMap],
+    parent: Option<&SettingsMap>,
+) -> bool {
+    is_set_true(slot, "allowManagedMcpServersOnly")
+        || tiers.iter().any(|tier| is_true(tier, "allowManagedMcpServersOnly"))
+        || (is_set_true(parent, "allowManagedMcpServersOnly")
+            && slot.and_then(|slot| slot.get("allowManagedMcpServersOnly")) != Some(&Value::Bool(false)))
+}
+
+/// `Object.values(...).some(v => v !== false && v !== undefined)` over what a document says for `enabledPlugins`.
+fn any_plugin_enabled(plugins: Option<&Value>) -> bool {
+    match plugins {
+        Some(Value::Object(plugins)) => plugins.values().any(|value| *value != Value::Bool(false)),
+        Some(Value::Array(items)) => items.iter().any(|value| *value != Value::Bool(false)),
+        Some(Value::String(text)) => !text.is_empty(),
+        _ => false,
+    }
+}
+
+/// The admin-held facts `zP` checks the parent against (`ia` upstream). A key the admin holds counts as set whatever
+/// its value, the way upstream compares it with `undefined`.
+pub(crate) struct AdminFacts {
     hooks_set: bool,
     plugin_enabled: bool,
     force_login_org: bool,
     managed_permission_rules_only: bool,
     managed_domains_only: bool,
     managed_read_paths_only: bool,
-    allow_list_keys: Vec<&'static str>,
+    allow_lists: SettingsMap,
 }
 
-fn admin_facts(admin: Option<&SettingsMap>, tiers: &[SettingsMap]) -> AdminFacts {
-    let admin_settings = admin.cloned().unwrap_or_default();
-    AdminFacts {
-        hooks_set: admin_settings.get("hooks").is_some_and(|value| !value.is_null()),
-        plugin_enabled: admin_settings
-            .get("enabledPlugins")
-            .and_then(Value::as_object)
-            .is_some_and(|plugins| {
-                plugins
-                    .values()
-                    .any(|value| *value != Value::Bool(false) && !value.is_null())
-            }),
-        force_login_org: admin_settings
-            .get("forceLoginOrgUUID")
-            .is_some_and(|value| !value.is_null()),
-        managed_permission_rules_only: tiers
-            .iter()
-            .any(|tier| is_true(tier, "allowManagedPermissionRulesOnly")),
-        managed_domains_only: tiers
-            .iter()
-            .any(|tier| path_is_true(tier, &["sandbox", "network", "allowManagedDomainsOnly"])),
-        managed_read_paths_only: tiers
-            .iter()
-            .any(|tier| path_is_true(tier, &["sandbox", "filesystem", "allowManagedReadPathsOnly"])),
-        allow_list_keys: ALLOW_LIST_KEYS
-            .iter()
-            .copied()
-            .filter(|key| admin_settings.get(*key).is_some_and(|value| !value.is_null()))
-            .collect(),
+impl AdminFacts {
+    pub(crate) fn new(admin: Option<&SettingsMap>, tiers: &[SettingsMap], parent: Option<&SettingsMap>) -> Self {
+        let empty = SettingsMap::new();
+        let settings = admin.unwrap_or(&empty);
+        let mut allow_lists = pick(settings, &ALLOW_LIST_KEYS);
+        let servers = if mcp_servers_managed_only(admin, tiers, parent) {
+            settings
+                .get(MCP_SERVER_ALLOW_LIST_KEY)
+                .filter(|value| !value.is_null())
+                .or_else(|| tiers.iter().find_map(|tier| tier.get(MCP_SERVER_ALLOW_LIST_KEY)))
+        } else {
+            settings.get(MCP_SERVER_ALLOW_LIST_KEY)
+        };
+        match servers.cloned() {
+            Some(servers) => {
+                allow_lists.insert(MCP_SERVER_ALLOW_LIST_KEY.to_owned(), servers);
+            }
+            None => {
+                allow_lists.shift_remove(MCP_SERVER_ALLOW_LIST_KEY);
+            }
+        }
+        Self {
+            hooks_set: settings.contains_key("hooks"),
+            plugin_enabled: any_plugin_enabled(settings.get("enabledPlugins")),
+            force_login_org: settings.contains_key("forceLoginOrgUUID"),
+            managed_permission_rules_only: tiers
+                .iter()
+                .any(|tier| is_true(tier, "allowManagedPermissionRulesOnly")),
+            managed_domains_only: tiers
+                .iter()
+                .any(|tier| path_is_true(tier, &["sandbox", "network", "allowManagedDomainsOnly"])),
+            managed_read_paths_only: tiers
+                .iter()
+                .any(|tier| path_is_true(tier, &["sandbox", "filesystem", "allowManagedReadPathsOnly"])),
+            allow_lists,
+        }
     }
+
+    /// What the admin holds for an allow list (`ia[key]` upstream).
+    pub(crate) fn allow_list(&self, key: &str) -> Option<&Value> {
+        self.allow_lists.get(key)
+    }
+
+    /// The parent may not widen anything the managed-only gates cover (`Ye` upstream).
+    pub(crate) fn hold_everything(&mut self) {
+        self.managed_permission_rules_only = true;
+        self.managed_domains_only = true;
+        self.managed_read_paths_only = true;
+    }
+
+    /// Lets the parent supply allow lists that only a document the organization withholds set (`xm` upstream).
+    pub(crate) fn release(&mut self, keys: &[&str]) {
+        for key in keys {
+            self.allow_lists.shift_remove(*key);
+        }
+    }
+}
+
+/// `dX` upstream: drops a gate of the parent when neither it nor the admin sets the list the gate covers.
+pub(crate) fn drop_open_gates(parent: &SettingsMap, facts: &AdminFacts) -> SettingsMap {
+    let open: Vec<&str> = ALLOW_LIST_GATES
+        .iter()
+        .filter(|(_, list)| !parent.contains_key(*list) && facts.allow_list(list).is_none())
+        .map(|(gate, _)| *gate)
+        .collect();
+    omit(parent, &open)
 }
 
 fn filter_rules(rules: &Value) -> Value {
@@ -171,8 +238,7 @@ fn sandbox_slice(parent: &SettingsMap, facts: &AdminFacts) -> Option<SettingsMap
 }
 
 /// `zP` upstream: the restrictive keys of a host's `managedSettings`.
-pub(crate) fn parent_slice(parent: &SettingsMap, admin: Option<&SettingsMap>, tiers: &[SettingsMap]) -> SettingsMap {
-    let facts = admin_facts(admin, tiers);
+pub(crate) fn parent_slice(parent: &SettingsMap, facts: &AdminFacts) -> SettingsMap {
     let mut slice = SettingsMap::new();
     if is_true(parent, "allowManagedHooksOnly") || is_true(parent, "disableAllHooks") || hooks_disabled(parent) {
         slice.insert("allowManagedHooksOnly".to_owned(), Value::Bool(true));
@@ -264,7 +330,7 @@ pub(crate) fn parent_slice(parent: &SettingsMap, admin: Option<&SettingsMap>, ti
         slice.insert("forceLoginOrgUUID".to_owned(), value.clone());
     }
     for key in ALLOW_LIST_KEYS {
-        if !facts.allow_list_keys.contains(&key)
+        if facts.allow_list(key).is_none()
             && let Some(value) = parent.get(key).filter(|value| truthy(Some(value)))
         {
             slice.insert(key.to_owned(), value.clone());
@@ -276,10 +342,10 @@ pub(crate) fn parent_slice(parent: &SettingsMap, admin: Option<&SettingsMap>, ti
     if parent.get("availableModelsMatch") == Some(&Value::String("exact".into())) {
         slice.insert("availableModelsMatch".to_owned(), Value::String("exact".into()));
     }
-    if let Some(permissions) = permissions_slice(parent, &facts) {
+    if let Some(permissions) = permissions_slice(parent, facts) {
         slice.insert("permissions".to_owned(), Value::Object(permissions));
     }
-    if let Some(sandbox) = sandbox_slice(parent, &facts) {
+    if let Some(sandbox) = sandbox_slice(parent, facts) {
         slice.insert("sandbox".to_owned(), Value::Object(sandbox));
     }
     slice
