@@ -310,7 +310,7 @@ async fn a_non_object_initialize_response_is_kept_in_typescript_and_empty_in_pyt
         options.argv_style = style;
         let (client, server) = connect(options, json!(42)).await;
         let client = client?;
-        assert_eq!(client.connection_info().as_json(), &expected);
+        assert_eq!(client.connection_info().as_json(), Some(&expected));
         client.disconnect().await?;
         server.await??;
     }

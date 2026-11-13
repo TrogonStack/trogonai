@@ -30,6 +30,10 @@ fn identical_startup_policy_failures_are_not_reported_twice() {
         Error::HooksNotApplied
     ));
     assert!(matches!(
+        connection_failure(Error::ManagedSettingsNotApplied, Err(Error::ManagedSettingsNotApplied)),
+        Error::ManagedSettingsNotApplied
+    ));
+    assert!(matches!(
         connection_failure(
             Error::ControlTimeout {
                 operation: ControlOperation::Initialize

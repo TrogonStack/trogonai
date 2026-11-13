@@ -1250,7 +1250,10 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "golden_controls::typescript_rejections_keep_a_well_formed_error_code",
+        "golden_controls::python_controls_match_claude_agent_sdk_bytes_and_returns"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -2839,6 +2842,306 @@
       "rust": [
         "src/driver.rs",
         "src/version_check.rs"
+      ]
+    },
+    {
+      "id": "c06-control-error-code",
+      "concept": "error_code on a control error response",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 431,
+        "line_end": 435,
+        "sha256": "c075f65c7463d433766c7f20c928877de8e43512d79a73ad059ed850bb741a6a"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "/^[a-z][a-z0-9_]{0,63}$/",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 70,
+        "sha256": "6139e17275810da0e7d1b8d0737a93c0990d7f084b037baabce123bcce49867f"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript keeps a string error_code matching /^[a-z][a-z0-9_]{0,63}$/ as errorCode and drops any other; Python raises with the message only."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "ControlRejectionError::error_code reads it the TypeScript way by default; ArgvStyle::Python leaves it unset like Python."
+      },
+      "contracts": [
+        "golden_controls::typescript_rejections_keep_a_well_formed_error_code",
+        "golden_controls::python_controls_match_claude_agent_sdk_bytes_and_returns"
+      ],
+      "rust": [
+        "src/error.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c07-control-response-values",
+      "concept": "Control responses returned to the caller",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 775,
+        "line_end": 776,
+        "sha256": "d4047a01b9417c32f423a868962aee98be1962429a8424894bf1d21bdc9454e7"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "subtype:\"get_context_usage\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 120,
+        "sha256": "5c47eae5fb38349e098a93a239a26fe2701dcc48ce67219a926b1468290272ca"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Neither SDK validates a control response. TypeScript returns the response as sent, undefined when absent; Python returns it when it is an object and an empty object otherwise."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "ControlReply keeps the response as sent, None when absent, and decodes it to the pinned type only on request; ArgvStyle::Python reads a missing or non-object response as an empty object."
+      },
+      "contracts": [
+        "golden_controls::typescript_controls_match_sdk_mjs_bytes_and_returns",
+        "golden_controls::python_controls_match_claude_agent_sdk_bytes_and_returns",
+        "golden_controls::an_absent_response_stays_undefined_and_a_null_one_stays_null_like_typescript"
+      ],
+      "rust": [
+        "src/control.rs",
+        "src/client.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c08-set-model-unset",
+      "concept": "set_model without a model",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 834,
+        "line_end": 841,
+        "sha256": "9d30373b4d047e7c8b73fd68c4f278d60be56efe2245a5a616714f454b091aca"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "subtype:\"set_model\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 30,
+        "sha256": "737b7ded46d298bfb4b36d13f663d3163203fd01b8cdec2689d35cf5666dc603"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript setModel() leaves model out of the request; Python set_model(None) sends model null."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "set_model(None) leaves model out by default and sends null under ArgvStyle::Python."
+      },
+      "contracts": [
+        "golden_controls::typescript_controls_match_sdk_mjs_bytes_and_returns",
+        "golden_controls::python_controls_match_claude_agent_sdk_bytes_and_returns"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/runtime_payload.rs"
+      ]
+    },
+    {
+      "id": "c09-rewind-dry-run",
+      "concept": "rewind_files dry run flag",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 843,
+        "line_end": 856,
+        "sha256": "e5644802dde48ab73c5986f6be7197ae97fa75f6a38ba42843391d5d3509dd4f"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "subtype:\"rewind_files\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 60,
+        "sha256": "6e2148514ba48675af70287728915a5c4940e4a94e222a2bbd36f3bdd958015a"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript sends dry_run as the caller's dryRun, left out when unset; Python sends only user_message_id."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "rewind_files(id, None) sends what both SDKs send without the option; RewindMode::DryRun and RewindMode::Apply send the TypeScript flag."
+      },
+      "contracts": [
+        "golden_controls::typescript_controls_match_sdk_mjs_bytes_and_returns",
+        "golden_controls::python_controls_match_claude_agent_sdk_bytes_and_returns"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/runtime_payload.rs"
+      ]
+    },
+    {
+      "id": "c10-supported-commands",
+      "concept": "Slash commands after commands_changed",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python client has no supported commands accessor."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "async supportedCommands(){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 70,
+        "sha256": "b48e18460d09b93ba9f62da81bbf7416cd65b802fbcb8d63c12010ba1700e555"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "supportedCommands returns the commands of the last system commands_changed message whose commands is an array, else the initialize commands."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_controls::supported_commands_follow_commands_changed",
+        "golden_controls::typescript_controls_match_sdk_mjs_bytes_and_returns"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c11-reinitialize",
+      "concept": "Sending initialize again",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python client has no reinitialize."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "reinitialize(){return",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 60,
+        "sha256": "a73de2e32172fb7d8019a1bd785feff8fa4834cda2e185c0d9b2634d531c5f61"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "reinitialize sends the initialize request again without SDK MCP server manifests and returns its response; initializationResult keeps the first response."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_controls::typescript_controls_match_sdk_mjs_bytes_and_returns"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c12-background-tasks-result",
+      "concept": "background_tasks response",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python client has no background_tasks control."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "subtype:\"background_tasks\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 80,
+        "sha256": "383ae799af9a9c3649059cfcdddb450d4de7699a8a85ca7b5f120699e8f83e88"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "backgroundTasks returns response.backgrounded, true when it is null or absent, and throws when the response itself is absent."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "A backgrounded that is not a boolean is a protocol error, where TypeScript returns the value untyped."
+      },
+      "contracts": [
+        "golden_controls::background_tasks_reads_backgrounded_like_typescript",
+        "golden_controls::typescript_rejections_keep_a_well_formed_error_code"
+      ],
+      "rust": [
+        "src/client.rs"
+      ]
+    },
+    {
+      "id": "c13-read-file-failure",
+      "concept": "read_file failure",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python client has no read_file control."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "subtype:\"read_file\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 90,
+        "sha256": "d7340040c520790fa3fba252b4e9ace107b9211ac77f138cb3a4fbab77b88557"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "readFile resolves to null on any failure, the CLI's refusal included, and leaves max_bytes and encoding out when unset."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_controls::typescript_controls_match_sdk_mjs_bytes_and_returns"
+      ],
+      "rust": [
+        "src/client.rs"
+      ]
+    },
+    {
+      "id": "c14-javascript-numbers",
+      "concept": "Numbers in TypeScript control requests",
+      "python": {
+        "status": "absent",
+        "reason": "Python writes its own json.dumps spelling, covered by the Python dialect."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "subtype:\"seed_read_state\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 30,
+        "span_after": 30,
+        "sha256": "21a9b1968640681b30a6697a95e4943a8afc487a7af6476206af817c57d08772"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Requests are written with JSON.stringify: integral numbers without a fraction, 1e21 as 1e+21, NaN and the infinities as null."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_controls::javascript_numbers_are_spelled_like_json_stringify",
+        "golden_controls::typescript_controls_match_sdk_mjs_bytes_and_returns"
+      ],
+      "rust": [
+        "src/js_json.rs",
+        "src/client.rs",
+        "src/driver.rs"
       ]
     }
   ]

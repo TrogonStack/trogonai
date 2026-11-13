@@ -130,12 +130,36 @@ async fn m06_a_control_request_has_no_deadline_by_default() -> TestResult {
 #[tokio::test]
 async fn r07_the_default_shutdown_stops_a_stuck_cli_without_an_error() -> TestResult {
     let client = ClaudeSdkClient::connect(options("blocked-stdin")?).await?;
+    let pid = client.process_id();
     client.send_prompt(Prompt::from("block")).await?;
     let started = Instant::now();
     let outcome = timeout(Duration::from_secs(10), client.disconnect()).await?;
     assert!(outcome.is_ok(), "{outcome:?}");
     assert!(started.elapsed() >= Duration::from_secs(2));
     assert!(started.elapsed() < Duration::from_secs(5));
+    #[cfg(unix)]
+    wait_until_reaped(pid.ok_or_else(|| std::io::Error::other("missing pid"))?).await?;
+    Ok(())
+}
+
+/// The CLI is reaped in the background after `disconnect` returns, so wait for that to happen.
+#[cfg(unix)]
+async fn wait_until_reaped(pid: u32) -> TestResult {
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let alive = std::process::Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()?
+                .success();
+            if !alive {
+                return Ok::<(), Box<dyn StdError>>(());
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await??;
     Ok(())
 }
 

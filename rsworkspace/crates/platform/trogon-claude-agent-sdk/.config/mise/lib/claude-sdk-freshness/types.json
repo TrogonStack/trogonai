@@ -327,6 +327,44 @@
       "roots": [
         "SDKMessage"
       ]
+    },
+    {
+      "source": "sdk.d.ts",
+      "output": "src/upstream/control.rs",
+      "foreign": {
+        "UUID": "string",
+        "BetaMessage": "object",
+        "MessageParam": "object",
+        "BetaRawMessageStreamEvent": "object",
+        "NonNullableUsage": "object",
+        "JSONRPCMessage": "object",
+        "HookInput": "object"
+      },
+      "tagged": {
+        "SDKControlRequestInner": [
+          "subtype"
+        ]
+      },
+      "roots": [
+        "SDKControlInitializeResponse",
+        "SlashCommand",
+        "ModelInfo",
+        "AgentInfo",
+        "AccountInfo",
+        "McpServerStatus",
+        "SDKControlInterruptResponse",
+        "SDKControlGetContextUsageResponse",
+        "SDKControlGetUsageResponse",
+        "SDKControlReadFileResponse",
+        "SDKControlReloadPluginsResponse",
+        "SDKControlReloadSkillsResponse",
+        "SDKControlReloadOutputStylesResponse",
+        "SDKControlMcpReadResourceResponse",
+        "RewindFilesResult",
+        "McpSetServersResult",
+        "SDKControlRequest",
+        "SDKControlResponse"
+      ]
     }
   ]
 }

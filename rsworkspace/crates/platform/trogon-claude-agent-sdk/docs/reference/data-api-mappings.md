@@ -121,6 +121,33 @@ integrity-verified published `0.3.319` declaration archive.
 | `ClaudeSdkClient::connect_with_transport`, `query_with_transport` | `ClaudeSDKClient(transport=...)`, `query(transport=...)` | not applicable |
 | `Error::Transport(..)` | exception raised by the transport | not applicable |
 
+## Query controls
+
+All methods are on `ClientHandle`. Requests match `sdk.mjs` by default and
+`claude_agent_sdk` under `ArgvStyle::Python`; replies are `ControlReply<T>`
+(`as_json()` keeps the sent value, `None` when the reply has none where
+TypeScript returns `undefined`, `decode()` reads the generated type).
+
+| Rust | Python | TypeScript |
+| --- | --- | --- |
+| `initialization_result`, `reinitialize` | `get_server_info` (cached result only) | `initializationResult`, `reinitialize` |
+| `supported_commands`, `supported_models`, `supported_agents`, `account_info` | not applicable | `supportedCommands` (latest `commands_changed` list first), `supportedModels`, `supportedAgents`, `accountInfo` |
+| `set_model(Option<String>)` | `set_model` (`model: null` when unset) | `setModel` (`model` omitted when unset) |
+| `set_mcp_permission_mode_override`, `McpPermissionModeOverride` | not applicable | `setMcpPermissionModeOverride` (`{}` for an absent response) |
+| `set_max_thinking_tokens`, `set_max_thinking_tokens_with_display`, `MaxThinkingTokensDisplay` | not applicable | `setMaxThinkingTokens` |
+| `apply_flag_settings`, `update_settings`, `SettingsUpdateSource` | not applicable | `applyFlagSettings`, `updateSettings` |
+| `rewind_files(MessageId, Option<RewindMode>)` | `rewind_files` (no dry run) | `rewindFiles` (`dry_run`) |
+| `mcp_status`, `mcp_server_status` | `get_mcp_status` | `mcpServerStatus` (`response.mcpServers`) |
+| `context_usage(Option<ContextUsageDetail>)` | `get_context_usage` | `getContextUsage` |
+| `usage_experimental(bool)` | not applicable | `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET` (`skip_behaviors` sent only when true) |
+| `read_file`, `ReadFileOptions`, `ReadFileEncoding` | not applicable | `readFile` (`null` on any failure, here `None`) |
+| `read_mcp_resource` | not applicable | `readMcpResource` |
+| `reload_plugins`, `ReloadPluginsOptions`, `reload_skills`, `reload_output_styles` | not applicable | `reloadPlugins`, `reloadSkills`, `reloadOutputStyles` |
+| `seed_read_state(&str, f64)` | not applicable | `seedReadState` (`mtime` spelled like `JSON.stringify`) |
+| `stop_task` | `stop_task` | `stopTask` |
+| `background_tasks(Option<ToolUseId>) -> bool` | not applicable | `backgroundTasks` (`true` for an absent `backgrounded`; a non-boolean is `Error::Protocol` here) |
+| `Error::ControlRejected`, `ControlRejectionError::error_code` | `Exception(error)` (no code) | `error_code` kept when it matches `/^[a-z][a-z0-9_]{0,63}$/` |
+
 ## Messages
 
 | Rust | Python | TypeScript |

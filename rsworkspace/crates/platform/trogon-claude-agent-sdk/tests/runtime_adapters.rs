@@ -210,7 +210,7 @@ async fn injected_process_runs_protocol_and_closes_input_on_disconnect() -> Resu
         client.connection_info().claude_code_version.as_deref(),
         Some("scripted-cli")
     );
-    let status = client.handle().mcp_status().await?;
+    let status = client.handle().mcp_status().await?.decode()?;
     assert_eq!(status.mcp_servers[0]["name"], "scripted");
     client.disconnect().await?;
     assert_eq!(server.await??, ["initialize", "mcp_status"]);

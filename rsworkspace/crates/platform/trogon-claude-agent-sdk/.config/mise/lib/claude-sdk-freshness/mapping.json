@@ -472,10 +472,18 @@
         {
           "path": "tests/runtime_features.rs",
           "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "typescript_controls_match_sdk_mjs_bytes_and_returns"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "python_controls_match_claude_agent_sdk_bytes_and_returns"
         }
       ],
       "status": "supported",
-      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+      "rationale": "Requests match sdk.mjs 0.3.323 by default and claude_agent_sdk 0.2.181 under ArgvStyle::Python, byte for byte, including optional fields omitted when unset; replies keep the value the CLI sent. Installed CLI capability remains authoritative."
     },
     {
       "id": "set-permission-mode",
@@ -530,10 +538,18 @@
         {
           "path": "tests/runtime_features.rs",
           "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "typescript_controls_match_sdk_mjs_bytes_and_returns"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "python_controls_match_claude_agent_sdk_bytes_and_returns"
         }
       ],
       "status": "supported",
-      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+      "rationale": "Requests match sdk.mjs 0.3.323 by default and claude_agent_sdk 0.2.181 under ArgvStyle::Python, byte for byte, including optional fields omitted when unset; replies keep the value the CLI sent. Installed CLI capability remains authoritative."
     },
     {
       "id": "mcp-status",
@@ -553,16 +569,25 @@
         }
       },
       "rust_api": [
-        "ClientHandle.mcp_status"
+        "ClientHandle.mcp_status",
+        "ClientHandle.mcp_server_status"
       ],
       "tests": [
         {
           "path": "tests/runtime_features.rs",
           "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "typescript_controls_match_sdk_mjs_bytes_and_returns"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "python_controls_match_claude_agent_sdk_bytes_and_returns"
         }
       ],
       "status": "supported",
-      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+      "rationale": "mcp_status keeps the get_mcp_status reply like Python get_mcp_status (an absent response reads as {}); mcp_server_status returns response.mcpServers like TypeScript mcpServerStatus. Both requests match the pinned SDK bytes."
     },
     {
       "id": "mcp-reconnect",
@@ -682,10 +707,18 @@
         {
           "path": "tests/runtime_features.rs",
           "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "typescript_controls_match_sdk_mjs_bytes_and_returns"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "python_controls_match_claude_agent_sdk_bytes_and_returns"
         }
       ],
       "status": "supported",
-      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+      "rationale": "Requests match sdk.mjs 0.3.323 by default and claude_agent_sdk 0.2.181 under ArgvStyle::Python, byte for byte, including optional fields omitted when unset; replies keep the value the CLI sent. Installed CLI capability remains authoritative."
     },
     {
       "id": "stop-task",
@@ -711,10 +744,18 @@
         {
           "path": "tests/runtime_features.rs",
           "name": "typed_controls_preserve_receipts_and_use_exact_wire_operations"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "typescript_rejections_keep_a_well_formed_error_code"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "python_controls_match_claude_agent_sdk_bytes_and_returns"
         }
       ],
       "status": "supported",
-      "rationale": "Typed control operation and reply are verified through the exported client and exact fixture wire request. Installed CLI capability remains authoritative."
+      "rationale": "Requests match sdk.mjs 0.3.323 by default and claude_agent_sdk 0.2.181 under ArgvStyle::Python, byte for byte, including optional fields omitted when unset; replies keep the value the CLI sent. Installed CLI capability remains authoritative."
     },
     {
       "id": "dynamic-mcp",
@@ -759,7 +800,17 @@
         "typescript": {
           "symbols": [
             "Query.initializationResult",
-            "core.Query.initializationResult"
+            "core.Query.initializationResult",
+            "Query.reinitialize",
+            "core.Query.reinitialize",
+            "Query.supportedCommands",
+            "core.Query.supportedCommands",
+            "Query.supportedModels",
+            "core.Query.supportedModels",
+            "Query.supportedAgents",
+            "core.Query.supportedAgents",
+            "Query.accountInfo",
+            "core.Query.accountInfo"
           ],
           "prefixes": []
         }
@@ -771,7 +822,13 @@
         "ConnectionInfo.as_json",
         "FeatureSupport",
         "ArgvStyle",
-        "Error.typescript_message"
+        "Error.typescript_message",
+        "ClientHandle.initialization_result",
+        "ClientHandle.reinitialize",
+        "ClientHandle.supported_commands",
+        "ClientHandle.supported_models",
+        "ClientHandle.supported_agents",
+        "ClientHandle.account_info"
       ],
       "tests": [
         {
@@ -821,10 +878,18 @@
         {
           "path": "tests/golden_initialize.rs",
           "name": "a_non_object_initialize_response_is_kept_in_typescript_and_empty_in_python"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "typescript_controls_match_sdk_mjs_bytes_and_returns"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "supported_commands_follow_commands_changed"
         }
       ],
       "status": "supported",
-      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning."
+      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning. initializationResult, supportedModels, supportedAgents and accountInfo read the cached response like sdk.mjs; supportedCommands prefers the latest commands_changed list; reinitialize sends a non-first initialize and replaces the cache."
     },
     {
       "id": "budget",
@@ -2265,19 +2330,81 @@
         "typescript": {
           "symbols": [
             "Query.setMcpPermissionModeOverride",
-            "Query.setMaxThinkingTokens",
-            "Query.applyFlagSettings",
             "core.Query.setMcpPermissionModeOverride",
+            "Query.setMaxThinkingTokens",
             "core.Query.setMaxThinkingTokens",
-            "core.Query.applyFlagSettings"
+            "Query.applyFlagSettings",
+            "core.Query.applyFlagSettings",
+            "Query.updateSettings",
+            "core.Query.updateSettings",
+            "Query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET",
+            "core.Query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET",
+            "Query.readFile",
+            "core.Query.readFile",
+            "Query.reloadPlugins",
+            "core.Query.reloadPlugins",
+            "Query.reloadSkills",
+            "core.Query.reloadSkills",
+            "Query.reloadOutputStyles",
+            "core.Query.reloadOutputStyles",
+            "Query.seedReadState",
+            "core.Query.seedReadState",
+            "Query.backgroundTasks",
+            "core.Query.backgroundTasks"
           ],
           "prefixes": []
         }
       },
-      "rust_api": [],
-      "tests": [],
-      "status": "deferred",
-      "rationale": "Additional upstream controls remain separate implementation/review work; runtime-hash changes also require review of control semantics."
+      "rust_api": [
+        "ClientHandle.set_mcp_permission_mode_override",
+        "McpPermissionModeOverride",
+        "ClientHandle.set_max_thinking_tokens",
+        "ClientHandle.set_max_thinking_tokens_with_display",
+        "MaxThinkingTokensDisplay",
+        "ClientHandle.apply_flag_settings",
+        "ClientHandle.update_settings",
+        "SettingsUpdateSource",
+        "ClientHandle.usage_experimental",
+        "ClientHandle.read_file",
+        "ReadFileOptions",
+        "ReadFileEncoding",
+        "ClientHandle.reload_plugins",
+        "ReloadPluginsOptions",
+        "ClientHandle.reload_skills",
+        "ClientHandle.reload_output_styles",
+        "ClientHandle.seed_read_state",
+        "ClientHandle.background_tasks",
+        "ControlReply",
+        "ControlRejectionError"
+      ],
+      "tests": [
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "typescript_controls_match_sdk_mjs_bytes_and_returns"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "typescript_rejections_keep_a_well_formed_error_code"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "background_tasks_reads_backgrounded_like_typescript"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "javascript_numbers_are_spelled_like_json_stringify"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "an_absent_response_stays_undefined_and_a_null_one_stays_null_like_typescript"
+        },
+        {
+          "path": "tests/error_contracts.rs",
+          "name": "control_timeout_diagnostics_identify_each_wire_operation"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Every request matches sdk.mjs 0.3.323 byte for byte, captured from the published package with JSON.stringify number spelling, optional fields omitted when unset and the same request ids. Replies keep the value the CLI sent (ControlReply::as_json), None when the reply has no response where TypeScript returns undefined, with the generated upstream type available through decode, and each method returns what the TypeScript method returns: readFile is None on any failure, setMcpPermissionModeOverride is {} for an absent response, backgroundTasks is true for an absent backgrounded. A rejection keeps its error_code when it matches the TypeScript pattern. backgroundTasks refuses a non-boolean backgrounded where TypeScript returns it untyped. Python 0.2.181 has none of these methods."
     },
     {
       "id": "custom-transport",

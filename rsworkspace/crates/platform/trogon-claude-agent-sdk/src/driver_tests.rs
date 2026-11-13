@@ -98,6 +98,7 @@ impl DriverFixture {
             initialize_expectations: InitializeExpectations::default(),
             initialize_timeout: None,
             version_check: None,
+            latest_commands: LatestCommands::default(),
             verbatim_prompts: false,
             warn_unsupported_verbatim: false,
             elicitation_handler: None,
@@ -499,7 +500,7 @@ async fn a_typescript_initialize_expiry_is_initialize_not_confirmed() -> Result<
     fixture.driver.pending.insert(
         ControlRequestId::from("initialize"),
         PendingControl {
-            response: ControlResponder::Initialize(response),
+            response: ControlResponder::Initialize { first: true, response },
             deadline: Some(Instant::now()),
         },
     );
@@ -520,7 +521,7 @@ async fn an_initialize_armed_only_by_managed_settings_expires_with_their_message
     fixture.driver.pending.insert(
         ControlRequestId::from("initialize"),
         PendingControl {
-            response: ControlResponder::Initialize(response),
+            response: ControlResponder::Initialize { first: true, response },
             deadline: Some(Instant::now()),
         },
     );

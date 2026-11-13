@@ -246,7 +246,7 @@ async fn connected_client_exposes_cached_lossless_metadata() -> TestResult {
         client.connection_info().hook_on_failure_supported,
         FeatureSupport::NotReported
     );
-    assert_eq!(client.connection_info().as_json(), &serde_json::json!({}));
+    assert_eq!(client.connection_info().as_json(), Some(&serde_json::json!({})));
     client.disconnect().await?;
     Ok(())
 }
@@ -543,7 +543,7 @@ async fn malformed_initialization_is_accepted_like_upstream() -> TestResult {
     ] {
         let client = ClaudeSdkClient::connect(options(mode)?).await?;
         assert!(client.connection_info().models.is_empty());
-        assert_eq!(client.connection_info().as_json(), &raw);
+        assert_eq!(client.connection_info().as_json(), Some(&raw));
         client.disconnect().await?;
     }
     Ok(())

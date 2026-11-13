@@ -3,9 +3,10 @@ use futures_util::StreamExt;
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 
 use crate::{
-    ClaudeAgentOptions, ControlOperation, Error, JsonObject, Message, Prompt, ProtocolError,
+    ClaudeAgentOptions, ControlOperation, ControlReply, Error, JsonObject, Message, Prompt, ProtocolError,
     driver::{self, Command, Completion},
     process_transport::{Closed, ProcessSpawn, ProcessTransport},
+    upstream::control as wire_types,
     wire::runtime_payload::RequestPayload,
 };
 
@@ -42,6 +43,10 @@ pub struct ClientHandle {
     timeout: Option<std::time::Duration>,
     aborted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     closed: Closed,
+    /// The first initialize response, which `reinitialize` does not replace; `None` when the reply had none.
+    initialization: std::sync::Arc<std::sync::OnceLock<Option<serde_json::Value>>>,
+    latest_commands: driver::LatestCommands,
+    style: crate::ArgvStyle,
 }
 
 /// The inherited variables plus the two the default debug file needs. They are read only here, and the
@@ -347,7 +352,11 @@ impl ClaudeSdkClient {
                 .map(crate::Timeout::as_duration),
             aborted: std::sync::Arc::default(),
             closed,
+            initialization: std::sync::Arc::default(),
+            latest_commands: driver::LatestCommands::default(),
+            style: options.argv_style,
         };
+        let latest_commands = handle.latest_commands.clone();
         let driver = driver::spawn(driver::SpawnOptions {
             options,
             session,
@@ -358,6 +367,7 @@ impl ClaudeSdkClient {
             transport,
             initialization,
             version_check,
+            latest_commands,
         })
         .await?;
         let mut runtime = ClientRuntime {
@@ -368,11 +378,15 @@ impl ClaudeSdkClient {
             driver: Some(driver),
             process_id,
         };
-        match runtime.handle.initialize().await {
-            Ok(connection_info) => Ok(Self {
-                runtime,
-                connection_info,
-            }),
+        match runtime.handle.initialize(true).await {
+            Ok(response) => {
+                let connection_info = crate::ConnectionInfo::from_response(response.clone());
+                let _ = runtime.handle.initialization.set(response);
+                Ok(Self {
+                    runtime,
+                    connection_info,
+                })
+            }
             Err(error) => {
                 let cleanup = if matches!(error, Error::DriverStopped) {
                     runtime.finish().await
@@ -453,6 +467,7 @@ fn connection_failure(primary: Error, cleanup: Result<(), Error>) -> Error {
         Err(Error::DriverStopped) => primary,
         Err(Error::BlockingHooksUnsupported) if matches!(primary, Error::BlockingHooksUnsupported) => primary,
         Err(Error::HooksNotApplied) if matches!(primary, Error::HooksNotApplied) => primary,
+        Err(Error::ManagedSettingsNotApplied) if matches!(primary, Error::ManagedSettingsNotApplied) => primary,
         Err(Error::ControlTimeout { operation }) if matches!(&primary, Error::ControlTimeout { operation: original } if *original == operation) => {
             primary
         }
@@ -497,10 +512,64 @@ impl Drop for ClientRuntime {
 }
 
 impl ClientHandle {
-    async fn initialize(&self) -> Result<crate::ConnectionInfo, Error> {
+    async fn initialize(&self, first: bool) -> Result<Option<serde_json::Value>, Error> {
         let (response, receiver) = oneshot::channel();
-        self.enqueue(Command::Initialize { response }).await?;
+        self.enqueue(Command::Initialize { first, response }).await?;
         receiver.await.map_err(|_| Error::DriverStopped)?
+    }
+
+    /// TypeScript `initializationResult()`, Python `get_server_info()`: the first initialize response.
+    pub fn initialization_result(&self) -> Result<crate::ConnectionInfo, Error> {
+        self.initialization_value().map(crate::ConnectionInfo::from_response)
+    }
+
+    fn initialization_value(&self) -> Result<Option<serde_json::Value>, Error> {
+        self.initialization.get().cloned().ok_or(Error::NotInitialized)
+    }
+
+    /// A field of the first initialize response, `None` when it is missing (TypeScript `undefined`). TypeScript
+    /// reads it off the response, which throws when the CLI sent none or `null`.
+    fn initialization_field<T>(&self, key: &str) -> Result<ControlReply<T>, Error> {
+        match self.initialization_value()? {
+            None | Some(serde_json::Value::Null) => Err(missing_response(ControlOperation::Initialize)),
+            Some(value) => Ok(ControlReply::new(value.get(key).cloned())),
+        }
+    }
+
+    /// TypeScript `reinitialize()`: sends the connect-time initialize request again, without SDK MCP server
+    /// manifests, and returns its response. A response that fails the initialize checks ends the session.
+    /// [`ClientHandle::initialization_result`] keeps the first response.
+    pub async fn reinitialize(&self) -> Result<crate::ConnectionInfo, Error> {
+        self.initialize(false).await.map(crate::ConnectionInfo::from_response)
+    }
+
+    /// TypeScript `supportedCommands()`: the list from the last `commands_changed` message, else the initialize
+    /// one.
+    pub fn supported_commands(&self) -> Result<ControlReply<Vec<wire_types::SlashCommand>>, Error> {
+        let latest = self
+            .latest_commands
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        match latest {
+            Some(commands) => Ok(ControlReply::new(Some(commands))),
+            None => self.initialization_field("commands"),
+        }
+    }
+
+    /// TypeScript `supportedModels()`.
+    pub fn supported_models(&self) -> Result<ControlReply<Vec<wire_types::ModelInfo>>, Error> {
+        self.initialization_field("models")
+    }
+
+    /// TypeScript `supportedAgents()`.
+    pub fn supported_agents(&self) -> Result<ControlReply<Vec<wire_types::AgentInfo>>, Error> {
+        self.initialization_field("agents")
+    }
+
+    /// TypeScript `accountInfo()`.
+    pub fn account_info(&self) -> Result<ControlReply<wire_types::AccountInfo>, Error> {
+        self.initialization_field("account")
     }
 
     pub async fn set_mcp_servers(
@@ -516,7 +585,7 @@ impl ClientHandle {
         })
         .await?;
         let response = receiver.await.map_err(|_| Error::DriverStopped)??;
-        serde_json::from_value(response.into())
+        serde_json::from_value(response.unwrap_or_default())
             .map_err(ProtocolError::from)
             .map_err(Error::from)
     }
@@ -547,7 +616,7 @@ impl ClientHandle {
                 RequestPayload::Interrupt { cancel_queued: None }.to_value()?,
             )
             .await?;
-        Ok(crate::InterruptReceipt::from_json(response))
+        Ok(interrupt_receipt(response))
     }
 
     pub async fn interrupt_cancel_queued(&self) -> Result<crate::InterruptReceipt, Error> {
@@ -560,14 +629,103 @@ impl ClientHandle {
                 .to_value()?,
             )
             .await?;
-        Ok(crate::InterruptReceipt::from_json(response))
+        Ok(interrupt_receipt(response))
     }
 
+    /// `None` is TypeScript `setModel()`, which leaves `model` out, or Python `set_model(None)`, which sends
+    /// `null`.
     pub async fn set_model(&self, model: Option<String>) -> Result<(), Error> {
+        let model = match (model.as_deref(), self.style) {
+            (Some(model), _) => Some(Some(model)),
+            (None, crate::ArgvStyle::TypeScript) => None,
+            (None, crate::ArgvStyle::Python) => Some(None),
+        };
         self.control(
             ControlOperation::SetModel,
-            RequestPayload::SetModel {
-                model: model.as_deref(),
+            RequestPayload::SetModel { model }.to_value()?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// TypeScript `setMcpPermissionModeOverride`; `None` clears the override. An absent response reads as `{}`.
+    pub async fn set_mcp_permission_mode_override(
+        &self,
+        server_name: &str,
+        mode: Option<crate::McpPermissionModeOverride>,
+    ) -> Result<ControlReply<JsonObject>, Error> {
+        let response = self
+            .control(
+                ControlOperation::SetMcpPermissionModeOverride,
+                RequestPayload::SetMcpPermissionModeOverride {
+                    server_name,
+                    mode: mode.map(crate::McpPermissionModeOverride::as_str),
+                }
+                .to_value()?,
+            )
+            .await?;
+        Ok(ControlReply::new(match response {
+            None | Some(serde_json::Value::Null) => Some(serde_json::Value::Object(JsonObject::new())),
+            response => response,
+        }))
+    }
+
+    /// TypeScript `setMaxThinkingTokens(tokens)`: `thinking_display` is left out.
+    pub async fn set_max_thinking_tokens(&self, max_thinking_tokens: Option<u64>) -> Result<(), Error> {
+        self.send_max_thinking_tokens(max_thinking_tokens, None).await
+    }
+
+    /// TypeScript `setMaxThinkingTokens(tokens, display)`; `None` sends `thinking_display: null`.
+    pub async fn set_max_thinking_tokens_with_display(
+        &self,
+        max_thinking_tokens: Option<u64>,
+        thinking_display: Option<crate::MaxThinkingTokensDisplay>,
+    ) -> Result<(), Error> {
+        self.send_max_thinking_tokens(
+            max_thinking_tokens,
+            Some(thinking_display.map(crate::MaxThinkingTokensDisplay::as_str)),
+        )
+        .await
+    }
+
+    async fn send_max_thinking_tokens(
+        &self,
+        max_thinking_tokens: Option<u64>,
+        thinking_display: Option<Option<&'static str>>,
+    ) -> Result<(), Error> {
+        self.control(
+            ControlOperation::SetMaxThinkingTokens,
+            RequestPayload::SetMaxThinkingTokens {
+                max_thinking_tokens,
+                thinking_display,
+            }
+            .to_value()?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// TypeScript `applyFlagSettings`: the object is sent as given, so a `null` value clears that flag setting.
+    pub async fn apply_flag_settings(&self, settings: &JsonObject) -> Result<(), Error> {
+        self.control(
+            ControlOperation::ApplyFlagSettings,
+            RequestPayload::ApplyFlagSettings { settings }.to_value()?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// TypeScript `updateSettings`.
+    pub async fn update_settings(
+        &self,
+        source: crate::SettingsUpdateSource,
+        settings: &JsonObject,
+    ) -> Result<(), Error> {
+        self.control(
+            ControlOperation::UpdateSettings,
+            RequestPayload::UpdateSettings {
+                source: source.as_str(),
+                settings,
             }
             .to_value()?,
         )
@@ -584,33 +742,140 @@ impl ClientHandle {
         Ok(())
     }
 
+    /// TypeScript `rewindFiles(id, {dryRun})`, Python `rewind_files(id)`. `None` leaves `dry_run` out, as both do
+    /// without the option.
     pub async fn rewind_files(
         &self,
         user_message_id: crate::MessageId,
-        mode: crate::RewindMode,
-    ) -> Result<crate::RewindFilesResult, Error> {
-        self.typed_control(
+        mode: impl Into<Option<crate::RewindMode>>,
+    ) -> Result<ControlReply<wire_types::RewindFilesResult>, Error> {
+        self.reply(
             ControlOperation::RewindFiles,
             RequestPayload::RewindFiles {
                 user_message_id: user_message_id.as_str(),
-                dry_run: mode == crate::RewindMode::DryRun,
+                dry_run: mode.into().map(|mode| mode == crate::RewindMode::DryRun),
             }
             .to_value()?,
         )
         .await
     }
 
-    pub async fn mcp_status(&self) -> Result<crate::McpStatusResponse, Error> {
-        self.typed_control(ControlOperation::McpStatus, RequestPayload::McpStatus.to_value()?)
+    /// Python `get_mcp_status()`: the whole response.
+    pub async fn mcp_status(&self) -> Result<ControlReply<crate::McpStatusResponse>, Error> {
+        self.reply(ControlOperation::McpStatus, RequestPayload::McpStatus.to_value()?)
             .await
     }
 
-    pub async fn context_usage(&self) -> Result<crate::ContextUsageResponse, Error> {
-        self.typed_control(
+    /// TypeScript `mcpServerStatus()`: the response's `mcpServers`.
+    pub async fn mcp_server_status(&self) -> Result<ControlReply<Vec<wire_types::McpServerStatus>>, Error> {
+        let response = self
+            .control(ControlOperation::McpStatus, RequestPayload::McpStatus.to_value()?)
+            .await?;
+        let Some(serde_json::Value::Object(mut response)) = response else {
+            return Err(missing_response(ControlOperation::McpStatus));
+        };
+        Ok(ControlReply::new(response.remove("mcpServers")))
+    }
+
+    /// TypeScript `getContextUsage({detail})`, Python `get_context_usage()` when `detail` is `None`.
+    pub async fn context_usage(
+        &self,
+        detail: Option<crate::ContextUsageDetail>,
+    ) -> Result<ControlReply<wire_types::SDKControlGetContextUsageResponse>, Error> {
+        self.reply(
             ControlOperation::ContextUsage,
-            RequestPayload::GetContextUsage.to_value()?,
+            RequestPayload::GetContextUsage {
+                detail: detail.map(crate::ContextUsageDetail::as_str),
+            }
+            .to_value()?,
         )
         .await
+    }
+
+    /// TypeScript `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({skipBehaviors})`, which upstream
+    /// marks unstable. `skip_behaviors` is sent only when set.
+    pub async fn usage_experimental(
+        &self,
+        skip_behaviors: bool,
+    ) -> Result<ControlReply<wire_types::SDKControlGetUsageResponse>, Error> {
+        self.reply(
+            ControlOperation::GetUsage,
+            RequestPayload::GetUsage {
+                skip_behaviors: skip_behaviors.then_some(true),
+            }
+            .to_value()?,
+        )
+        .await
+    }
+
+    /// TypeScript `readFile(path, {maxBytes, encoding})`: `None` for any failure, the CLI's refusal included.
+    pub async fn read_file(
+        &self,
+        path: &str,
+        options: crate::ReadFileOptions,
+    ) -> Option<ControlReply<wire_types::SDKControlReadFileResponse>> {
+        let request = RequestPayload::ReadFile {
+            path,
+            max_bytes: options.max_bytes,
+            encoding: options.encoding.map(crate::ReadFileEncoding::as_str),
+        }
+        .to_value()
+        .ok()?;
+        self.reply(ControlOperation::ReadFile, request).await.ok()
+    }
+
+    /// TypeScript `reloadPlugins({holdOnCacheImpact, addPlugins})`.
+    pub async fn reload_plugins(
+        &self,
+        options: &crate::ReloadPluginsOptions,
+    ) -> Result<ControlReply<wire_types::SDKControlReloadPluginsResponse>, Error> {
+        self.reply(
+            ControlOperation::ReloadPlugins,
+            RequestPayload::ReloadPlugins {
+                hold_on_cache_impact: options.hold_on_cache_impact.then_some(true),
+                add_plugins: (!options.add_plugins.is_empty()).then(|| {
+                    options
+                        .add_plugins
+                        .iter()
+                        .map(crate::plugin::PluginPayload::from)
+                        .collect()
+                }),
+            }
+            .to_value()?,
+        )
+        .await
+    }
+
+    /// TypeScript `reloadSkills()`.
+    pub async fn reload_skills(&self) -> Result<ControlReply<wire_types::SDKControlReloadSkillsResponse>, Error> {
+        self.reply(ControlOperation::ReloadSkills, RequestPayload::ReloadSkills.to_value()?)
+            .await
+    }
+
+    /// TypeScript `reloadOutputStyles()`.
+    pub async fn reload_output_styles(
+        &self,
+    ) -> Result<ControlReply<wire_types::SDKControlReloadOutputStylesResponse>, Error> {
+        self.reply(
+            ControlOperation::ReloadOutputStyles,
+            RequestPayload::ReloadOutputStyles.to_value()?,
+        )
+        .await
+    }
+
+    /// TypeScript `seedReadState(path, mtime)`. `mtime` is a JavaScript number, sent as `JSON.stringify` writes
+    /// it.
+    pub async fn seed_read_state(&self, path: &str, mtime: f64) -> Result<(), Error> {
+        self.control(
+            ControlOperation::SeedReadState,
+            RequestPayload::SeedReadState {
+                path,
+                mtime: javascript_number(mtime),
+            }
+            .to_value()?,
+        )
+        .await?;
+        Ok(())
     }
 
     pub async fn reconnect_mcp_server(&self, server_name: crate::McpServerName) -> Result<(), Error> {
@@ -678,13 +943,12 @@ impl ClientHandle {
         Ok(())
     }
 
+    /// TypeScript `backgroundTasks(toolUseId)`: `backgrounded`, `true` when the CLI leaves it out. A response
+    /// without an object, or a `backgrounded` that is not a boolean, is a protocol error here, where TypeScript
+    /// throws or returns the value untyped.
     pub async fn background_tasks(&self, tool_use_id: Option<crate::ToolUseId>) -> Result<bool, Error> {
-        #[derive(serde::Deserialize)]
-        struct Response {
-            backgrounded: bool,
-        }
-        let response: Response = self
-            .typed_control(
+        let response = self
+            .control(
                 ControlOperation::BackgroundTasks,
                 RequestPayload::BackgroundTasks {
                     tool_use_id: tool_use_id.as_ref().map(crate::ToolUseId::as_str),
@@ -692,18 +956,25 @@ impl ClientHandle {
                 .to_value()?,
             )
             .await?;
-        Ok(response.backgrounded)
+        let Some(serde_json::Value::Object(response)) = response else {
+            return Err(missing_response(ControlOperation::BackgroundTasks));
+        };
+        match response.get("backgrounded") {
+            None | Some(serde_json::Value::Null) => Ok(true),
+            Some(serde_json::Value::Bool(backgrounded)) => Ok(*backgrounded),
+            Some(_) => Err(ProtocolError::from(<serde_json::Error as serde::de::Error>::custom(
+                "background_tasks answered a backgrounded that is not a boolean",
+            ))
+            .into()),
+        }
     }
 
-    async fn typed_control<T: serde::de::DeserializeOwned>(
+    async fn reply<T>(
         &self,
         operation: ControlOperation,
         request: serde_json::Value,
-    ) -> Result<T, Error> {
-        let response = self.control(operation, request).await?;
-        serde_json::from_value(response.into())
-            .map_err(ProtocolError::from)
-            .map_err(Error::from)
+    ) -> Result<ControlReply<T>, Error> {
+        self.control(operation, request).await.map(ControlReply::new)
     }
 
     pub async fn finish_input(&self) -> Result<(), Error> {
@@ -728,7 +999,11 @@ impl ClientHandle {
         }
     }
 
-    async fn control(&self, operation: ControlOperation, request: serde_json::Value) -> Result<JsonObject, Error> {
+    async fn control(
+        &self,
+        operation: ControlOperation,
+        request: serde_json::Value,
+    ) -> Result<Option<serde_json::Value>, Error> {
         let (response, receiver) = oneshot::channel();
         self.enqueue(Command::Control {
             operation,
@@ -764,6 +1039,33 @@ impl ClientHandle {
             self.closed.write_error().unwrap_or(Error::DriverStopped)
         }
     }
+}
+
+/// The queue report of an interrupt response; anything but an object reports nothing.
+fn interrupt_receipt(response: Option<serde_json::Value>) -> crate::InterruptReceipt {
+    match response {
+        Some(serde_json::Value::Object(object)) => crate::InterruptReceipt::from_json(object),
+        _ => crate::InterruptReceipt::from_json(JsonObject::new()),
+    }
+}
+
+/// TypeScript reads a field of the response, which throws when the CLI sent none.
+fn missing_response(operation: ControlOperation) -> Error {
+    ProtocolError::from(<serde_json::Error as serde::de::Error>::custom(format!(
+        "{operation} answered without a response object"
+    )))
+    .into()
+}
+
+/// A JavaScript number: an integral value as an integer, NaN and the infinities as `null`.
+fn javascript_number(value: f64) -> serde_json::Value {
+    const EXACT: f64 = 9_007_199_254_740_992.0;
+    if value.fract() == 0.0 && value.abs() <= EXACT {
+        #[allow(clippy::cast_possible_truncation, reason = "the value is an integer within 2^53")]
+        let integer = value as i64;
+        return serde_json::Value::from(integer);
+    }
+    serde_json::Number::from_f64(value).map_or(serde_json::Value::Null, serde_json::Value::Number)
 }
 
 /// Messages through run completion, including background-agent continuation turns.
