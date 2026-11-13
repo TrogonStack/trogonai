@@ -1088,8 +1088,8 @@ where
         if expectations.plugins > 0 && connection_info.plugins_applied != crate::FeatureSupport::Supported {
             tracing::warn!(
                 plugins_applied = javascript_string(connection_info.plugins_applied),
-                plugins_sent = expectations.plugins,
-                "[Query.initialize] Claude Code reported plugin application status for plugins sent with pluginDelivery 'initialize'; the process is running with the plugins it was launched with."
+                plugins = expectations.plugins,
+                "[Query.initialize] Claude Code did not apply the plugins sent with pluginDelivery 'initialize'; the process is running with the plugins it was launched with."
             );
         }
         self.state = State::Idle;
