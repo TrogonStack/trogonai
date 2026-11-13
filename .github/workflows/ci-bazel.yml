@@ -18,7 +18,7 @@ on:
       - '.config/mise/tasks/github/workflows/ci-bazel/**'
       - 'rsworkspace/Cargo.lock'
       - 'rsworkspace/**/Cargo.toml'
-      - 'rsworkspace/crates/platform/trogon-config-value/**'
+      - 'rsworkspace/crates/**'
       - 'goworkspace/**'
       - 'proto/trogonai/scheduler/schedules/v1/**'
       - '.github/workflows/ci-bazel.yml'
