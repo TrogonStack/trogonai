@@ -93,6 +93,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `trace_context: Option<TraceContext>` | `TRACEPARENT`, `TRACESTATE` | `TRACEPARENT`, `TRACESTATE` |
 | `stderr_handler: Option<StderrHandler>` | `stderr` callback (lines) | `stderr` callback (chunks) |
 | `extra_args: Vec<ExtraArgument>` | `extra_args` | `extraArgs` |
+| `tools: ToolSet` (`CliDefault`, `Only`, `ClaudeCodePreset`) | `tools` list, empty list or `{type: "preset", preset: "claude_code"}` | `tools` list or preset object |
 | `script_runtime: ScriptRuntime` | not applicable | `executable`, `executableArgs` (a native path runs directly with the arguments first; a path ending in `.js`, `.mjs`, `.ts`, `.tsx` or `.jsx`, matched case-sensitively, runs under the executable) |
 | `oauth_token_handler: Option<Arc<dyn OAuthTokenHandler>>` | not applicable | `getOAuthToken` (with `onDecline` as `OAuthTokenResponse::decline_reason`); sets `CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH` |
 | `host_auth_token_handler: Option<Arc<dyn HostAuthTokenHandler>>` | not applicable | `getHostAuthToken`; sets `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH`. A handler returns a string or none, never the bare number the bundle would forward. Both token callbacks use `limits.callback_timeout` when that opt-in limit is set. |

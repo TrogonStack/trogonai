@@ -3363,6 +3363,7 @@
         "SessionStoreOptions.load_timeout",
         "ClaudeAgentOptions.additional_directories",
         "ClaudeAgentOptions.user",
+        "ClaudeAgentOptions.debug_stderr",
         "Limits.max_buffer_size",
         "ToolConfig",
         "OAuthTokenHandler",
@@ -3397,10 +3398,119 @@
         {
           "path": "tests/session_store.rs",
           "name": "python_dialect_reports_the_resume_materialization_text"
+        },
+        {
+          "path": "src/run_as/tests.rs",
+          "name": "setting_the_uid_to_the_current_one_needs_no_privilege"
         }
       ],
       "status": "supported",
-      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; the Python timeout wording is selected by argv_style. debug_stderr is an upstream no-op, so it has no Rust field. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. Known limits: a host token handler returns a string or none, never the bare number the bundle would forward, and token callbacks use the opt-in callback_timeout limit."
+      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; the Python timeout wording is selected by argv_style. debug_stderr is an upstream no-op, so the Rust field is accepted and ignored. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. Known limits: a host token handler returns a string or none, never the bare number the bundle would forward, and token callbacks use the opt-in callback_timeout limit."
+    },
+    {
+      "id": "core-options",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.allowed_tools",
+            "ClaudeAgentOptions.client_app",
+            "ClaudeAgentOptions.continue_conversation",
+            "ClaudeAgentOptions.disallowed_tools",
+            "ClaudeAgentOptions.extra_args",
+            "ClaudeAgentOptions.fork_session",
+            "ClaudeAgentOptions.include_partial_messages",
+            "ClaudeAgentOptions.max_turns",
+            "ClaudeAgentOptions.resume",
+            "ClaudeAgentOptions.stderr",
+            "ClaudeAgentOptions.tools"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.additionalDirectories",
+            "core.Options.additionalDirectories",
+            "Options.agent",
+            "core.Options.agent",
+            "Options.allowedTools",
+            "core.Options.allowedTools",
+            "Options.continue",
+            "core.Options.continue",
+            "Options.disallowedTools",
+            "core.Options.disallowedTools",
+            "Options.extraArgs",
+            "core.Options.extraArgs",
+            "Options.forkSession",
+            "core.Options.forkSession",
+            "Options.includePartialMessages",
+            "core.Options.includePartialMessages",
+            "Options.maxTurns",
+            "core.Options.maxTurns",
+            "Options.persistSession",
+            "core.Options.persistSession",
+            "Options.resume",
+            "core.Options.resume",
+            "Options.sessionStoreFlush",
+            "core.Options.sessionStoreFlush",
+            "Options.stderr",
+            "core.Options.stderr",
+            "Options.tools",
+            "core.Options.tools"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions",
+        "ToolSet",
+        "ExtraArgument",
+        "ArgvStyle",
+        "StderrHandler",
+        "StderrDelivery",
+        "Limits",
+        "SessionStoreFlush",
+        "Error"
+      ],
+      "tests": [
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "typescript_core_options_match_the_upstream_argv"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "python_core_options_match_the_upstream_argv"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "python_client_app_follows_the_upstream_precedence"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "typescript_stderr_reaches_the_callback_as_raw_chunks"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "python_stderr_reaches_the_callback_as_trimmed_lines"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "typescript_stderr_holds_a_split_character_across_chunks"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "typescript_refuses_a_session_store_without_persistence"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "eager_flush_appends_every_frame_without_waiting_for_a_flush"
+        },
+        {
+          "path": "src/run_as/tests.rs",
+          "name": "setting_the_uid_to_the_current_one_needs_no_privilege"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Argv tokens and order, the dash rule, extraArgs dictionary semantics (duplicate keys collapse, TypeScript lists integer keys first), the tools preset, empty agent and resume, stderr delivery (raw decoder chunks for TypeScript, trimmed lines for Python), max_buffer_size including zero, client_app precedence and the sessionStore with persistSession false refusal are pinned against goldens captured from the real sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 driving a recording stand-in for the CLI. user resolves the name with getpwnam and switches only the real and effective uid with setreuid in a pre_exec hook, as CPython does; debug_stderr is an accepted no-op."
     }
   ]
 }

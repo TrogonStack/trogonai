@@ -240,3 +240,60 @@ fn workload_precedes_await_initialize_and_an_existing_await_flag_becomes_bare_in
     request_await_initialize(&mut explicit);
     assert_eq!(tokens(&explicit)[5..], ["--continue", "--await-initialize", "--tail"]);
 }
+
+#[test]
+fn an_explicit_await_initialize_extra_is_overwritten_in_place() {
+    let mut options = ClaudeAgentOptions {
+        extra_args: vec![
+            ExtraArgument {
+                flag: "await-initialize".into(),
+                value: Some("no".into()),
+            },
+            ExtraArgument {
+                flag: "other".into(),
+                value: None,
+            },
+        ],
+        ..resumed()
+    };
+    request_await_initialize(&mut options);
+    assert_eq!(options.extra_args.len(), 2);
+    assert_eq!(options.extra_args[0].flag, "await-initialize");
+    assert_eq!(options.extra_args[0].value, None);
+}
+
+#[test]
+fn a_repeated_await_initialize_extra_is_forced_bare_at_its_first_position() {
+    let mut options = ClaudeAgentOptions {
+        extra_args: vec![
+            ExtraArgument {
+                flag: "await-initialize".into(),
+                value: Some("first".into()),
+            },
+            ExtraArgument {
+                flag: "other".into(),
+                value: None,
+            },
+            ExtraArgument {
+                flag: "await-initialize".into(),
+                value: Some("last".into()),
+            },
+        ],
+        ..resumed()
+    };
+    request_await_initialize(&mut options);
+    assert!(
+        options
+            .extra_args
+            .iter()
+            .all(|extra| extra.flag != "await-initialize" || extra.value.is_none())
+    );
+    let entries = crate::settings_option::typescript_extra_entries(&options).ok();
+    assert_eq!(
+        entries.map(|entries| entries
+            .into_iter()
+            .map(|(flag, value)| (flag, value.is_none()))
+            .collect::<Vec<_>>()),
+        Some(vec![("await-initialize".to_owned(), true), ("other".to_owned(), true)])
+    );
+}

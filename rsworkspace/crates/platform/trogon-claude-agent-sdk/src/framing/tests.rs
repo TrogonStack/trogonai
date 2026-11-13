@@ -55,3 +55,19 @@ async fn without_a_limit_every_line_is_kept() -> Result<(), Error> {
     assert_eq!(frames(&input, None).await?, [long]);
     Ok(())
 }
+
+#[test]
+fn an_invalid_byte_becomes_a_replacement_character_without_holding_later_bytes() {
+    let mut pending = Vec::new();
+    assert_eq!(super::decode_chunk(&mut pending, b"a\xffb"), "a\u{fffd}b");
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn an_incomplete_character_waits_for_the_next_chunk() {
+    let mut pending = Vec::new();
+    let bytes = "é".as_bytes();
+    assert_eq!(super::decode_chunk(&mut pending, &bytes[..1]), "");
+    assert_eq!(super::decode_chunk(&mut pending, &bytes[1..]), "é");
+    assert!(pending.is_empty());
+}

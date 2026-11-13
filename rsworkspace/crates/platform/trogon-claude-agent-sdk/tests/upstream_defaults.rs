@@ -64,7 +64,7 @@ fn the_default_limits_are_the_typescript_sdk() {
 #[test]
 fn the_python_preset_selects_the_python_sdk_values() {
     let limits = Limits::python();
-    assert_eq!(limits.max_buffer_size.map(|size| size.get()), Some(1024 * 1024));
+    assert_eq!(limits.max_buffer_size, Some(1024 * 1024));
     assert_eq!(limits.stderr_tail, 0);
     assert_eq!(
         limits.message_buffer,
