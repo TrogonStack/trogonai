@@ -3,6 +3,7 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 workspace_crate(
     name = "trogon-claude-agent-sdk",
     compile_data = ["README.md"],
+    crate_features = ["test-support"],
     integration_tests = {
         "additional_directories": {},
         "agent": {},
@@ -16,6 +17,7 @@ workspace_crate(
         "disallowed_tools": {},
         "effort": {},
         "environment": {},
+        "fixed_environment": {},
         "json_object": {},
         "max_turns": {},
         "mcp_server_name": {},
@@ -27,7 +29,9 @@ workspace_crate(
         "message_id": {},
         "message_id_storage": {},
         "message_origin": {},
+        "owned_string_values": {},
         "permission_mode": {},
+        "process_adapter_contracts": {},
         "prompt": {},
         "public_api": {},
         "queue_capacity": {},
@@ -37,6 +41,7 @@ workspace_crate(
         "setting_sources": {},
         "stderr_tail": {},
         "stream_event": {},
+        "system_adapters": {},
         "system_message": {},
         "task_id": {},
         "timeout": {},

@@ -1,5 +1,10 @@
 #![doc = include_str!("../README.md")]
 
+pub mod adapters;
+
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+
 mod agent_name;
 mod builtin_tool_name;
 mod client;
@@ -30,54 +35,38 @@ mod tool_rule;
 mod tool_use_id;
 mod usd_budget;
 
+pub use agent_name::AgentName;
+pub use builtin_tool_name::BuiltinToolName;
 pub use client::ClaudeSdkClient;
 pub use config_value::ConfigValue;
+pub use control_request_id::ControlRequestId;
+pub use dialog_kind::DialogKind;
+pub use effort_level::EffortLevel;
 pub use environment::Environment;
 pub use error::Error;
-pub use model_name::ModelName;
-pub use options::ClaudeAgentOptions;
-pub use permission_mode::PermissionMode;
-pub use sensitive_string::SensitiveString;
-pub use setting_source::SettingSource;
-
-pub use usd_budget::{UsdBudget, UsdBudgetError};
-
-pub use effort_level::EffortLevel;
-
-pub use agent_name::AgentName;
-
-pub use tool_rule::ToolRule;
-
-pub use prompt::Prompt;
-
-pub use session_id::SessionId;
-
-pub use message_id::MessageId;
-
-pub use control_request_id::ControlRequestId;
-pub use task_id::TaskId;
-pub use tool_use_id::ToolUseId;
-
-pub use tool_name::ToolName;
-
-pub use builtin_tool_name::BuiltinToolName;
-
 pub use mcp_server_name::McpServerName;
-
 pub use mcp_tool_name::McpToolName;
-
-pub use dialog_kind::DialogKind;
-
-pub use queue_capacity::{QueueCapacity, QueueCapacityError};
-
-pub use timeout::{Timeout, TimeoutError};
-
 pub use message::{
     AssistantMessage, Content, ContentBlock, Message, ResultMessage, ResultStatus, StreamEvent, SystemMessage,
     ToolResultStatus, UserMessage,
 };
+pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};
+pub use model_name::ModelName;
+pub use options::ClaudeAgentOptions;
+pub use permission_mode::PermissionMode;
+pub use prompt::Prompt;
+pub use queue_capacity::{QueueCapacity, QueueCapacityError};
+pub use sensitive_string::SensitiveString;
+pub use session_id::SessionId;
+pub use setting_source::SettingSource;
 pub use stderr_tail::StderrTail;
+pub use task_id::TaskId;
+pub use timeout::{Timeout, TimeoutError};
+pub use tool_name::ToolName;
+pub use tool_rule::ToolRule;
+pub use tool_use_id::ToolUseId;
+pub use usd_budget::{UsdBudget, UsdBudgetError};
 
 /// A JSON object whose schema is owned by an individual tool or upstream event.
 pub type JsonObject = serde_json::Map<String, serde_json::Value>;
