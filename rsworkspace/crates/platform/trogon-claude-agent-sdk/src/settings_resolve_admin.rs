@@ -9,11 +9,18 @@ use crate::{
     constants::{
         AVAILABLE_MODELS_KEY, AWS_CREDENTIAL_VARIABLES, AWS_PAIR_FIELDS, AWS_PAIR_SUPPRESSOR_PREFIX, AWS_PAIRS_KEY,
         LOWER_TIER_DROPPED_PATHS, LOWER_TIER_REPLACED_KEYS, LOWER_TIER_STRIPPED_KEYS, MANAGED_SOURCES_BEHAVIOR_KEY,
-        MODEL_OVERRIDES_KEY, REPLACED_ADMIN_ARRAY_KEYS, REPLACED_ARRAY_KEYS, RESTRICTIVE_RULES, SANDBOX_PLATFORMS_PATH,
-        SHALLOW_MERGED_OBJECT_KEYS, STRICT_PLUGIN_ONLY_KEY,
+        MODEL_OVERRIDES_KEY, REPLACED_ADMIN_ARRAY_KEYS, RESTRICTIVE_RULES, SANDBOX_PLATFORMS_PATH,
+        STRICT_PLUGIN_ONLY_KEY,
     },
+    settings_merge_spec::MergeSpec,
     settings_resolve_values::{SettingsMap, get_path, omit, union_arrays},
+    settings_schema::schema,
 };
+
+/// Whether the merge rule `rule` of the extracted upstream customizer lists `key`; without a schema no key is listed.
+fn listed(key: &str, rule: impl Fn(&MergeSpec) -> &Vec<String>) -> bool {
+    schema().is_some_and(|schema| rule(schema.merge_spec()).iter().any(|name| name == key))
+}
 
 /// `Qt` upstream: sets (or, with `None`, removes) the value at `path`, copying each object on the way and pruning
 /// objects that a removal leaves empty.
@@ -115,7 +122,7 @@ fn merge_value(key: &str, destination: &mut Value, source: &Value) {
         *destination = next;
         return;
     }
-    if !REPLACED_ARRAY_KEYS.contains(&key)
+    if !listed(key, |spec| &spec.replaced_arrays)
         && let (Value::Array(left), Value::Array(right)) = (&*destination, source)
     {
         let merged = union_arrays(right, left);
@@ -127,7 +134,7 @@ fn merge_value(key: &str, destination: &mut Value, source: &Value) {
         return;
     }
     match (destination, source) {
-        (Value::Object(left), Value::Object(right)) if SHALLOW_MERGED_OBJECT_KEYS.contains(&key) => {
+        (Value::Object(left), Value::Object(right)) if listed(key, |spec| &spec.shallow_objects) => {
             for (name, value) in right {
                 left.insert(name.clone(), value.clone());
             }
