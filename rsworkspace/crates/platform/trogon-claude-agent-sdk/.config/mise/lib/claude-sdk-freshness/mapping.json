@@ -66,7 +66,12 @@
       "rust_api": [
         "ClaudeAgentOptions.cli_path",
         "ClaudeAgentOptions.cwd",
-        "ClaudeAgentOptions.model"
+        "ClaudeAgentOptions.model",
+        "find_bundled_cli",
+        "find_native_cli",
+        "ResolveNodeModule",
+        "NodeModuleLookup",
+        "NativePackageTarget"
       ],
       "tests": [
         {
@@ -80,10 +85,18 @@
         {
           "path": "tests/runtime_adapters.rs",
           "name": "injected_process_runs_protocol_and_closes_input_on_disconnect"
+        },
+        {
+          "name": "bundled_cli_is_a_file_under_the_bundled_directory",
+          "path": "tests/bundled_cli.rs"
+        },
+        {
+          "name": "linux_orders_the_libc_variants_by_preference",
+          "path": "tests/bundled_cli.rs"
         }
       ],
       "status": "supported",
-      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity."
+      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity. The bundled executable lookups (Python _bundled directory, TypeScript platform packages with musl and Windows or arm variants) are caller-driven helpers in find_bundled_cli and find_native_cli; they are not part of connect's discovery."
     },
     {
       "id": "process-errors-and-shutdown",

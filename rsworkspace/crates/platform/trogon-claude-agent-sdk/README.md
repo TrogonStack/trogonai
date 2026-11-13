@@ -206,6 +206,14 @@ the stdin `initialize` bytes).
   argument list and no store-backed resume materialization, while the session
   store mirror still runs, as in Python. `read_message` must be cancel safe, and
   an `Err` from any method ends the run as `Error::Transport` surfaces it.
+- Bundled executables are caller-driven lookups, not part of `connect`.
+  `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check.
+  `find_native_cli` ports TypeScript's platform package selection
+  (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`, musl before glibc on musl
+  Linux, `-android` packages, `.exe` on win32) over a `ResolveNodeModule`
+  adapter; `NodeModuleLookup` is the default and searches Node's `node_modules`,
+  `NODE_PATH`, home and prefix directories. Musl comes from the compile target
+  (`NativePackageTarget::host`) because a Rust process has no Node process report.
 - Failures follow upstream. A missing executable is `Error::CliNotFoundAt`, a missing
   `cwd` is `Error::WorkingDirectoryMissing`, any other spawn failure is
   `Error::Spawn` ("Failed to start Claude Code: ..."). `Error::Process` displays
