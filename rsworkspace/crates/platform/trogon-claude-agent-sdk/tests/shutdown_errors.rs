@@ -300,3 +300,25 @@ async fn abort_stops_the_process_and_ends_the_run_with_an_abort_error() -> TestR
     let _ = client.disconnect().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn t14_ending_input_after_the_run_failed_is_a_no_op_for_both_styles() -> TestResult {
+    for style in [ArgvStyle::Python, ArgvStyle::TypeScript] {
+        let mut client = ClaudeSdkClient::connect(options("malformed", style)?).await?;
+        client.send_prompt(Prompt::from("go")).await?;
+        let error = timeout(Duration::from_secs(10), async {
+            loop {
+                match client.next_message().await {
+                    Ok(Some(_)) => {}
+                    Ok(None) => return None,
+                    Err(error) => return Some(error),
+                }
+            }
+        })
+        .await?;
+        assert!(matches!(error, Some(Error::MessageParse(_))), "{style:?}: {error:?}");
+        client.finish_input().await?;
+        let _ = client.disconnect().await;
+    }
+    Ok(())
+}
