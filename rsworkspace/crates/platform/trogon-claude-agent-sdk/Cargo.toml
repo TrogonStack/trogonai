@@ -24,6 +24,7 @@ jsonschema = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
 unicode-normalization = "=0.1.26"
+unicode-general-category = "=1.1.0"
 futures-util = { workspace = true }
 tracing = { workspace = true }
 

@@ -184,7 +184,7 @@ impl SessionFiles {
         )
     }
 
-    fn project_dirs(&self) -> Vec<PathBuf> {
+    pub(crate) fn project_dirs(&self) -> Vec<PathBuf> {
         std::fs::read_dir(&self.projects_dir)
             .map(|entries| {
                 entries
@@ -226,7 +226,7 @@ impl SessionFiles {
     }
 
     /// The directory itself first, then the other git worktrees of its repository.
-    fn directory_candidates(&self, canonical: &str) -> Vec<(PathBuf, String)> {
+    pub(crate) fn directory_candidates(&self, canonical: &str) -> Vec<(PathBuf, String)> {
         let mut candidates = Vec::new();
         if let Some(dir) = self.find_project_dir(canonical) {
             candidates.push((dir, canonical.to_owned()));
@@ -359,7 +359,7 @@ impl SessionFiles {
     }
 }
 
-fn valid_uuid(candidate: &str) -> Option<&str> {
+pub(crate) fn valid_uuid(candidate: &str) -> Option<&str> {
     let groups: Vec<&str> = candidate.split('-').collect();
     let lengths = [8, 4, 4, 4, 12];
     (groups.len() == 5
@@ -485,7 +485,7 @@ fn extract_json_string_field(text: &str, key: &str) -> Option<String> {
 }
 
 /// Like [`extract_json_string_field`] but keeps the last occurrence of each key spelling.
-fn extract_last_json_string_field(text: &str, key: &str) -> Option<String> {
+pub(crate) fn extract_last_json_string_field(text: &str, key: &str) -> Option<String> {
     let mut last = None;
     for pattern in [format!("\"{key}\":\""), format!("\"{key}\": \"")] {
         let mut search_from = 0;
@@ -501,7 +501,7 @@ fn extract_last_json_string_field(text: &str, key: &str) -> Option<String> {
     last
 }
 
-fn extract_first_prompt_from_head(head: &str) -> String {
+pub(crate) fn extract_first_prompt_from_head(head: &str) -> String {
     let mut command_fallback: Option<String> = None;
     for line in head.split('\n') {
         if !(line.contains("\"type\":\"user\"") || line.contains("\"type\": \"user\"")) {

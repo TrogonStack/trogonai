@@ -90,7 +90,7 @@ fn kind_of(entry: &JsonObject) -> Option<&str> {
 }
 
 /// Python truthiness of a JSON value, which upstream uses for `isSidechain`, `teamName` and `isMeta`.
-fn truthy(value: Option<&Value>) -> bool {
+pub(crate) fn truthy(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) => false,
         Some(Value::Bool(flag)) => *flag,
