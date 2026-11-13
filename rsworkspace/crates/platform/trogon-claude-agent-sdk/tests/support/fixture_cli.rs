@@ -360,7 +360,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                             emit(result("undeclared"))?;
                         }
                     }
-                    "malformed" => emit(json!({"type":"assistant","message":{"content":[]}}))?,
+                    "malformed" => {
+                        emit(json!({"type":"assistant","message":{"content":[]}}))?;
+                        emit(result(prompt))?;
+                    }
                     "oversized" => {
                         io::stdout().write_all(&vec![b'x'; 8192])?;
                         io::stdout().write_all(b"\n")?;
