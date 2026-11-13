@@ -281,7 +281,7 @@ fn mirror_failure_messages_preserve_context_and_bound_suppressed_failures() -> T
 async fn s19_mirror_never_rejects_frames_and_drains_eagerly_past_the_pending_budget() -> TestResult {
     let store = Arc::new(InMemorySessionStore::new());
     let mut options = SessionStoreOptions::from(store.clone());
-    options.limits.command_queue_capacity = QueueCapacity::new(1)?;
+    options.limits.max_retained_failures = Some(QueueCapacity::new(1)?);
     options.limits.max_pending_entries = NonZeroUsize::new(2).ok_or("zero limit")?;
     options.limits.max_pending_bytes = NonZeroUsize::new(1).ok_or("zero limit")?;
     let mirror = TranscriptMirror::new(&options, PathBuf::from("/memory-config/projects"));
@@ -329,7 +329,7 @@ async fn w1_mirror_retries_every_backend_error_and_coalesces_failure_overflow() 
         observed: Notify::new(),
     });
     let mut options = SessionStoreOptions::from(store.clone());
-    options.limits.command_queue_capacity = QueueCapacity::new(1)?;
+    options.limits.max_retained_failures = Some(QueueCapacity::new(1)?);
     let mirror = TranscriptMirror::new(&options, PathBuf::from("/memory-config/projects"));
     let session = mirror_path().with_extension("");
     mirror.enqueue(&mirror_path(), vec![entry()?])?;
