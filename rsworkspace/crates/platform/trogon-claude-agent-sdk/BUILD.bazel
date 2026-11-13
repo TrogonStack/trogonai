@@ -160,6 +160,7 @@ workspace_crate(
         "session_store_helpers": {},
         "session_summary": {},
         "settings_resolve": {"compile_data": glob(["tests/support/*.rs"])},
+        "settings_resolve_connector": {"compile_data": glob(["tests/support/*.rs"])},
         "shutdown_errors": {
             "data": [":claude_sdk_fixture"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},

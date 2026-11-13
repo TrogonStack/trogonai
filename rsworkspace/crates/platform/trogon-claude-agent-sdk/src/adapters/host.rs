@@ -50,6 +50,27 @@ pub trait ReadDirectory {
     fn read_directory(&self, path: &Path) -> Result<Vec<DirectoryEntry>, Self::Error>;
 }
 
+/// What `lstat` reports about one path: its own kind (a symbolic link is not followed) and its size in bytes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LinkMetadata {
+    pub kind: DirectoryEntryKind,
+    pub len: u64,
+}
+
+/// Reads metadata exactly as [`std::fs::symlink_metadata`] does.
+pub trait ReadSymlinkMetadata {
+    type Error;
+
+    fn symlink_metadata(&self, path: &Path) -> Result<LinkMetadata, Self::Error>;
+}
+
+/// Reads a symbolic link's text exactly as [`std::fs::read_link`] does.
+pub trait ReadLink {
+    type Error;
+
+    fn read_link(&self, path: &Path) -> Result<PathBuf, Self::Error>;
+}
+
 /// The operating system the process runs on, as `process.platform` names it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OperatingSystem {
@@ -147,6 +168,36 @@ impl ReadDirectory for NativeHost {
             });
         }
         Ok(entries)
+    }
+}
+
+impl ReadSymlinkMetadata for NativeHost {
+    type Error = io::Error;
+
+    fn symlink_metadata(&self, path: &Path) -> Result<LinkMetadata, Self::Error> {
+        let metadata = std::fs::symlink_metadata(path)?;
+        let file_type = metadata.file_type();
+        let kind = if file_type.is_symlink() {
+            DirectoryEntryKind::Symlink
+        } else if file_type.is_file() {
+            DirectoryEntryKind::File
+        } else if file_type.is_dir() {
+            DirectoryEntryKind::Directory
+        } else {
+            DirectoryEntryKind::Other
+        };
+        Ok(LinkMetadata {
+            kind,
+            len: metadata.len(),
+        })
+    }
+}
+
+impl ReadLink for NativeHost {
+    type Error = io::Error;
+
+    fn read_link(&self, path: &Path) -> Result<PathBuf, Self::Error> {
+        std::fs::read_link(path)
     }
 }
 
@@ -323,6 +374,8 @@ pub trait SettingsHost:
     ReadFile<Error = io::Error>
     + CheckReadable<Error = io::Error>
     + ReadDirectory<Error = io::Error>
+    + ReadSymlinkMetadata<Error = io::Error>
+    + ReadLink<Error = io::Error>
     + ExecuteFile
     + HostIdentity
     + super::EnvironmentVariable
@@ -337,6 +390,8 @@ impl<T> SettingsHost for T where
     T: ReadFile<Error = io::Error>
         + CheckReadable<Error = io::Error>
         + ReadDirectory<Error = io::Error>
+        + ReadSymlinkMetadata<Error = io::Error>
+        + ReadLink<Error = io::Error>
         + ExecuteFile
         + HostIdentity
         + super::EnvironmentVariable

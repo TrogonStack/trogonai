@@ -1,0 +1,8 @@
+{
+  "platform": "linux",
+  "env": {},
+  "links": {"work/connector-downloads/.gitignore": ".gitignore"},
+  "options": {
+    "cwd": "$ROOT/work/connector-downloads"
+  }
+}
