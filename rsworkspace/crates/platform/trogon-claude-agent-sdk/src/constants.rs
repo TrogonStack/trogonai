@@ -237,12 +237,6 @@ pub(crate) const ESCALATING_DEFAULT_MODES: [&str; 3] = ["bypassPermissions", "au
 /// Escalating modes that a repo-local `local` source may also not set (`P5` upstream).
 pub(crate) const STRICT_ESCALATING_DEFAULT_MODES: [&str; 2] = ["auto", "bypassPermissions"];
 
-/// Object keys the upstream merge customizer spreads (`{...a, ...b}`) instead of merging deeply.
-pub(crate) const SHALLOW_MERGED_OBJECT_KEYS: [&str; 2] = ["extraKnownMarketplaces", "managedMcpServers"];
-
-/// Settings keys whose arrays are replaced rather than unioned.
-pub(crate) const REPLACED_ARRAY_KEYS: [&str; 1] = ["fallbackModel"];
-
 /// Bundle identifier whose managed preferences hold the policy.
 pub(crate) const PLIST_DOMAIN: &str = "com.anthropic.claudecode";
 

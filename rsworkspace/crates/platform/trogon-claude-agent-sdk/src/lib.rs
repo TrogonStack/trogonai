@@ -89,6 +89,7 @@ mod setting_source;
 mod settings_dialect;
 mod settings_input;
 mod settings_json;
+mod settings_merge_spec;
 mod settings_numbers;
 mod settings_option;
 mod settings_read;

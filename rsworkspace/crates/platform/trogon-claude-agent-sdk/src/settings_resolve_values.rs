@@ -2,7 +2,7 @@ use serde_json::{Map, Value};
 
 use crate::settings_schema::{SettingsSchema, schema};
 
-use crate::constants::{POLICY_META_KEYS, REPLACED_ARRAY_KEYS, SHALLOW_MERGED_OBJECT_KEYS};
+use crate::{constants::POLICY_META_KEYS, settings_merge_spec::MergeSpec};
 
 pub(crate) type SettingsMap = Map<String, Value>;
 
@@ -57,40 +57,49 @@ fn union_arrays(left: &[Value], right: &[Value]) -> Vec<Value> {
     merged
 }
 
-fn merge_existing(key: &str, destination: &mut Value, source: &Value) {
-    if key == "modelPicker" {
+fn merge_existing(rules: &MergeSpec, key: &str, destination: &mut Value, source: &Value) {
+    let listed = |keys: &[String]| keys.iter().any(|listed| listed == key);
+    if listed(&rules.replaced) {
         *destination = source.clone();
         return;
     }
     match (destination, source) {
-        (Value::Object(left), Value::Object(right)) if SHALLOW_MERGED_OBJECT_KEYS.contains(&key) => {
+        (Value::Object(left), Value::Object(right)) if listed(&rules.shallow_objects) => {
             for (name, value) in right {
                 left.insert(name.clone(), value.clone());
             }
         }
         (Value::Array(left), Value::Array(right)) => {
-            if REPLACED_ARRAY_KEYS.contains(&key) {
+            if listed(&rules.replaced_arrays) {
                 *left = right.clone();
             } else {
                 *left = union_arrays(left, right);
             }
         }
-        (Value::Object(left), Value::Object(right)) => merge_with_union(left, right),
+        (Value::Object(left), Value::Object(right)) => merge_rules(rules, left, right),
         (Value::Array(_), Value::Object(_)) => {}
         (destination, source) => *destination = source.clone(),
     }
 }
 
-/// Deep merge with the upstream customizer: arrays union, objects recurse, scalars replace, and an
-/// existing key keeps its position while a new key appends (lodash `mergeWith`).
-pub(crate) fn merge_with_union(destination: &mut SettingsMap, source: &SettingsMap) {
+fn merge_rules(rules: &MergeSpec, destination: &mut SettingsMap, source: &SettingsMap) {
     for (key, value) in source {
         match destination.get_mut(key) {
-            Some(existing) => merge_existing(key, existing, value),
+            Some(existing) => merge_existing(rules, key, existing, value),
             None => {
                 destination.insert(key.clone(), value.clone());
             }
         }
+    }
+}
+
+/// Deep merge with the upstream customizer: arrays union, objects recurse, scalars replace, and an
+/// existing key keeps its position while a new key appends (lodash `mergeWith`). The keys the customizer
+/// treats specially come from the extracted schema description.
+pub(crate) fn merge_with_union(destination: &mut SettingsMap, source: &SettingsMap) {
+    match schema() {
+        Some(schema) => merge_rules(schema.merge_spec(), destination, source),
+        None => merge_rules(&MergeSpec::default(), destination, source),
     }
 }
 
@@ -119,3 +128,7 @@ pub(crate) fn in_schema_order(settings: &SettingsMap) -> SettingsMap {
     }
     ordered
 }
+
+#[cfg(test)]
+#[path = "settings_resolve_values_tests.rs"]
+mod tests;
