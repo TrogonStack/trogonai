@@ -22,8 +22,6 @@ pub const DEFAULT_PLAID_TIMESTAMP_TOLERANCE_SECS: u64 = 300;
 
 pub const SENTRY_MAX_ACK_TIMEOUT_SECS: u64 = 1;
 
-pub const MAX_INTEGRATION_ID_LEN: usize = 64;
-
 pub const SLACK_RESTART_BACKOFF: RestartBackoff = RestartBackoff::new(Duration::from_secs(1), Duration::from_secs(30));
 
 pub const METER_NAME: &str = "trogon-gateway";

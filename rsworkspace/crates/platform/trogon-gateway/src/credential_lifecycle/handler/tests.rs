@@ -14,10 +14,6 @@ use trogon_decider_runtime::{
 };
 
 use super::*;
-use crate::credential::commands::domain::{
-    CredentialFingerprint, CredentialIdentityVersion, CredentialKind, CredentialMetadata, CredentialOwnerId,
-    CredentialScope, CredentialStatus,
-};
 use crate::credential::commands::proto::{
     activated_to_proto, decode_active_state, pending_write_to_proto_state, revoked_to_proto,
     rotation_requested_to_proto, write_requested_to_proto,
@@ -27,7 +23,10 @@ use crate::credential_runtime_projection::{
 };
 use crate::secret_store::openbao_secret_store::{OpenBaoSecretStore, OpenBaoTransport};
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreError, SecretStoreGet};
-use crate::source_integration_id::SourceIntegrationId;
+use trogon_credential_domain::{
+    CredentialFingerprint, CredentialIdentityVersion, CredentialKind, CredentialMetadata, CredentialOwnerId,
+    CredentialScope, CredentialStatus, SourceIntegrationId,
+};
 use trogonai_proto::gateway::credentials::CredentialEventCase;
 
 const OPENBAO_IMAGE: &str = "openbao/openbao";

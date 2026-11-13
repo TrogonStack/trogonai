@@ -1,4 +1,4 @@
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+use trogon_credential_domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 
 use super::*;
 

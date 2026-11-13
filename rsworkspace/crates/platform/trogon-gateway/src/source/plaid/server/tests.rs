@@ -1,5 +1,4 @@
 use super::*;
-use crate::credential::commands::domain::{CredentialIdentity, CredentialOwnerId, CredentialRef, CredentialScope};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 use crate::secret_store::{MockOpenBaoSecretStore, SecretMaterial, SecretStorePut};
 use crate::source::plaid::constants::KEY_ID_LEN_MAX;
@@ -11,6 +10,7 @@ use axum::body::Body;
 use axum::http::Request;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_credential_domain::{CredentialIdentity, CredentialOwnerId, CredentialRef, CredentialScope};
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};

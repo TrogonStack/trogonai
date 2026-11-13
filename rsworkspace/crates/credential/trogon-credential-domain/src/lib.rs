@@ -1,3 +1,19 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+
+//! Credential value objects shared by every credential consumer.
+//!
+//! A credential is named by its [`CredentialIdentity`], recorded once on the
+//! write request that creates it, and addressed afterwards by its
+//! [`CredentialKey`]. A [`CredentialRef`] pins one version of its material, and
+//! [`CredentialPath`] is where that material lives in the managed subtree.
+//! [`PublicCredentialId`] is the identifier callers see, composed from validated
+//! identifiers so no storage artifact reaches a wire contract.
+//!
+//! Every type validates on construction and carries no transport, serialization,
+//! or storage concern, so both sides of the
+//! [ADR#0074](https://github.com/TrogonStack/trogonai/blob/main/docs/adr/0074-credential-platform-extraction-boundary.md)
+//! extraction boundary can share them.
+
 mod allowed_host;
 mod constants;
 mod credential_destroy_reason;
@@ -19,9 +35,9 @@ mod injection_location;
 mod public_credential_id;
 mod runtime_release_policy;
 mod runtime_service_id;
+mod source_integration_id;
 mod source_kind;
 
-#[allow(unused_imports)]
 pub use allowed_host::{AllowedHost, AllowedHostError, AllowedHosts};
 pub use credential_destroy_reason::{CredentialDestroyReason, CredentialDestroyReasonError};
 pub use credential_failure_reason::{CredentialFailureReason, CredentialFailureReasonError};
@@ -38,13 +54,11 @@ pub use credential_ref::CredentialRef;
 pub use credential_scope::CredentialScope;
 pub use credential_status::CredentialStatus;
 pub use credential_version::{CredentialVersion, CredentialVersionError};
-#[allow(unused_imports)]
 pub use injection_location::{InjectionLocation, InjectionLocationError, InjectionLocations};
 pub use public_credential_id::PublicCredentialId;
-#[allow(unused_imports)]
 pub use runtime_release_policy::{
     RuntimeReleaseDeniedError, RuntimeReleasePolicy, RuntimeReleasePolicyError, RuntimeReleaseRequest,
 };
-#[allow(unused_imports)]
 pub use runtime_service_id::{AllowedRuntimeServices, RuntimeServiceId, RuntimeServiceIdError};
+pub use source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 pub use source_kind::SourceKind;

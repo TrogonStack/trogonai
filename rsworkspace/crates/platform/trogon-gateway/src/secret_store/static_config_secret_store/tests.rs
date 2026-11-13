@@ -1,5 +1,4 @@
-use crate::credential::commands::domain::{CredentialOwnerId, SourceKind};
-use crate::source_integration_id::SourceIntegrationId;
+use trogon_credential_domain::{CredentialOwnerId, SourceIntegrationId, SourceKind};
 use trogon_std::env::{InMemoryEnv, ReadEnv};
 
 use super::*;

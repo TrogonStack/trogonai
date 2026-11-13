@@ -5,13 +5,13 @@ use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_credential_domain::{CredentialIdentity, CredentialOwnerId, CredentialScope};
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
 
-use crate::credential::commands::domain::{CredentialIdentity, CredentialOwnerId, CredentialScope};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 

@@ -11,7 +11,6 @@ mod credential_runtime_projection;
 mod http;
 mod secret_store;
 mod source;
-mod source_integration_id;
 mod source_plugin;
 mod source_status;
 mod streams;
@@ -31,12 +30,12 @@ use crate::constants::{
     ENABLE_RUNTIME_TWITTER_CREDENTIALS, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR,
     OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
 };
-use crate::credential::commands::domain::CredentialKey;
 use crate::secret_store::openbao_secret_store::OpenBaoTransport;
 use anyhow::Context;
 use futures_util::FutureExt;
 use tokio::task::JoinSet;
 use tracing::{error, info, warn};
+use trogon_credential_domain::CredentialKey;
 use trogon_decider_runtime::StreamRead;
 use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{
@@ -64,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
         cli::Command::Source { source } => match source {
             cli::SourceCommand::Notion { command } => match command {
                 cli::NotionCommand::VerificationToken { integration, watch } => {
-                    let integration = source_integration_id::SourceIntegrationId::new(&integration)?;
+                    let integration = trogon_credential_domain::SourceIntegrationId::new(&integration)?;
                     let nats = connect(&resolved.nats, NATS_CONNECT_TIMEOUT).await?;
                     let js_context = async_nats::jetstream::new(nats.clone());
                     let mut stdout = std::io::stdout();
@@ -299,8 +298,8 @@ fn log_nats_connection(server_max_payload: usize, max_payload: MaxPayload) {
 struct TelegramWebhookRegistrations {
     registered_credentials: source::telegram::TelegramRegisteredWebhookCredentials,
     by_integration: std::collections::HashMap<
-        source_integration_id::SourceIntegrationId,
-        Option<credential::commands::domain::CredentialRef>,
+        trogon_credential_domain::SourceIntegrationId,
+        Option<trogon_credential_domain::CredentialRef>,
     >,
 }
 
@@ -314,16 +313,16 @@ impl TelegramWebhookRegistrations {
 
     fn is_current(
         &self,
-        integration: &source_integration_id::SourceIntegrationId,
-        credential: &Option<credential::commands::domain::CredentialRef>,
+        integration: &trogon_credential_domain::SourceIntegrationId,
+        credential: &Option<trogon_credential_domain::CredentialRef>,
     ) -> bool {
         self.by_integration.get(integration) == Some(credential)
     }
 
     fn record(
         &mut self,
-        integration: source_integration_id::SourceIntegrationId,
-        credential: Option<credential::commands::domain::CredentialRef>,
+        integration: trogon_credential_domain::SourceIntegrationId,
+        credential: Option<trogon_credential_domain::CredentialRef>,
     ) {
         self.by_integration.insert(integration, credential);
     }
@@ -383,11 +382,11 @@ async fn register_telegram_webhooks<C, E, Register, G>(
         let current = match runtime_credentials {
             Some(resolver) => {
                 let key = credential_runtime_projection::RuntimeIntegrationKey::new(
-                    credential::commands::domain::SourceKind::Telegram,
+                    trogon_credential_domain::SourceKind::Telegram,
                     &integration.id,
                 );
                 let current = resolver
-                    .active_credential_ref(&key, credential::commands::domain::CredentialKind::WebhookSecret)
+                    .active_credential_ref(&key, trogon_credential_domain::CredentialKind::WebhookSecret)
                     .await;
                 if registrations.is_current(&integration.id, &current) {
                     continue;
@@ -414,11 +413,11 @@ async fn register_telegram_webhooks<C, E, Register, G>(
                     let config = match runtime_credentials {
                         Some(resolver) => {
                             let key = credential_runtime_projection::RuntimeIntegrationKey::new(
-                                credential::commands::domain::SourceKind::Telegram,
+                                trogon_credential_domain::SourceKind::Telegram,
                                 &integration.id,
                             );
                             let secret = match resolver
-                                .resolve_plaintext(&key, credential::commands::domain::CredentialKind::WebhookSecret)
+                                .resolve_plaintext(&key, trogon_credential_domain::CredentialKind::WebhookSecret)
                                 .await
                             {
                                 Ok(secret) => secret,
@@ -545,18 +544,17 @@ where
     Run: Fn(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running,
     Running: std::future::Future<Output = ()>,
 {
-    let key = credential_runtime_projection::RuntimeIntegrationKey::for_source(
-        credential::commands::domain::SourceKind::Discord,
-    );
+    let key =
+        credential_runtime_projection::RuntimeIntegrationKey::for_source(trogon_credential_domain::SourceKind::Discord);
     let mut restart_delay = backoff.initial();
     loop {
         let before = credentials
-            .active_credential_ref(&key, credential::commands::domain::CredentialKind::BotToken)
+            .active_credential_ref(&key, trogon_credential_domain::CredentialKind::BotToken)
             .await;
         let bot_token =
             source::discord::gateway_runner::resolve_runtime_bot_token_with_retry(&credentials, backoff).await;
         let active = credentials
-            .active_credential_ref(&key, credential::commands::domain::CredentialKind::BotToken)
+            .active_credential_ref(&key, trogon_credential_domain::CredentialKind::BotToken)
             .await;
         if before != active {
             continue;
@@ -591,13 +589,13 @@ where
 async fn wait_for_credential_change<G>(
     credentials: &credential_runtime_projection::RuntimeCredentialResolver<G>,
     key: &credential_runtime_projection::RuntimeIntegrationKey,
-    active: Option<credential::commands::domain::CredentialRef>,
+    active: Option<trogon_credential_domain::CredentialRef>,
     poll_interval: std::time::Duration,
 ) {
     loop {
         tokio::time::sleep(poll_interval).await;
         let current = credentials
-            .active_credential_ref(key, credential::commands::domain::CredentialKind::BotToken)
+            .active_credential_ref(key, trogon_credential_domain::CredentialKind::BotToken)
             .await;
         if current != active {
             return;
@@ -1039,12 +1037,12 @@ fn env_flag_enabled(env: &impl ReadEnv, name: &str) -> bool {
 #[derive(Debug, thiserror::Error)]
 enum NotionVerificationTokenCommandError {
     #[error("notion integration '{0}' is not configured")]
-    IntegrationNotConfigured(source_integration_id::SourceIntegrationId),
+    IntegrationNotConfigured(trogon_credential_domain::SourceIntegrationId),
 }
 
 async fn notion_verification_token<N, J, W>(
     resolved: &config::ResolvedConfig,
-    integration: &source_integration_id::SourceIntegrationId,
+    integration: &trogon_credential_domain::SourceIntegrationId,
     watch: bool,
     nats: &N,
     js_context: &J,

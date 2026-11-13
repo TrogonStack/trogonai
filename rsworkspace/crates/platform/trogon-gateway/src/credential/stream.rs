@@ -1,13 +1,13 @@
 use async_nats::SubjectError;
 use async_nats::jetstream::stream;
 use async_nats::jetstream::stream::Stream;
+use trogon_credential_domain::{CredentialKey, CredentialOwnerId};
 use trogon_decider_nats::{
     StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectScope, SubjectScopeError, SubjectState,
     subject_current_position,
 };
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 
-use super::commands::domain::{CredentialKey, CredentialOwnerId};
 use super::constants::{CREDENTIAL_EVENT_SUBJECT_PREFIX, CREDENTIAL_STREAM};
 use super::event_stream_mismatch_error::CredentialEventStreamMismatchError;
 

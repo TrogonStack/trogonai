@@ -7370,6 +7370,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-credential-domain"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "trogon-nats",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-decider"
 version = "0.1.0"
 dependencies = [
@@ -7642,6 +7651,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-config-value",
+ "trogon-credential-domain",
  "trogon-decider",
  "trogon-decider-nats",
  "trogon-decider-runtime",

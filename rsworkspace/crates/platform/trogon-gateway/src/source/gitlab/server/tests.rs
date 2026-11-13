@@ -1,19 +1,18 @@
 use super::*;
 use std::time::Duration;
 
-use crate::credential::commands::domain::{
-    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind,
-};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 use crate::source::gitlab::constants::{HEADER_WEBHOOK_ID, HEADER_WEBHOOK_SIGNATURE, HEADER_WEBHOOK_TIMESTAMP};
 use crate::source::standard_webhooks::sign_for_test;
-use crate::source_integration_id::SourceIntegrationId;
 use axum::body::Body;
 use axum::http::Request;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceKind,
+};
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{

@@ -1,10 +1,10 @@
 use std::error::Error;
 use std::future::Future;
 
+use trogon_credential_domain::{CredentialIdentity, CredentialMetadata, CredentialRef};
 use trogon_std::SecretString;
 
 use super::{SecretDestroyReason, SecretMaterial};
-use crate::credential::commands::domain::{CredentialIdentity, CredentialMetadata, CredentialRef};
 
 pub trait SecretStorePut: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;

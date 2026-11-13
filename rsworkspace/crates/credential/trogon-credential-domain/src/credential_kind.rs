@@ -17,7 +17,7 @@ pub enum CredentialKind {
 }
 
 impl CredentialKind {
-    pub(crate) const ALL: [Self; 12] = [
+    pub const ALL: [Self; 12] = [
         Self::AppToken,
         Self::BotToken,
         Self::ClientSecret,

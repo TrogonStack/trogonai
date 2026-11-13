@@ -1,4 +1,4 @@
-use crate::credential::commands::domain::CredentialFingerprintError;
+use trogon_credential_domain::CredentialFingerprintError;
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum GeneratedValueError {

@@ -1,5 +1,5 @@
 use super::*;
-use crate::credential::commands::domain::{CredentialId, CredentialOwnerId};
+use crate::{CredentialId, CredentialOwnerId};
 
 fn key() -> CredentialKey {
     CredentialKey::new(

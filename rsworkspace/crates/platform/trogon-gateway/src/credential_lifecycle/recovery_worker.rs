@@ -9,6 +9,7 @@ use bytes::Bytes;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use tracing::{error, info, warn};
+use trogon_credential_domain::{CredentialKey, CredentialVersion};
 use trogon_decider_runtime::{
     EventDecodeOutcome, ReadFrom, ReadStreamRequest, SnapshotRead, SnapshotWrite, StreamAppend, StreamEvent, StreamRead,
 };
@@ -30,7 +31,6 @@ use super::handler::{
     activation_recovery_command,
 };
 use crate::constants::METER_NAME;
-use crate::credential::commands::domain::{CredentialKey, CredentialVersion};
 use crate::credential::commands::proto::{CredentialProtoDecodeError, decode_destroyed, event_key};
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::{CredentialEvolveError, evolve_stream, initial_state};

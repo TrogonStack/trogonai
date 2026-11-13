@@ -1,11 +1,11 @@
 use std::env::VarError;
 use std::fmt;
 
+use trogon_credential_domain::{CredentialKind, CredentialScope, PublicCredentialId};
 use trogon_std::env::ReadEnv;
 use trogon_std::{EmptySecretError, SecretString};
 
 use super::SecretMaterial;
-use crate::credential::commands::domain::{CredentialKind, CredentialScope, PublicCredentialId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StaticConfigSecretInput {

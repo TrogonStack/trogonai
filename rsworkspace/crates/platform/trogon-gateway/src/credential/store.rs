@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use async_nats::jetstream::{self, context, kv};
+use trogon_credential_domain::CredentialKey;
 use trogon_decider_nats::{JetStreamStore, JetStreamStoreBuilder, JetStreamStoreError};
 use trogon_decider_runtime::{
     AppendStreamRequest, AppendStreamResponse, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
@@ -12,7 +13,6 @@ use trogon_nats::jetstream::{
 };
 use uuid::Uuid;
 
-use super::commands::domain::CredentialKey;
 use super::constants::{CREDENTIAL_NAMESPACE, CREDENTIAL_SNAPSHOT_BUCKET};
 use super::ensure_event_stream::ensure_credential_event_stream;
 use super::ensure_event_stream_error::EnsureCredentialEventStreamError;

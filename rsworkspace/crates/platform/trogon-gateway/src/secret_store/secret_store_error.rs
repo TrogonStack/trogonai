@@ -1,5 +1,6 @@
+use trogon_credential_domain::{CredentialRef, CredentialStatus};
+
 use super::GeneratedValueError;
-use crate::credential::commands::domain::{CredentialRef, CredentialStatus};
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum SecretStoreError {

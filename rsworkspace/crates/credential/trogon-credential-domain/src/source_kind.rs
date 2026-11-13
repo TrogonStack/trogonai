@@ -20,7 +20,7 @@ pub enum SourceKind {
 }
 
 impl SourceKind {
-    pub(crate) const ALL: [Self; 15] = [
+    pub const ALL: [Self; 15] = [
         Self::Datadog,
         Self::Discord,
         Self::GitHub,

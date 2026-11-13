@@ -6,6 +6,10 @@ use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKey, CredentialMetadata, CredentialPath, CredentialRef, CredentialStatus,
+    CredentialVersion,
+};
 use trogon_std::{EmptySecretError, SecretString};
 use url::Url;
 
@@ -14,10 +18,6 @@ mod constants;
 use super::{
     SecretDestroyReason, SecretMaterial, SecretStoreDestroy, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
     SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
-};
-use crate::credential::commands::domain::{
-    CredentialIdentity, CredentialKey, CredentialMetadata, CredentialPath, CredentialRef, CredentialStatus,
-    CredentialVersion,
 };
 
 #[derive(Clone)]

@@ -1,8 +1,5 @@
 use super::*;
 use crate::config::load;
-use crate::credential::commands::domain::{
-    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind,
-};
 use crate::credential_runtime_projection::{
     RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
 };
@@ -20,7 +17,6 @@ use crate::source::slack::constants as slack_constants;
 use crate::source::telegram::constants as telegram_constants;
 use crate::source::twitter::constants as twitter_constants;
 use crate::source::zoom::constants as zoom_constants;
-use crate::source_integration_id::SourceIntegrationId;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use base64::Engine;
@@ -28,6 +24,9 @@ use base64::engine::general_purpose::STANDARD;
 use hmac::{KeyInit, Mac};
 use std::io::Write;
 use tower::ServiceExt;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceKind,
+};
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore};

@@ -4,7 +4,6 @@ mod activate_credential_rotation;
 mod activate_credential_write;
 mod complete_credential_destroy;
 mod constants;
-pub(crate) mod domain;
 pub(crate) mod proto;
 mod record_credential_destroy_failure;
 mod record_credential_rotation_failure;

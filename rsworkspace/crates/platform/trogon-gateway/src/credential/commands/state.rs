@@ -1,9 +1,9 @@
-use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1};
-
-use super::domain::{
+use trogon_credential_domain::{
     CredentialId, CredentialIdentity, CredentialKey, CredentialMetadata, CredentialRef, CredentialStatus,
     CredentialVersion,
 };
+use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1};
+
 use super::proto::{
     CredentialProtoDecodeError, active_credential_ref, active_state_to_proto, cleanup_failed_to_proto_state,
     decode_activated, decode_active_state, decode_cleanup_failed_state, decode_destroy_failed,

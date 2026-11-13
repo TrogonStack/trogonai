@@ -5,18 +5,17 @@ use std::time::Duration;
 
 use google_cloud_auth::build_errors;
 use tokio::sync::Mutex;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceKind,
+};
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucketBinding, MockJetStreamPublisher, MockObjectStore};
 
-use crate::credential::commands::domain::{
-    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind,
-};
 use crate::credential_runtime_projection::{
     RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
 };
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut, SecretStoreRotate};
 use crate::source::google_pubsub::credentials::GoogleCredentialsError;
-use crate::source_integration_id::SourceIntegrationId;
 
 use super::*;
 
@@ -256,7 +255,7 @@ async fn telegram_registration_follows_a_rotated_runtime_secret_and_skips_an_unc
     assert_eq!(
         registrations
             .registered_credentials
-            .get(&source_integration_id::SourceIntegrationId::new("first").unwrap()),
+            .get(&trogon_credential_domain::SourceIntegrationId::new("first").unwrap()),
         Some(rotated)
     );
 }
@@ -419,7 +418,7 @@ async fn put_discord_bot_token(
     store: &MockOpenBaoSecretStore,
     registry: &RuntimeCredentialRegistry,
     token: &str,
-) -> crate::credential::commands::domain::CredentialRef {
+) -> trogon_credential_domain::CredentialRef {
     let credential = store
         .put(
             CredentialIdentity::derive(

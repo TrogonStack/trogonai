@@ -1,6 +1,6 @@
 use super::*;
-use crate::credential::commands::domain::{CredentialOwnerId, SourceKind};
 use crate::source_integration_id::SourceIntegrationId;
+use crate::{CredentialOwnerId, SourceKind};
 
 fn owner(value: &str) -> CredentialOwnerId {
     CredentialOwnerId::new(value).unwrap()

@@ -1,5 +1,5 @@
 use super::*;
-use crate::credential::commands::domain::CredentialOwnerId;
+use crate::CredentialOwnerId;
 use crate::source_integration_id::SourceIntegrationId;
 
 fn owner() -> CredentialOwnerId {

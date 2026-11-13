@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tracing::{info, instrument, warn};
+use trogon_credential_domain::{CredentialKind, SourceIntegrationId, SourceKind};
 use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
 use trogon_semconv::span::MICROSOFT_GRAPH_WEBHOOK;
@@ -20,10 +21,8 @@ use trogon_std::NonZeroDuration;
 use super::client_state::MicrosoftGraphClientState;
 use super::config::MicrosoftGraphConfig;
 use super::constants::HTTP_BODY_SIZE_MAX;
-use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
 use crate::secret_store::{SecretStoreError, SecretStoreGet};
-use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Deserialize)]
 struct ChangeNotificationCollection {

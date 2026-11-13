@@ -10,6 +10,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, instrument, warn};
+use trogon_credential_domain::{CredentialKind, SourceIntegrationId, SourceKind};
 use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
@@ -18,10 +19,8 @@ use trogon_semconv::span::TWITTER_CRC;
 use trogon_semconv::span::TWITTER_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
-use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
 use crate::secret_store::{SecretStoreError, SecretStoreGet};
-use crate::source_integration_id::SourceIntegrationId;
 
 use super::config::{TwitterConfig, TwitterConsumerSecret};
 use super::constants::{

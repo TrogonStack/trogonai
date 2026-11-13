@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialMetadata, CredentialRef, CredentialStatus, CredentialVersion,
+};
 use trogon_std::SecretString;
 
 use super::{
     SecretDestroyReason, SecretMaterial, SecretStoreDestroy, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
     SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
-};
-use crate::credential::commands::domain::{
-    CredentialIdentity, CredentialMetadata, CredentialRef, CredentialStatus, CredentialVersion,
 };
 
 #[derive(Clone, Default)]

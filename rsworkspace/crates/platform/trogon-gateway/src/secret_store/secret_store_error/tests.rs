@@ -1,5 +1,6 @@
+use trogon_credential_domain::CredentialFingerprintError;
+
 use super::*;
-use crate::credential::commands::domain::CredentialFingerprintError;
 
 #[test]
 fn invalid_generated_keeps_the_fingerprint_error_as_its_source() {

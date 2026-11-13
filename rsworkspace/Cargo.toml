@@ -68,6 +68,7 @@ trogon-policy-eval = { path = "crates/policy/trogon-policy-eval" }
 trogon-policy-cel = { path = "crates/policy/trogon-policy-cel" }
 trogon-channel = { path = "crates/channel/trogon-channel" }
 channel-bridge-telegram = { path = "crates/channel/channel-bridge-telegram" }
+trogon-credential-domain = { path = "crates/credential/trogon-credential-domain" }
 
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }

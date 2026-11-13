@@ -144,8 +144,8 @@ verification_token = "configured-token"
     config::load(Some(file.path())).unwrap()
 }
 
-fn integration(value: &str) -> source_integration_id::SourceIntegrationId {
-    source_integration_id::SourceIntegrationId::new(value).unwrap()
+fn integration(value: &str) -> trogon_credential_domain::SourceIntegrationId {
+    trogon_credential_domain::SourceIntegrationId::new(value).unwrap()
 }
 
 fn nats_message(subject: &str, payload: &'static [u8]) -> async_nats::Message {

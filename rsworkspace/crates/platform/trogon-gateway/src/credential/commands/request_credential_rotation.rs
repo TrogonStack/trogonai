@@ -1,7 +1,7 @@
+use trogon_credential_domain::{CredentialKey, CredentialRef};
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialKey, CredentialRef};
 use super::proto::{active_credential_ref, rotation_requested_to_proto};
 use super::state::{CredentialDecideError, CredentialEvolveError, ensure_recorded_ref};
 

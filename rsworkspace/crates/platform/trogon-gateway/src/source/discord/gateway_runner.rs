@@ -2,10 +2,10 @@ use std::fmt::Debug;
 
 use futures_util::{Stream, StreamExt};
 use tracing::{info, warn};
+use trogon_credential_domain::{CredentialKind, SourceKind};
 use trogon_std::EmptySecretError;
 use twilight_gateway::Message;
 
-use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
 use crate::secret_store::{SecretStoreError, SecretStoreGet};
 use crate::supervision::RestartBackoff;

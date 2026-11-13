@@ -1,7 +1,5 @@
 use super::*;
-use crate::credential::commands::domain::{
-    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, CredentialVersion, SourceKind,
-};
+use crate::{CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, CredentialVersion, SourceKind};
 
 #[test]
 fn exposes_the_parts_it_was_built_from() {

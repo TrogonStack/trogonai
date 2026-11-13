@@ -1,8 +1,7 @@
 use std::fmt;
 
 use sha2::{Digest, Sha256};
-
-use crate::credential::commands::domain::{CredentialFingerprint, CredentialFingerprintError};
+use trogon_credential_domain::{CredentialFingerprint, CredentialFingerprintError};
 
 pub(super) fn digest(
     prefix: &str,

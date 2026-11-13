@@ -16,7 +16,6 @@ use trogon_decider_runtime::{
 
 use super::idempotency::IdempotencyKeyError;
 use super::*;
-use crate::credential::commands::domain::{CredentialDestroyReason, CredentialFailureReason};
 use crate::credential::commands::proto::{
     active_state_to_proto, cleanup_failed_to_proto_state, destroy_requested_to_proto_state, destroyed_to_proto_state,
     pending_write_to_proto_state, revoked_to_proto_state, rotation_pending_to_proto_state, write_failed_to_proto_state,
@@ -26,6 +25,7 @@ use crate::credential_lifecycle::recovery_worker::{
 };
 use crate::credential_runtime_projection::{RuntimeCredentialError, RuntimeIntegrationKey};
 use crate::secret_store::MockOpenBaoSecretStore;
+use trogon_credential_domain::{CredentialDestroyReason, CredentialFailureReason};
 use trogonai_proto::gateway::credentials::v1;
 
 #[derive(Clone, Default)]
@@ -2490,7 +2490,7 @@ async fn failed_commands_abandon_their_idempotency_key() {
 }
 
 struct SnapshotFixture {
-    metadata: crate::credential::commands::domain::CredentialMetadata,
+    metadata: trogon_credential_domain::CredentialMetadata,
 }
 
 impl SnapshotFixture {

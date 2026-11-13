@@ -1,9 +1,9 @@
 use super::*;
-use crate::credential::commands::domain::{
+use crate::source_integration_id::SourceIntegrationId;
+use crate::{
     CredentialId, CredentialIdentity, CredentialIdentityVersion, CredentialRef, CredentialScope, CredentialVersion,
     SourceKind,
 };
-use crate::source_integration_id::SourceIntegrationId;
 
 fn owner() -> CredentialOwnerId {
     CredentialOwnerId::new("tenant-1").unwrap()

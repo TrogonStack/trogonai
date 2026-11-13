@@ -22,13 +22,6 @@ use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 use uuid::Uuid;
 
 use super::*;
-use crate::credential::commands::domain::{
-    CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialIdentity, CredentialKey,
-    CredentialMetadata, CredentialStatus,
-};
-use crate::credential::commands::domain::{
-    CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
-};
 use crate::credential::commands::proto::{
     activated_to_proto, decode_active_state, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto,
     revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
@@ -41,7 +34,11 @@ use crate::credential_lifecycle::handler::{
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
 use crate::secret_store::SecretDestroyReason;
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreError, SecretStoreMetadata};
-use crate::source_integration_id::SourceIntegrationId;
+use trogon_credential_domain::{
+    CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialIdentity, CredentialKey,
+    CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus,
+    CredentialVersion, SourceIntegrationId, SourceKind,
+};
 use trogonai_proto::gateway::credentials::CredentialStateSnapshotCase;
 
 #[derive(Debug, thiserror::Error)]

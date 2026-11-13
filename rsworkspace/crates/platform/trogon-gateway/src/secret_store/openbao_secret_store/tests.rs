@@ -1,7 +1,5 @@
 use std::net::SocketAddr;
 
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
-use crate::source_integration_id::SourceIntegrationId;
 use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
@@ -16,6 +14,7 @@ use testcontainers_modules::testcontainers::{
 };
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+use trogon_credential_domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceKind};
 use trogon_std::env::{ReadEnv, SystemEnv};
 
 use super::*;
