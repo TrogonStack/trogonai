@@ -106,9 +106,13 @@ Initialization may perform configuration, authentication, MCP and CLI startup
 hook work. A connection without a model prompt is not a promise that startup
 has no side effects. Ready means the control protocol is initialized; inspect
 MCP status separately. Startup callbacks can run before `connect()` returns.
-The initialization exchange uses `limits.control_timeout`; startup hooks must
-complete within that configured bound. This is separate from how long a model
-turn may execute.
+The initialization exchange follows `limits.initialize_timeout`. By default it
+waits without a deadline, like TypeScript, unless a hook is set to block on
+failure or managed settings are sent, which arms 660 seconds and reports
+`Error::InitializeNotConfirmed`, or `Error::ManagedSettingsNotConfirmed` when
+only managed settings armed it.
+`InitializeTimeout::Python` reads `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` with a 60
+second floor. This is separate from how long a model turn may execute.
 
 The initialization exchange is internal to `connect()`. It configures the
 protocol and checks requested blocking-hook support before returning the
@@ -123,9 +127,11 @@ client ends its process. Resuming a conversation uses stored identity and
 transcripts to create another client; it does not resurrect a closed owner.
 `ClientHandle` permits concurrent control and input without extending the
 owner's lifetime. Input sent while a turn runs is written immediately, as both
-upstream SDKs do; outbound frames are not capped by `max_frame_bytes`, which
-bounds inbound frames only, and only in `ArgvStyle::Python` (TypeScript keeps every line). Continue consuming messages while work runs. Queue
-capacity is finite, and a lagging consumer can end the session with
+upstream SDKs do; outbound frames are not capped by `max_buffer_size`, which
+bounds inbound lines only and is unset unless selected, as TypeScript keeps
+every line. Messages queue without a bound by default, like TypeScript.
+`MessageBuffer::Backpressure` stops reading stdout while the buffer is full,
+like Python, and `MessageBuffer::FailWhenFull` ends the session with
 `Error::MessageQueueFull`.
 
 ## Turns, runs and interrupts
@@ -161,12 +167,13 @@ structured response. Hooks are not application message-stream handlers.
 Permission, elicitation, dialog and embedded MCP responders use the same
 bidirectional control machinery.
 
-Rust supplies per-request cancellation tokens, callback admission limits and
-timeouts. Once the SDK observes control cancellation, it cancels the matching
-task; identity checks suppress stale replies to reused request IDs. A timeout or
-callback error produces a protocol response rather than inventing success.
-The driver does not wait indefinitely for the application to consume a message
-before servicing controls; overflow is an explicit terminal error. Cancellation
+Rust supplies per-request cancellation tokens; callback admission limits and
+timeouts are opt-in, as neither upstream SDK has them. Once the SDK observes
+control cancellation, it cancels the matching task; identity checks suppress
+stale replies to reused request IDs. A timeout or callback error produces a
+protocol response rather than inventing success. With the default unbounded
+buffer the driver services controls whether or not the application consumes
+messages. Cancellation
 does not roll back an external effect or stop arbitrary blocking work.
 
 Blocking failure policy requires advertised CLI support. When a blocking hook is

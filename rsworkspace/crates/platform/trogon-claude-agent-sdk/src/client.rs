@@ -1,10 +1,6 @@
 use futures_util::StreamExt;
 
-use tokio::{
-    sync::{mpsc, oneshot},
-    task::JoinHandle,
-    time::timeout,
-};
+use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 
 use crate::{
     ClaudeAgentOptions, ControlOperation, Error, JsonObject, Message, Prompt, ProtocolError,
@@ -31,7 +27,7 @@ pub struct ClaudeSdkClient {
 
 struct ClientRuntime {
     handle: ClientHandle,
-    messages: mpsc::Receiver<Message>,
+    messages: crate::channel::Receiver<Message>,
     terminal: Option<oneshot::Receiver<Result<(), Error>>>,
     shutdown: Option<oneshot::Sender<()>>,
     driver: Option<JoinHandle<()>>,
@@ -41,10 +37,29 @@ struct ClientRuntime {
 /// A cloneable command handle that does not extend the subprocess owner's life.
 #[derive(Clone)]
 pub struct ClientHandle {
-    commands: mpsc::Sender<Command>,
-    timeout: std::time::Duration,
+    commands: crate::channel::Sender<Command>,
+    /// Only a bounded command queue can be full, so the wait applies only when the caller opted into both.
+    timeout: Option<std::time::Duration>,
     aborted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     closed: Closed,
+}
+
+/// The inherited variables plus the two the default debug file needs. They are read only here, and the
+/// configuration directory only when the debug variable is set, so an ordinary connection stays unobserved.
+fn debug_probe<E: crate::adapters::EnvironmentVariable>(
+    environment: &E,
+    inherited: &crate::environment_plan::Inherited,
+) -> crate::environment_plan::Inherited {
+    let mut probe = inherited.clone();
+    let debug = std::ffi::OsString::from(crate::constants::SDK_DEBUG_ENV);
+    if let Some(value) = environment.var_os(&debug) {
+        probe.insert(debug, value);
+        let config = std::ffi::OsString::from("CLAUDE_CONFIG_DIR");
+        if let Some(value) = environment.var_os(&config) {
+            probe.insert(config, value);
+        }
+    }
+    probe
 }
 
 fn capture_inherited<E: crate::adapters::EnvironmentVariable>(
@@ -90,7 +105,7 @@ impl ClaudeSdkClient {
         } else {
             None
         };
-        Self::connect_resolved(options, adapters, discovered).await
+        Self::connect_resolved(options, adapters, discovered, true).await
     }
 
     /// Connects through caller-supplied adapters. The caller owns spawning, so no executable discovery runs and
@@ -106,13 +121,14 @@ impl ClaudeSdkClient {
         P: crate::adapters::SpawnProcess<Error = std::io::Error>,
         F: crate::adapters::SessionFileSystem,
     {
-        Self::connect_resolved(options, adapters, None).await
+        Self::connect_resolved(options, adapters, None, false).await
     }
 
     async fn connect_resolved<E, P, F>(
         mut options: ClaudeAgentOptions,
         adapters: crate::adapters::RuntimeAdapters<E, P, F>,
         discovered: Option<std::path::PathBuf>,
+        derive_debug_file: bool,
     ) -> Result<Self, Error>
     where
         E: crate::adapters::EnvironmentVariable
@@ -135,14 +151,25 @@ impl ClaudeSdkClient {
             true,
         )
         .await?;
-        let initialization = driver::Initialization::new(&options)?;
+        crate::shadow_warning::emit(&options);
+        let initialization = driver::Initialization::new(&options, &adapters.environment)?;
         let closed = Closed::default();
+        // TypeScript derives a default debug file only when the SDK spawns the CLI and none was given.
+        let derived_debug_file = (derive_debug_file
+            && options.argv_style == crate::ArgvStyle::TypeScript
+            && options
+                .debug_file
+                .as_ref()
+                .is_none_or(|file| file.as_os_str().is_empty()))
+        .then(|| debug_probe(&adapters.environment, &inherited))
+        .and_then(|probe| crate::debug_file::process_debug_file(&probe));
         let transport = ProcessTransport::spawn(ProcessSpawn {
             options: &options,
             cli_path: cli_path.clone(),
             inherited: &inherited,
             process: &adapters.process,
             config_dir: session.as_ref().and_then(|session| session.config_dir.as_deref()),
+            derived_debug_file: derived_debug_file.as_deref(),
             closed: closed.clone(),
         })?;
         let version_check = (!crate::version_check::skip_requested(
@@ -199,7 +226,8 @@ impl ClaudeSdkClient {
             false,
         )
         .await?;
-        let initialization = driver::Initialization::new(&options)?;
+        crate::shadow_warning::emit(&options);
+        let initialization = driver::Initialization::new(&options, &adapters.environment)?;
         Self::start(StartInput {
             options,
             session,
@@ -295,13 +323,17 @@ impl ClaudeSdkClient {
             closed,
             process_id,
         } = input;
-        let (command_tx, command_rx) = mpsc::channel(options.limits.command_queue_capacity.get());
-        let (message_tx, message_rx) = mpsc::channel(options.limits.message_queue_capacity.get());
+        let (command_tx, command_rx) = crate::channel::channel(options.limits.command_queue_capacity);
+        let (message_tx, message_rx) = crate::channel::channel(options.limits.message_buffer.capacity());
         let (terminal_tx, terminal_rx) = oneshot::channel();
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let handle = ClientHandle {
             commands: command_tx,
-            timeout: options.limits.control_timeout.as_duration(),
+            timeout: options
+                .limits
+                .command_queue_capacity
+                .and(options.limits.command_queue_timeout)
+                .map(crate::Timeout::as_duration),
             aborted: std::sync::Arc::default(),
             closed,
         };
@@ -651,7 +683,7 @@ impl ClientHandle {
     async fn finish_with(&self, completion: Completion) -> Result<(), Error> {
         let (response, receiver) = oneshot::channel();
         let command = Command::FinishInput { completion, response };
-        match timeout(self.timeout, self.commands.send(command)).await {
+        match self.send_command(command).await {
             Err(_) => Err(Error::CommandQueueTimeout),
             // Upstream `endInput()` (TypeScript) and `end_input()` (Python) only close stdin and never fail, so ending
             // the input of a run that already stopped is a no-op; the run's own error surfaces from the message
@@ -673,10 +705,17 @@ impl ClientHandle {
     }
 
     async fn enqueue(&self, command: Command) -> Result<(), Error> {
-        timeout(self.timeout, self.commands.send(command))
+        self.send_command(command)
             .await
             .map_err(|_| Error::CommandQueueTimeout)?
             .map_err(|_| self.stopped_error())
+    }
+
+    async fn send_command(&self, command: Command) -> Result<Result<(), Command>, tokio::time::error::Elapsed> {
+        match self.timeout {
+            Some(limit) => timeout(limit, self.commands.send(command)).await,
+            None => Ok(self.commands.send(command).await),
+        }
     }
 
     /// The error for a write that the stopped driver did not (or could not) accept. The driver records how the

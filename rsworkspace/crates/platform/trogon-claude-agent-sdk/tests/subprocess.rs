@@ -5,9 +5,9 @@ use std::{error::Error as StdError, num::NonZeroUsize, sync::Arc, time::Duration
 use tokio::time::{sleep, timeout};
 use trogon_claude_agent_sdk::{
     BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, Error, FeatureSupport,
-    FileCheckpointing, InMemorySessionStore, Message, PartialMessages, PermissionDecision, Prompt, QueueCapacity,
-    SessionId, SessionStore, SessionStoreOptions, SystemPrompt, Timeout, ToolPermissionRequest, ToolRule, ToolSet,
-    adapters::SystemClock, query,
+    FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages, PermissionDecision, Prompt,
+    QueueCapacity, SessionId, SessionStore, SessionStoreOptions, SystemPrompt, Timeout, ToolPermissionRequest,
+    ToolRule, ToolSet, adapters::SystemClock, query,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -18,8 +18,8 @@ fn options(mode: &str) -> Result<ClaudeAgentOptions, Box<dyn StdError>> {
         model: Some(format!("fixture:{mode}").into()),
         ..ClaudeAgentOptions::default()
     };
-    options.limits.control_timeout = Timeout::new(Duration::from_secs(2))?;
-    options.limits.shutdown_timeout = Timeout::new(Duration::from_millis(200))?;
+    options.limits.control_timeout = Some(Timeout::new(Duration::from_secs(2)));
+    options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(Timeout::new(Duration::from_millis(200)));
     // The runtime force-kills the fixture on shutdown, possibly while it is writing its coverage
     // profile at exit, which leaves a corrupt profile. The fixture runs no crate code, so its
     // profile is discarded.
@@ -100,7 +100,7 @@ async fn s02_non_json_stdout_lines_are_skipped() -> TestResult {
 #[tokio::test]
 async fn s05_a_missing_idle_state_ends_the_run_quietly_at_the_ceiling() -> TestResult {
     let mut options = options("stuck-running")?;
-    options.limits.run_end_timeout = Timeout::new(Duration::from_millis(300))?;
+    options.limits.run_end_timeout = Timeout::new(Duration::from_millis(300));
     let mut response = query(Prompt::from("stuck"), options).await?;
     let results = timeout(Duration::from_secs(5), async {
         let mut results = Vec::new();
@@ -246,7 +246,7 @@ async fn connected_client_exposes_cached_lossless_metadata() -> TestResult {
         client.connection_info().hook_on_failure_supported,
         FeatureSupport::NotReported
     );
-    assert!(client.connection_info().as_json().is_empty());
+    assert_eq!(client.connection_info().as_json(), &serde_json::json!({}));
     client.disconnect().await?;
     Ok(())
 }
@@ -420,8 +420,10 @@ async fn cancelling_a_receive_preserves_partial_frame() -> TestResult {
 }
 
 #[tokio::test]
-async fn malformed_known_frame_is_a_terminal_protocol_error() -> TestResult {
-    let mut client = ClaudeSdkClient::connect(options("malformed")?).await?;
+async fn malformed_known_frame_is_a_terminal_protocol_error_with_python_decoding() -> TestResult {
+    let mut options = options("malformed")?;
+    options.message_decoding = MessageDecoding::Python;
+    let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("malformed")).await?;
     let error = loop {
         match client.next_message().await {
@@ -439,7 +441,7 @@ async fn malformed_known_frame_is_a_terminal_protocol_error() -> TestResult {
 async fn oversized_frame_is_rejected() -> TestResult {
     let mut options = options("oversized")?;
     options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
-    options.limits.max_frame_bytes = NonZeroUsize::new(1024).ok_or_else(|| std::io::Error::other("zero limit"))?;
+    options.limits.max_buffer_size = Some(NonZeroUsize::new(1024).ok_or_else(|| std::io::Error::other("zero limit"))?);
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("oversized")).await?;
     let error = loop {
@@ -464,7 +466,7 @@ async fn oversized_frame_is_rejected() -> TestResult {
 #[tokio::test]
 async fn process_failure_preserves_status_and_bounded_stderr() -> TestResult {
     let mut options = options("failure")?;
-    options.limits.max_stderr_bytes = NonZeroUsize::new(32).ok_or_else(|| std::io::Error::other("zero limit"))?;
+    options.limits.stderr_tail = 32;
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("failure")).await?;
     let error = loop {
@@ -488,7 +490,7 @@ async fn process_failure_preserves_status_and_bounded_stderr() -> TestResult {
 #[tokio::test]
 async fn consumer_lag_fails_with_a_bounded_queue() -> TestResult {
     let mut options = options("queue-overflow")?;
-    options.limits.message_queue_capacity = QueueCapacity::new(1)?;
+    options.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(QueueCapacity::new(1)?);
     let mut client = ClaudeSdkClient::connect(options).await?;
     let _ = client.next_message().await?;
     client.send_prompt(Prompt::from("flood")).await?;
@@ -516,7 +518,7 @@ async fn consumer_lag_fails_with_a_bounded_queue() -> TestResult {
 #[tokio::test]
 async fn missing_control_reply_times_out() -> TestResult {
     let mut options = options("control-timeout")?;
-    options.limits.control_timeout = Timeout::new(Duration::from_millis(100))?;
+    options.limits.control_timeout = Some(Timeout::new(Duration::from_millis(100)));
     let client = ClaudeSdkClient::connect(options).await?;
     assert!(matches!(
         client.handle().interrupt().await,
@@ -534,12 +536,15 @@ async fn missing_control_reply_times_out() -> TestResult {
 }
 
 #[tokio::test]
-async fn malformed_initialization_is_rejected() -> TestResult {
-    for mode in ["init-malformed", "init-malformed-known"] {
-        assert!(matches!(
-            ClaudeSdkClient::connect(options(mode)?).await,
-            Err(Error::Protocol(_) | Error::MessageParse(_))
-        ));
+async fn malformed_initialization_is_accepted_like_upstream() -> TestResult {
+    for (mode, raw) in [
+        ("init-malformed", serde_json::json!(42)),
+        ("init-malformed-known", serde_json::json!({"models":"invalid"})),
+    ] {
+        let client = ClaudeSdkClient::connect(options(mode)?).await?;
+        assert!(client.connection_info().models.is_empty());
+        assert_eq!(client.connection_info().as_json(), &raw);
+        client.disconnect().await?;
     }
     Ok(())
 }
@@ -564,7 +569,7 @@ async fn successful_process_exit_without_a_result_is_not_success() -> TestResult
 async fn queue_capacity_rejects_values_that_would_panic() -> TestResult {
     let mut options = options("normal")?;
     match usize::MAX.try_into() {
-        Ok(capacity) => options.limits.message_queue_capacity = capacity,
+        Ok(capacity) => options.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(capacity),
         Err(_) => return Ok(()),
     }
     let outcome = tokio::spawn(ClaudeSdkClient::connect(options)).await;
@@ -578,10 +583,7 @@ async fn queue_capacity_rejects_values_that_would_panic() -> TestResult {
 #[tokio::test]
 async fn timeout_rejects_values_that_would_overflow_an_instant() -> TestResult {
     let mut options = options("normal")?;
-    match Duration::MAX.try_into() {
-        Ok(timeout) => options.limits.control_timeout = timeout,
-        Err(_) => return Ok(()),
-    }
+    options.limits.control_timeout = Some(Timeout::new(Duration::MAX));
     let outcome = ClaudeSdkClient::connect(options).await;
     assert!(
         !matches!(outcome, Err(Error::DriverStopped)),
@@ -676,7 +678,8 @@ async fn initialization_timeout_reaps_process() -> TestResult {
     let marker = directory.path().join("pid");
     let mut options = options("init-timeout")?;
     options.system_prompt = SystemPrompt::Custom(marker.to_string_lossy().into_owned());
-    options.limits.control_timeout = Timeout::new(Duration::from_millis(100))?;
+    options.limits.initialize_timeout =
+        trogon_claude_agent_sdk::InitializeTimeout::Fixed(Timeout::new(Duration::from_millis(100)));
     assert!(matches!(
         ClaudeSdkClient::connect(options).await,
         Err(Error::ControlTimeout {

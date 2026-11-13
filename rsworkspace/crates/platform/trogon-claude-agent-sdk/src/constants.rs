@@ -62,6 +62,15 @@ pub(crate) const INHERITED_KEYS: &[&str] = &[
     "USERPROFILE",
 ];
 
+/// `cmd.exe` metacharacters Python refuses in resume and session values on Windows.
+pub(crate) const WINDOWS_CMD_METACHARACTERS: &str = "&|<>^%!\"";
+
+/// Python `--setting-sources` default when `skills` is set and no sources were given.
+pub(crate) const SKILLS_DEFAULT_SETTING_SOURCES: [&str; 2] = ["user", "project"];
+
+/// Environment variable that makes the TypeScript SDK log to a derived debug file.
+pub(crate) const SDK_DEBUG_ENV: &str = "DEBUG_CLAUDE_AGENT_SDK";
+
 /// Upstream `_STORE_LIST_LOAD_CONCURRENCY`.
 pub(crate) const LIST_LOAD_CONCURRENCY: usize = 16;
 
@@ -228,6 +237,9 @@ pub(crate) const ESCALATING_DEFAULT_MODES: [&str; 3] = ["bypassPermissions", "au
 /// Escalating modes that a repo-local `local` source may also not set (`P5` upstream).
 pub(crate) const STRICT_ESCALATING_DEFAULT_MODES: [&str; 2] = ["auto", "bypassPermissions"];
 
+/// Object keys the upstream merge customizer spreads (`{...a, ...b}`) instead of merging deeply.
+pub(crate) const SHALLOW_MERGED_OBJECT_KEYS: [&str; 2] = ["extraKnownMarketplaces", "managedMcpServers"];
+
 /// Settings keys whose arrays are replaced rather than unioned.
 pub(crate) const REPLACED_ARRAY_KEYS: [&str; 1] = ["fallbackModel"];
 
@@ -382,3 +394,223 @@ pub(crate) const PASSWD_INITIAL_BUFFER: usize = 1024;
 
 /// Largest `getpwnam_r` scratch buffer tried before giving up.
 pub(crate) const PASSWD_MAX_BUFFER: usize = 1 << 20;
+
+/// Upstream `C5e`: control, line separator and default-ignorable characters a helper path must not hold.
+pub(crate) const SETTINGS_PATTERN_INVISIBLE_PATH: &str = r"[\x00-\x1f\x7f-\x9f\x{2028}\x{2029}]|\p{DI}";
+
+/// Upstream `R3`: control and bidirectional formatting characters.
+pub(crate) const SETTINGS_PATTERN_BIDI_NAME: &str = r"[\p{Cc}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]";
+
+/// Upstream `C3e` and `A3e`: control and invisible format characters.
+pub(crate) const SETTINGS_PATTERN_FORMAT_CHARS: &str = r"[\p{Cc}\p{Cf}\x{2028}\x{2029}]";
+
+/// Upstream `W6` plus the `V6` anchor: marketplace names that impersonate an official one.
+pub(crate) const SETTINGS_PATTERN_IMPERSONATION: &str = "official[^a-z0-9]*(anthropic|claude)|(?:anthropic|claude)[^a-z0-9]*official|^(?:anthropic|claude)[^a-z0-9]*(marketplace|plugins|official)";
+
+/// Upstream `G6e`: a `${NAME}` or `${NAME:-default}` environment reference.
+pub(crate) const SETTINGS_PATTERN_ENV_REFERENCE: &str = r"\$\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\}";
+
+/// Upstream `bJe`: a scoped npm package name.
+pub(crate) const SETTINGS_PATTERN_SCOPED_PACKAGE: &str = r"^@[a-z0-9][a-z0-9\-._]*/[a-z0-9][a-z0-9\-._]*$";
+
+/// Upstream `CJe`: an unscoped npm package name.
+pub(crate) const SETTINGS_PATTERN_PLAIN_PACKAGE: &str = r"^[a-z0-9][a-z0-9\-._]*$";
+
+/// Upstream `Xo` search: a macOS firmlink-style path component.
+pub(crate) const SETTINGS_PATTERN_VOLUME_COMPONENT: &str = r"/\.(?:vol|file|nofollow|resolve)(?:/|$)";
+
+/// Upstream `Xo` first-component test.
+pub(crate) const SETTINGS_PATTERN_VOLUME_ROOT: &str = r"^\.(?:vol|file|nofollow|resolve)$";
+
+/// Upstream `R5e` automount root.
+pub(crate) const SETTINGS_PATTERN_NETWORK_SERVERS: &str = r"^/network/servers(/|$)";
+
+/// Upstream `O5e` kernel magic-link roots.
+pub(crate) const SETTINGS_PATTERN_MAGIC_LINK: &str = r"^/(proc|dev/(fd|stdin|stdout|stderr))(/|$)";
+
+/// Upstream `w5e` and `v5e`: PowerShell and executable suffixes.
+pub(crate) const SETTINGS_PATTERN_WINDOWS_EXECUTABLE: &str = r"\.(exe|ps1)$";
+
+/// Upstream `v5e`.
+pub(crate) const SETTINGS_PATTERN_POWERSHELL_SUFFIX: &str = r"\.ps1$";
+
+/// Node `net.isIPv4` segment.
+pub(crate) const SETTINGS_PATTERN_IPV4_SEGMENT: &str = "(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])";
+
+/// Node `net.isIPv6` segment.
+pub(crate) const SETTINGS_PATTERN_IPV6_SEGMENT: &str = "(?:[0-9a-fA-F]{1,4})";
+
+/// Node `net.isIPv6` zone suffix.
+pub(crate) const SETTINGS_PATTERN_IPV6_ZONE: &str = "(?:%[0-9a-zA-Z-.:]{1,})?$";
+
+/// Upstream `K6`, `j6` and `nJe` together: marketplace names reserved for Anthropic.
+pub(crate) const SETTINGS_RESERVED_MARKETPLACE_NAMES: [&str; 19] = [
+    "claude-code-marketplace",
+    "claude-code-plugins",
+    "claude-plugins-official",
+    "anthropic-marketplace",
+    "anthropic-plugins",
+    "agent-skills",
+    "anthropic-agent-skills",
+    "life-sciences",
+    "knowledge-work-plugins",
+    "claude-for-legal",
+    "claude-for-financial-services",
+    "financial-services-plugins",
+    "first-party-plugins",
+    "claude-tag-plugins",
+    "claude-community",
+    "claude-plugins-community",
+    "healthcare",
+    "anthropic-plugin-directory",
+    "claude-plugin-directory",
+];
+
+/// Own property names of `Object.prototype`.
+pub(crate) const SETTINGS_OBJECT_PROTOTYPE_NAMES: [&str; 12] = [
+    "constructor",
+    "__defineGetter__",
+    "__defineSetter__",
+    "hasOwnProperty",
+    "__lookupGetter__",
+    "__lookupSetter__",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toString",
+    "valueOf",
+    "__proto__",
+    "toLocaleString",
+];
+
+/// Upstream `$3e`: cloud metadata and loopback host names.
+pub(crate) const SETTINGS_METADATA_HOSTS: [&str; 12] = [
+    "metadata.google.internal",
+    "metadata.goog",
+    "metadata",
+    "instance-data",
+    "instance-data.ec2.internal",
+    "ip6-localhost",
+    "ip6-loopback",
+    "localhost.localdomain",
+    "localhost4",
+    "localhost4.localdomain4",
+    "localhost6",
+    "localhost6.localdomain6",
+];
+
+/// Upstream `p6`: link-local metadata addresses outside the loopback ranges.
+pub(crate) const SETTINGS_METADATA_ADDRESSES: [&str; 3] = ["100.100.100.200", "168.63.129.16", "192.0.0.192"];
+
+/// Upstream `Y6` keys: marketplace names reserved for session-scoped plugin sources.
+pub(crate) const SETTINGS_BUILTIN_PLUGIN_NAMES: [&str; 5] =
+    ["inline", "builtin", "skills-dir", "synced", "claude-plugin-test"];
+
+/// Upstream `Gf`: provider names an `allowedProviders` entry may carry.
+pub(crate) const SETTINGS_PROVIDER_NAMES: [&str; 8] = [
+    "anthropic",
+    "customEndpoint",
+    "bedrock",
+    "vertex",
+    "foundry",
+    "anthropicAws",
+    "mantle",
+    "gateway",
+];
+
+/// Upstream `E3e`: server fields a managed settings server must not carry.
+pub(crate) const SETTINGS_MANAGED_SERVER_FORBIDDEN: [&str; 4] = ["command", "args", "env", "headersHelper"];
+
+/// Upstream `b3e`: server types a managed settings server may use.
+pub(crate) const SETTINGS_MANAGED_SERVER_TYPES: [&str; 3] = ["http", "streamable-http", "sse"];
+
+/// Keys a static `defaultSettings` payload must not carry (upstream `al`: the policy helper keys, the
+/// entry fields, the envelope keys and the per-OS keys; a key in two groups counts once per group).
+pub(crate) const SETTINGS_PAYLOAD_FORBIDDEN_KEYS: [&str; 18] = [
+    "policyHelper",
+    "policyHelpers",
+    "path",
+    "script",
+    "interpreter",
+    "outputBehavior",
+    "onFailure",
+    "retries",
+    "timeoutMs",
+    "refreshIntervalMs",
+    "defaultSettings",
+    "managedSettings",
+    "appendSystemPrompt",
+    "macos",
+    "linux",
+    "windows",
+    "wsl",
+    "default",
+];
+
+/// Upstream `f3e`: the largest `timeout` a request timeout converts to.
+pub(crate) const SETTINGS_REQUEST_TIMEOUT_LIMIT: f64 = 300_000.0;
+
+/// The credential file `mode` upstream cleans malformed optional fields for.
+pub(crate) const SETTINGS_CREDENTIAL_DENY_MODE: &str = "deny";
+
+/// Upstream `gy`: legacy tool names a permission rule resolves to their current names.
+pub(crate) const SETTINGS_PERMISSION_TOOL_ALIASES: [(&str, &str); 8] = [
+    ("Task", "Agent"),
+    ("KillShell", "TaskStop"),
+    ("KillBash", "TaskStop"),
+    ("ListPeers", "ListAgents"),
+    ("Brief", "SendUserMessage"),
+    ("ListMcpResources", "ListMcpResourcesTool"),
+    ("ReadMcpResource", "ReadMcpResourceTool"),
+    ("ReadMcpResourceDir", "ReadMcpResourceDirTool"),
+];
+
+/// Upstream `Zf.filePatternTools`: tools whose rule content is a file glob.
+pub(crate) const SETTINGS_PERMISSION_FILE_PATTERN_TOOLS: [&str; 7] =
+    ["Read", "Write", "Edit", "Glob", "NotebookRead", "NotebookEdit", "Cd"];
+
+/// Upstream `Zf.bashPrefixTools`: tools whose rule content may use the trailing `:*` prefix syntax.
+pub(crate) const SETTINGS_PERMISSION_PREFIX_TOOLS: [&str; 1] = ["Bash"];
+
+/// The tool name every permission rule for a Model Context Protocol tool starts with.
+pub(crate) const SETTINGS_PERMISSION_MCP_PREFIX: &str = "mcp";
+
+/// Separator between the segments of a Model Context Protocol tool name.
+pub(crate) const SETTINGS_PERMISSION_MCP_SEPARATOR: &str = "__";
+
+/// Rule content that makes a Bash prefix rule empty.
+pub(crate) const SETTINGS_PERMISSION_EMPTY_PREFIX: &str = ":*";
+
+/// The `WebSearch` characters upstream refuses in rule content.
+pub(crate) const SETTINGS_PERMISSION_WEB_SEARCH_WILDCARDS: [char; 2] = ['*', '?'];
+
+/// The `WebFetch` rule content prefix, and the marker of a URL upstream refuses.
+pub(crate) const SETTINGS_PERMISSION_WEB_FETCH_DOMAIN_PREFIX: &str = "domain:";
+pub(crate) const SETTINGS_PERMISSION_WEB_FETCH_URL_MARKER: &str = "://";
+pub(crate) const SETTINGS_PERMISSION_WEB_FETCH_HTTP_PREFIX: &str = "http";
+
+/// ASCII characters as the UTF-16 code units the JavaScript string ports walk.
+pub(crate) const UTF16_BACKSLASH: u16 = b'\\' as u16;
+pub(crate) const UTF16_BANG: u16 = b'!' as u16;
+pub(crate) const UTF16_CARET: u16 = b'^' as u16;
+pub(crate) const UTF16_CLOSE_BRACE: u16 = b'}' as u16;
+pub(crate) const UTF16_CLOSE_BRACKET: u16 = b']' as u16;
+pub(crate) const UTF16_CLOSE_PAREN: u16 = b')' as u16;
+pub(crate) const UTF16_COLON: u16 = b':' as u16;
+pub(crate) const UTF16_COMMA: u16 = b',' as u16;
+pub(crate) const UTF16_DASH: u16 = b'-' as u16;
+pub(crate) const UTF16_DOT: u16 = b'.' as u16;
+pub(crate) const UTF16_EQUALS: u16 = b'=' as u16;
+pub(crate) const UTF16_GREATER: u16 = b'>' as u16;
+pub(crate) const UTF16_LESS: u16 = b'<' as u16;
+pub(crate) const UTF16_OPEN_BRACE: u16 = b'{' as u16;
+pub(crate) const UTF16_OPEN_BRACKET: u16 = b'[' as u16;
+pub(crate) const UTF16_OPEN_PAREN: u16 = b'(' as u16;
+pub(crate) const UTF16_PIPE: u16 = b'|' as u16;
+pub(crate) const UTF16_QUESTION: u16 = b'?' as u16;
+pub(crate) const UTF16_SLASH: u16 = b'/' as u16;
+
+/// The largest repetition count the JavaScript regular expression engine keeps; larger counts clamp to it.
+pub(crate) const SETTINGS_REGEXP_REPEAT_LIMIT: u64 = i32::MAX as u64;
+
+/// The variable-name slots of one AWS credential export pair.
+pub(crate) const SETTINGS_AWS_PAIR_SLOTS: [&str; 3] = ["accessKeyIdVar", "secretAccessKeyVar", "sessionTokenVar"];

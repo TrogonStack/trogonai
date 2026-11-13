@@ -3,6 +3,8 @@ use std::{
     time::Duration,
 };
 
+use tokio::sync::mpsc;
+
 use super::*;
 use crate::{ToolPermissionRequest, ToolSet, environment_plan::Inherited, process_transport::command};
 
@@ -51,8 +53,8 @@ struct Harness {
 struct DriverFixture {
     driver: Driver<ScriptedTransport, crate::adapters::NativeFileSystem>,
     harness: Harness,
-    commands: mpsc::Sender<Command>,
-    messages: mpsc::Receiver<Message>,
+    commands: crate::channel::Sender<Command>,
+    messages: crate::channel::Receiver<Message>,
     shutdown: oneshot::Sender<()>,
 }
 
@@ -64,8 +66,9 @@ impl DriverFixture {
     fn with_handler(handler: Option<Arc<dyn ToolPermissionHandler>>) -> Result<Self, Box<dyn std::error::Error>> {
         let (written_tx, written) = mpsc::unbounded_channel();
         let (incoming_tx, incoming) = mpsc::unbounded_channel();
-        let (commands, command_rx) = mpsc::channel(4);
-        let (message_tx, messages) = mpsc::channel(4);
+        let capacity = Some(crate::QueueCapacity::new(4)?);
+        let (commands, command_rx) = crate::channel::channel(capacity);
+        let (message_tx, messages) = crate::channel::channel(capacity);
         let (shutdown, shutdown_rx) = oneshot::channel();
         let driver = Driver {
             transport: ScriptedTransport {
@@ -76,26 +79,25 @@ impl DriverFixture {
             input_ended: false,
             commands: command_rx,
             messages: message_tx,
+            overflow: VecDeque::new(),
             shutdown: shutdown_rx,
+            shutdown_seen: false,
             limits: Limits::default(),
             handler,
+            message_decoding: crate::MessageDecoding::TypeScript,
             pending: HashMap::new(),
             callbacks: JoinSet::new(),
             callback_handles: HashMap::new(),
             callback_signals: HashMap::new(),
+            detached_callbacks: HashMap::new(),
             hook_callbacks: HashMap::new(),
             sdk_mcp_servers: BTreeMap::new(),
             pending_mcp: None,
-            initialize_request: RequestPayload::Initialize {
-                hooks: None,
-                agents: None,
-                supported_dialog_kinds: None,
-                system_prompt: None,
-                append_system_prompt: None,
-                plugins: None,
-            }
-            .to_value()?,
-            blocking_hooks: false,
+            initialize_request: crate::wire::runtime_payload::InitializeRequest::default()
+                .into_payload(crate::ArgvStyle::TypeScript)
+                .to_value()?,
+            initialize_expectations: InitializeExpectations::default(),
+            initialize_timeout: None,
             version_check: None,
             elicitation_handler: None,
             user_dialog_handler: None,
@@ -214,6 +216,7 @@ async fn initialization_owns_admission_until_the_handshake_completes() -> Result
 #[tokio::test(start_paused = true)]
 async fn request_counter_exhaustion_never_reuses_an_id_or_writes_a_frame() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
+    fixture.driver.limits.request_id_exhaustion = crate::RequestIdExhaustion::Fail;
     fixture.driver.next_id = u64::MAX;
     let (response, _receiver) = oneshot::channel();
     let outcome = fixture
@@ -244,7 +247,7 @@ async fn a_shutdown_already_requested_wins_before_more_input_is_read() -> Result
 #[tokio::test(start_paused = true)]
 async fn closing_the_command_port_ends_the_loop_without_another_cli_frame() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
-    let (replacement, _receiver) = mpsc::channel(1);
+    let (replacement, _receiver) = crate::channel::channel(None);
     let commands = std::mem::replace(&mut fixture.commands, replacement);
     drop(commands);
     fixture.driver.event_loop().await?;
@@ -262,7 +265,7 @@ async fn an_expired_control_is_rejected_before_another_loop_iteration() -> Resul
                 operation: ControlOperation::SetModel,
                 response,
             },
-            deadline: Instant::now(),
+            deadline: Some(Instant::now()),
         },
     );
     assert!(matches!(
@@ -288,6 +291,8 @@ async fn an_abandoned_message_consumer_stops_publication() -> Result<(), Box<dyn
         subtype: "receipt".into(),
         session_id: None,
         data: JsonObject::new(),
+        event: crate::SystemEvent::Other,
+        raw: JsonObject::new(),
     });
     assert!(matches!(fixture.driver.publish(message), Err(Error::DriverStopped)));
     fixture.finish().await
@@ -300,7 +305,7 @@ async fn a_stale_panicked_callback_cannot_terminate_the_current_session() -> Res
     fixture.driver.spawn_callback(
         id.clone(),
         crate::CancellationToken::new(),
-        Duration::from_secs(1),
+        Some(Duration::from_secs(1)),
         wire::callback_error_response(&id, "fallback"),
         async { std::panic::resume_unwind(Box::new("scripted stale callback failure")) },
     );
@@ -362,6 +367,8 @@ async fn eof_mirror_drain_publishes_failures_before_deferred_messages() -> Resul
             subtype: "after_fence".into(),
             session_id: None,
             data: JsonObject::new(),
+            event: crate::SystemEvent::Other,
+            raw: JsonObject::new(),
         }),
         None,
     ));
@@ -383,7 +390,7 @@ fn tool_lists_reach_the_cli_verbatim() -> Result<(), Error> {
         tools: ToolSet::Only(vec![crate::BuiltinToolName::from("Read Bash")]),
         ..ClaudeAgentOptions::default()
     };
-    let command = command(&options, std::path::Path::new("claude"), &Inherited::new())?;
+    let command = command(&options, std::path::Path::new("claude"), &Inherited::new(), None)?;
     let arguments: Vec<_> = command
         .as_std()
         .get_args()
@@ -430,7 +437,7 @@ fn argv_delivery_leaves_the_initialize_request_without_plugins() -> Result<(), E
 }
 
 fn derived_label_in(options: &ClaudeAgentOptions, inherited: &Inherited, cli: &std::path::Path) -> Option<String> {
-    let command = command(options, cli, inherited).ok()?;
+    let command = command(options, cli, inherited, None).ok()?;
     command
         .as_std()
         .get_envs()
@@ -471,5 +478,184 @@ fn a_derived_client_app_reaches_the_overlay_environment_unless_a_label_exists() 
         ..derived
     };
     assert_eq!(derived_label_in(&inheriting, &Inherited::new(), &cli), None);
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_request_counter_wraps_by_default() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.next_id = u64::MAX;
+    assert_eq!(fixture.driver.next_request_id()?.as_str(), "request-0");
+    assert_eq!(fixture.driver.next_request_id()?.as_str(), "request-1");
+    fixture.finish().await
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_typescript_initialize_expiry_is_initialize_not_confirmed() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    let (response, receiver) = oneshot::channel();
+    fixture.driver.pending.insert(
+        ControlRequestId::from("initialize"),
+        PendingControl {
+            response: ControlResponder::Initialize(response),
+            deadline: Some(Instant::now()),
+        },
+    );
+    assert!(matches!(
+        fixture.driver.event_loop().await,
+        Err(Error::InitializeNotConfirmed)
+    ));
+    assert!(matches!(receiver.await?, Err(Error::InitializeNotConfirmed)));
+    fixture.finish().await
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_initialize_armed_only_by_managed_settings_expires_with_their_message()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.initialize_expectations.managed_settings = true;
+    let (response, receiver) = oneshot::channel();
+    fixture.driver.pending.insert(
+        ControlRequestId::from("initialize"),
+        PendingControl {
+            response: ControlResponder::Initialize(response),
+            deadline: Some(Instant::now()),
+        },
+    );
+    assert!(matches!(
+        fixture.driver.event_loop().await,
+        Err(Error::ManagedSettingsNotConfirmed)
+    ));
+    assert!(matches!(receiver.await?, Err(Error::ManagedSettingsNotConfirmed)));
+    fixture.finish().await
+}
+
+#[tokio::test(start_paused = true)]
+async fn controls_have_no_deadline_unless_one_is_configured() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    assert!(fixture.driver.control_deadline(ControlOperation::SetModel).is_none());
+    assert!(fixture.driver.control_deadline(ControlOperation::Initialize).is_none());
+    fixture.driver.limits.control_timeout = Some(crate::Timeout::default());
+    fixture.driver.initialize_timeout = Some(Duration::from_secs(1));
+    let now = Instant::now();
+    assert_eq!(
+        fixture.driver.control_deadline(ControlOperation::SetModel),
+        Some(now + Duration::from_secs(60))
+    );
+    assert_eq!(
+        fixture.driver.control_deadline(ControlOperation::Initialize),
+        Some(now + Duration::from_secs(1))
+    );
+    fixture.driver.limits.control_timeout = Some(crate::Timeout::new(Duration::MAX));
+    assert!(fixture.driver.control_deadline(ControlOperation::SetModel).is_none());
+    fixture.finish().await
+}
+
+fn receipt(subtype: &str) -> Message {
+    Message::System(crate::SystemMessage {
+        subtype: subtype.into(),
+        session_id: None,
+        data: JsonObject::new(),
+    })
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_full_buffer_holds_messages_back_unless_set_to_fail() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.limits.message_buffer = crate::MessageBuffer::Backpressure(crate::QueueCapacity::new(4)?);
+    for index in 0..6 {
+        fixture.driver.publish(receipt(&index.to_string()))?;
+    }
+    assert_eq!(fixture.driver.overflow.len(), 2);
+    for expected in ["0", "1"] {
+        assert!(matches!(fixture.messages.recv().await, Some(Message::System(message)) if message.subtype == expected));
+    }
+    fixture.driver.drain_overflow()?;
+    assert!(fixture.driver.overflow.is_empty());
+    fixture.driver.limits.message_buffer = crate::MessageBuffer::FailWhenFull(crate::QueueCapacity::new(4)?);
+    assert!(matches!(
+        fixture.driver.publish(receipt("full")),
+        Err(Error::MessageQueueFull)
+    ));
+    fixture.finish().await
+}
+
+#[tokio::test(start_paused = true)]
+async fn backpressure_stops_reading_and_overflow_reaches_the_caller() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.limits.message_buffer = crate::MessageBuffer::Backpressure(crate::QueueCapacity::new(4)?);
+    fixture
+        .driver
+        .deferred_messages
+        .extend((0..4).map(|index| (receipt(&index.to_string()), None)));
+    assert!(fixture.driver.deferred_full());
+    fixture.driver.deferred_messages.clear();
+    for index in 0..5 {
+        fixture.driver.publish(receipt(&index.to_string()))?;
+    }
+    let reader = async {
+        let mut seen = Vec::new();
+        while let Some(Message::System(message)) = fixture.messages.recv().await {
+            seen.push(message.subtype);
+            if seen.len() == 5 {
+                break;
+            }
+        }
+        seen
+    };
+    let (_, seen) = tokio::join!(fixture.driver.flush_overflow(), reader);
+    assert_eq!(seen, ["0", "1", "2", "3", "4"]);
+    fixture.finish().await
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_duplicate_in_flight_request_is_skipped_or_run_by_policy() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    let id = ControlRequestId::from("twice");
+    fixture.driver.spawn_callback(
+        id.clone(),
+        crate::CancellationToken::new(),
+        None,
+        wire::callback_error_response(&id, "fallback"),
+        pending(),
+    );
+    assert!(!fixture.driver.admit_callback(&id).await?);
+    assert_eq!(fixture.driver.running_callbacks(), 1);
+    fixture.driver.limits.duplicate_control_requests = crate::DuplicateControlRequests::Fail;
+    assert!(matches!(
+        fixture.driver.admit_callback(&id).await,
+        Err(Error::Protocol(ProtocolError::DuplicateControlRequest))
+    ));
+    fixture.driver.limits.duplicate_control_requests = crate::DuplicateControlRequests::RunBoth;
+    assert!(fixture.driver.admit_callback(&id).await?);
+    assert_eq!(fixture.driver.detached_callbacks.len(), 1);
+    assert!(!fixture.driver.callback_handles.contains_key(&id));
+    fixture.driver.limits.max_incoming_callbacks = Some(crate::QueueCapacity::new(1)?);
+    let other = ControlRequestId::from("other");
+    assert!(!fixture.driver.admit_callback(&other).await?);
+    let written = fixture.harness.written.recv().await.unwrap_or_default();
+    assert!(written.contains("Too many outstanding SDK callbacks"));
+    fixture.finish().await
+}
+
+#[test]
+fn python_initialize_timeout_reads_the_stream_close_variable() -> Result<(), Error> {
+    let parse = |value: &str| python_initialize_timeout(Some(value.into()));
+    assert_eq!(python_initialize_timeout(None)?, Duration::from_secs(60));
+    assert_eq!(parse("90000")?, Duration::from_secs(90));
+    assert_eq!(parse(" +120_500\n")?, Duration::from_millis(120_500));
+    assert_eq!(parse("1000")?, Duration::from_secs(60));
+    assert_eq!(parse("-5")?, Duration::from_secs(60));
+    assert_eq!(parse("99999999999999999999999")?, Duration::from_millis(u64::MAX));
+    for (value, message) in [
+        ("1.5", "invalid literal for int() with base 10: '1.5'"),
+        ("", "invalid literal for int() with base 10: ''"),
+        ("1__0", "invalid literal for int() with base 10: '1__0'"),
+        ("it's", "invalid literal for int() with base 10: \"it's\""),
+        ("a\tb\\", "invalid literal for int() with base 10: 'a\\tb\\\\'"),
+        ("\u{1}", "invalid literal for int() with base 10: '\\x01'"),
+    ] {
+        assert_eq!(parse(value).map_err(|error| error.to_string()), Err(message.to_owned()));
+    }
     Ok(())
 }

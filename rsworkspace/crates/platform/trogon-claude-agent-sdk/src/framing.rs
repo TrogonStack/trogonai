@@ -101,12 +101,55 @@ fn deliver_line(handler: &crate::StderrHandler, line: &[u8]) {
     }
 }
 
+/// The stderr read so far, readable while the drain still runs so a stream left open does not lose it.
+#[derive(Clone, Default)]
+pub(crate) struct SharedTail {
+    bytes: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    units: usize,
+}
+
+impl SharedTail {
+    pub(crate) fn new(units: usize) -> Self {
+        Self {
+            bytes: std::sync::Arc::default(),
+            units,
+        }
+    }
+
+    /// The last UTF-16 code units of what has been read, as TypeScript's `slice(-2048)` keeps them.
+    pub(crate) fn snapshot(&self) -> StderrTail {
+        let bytes = self.bytes.lock().map(|bytes| bytes.clone()).unwrap_or_default();
+        StderrTail(last_units(&bytes, self.units))
+    }
+
+    fn append(&self, chunk: &[u8]) {
+        // A UTF-16 code unit takes at most three UTF-8 bytes; the slack covers a character cut at the front.
+        let limit = self
+            .units
+            .saturating_mul(3)
+            .saturating_add(4 * usize::from(self.units > 0));
+        let Ok(mut tail) = self.bytes.lock() else {
+            return;
+        };
+        if chunk.len() >= limit {
+            tail.clear();
+            tail.extend_from_slice(&chunk[chunk.len() - limit..]);
+        } else {
+            let excess = tail.len().saturating_add(chunk.len()).saturating_sub(limit);
+            tail.drain(..excess);
+            tail.extend_from_slice(chunk);
+        }
+    }
+}
+
+/// Reads stderr to its end into `tail` and delivers it to the handler. A partial line longer than `line_limit`
+/// bytes is delivered without waiting for its newline.
 pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
     mut reader: R,
-    limit: usize,
+    tail: SharedTail,
+    line_limit: usize,
     handler: Option<crate::StderrHandler>,
-) -> Result<StderrTail, std::io::Error> {
-    let mut tail = Vec::with_capacity(limit.min(8192));
+) -> Result<(), std::io::Error> {
     let mut pending = Vec::new();
     let mut chunk = [0_u8; 8192];
     loop {
@@ -117,7 +160,7 @@ pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
             {
                 deliver_lines(handler, &mut pending, true);
             }
-            return Ok(StderrTail(tail));
+            return Ok(());
         }
         if let Some(handler) = &handler {
             match handler.delivery {
@@ -126,21 +169,35 @@ pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
                     pending.extend_from_slice(&chunk[..count]);
                     deliver_lines(handler, &mut pending, false);
                     // Python flushes a partial line once it exceeds the buffer limit.
-                    if pending.len() > limit {
+                    if pending.len() > line_limit {
                         deliver_lines(handler, &mut pending, true);
                     }
                 }
             }
         }
-        if count >= limit {
-            tail.clear();
-            tail.extend_from_slice(&chunk[count - limit..count]);
-        } else {
-            let excess = tail.len().saturating_add(count).saturating_sub(limit);
-            tail.drain(..excess);
-            tail.extend_from_slice(&chunk[..count]);
-        }
+        tail.append(&chunk[..count]);
     }
+}
+
+/// The last `units` UTF-16 code units of the lossily decoded bytes. A surrogate pair cut in half leaves a lone low
+/// surrogate in JavaScript, which UTF-8 cannot carry, so it is dropped.
+fn last_units(bytes: &[u8], units: usize) -> Vec<u8> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut kept = 0_usize;
+    let mut start = text.len();
+    for (index, character) in text.char_indices().rev() {
+        let width = character.len_utf16();
+        if kept + width > units {
+            break;
+        }
+        kept += width;
+        start = index;
+    }
+    // TypeScript trims the kept tail with `String.prototype.trim`, which also strips the byte order mark.
+    text[start..]
+        .trim_matches(|character: char| character.is_whitespace() || character == '\u{feff}')
+        .as_bytes()
+        .to_vec()
 }
 
 #[cfg(test)]

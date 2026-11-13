@@ -12,6 +12,7 @@ mod agent_name;
 mod argv;
 mod builtin_tool_name;
 mod bundled_cli;
+mod channel;
 mod cli_discovery;
 mod cli_path;
 mod client;
@@ -21,6 +22,7 @@ mod config_value;
 mod constants;
 mod control;
 mod control_request_id;
+mod debug_file;
 mod dialog;
 mod dialog_kind;
 mod driver;
@@ -36,9 +38,11 @@ mod mcp_tool_input_schema;
 mod mcp_tool_name;
 mod mcp_url;
 mod message;
+mod message_decode;
 mod message_id;
 mod message_origin;
 mod model_name;
+mod option_error;
 mod options;
 mod output_schema;
 mod permission;
@@ -48,9 +52,11 @@ mod plugin;
 mod process_options;
 mod process_transport;
 mod prompt;
+mod python_json;
 mod queue_capacity;
 #[cfg(unix)]
 mod run_as;
+mod runtime_options;
 mod sdk_mcp_server;
 mod sdk_tool;
 mod sdk_tools;
@@ -74,11 +80,15 @@ mod session_reader;
 mod session_resume;
 mod session_store;
 mod session_store_helpers;
+mod session_store_ts;
 mod session_subpath;
 mod session_summary;
 mod session_transcript;
 mod setting_source;
 mod settings_input;
+mod settings_read;
+mod settings_read_hooks;
+mod settings_read_spec;
 mod settings_resolve;
 mod settings_resolve_env;
 mod settings_resolve_parent;
@@ -90,6 +100,13 @@ mod settings_resolve_values;
 mod settings_sandbox;
 mod settings_schema;
 mod settings_schema_builtins;
+mod settings_schema_hosts;
+mod settings_schema_paths;
+mod settings_schema_permission_rule;
+mod settings_schema_ports;
+mod settings_schema_regexp;
+mod shadow_warning;
+mod skills;
 mod stderr_tail;
 mod summary_dialect;
 mod task_id;
@@ -148,15 +165,19 @@ pub use mcp_tool_input_schema::{McpToolInputSchema, McpToolInputSchemaError};
 pub use mcp_tool_name::McpToolName;
 pub use mcp_url::{McpUrl, McpUrlError};
 pub use message::{
-    AssistantMessage, Content, ContentBlock, Message, ResultMessage, ResultStatus, StreamEvent, SystemMessage,
+    AssistantMessage, Content, ContentBlock, ConversationResetMessage, DeferredToolUse, HookEventMessage, Message,
+    MessageDecoding, MirrorErrorMessage, RateLimitEvent, RateLimitInfo, ResultMessage, ResultStatus, StreamEvent,
+    SystemEvent, SystemMessage, TaskNotificationMessage, TaskProgressMessage, TaskStartedMessage, TaskUpdatedMessage,
     ToolResultStatus, UserMessage,
 };
 pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use model_name::ModelName;
+pub use option_error::OptionError;
 pub use options::{
-    ClaudeAgentOptions, ContinueConversation, Customizations, FileCheckpointing, Limits, McpDiscovery, PartialMessages,
-    SessionFork, SessionPersistence, SystemPrompt, ToolSet,
+    ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, FileCheckpointing,
+    InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, MessageBuffer, PartialMessages, RequestIdExhaustion,
+    SessionFork, SessionPersistence, Shutdown, SystemPrompt, ToolSet,
 };
 pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{
@@ -174,6 +195,10 @@ pub use process_options::{
 };
 pub use prompt::Prompt;
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
+pub use runtime_options::{
+    DangerousPermissionSkip, DebugOutput, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget, ThinkingConfig,
+    ThinkingDisplay,
+};
 pub use sdk_mcp_server::{
     LocalMcpServer, LocalMcpServerOptions, McpFuture, McpServerError, SdkMcpServer, SdkMcpSession,
 };
@@ -203,10 +228,12 @@ pub use session_store::{
     SessionStoreFuture, SessionStoreLimits, SessionStoreOperation, SessionStoreOptions,
 };
 pub use session_store_helpers::{
-    ImportOptions, SessionStoreHelperError, StoreListOptions, delete_session_via_store, fork_session_via_store,
-    get_session_info_from_store, get_session_messages_from_store, get_subagent_messages_from_store,
-    import_session_to_store, list_sessions_from_store, list_subagents_from_store, rename_session_via_store,
-    tag_session_via_store,
+    ImportOptions, SessionStoreHelperError, StoreListOptions, delete_session_via_store, delete_session_via_store_with,
+    fork_session_via_store, fork_session_via_store_with, get_session_info_from_store, get_session_info_from_store_with,
+    get_session_messages_from_store, get_session_messages_from_store_with, get_subagent_messages_from_store,
+    get_subagent_messages_from_store_with, import_session_to_store, list_sessions_from_store,
+    list_subagents_from_store, list_subagents_from_store_with, rename_session_via_store, rename_session_via_store_with,
+    tag_session_via_store, tag_session_via_store_with,
 };
 pub use session_subpath::{SessionSubpath, SessionSubpathError};
 pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_entry_to_sdk_info};

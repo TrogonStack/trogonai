@@ -25,6 +25,23 @@ integrity-verified published `0.3.319` declaration archive.
 | `allowed_tools: Vec<ToolRule>` | [`allowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2353) | `allowedTools` |
 | `disallowed_tools: Vec<ToolRule>` | [`disallowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2431) | `disallowedTools` |
 | `resume: Option<SessionId>` | [`resume`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2408) | `resume` |
+| `thinking: Option<ThinkingConfig>` | `thinking` | `thinking` |
+| `max_thinking_tokens: Option<u64>` | `max_thinking_tokens` | `maxThinkingTokens` |
+| `task_budget: Option<TaskBudget>` | `task_budget` | `taskBudget` |
+| `betas: Vec<SdkBeta>` | `betas` | `betas` |
+| `fallback_model: Option<ModelName>` | `fallback_model` | `fallbackModel` |
+| `permission_prompt_tool_name: Option<String>` | `permission_prompt_tool_name` | `permissionPromptToolName` |
+| `permission_prompts: Option<PermissionPrompts>` | Not exposed in pinned Python | `permissionPrompts` |
+| `channels: Vec<String>` | Not exposed in pinned Python | CLI bundle only |
+| `debug: DebugOutput` | Not exposed in pinned Python | `debug` |
+| `debug_file: Option<PathBuf>` | Not exposed in pinned Python | `debugFile` |
+| `include_hook_events: HookEvents` | `include_hook_events` | `includeHookEvents` |
+| `session_id: Option<SessionId>` | `session_id` | `sessionId` |
+| `resume_session_at: Option<String>` | `resume_session_at` | `resumeSessionAt` |
+| `resume_drops_turn: Option<String>` | `resume_drops_turn` | `resumeDropsTurn` |
+| `allow_dangerously_skip_permissions: DangerousPermissionSkip` | Not exposed in pinned Python | `allowDangerouslySkipPermissions` |
+| `project_config_root: Option<PathBuf>` | Not exposed in pinned Python | `projectConfigRoot` |
+| `skills: Option<Skills>` | `skills` | `skills` |
 
 | Rust value | Upstream scalar or purpose | Value contract |
 | --- | --- | --- |
@@ -32,7 +49,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `SessionId` | [Python `ResultMessage.session_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1714) / TypeScript `SDKResultSuccess.session_id` | Infallible opaque text; every string is stored verbatim. |
 | `MessageId` | [Python `UserMessage.uuid`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1378) / TypeScript `SDKUserMessage.uuid`; Rust does not require UUID syntax | Infallible opaque text; every string is stored verbatim. |
 | `ToolUseId` | [Python `ToolUseBlock.id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1223) / TypeScript `UserDialogRequest.toolUseID` | Infallible opaque text; every string is stored verbatim. |
-| `ControlRequestId` | [Python protocol `SDKControlRequest.request_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2885); an internal control-envelope string, not a published TypeScript wrapper class | Infallible opaque text; every string is stored verbatim. |
+| `ControlRequestId` | [Python protocol `SDKControlRequest.request_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2885); an internal control-envelope string, not a published TypeScript wrapper class | Infallible opaque text; every string is stored verbatim. Outbound ids follow the dialect: TypeScript `Math.random().toString(36).substring(2,15)`, Python `req_{counter}_{os.urandom(4).hex()}`. |
 | `TaskId` | [Python `TaskStartedMessage.task_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1568) / TypeScript `SDKTaskStartedMessage.task_id` | Infallible opaque text; every string is stored verbatim. |
 | `ToolName` | [Python `ToolUseBlock.name`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1224); the tool-call name string | Infallible opaque text; every string is stored verbatim. |
 | `BuiltinToolName` | [Python `ClaudeAgentOptions.tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2342) / TypeScript `Options.tools` string-list selection | Infallible opaque text. Names are joined into the `--tools` argument unvalidated, as both upstream SDKs do; callers must avoid commas and the CLI validates each name. |
@@ -41,8 +58,8 @@ integrity-verified published `0.3.319` declaration archive.
 | `McpToolName` | [Python `SdkMcpTool.name`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/__init__.py#L270) / TypeScript `SdkMcpToolDefinition.name` | Infallible opaque text. The built-in MCP server warns about a name outside one to 128 ASCII letters, digits, underscores, hyphens or periods, and still lists it. |
 | `ToolRule` | Python `allowed_tools` / `disallowed_tools` entry; TypeScript `allowedTools` / `disallowedTools` entry | Infallible opaque text. Rules are joined with commas unvalidated, as both upstream SDKs do; callers must avoid commas, which the CLI would split into separate rules. |
 | `AgentName` | TypeScript `Options.agent`; not exposed in pinned Python | Infallible opaque text; every string is stored verbatim. |
-| `QueueCapacity` | Rust host-side bounded-channel policy; not an upstream SDK class | Positive and no larger than Tokio's `Semaphore::MAX_PERMITS`; the value creates no channel. |
-| `Timeout` | Rust host-side wait policy; not an upstream SDK class | A positive duration no longer than the runtime draft's 24-hour maximum; no clock is read. |
+| `QueueCapacity` | Rust host-side bounded-channel policy; not an upstream SDK class | Positive and no larger than Tokio's `Semaphore::MAX_PERMITS`; the value creates no channel. Only opted-in bounds use it; queues are unbounded by default. |
+| `Timeout` | Rust host-side wait policy; not an upstream SDK class | Any duration; `Timeout::checked` rejects zero and values past 24 hours. A deadline past the clock's range never fires. No clock is read. |
 | `StderrTail` | Rust diagnostic byte container for child-process failures; not an upstream SDK class | Read-only public bytes and a content-free debug representation. Only the empty default is directly publicly constructible. |
 | `SessionSummaryEntry` | Python `SessionSummaryEntry` / TypeScript `SessionSummaryEntry`; `modified_at_ms` is upstream `mtime` | `data` is an opaque JSON object persisted verbatim; the fold never touches the write time unless one is passed. |
 | `SummaryDialect` | Rust selector for the two upstream fold layouts | `TypeScript` (default) stores camelCase `data` keys, honors `relocated` entries and shows bash input as `! command`; `Python` stores snake_case keys. |
@@ -91,6 +108,19 @@ integrity-verified published `0.3.319` declaration archive.
 | `Transport::kill` | not applicable | abort signal |
 | `ClaudeSdkClient::connect_with_transport`, `query_with_transport` | `ClaudeSDKClient(transport=...)`, `query(transport=...)` | not applicable |
 | `Error::Transport(..)` | exception raised by the transport | not applicable |
+
+## Messages
+
+| Rust | Python | TypeScript |
+| --- | --- | --- |
+| `Message` (`raw()`, `to_sdk_message()`) | `Message` union | `SDKMessage` (generated as `upstream::messages::SDKMessage`, every member plus `Unknown`) |
+| `MessageDecoding::{TypeScript, Python}`, `ClaudeAgentOptions::message_decoding` | `parse_message` | `query()` message stream |
+| `Message::RateLimit(RateLimitEvent)`, `RateLimitInfo` | `RateLimitEvent`, `RateLimitInfo` | `SDKRateLimitEvent` |
+| `Message::ConversationReset(ConversationResetMessage)` | `ConversationResetMessage` | `SDKConversationResetMessage` |
+| `SystemEvent::{TaskStarted, TaskProgress, TaskNotification, TaskUpdated, MirrorError, Hook}` | `TaskStartedMessage` and the other `SystemMessage` subclasses | `SDKTaskStartedMessage` and the other system members |
+| `ResultMessage::deferred_tool()` | `DeferredToolUse` | `SDKResultSuccess.deferred_tool_use` |
+| `ContentBlock::{ServerToolUse, ServerToolResult}` | `ServerToolUseBlock`, `ServerToolResultBlock` | server tool blocks of `BetaMessage` |
+| `Error::MessageParse(MessageParseError)` with Python decoding | `MessageParseError` (`KeyError` text) | not applicable |
 
 ## Settings
 
