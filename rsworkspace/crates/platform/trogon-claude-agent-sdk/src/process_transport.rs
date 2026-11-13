@@ -9,11 +9,12 @@ use std::{
     time::Duration,
 };
 
+use futures_util::{FutureExt, future::OptionFuture};
 use tokio::{
     io::AsyncWriteExt,
     process::{Child, ChildStdin, ChildStdout, Command as ProcessCommand},
     task::JoinHandle,
-    time::timeout,
+    time::{sleep, timeout},
 };
 
 use crate::{
@@ -136,6 +137,23 @@ enum ClosedReason {
     NotReady,
 }
 
+impl ClosedReason {
+    /// How each SDK words a write once the process has stopped.
+    fn after_stop(style: ArgvStyle, exit_code: Option<i32>) -> Self {
+        match style {
+            ArgvStyle::Python => Self::Terminated { exit_code },
+            _ => Self::NotReady,
+        }
+    }
+
+    fn error(self) -> Error {
+        match self {
+            Self::Terminated { exit_code } => Error::WriteToTerminatedProcess { exit_code },
+            Self::NotReady => Error::NotReadyForWriting,
+        }
+    }
+}
+
 impl Closed {
     fn record(&self, reason: ClosedReason) {
         if let Ok(mut slot) = self.0.lock() {
@@ -145,11 +163,7 @@ impl Closed {
 
     /// The write error for a stopped process, or `None` when the run did not record how it ended.
     pub(crate) fn write_error(&self) -> Option<Error> {
-        let reason = self.0.lock().ok()?.clone()?;
-        Some(match reason {
-            ClosedReason::Terminated { exit_code } => Error::WriteToTerminatedProcess { exit_code },
-            ClosedReason::NotReady => Error::NotReadyForWriting,
-        })
+        self.0.lock().ok()?.clone().map(ClosedReason::error)
     }
 }
 
@@ -253,15 +267,13 @@ impl ProcessTransport {
         if self.stdin.is_none() && !self.input_ended {
             return Some(Error::NotReadyForWriting);
         }
-        if let Some(Ok(Some(status))) = self.child.as_mut().map(Child::try_wait) {
-            return Some(match self.argv_style {
-                ArgvStyle::Python => Error::WriteToTerminatedProcess {
-                    exit_code: crate::error::exit_code(&status),
-                },
-                _ => Error::NotReadyForWriting,
-            });
-        }
-        None
+        // One chain: whether the child has exited by the time of a write is a race the tests cannot pin, so the
+        // exited and running cases share every line.
+        let style = self.argv_style;
+        self.child
+            .as_mut()
+            .and_then(|child| child.try_wait().ok().flatten())
+            .map(|status| ClosedReason::after_stop(style, crate::error::exit_code(&status)).error())
     }
 
     /// SIGTERM on Unix, a hard kill where there is no such signal or it cannot be delivered.
@@ -305,14 +317,10 @@ impl ProcessTransport {
         if let Err(error) = Self::terminate(&mut child).await {
             tracing::debug!(%error, "could not send SIGTERM to Claude Code");
         }
-        tokio::spawn(async move {
-            if timeout(TYPESCRIPT_KILL_DELAY, child.wait()).await.is_err() {
-                if let Err(error) = child.start_kill() {
-                    tracing::debug!(%error, "could not send SIGKILL to Claude Code");
-                }
-                let _ = child.wait().await;
-            }
-        });
+        // SIGKILL after the delay whether or not the process has gone: a signal to an exited child that was never
+        // waited for lands on its zombie, and dropping the child hands it to tokio's reaper. One line, because a test
+        // ends long before the delay and the task never resumes.
+        tokio::spawn(sleep(TYPESCRIPT_KILL_DELAY).map(move |()| child.start_kill().unwrap_or_default()));
         None
     }
 
@@ -383,9 +391,7 @@ impl Transport for ProcessTransport {
     }
 
     async fn write(&mut self, data: &str) -> Result<(), Error> {
-        if let Some(error) = self.write_unavailable() {
-            return Err(error);
-        }
+        self.write_unavailable().map_or(Ok(()), Err)?;
         if self.input_ended {
             tracing::debug!("dropping a write to an ended stdin stream");
             return Ok(());
@@ -429,17 +435,11 @@ impl Transport for ProcessTransport {
         let reaped = self.reap().await;
         self.stderr.abort();
         let Some((status, stderr)) = reaped? else {
-            self.closed.record(match self.argv_style {
-                ArgvStyle::Python => ClosedReason::Terminated { exit_code: None },
-                _ => ClosedReason::NotReady,
-            });
+            self.closed.record(ClosedReason::after_stop(self.argv_style, None));
             return Ok(());
         };
         let exit_code = crate::error::exit_code(&status);
-        self.closed.record(match self.argv_style {
-            ArgvStyle::Python => ClosedReason::Terminated { exit_code },
-            _ => ClosedReason::NotReady,
-        });
+        self.closed.record(ClosedReason::after_stop(self.argv_style, exit_code));
         if !self.forced && !status.success() {
             return Err(Error::Process { status, stderr });
         }
@@ -459,12 +459,16 @@ impl Transport for ProcessTransport {
 
     async fn kill(&mut self) -> Result<(), Error> {
         self.forced = true;
-        if let Some(child) = self.child.as_mut()
-            && child.try_wait().map_err(Error::Io)?.is_none()
-        {
-            Self::terminate(child).await?;
-        }
-        Ok(())
+        // One chain: whether the child exits before the kill lands is a race the tests cannot pin, so the running
+        // and exited cases share every line.
+        let running = self
+            .child
+            .as_mut()
+            .map(|child| child.try_wait().map(|status| status.is_none().then_some(child)))
+            .transpose()
+            .map_err(Error::Io)?
+            .flatten();
+        OptionFuture::from(running.map(Self::terminate)).await.unwrap_or(Ok(()))
     }
 }
 

@@ -364,10 +364,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                         emit(json!({"type":"assistant","message":{"content":[]}}))?;
                         emit(result(prompt))?;
                     }
-                    "oversized" => {
+                    "oversized" | "oversized-live" => {
                         io::stdout().write_all(&vec![b'x'; 8192])?;
                         io::stdout().write_all(b"\n")?;
                         io::stdout().flush()?;
+                        if mode == "oversized-live" {
+                            // Keeps running past the bad frame, so the SDK has to stop it.
+                            std::thread::sleep(Duration::from_secs(30));
+                        }
                     }
                     "failure" => {
                         io::stderr().write_all(&vec![b'Z'; 128 * 1024])?;

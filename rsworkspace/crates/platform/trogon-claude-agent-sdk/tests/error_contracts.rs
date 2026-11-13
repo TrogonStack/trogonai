@@ -71,6 +71,16 @@ fn write_to_terminated_process_renders_both_upstream_texts() {
 }
 
 #[test]
+fn a_write_to_a_terminated_process_reads_the_way_each_sdk_words_it() {
+    let error = Error::WriteToTerminatedProcess { exit_code: Some(0) };
+    assert_eq!(error.to_string(), "Cannot write to terminated process (exit code: 0)");
+    assert_eq!(
+        error.typescript_message().as_deref(),
+        Some("Cannot write to terminated process")
+    );
+}
+
+#[test]
 fn protocol_failures_retain_typed_sources_and_safe_context() -> TestResult {
     let failures = [
         (
