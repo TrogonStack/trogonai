@@ -32,6 +32,7 @@ mod environment_plan;
 mod error;
 mod framing;
 mod hooks;
+mod managed_settings_delivery;
 mod mcp_server_name;
 mod mcp_server_options;
 mod mcp_tool_input_schema;
@@ -86,6 +87,8 @@ mod session_summary;
 mod session_transcript;
 mod setting_source;
 mod settings_input;
+mod settings_json;
+mod settings_option;
 mod settings_read;
 mod settings_read_hooks;
 mod settings_read_spec;
@@ -159,6 +162,7 @@ pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
     HookOutputVisibility, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, SyncHookOutput,
 };
+pub use managed_settings_delivery::ManagedSettingsDelivery;
 pub use mcp_server_name::McpServerName;
 pub use mcp_server_options::McpServerOptions;
 pub use mcp_tool_input_schema::{McpToolInputSchema, McpToolInputSchemaError};

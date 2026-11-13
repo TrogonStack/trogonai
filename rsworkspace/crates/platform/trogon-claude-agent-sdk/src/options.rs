@@ -338,4 +338,13 @@ pub struct ClaudeAgentOptions {
     /// TypeScript `projectConfigRoot`. Ignored with `ArgvStyle::Python`.
     pub project_config_root: Option<PathBuf>,
     pub skills: Option<crate::Skills>,
+    /// `settings`: a settings file path, JSON text or a settings object. Passed as `--settings`; with
+    /// `sandbox` set the dialect decides how the two are combined.
+    pub settings: Option<crate::SettingsInput>,
+    /// `sandbox`: merged into the settings document, as both upstream SDKs do.
+    pub sandbox: Option<crate::SandboxSettings>,
+    /// TypeScript `managedSettings`. Ignored with `ArgvStyle::Python`.
+    pub managed_settings: Option<crate::Settings>,
+    /// TypeScript `managedSettingsDelivery`. Ignored with `ArgvStyle::Python`.
+    pub managed_settings_delivery: crate::ManagedSettingsDelivery,
 }
