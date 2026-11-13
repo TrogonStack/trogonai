@@ -1,0 +1,6 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "trogon-semconv",
+    integration_tests = {"attribute_contract_tests": {}},
+)

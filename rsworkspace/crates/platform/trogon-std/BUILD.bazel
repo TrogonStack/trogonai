@@ -1,0 +1,10 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "trogon-std",
+    crate_features = [
+        "test-support",
+        "tls",
+    ],
+    deps = ["//rsworkspace/crates/platform/trogon-semconv"],
+)
