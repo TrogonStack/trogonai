@@ -1121,3 +1121,6 @@ pub(crate) const REMOTE_TOOL_SUBTYPES: [&str; 4] = [
     "remote_tools_probe",
     "remote_tools_reannounce",
 ];
+
+/// The longest tool name the TypeScript `McpServer` registers without printing a warning.
+pub(crate) const MCP_TS_TOOL_NAME_MAX_LENGTH: usize = 128;

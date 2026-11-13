@@ -161,9 +161,14 @@ check a separate CLI installation.
 Build a `LocalMcpServer` with named `LocalMcpServerOptions` fields. Define each
 schema-validated tool through `SdkTool::from(SdkToolOptions { ... })`, naming its
 metadata, input schema and async handler. Construct its `McpToolName` and
-`McpToolInputSchema` first. `McpToolName` stores any text; `LocalMcpServer::from`
-logs a warning for a name outside the MCP protocol limits (one to 128 ASCII
-letters, digits, underscores, hyphens or periods), and `tools/list` still lists it.
+`McpToolInputSchema` first. `McpToolName` stores any text, and `tools/list`
+lists every name. In the TypeScript dialect, `LocalMcpServer::from` logs each
+line `createSdkMcpServer` prints with `console.warn` for a name the MCP tool
+naming standard discourages, one `tracing` warning per line and in the same
+words. That covers names outside one to 128 letters, digits, underscores,
+hyphens or periods, and also valid names that start or end with a hyphen or a
+period. The Python dialect logs nothing, as `create_sdk_mcp_server` builds a
+lowlevel MCP server that does not check names.
 `McpToolInputSchema::new` keeps any schema verbatim, as both upstream SDKs do;
 a call to a tool whose schema does not compile returns that error as the tool
 result. `McpToolInputSchema::validated` opts in to requiring a compiling object
@@ -176,7 +181,8 @@ several tools, as the TypeScript SDK does. Exact names must be unique;
 case-distinct names remain separate. `SdkTools::with_duplicates` keeps repeated
 names, as the Python SDK does. `LocalMcpServerOptions::new(name)` starts from no
 tools; `version`, `instructions` and `always_load` mirror the upstream server
-options. `LocalMcpServer::from` assembles these inputs infallibly.
+options. The Python dialect ignores `instructions` and `always_load`, because
+`create_sdk_mcp_server` takes only a name, a version and tools. `LocalMcpServer::from` assembles these inputs infallibly.
 Each client opens its own session. The built-in server supports initialize,
 initialized notification, cancellation, ping and tool listing/calls.
 `McpServerDialect::TypeScript`, the default, answers like `createSdkMcpServer`:

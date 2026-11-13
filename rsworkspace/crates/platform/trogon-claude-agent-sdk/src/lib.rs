@@ -47,6 +47,7 @@ mod mcp_server_options;
 mod mcp_server_tool_policy;
 mod mcp_tool_input_schema;
 mod mcp_tool_name;
+mod mcp_tool_name_warning;
 mod mcp_url;
 mod message;
 mod message_decode;
