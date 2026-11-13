@@ -1,0 +1,6 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "trogon-decider-wit",
+    data = glob(["wit/**"]),
+)
