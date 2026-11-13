@@ -180,3 +180,35 @@ fn pwd_and_checkpointing_are_overlay_and_option_driven() {
     replace.cwd = Some("/work".into());
     assert_eq!(set(&plan(&replace, &inherited(&[])), "PWD"), None);
 }
+
+#[test]
+fn inherit_deletes_the_agent_progress_summaries_variable_in_any_case_and_never_sets_it() {
+    let inherit = plan(
+        &options(EnvironmentMode::Inherit, &[]),
+        &inherited(&[
+            ("CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES", "1"),
+            ("claude_code_agent_progress_summaries", "1"),
+        ]),
+    );
+    assert!(
+        inherit
+            .remove
+            .contains(&OsString::from("CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES"))
+    );
+    assert!(
+        inherit
+            .remove
+            .contains(&OsString::from("claude_code_agent_progress_summaries"))
+    );
+    assert_eq!(set(&inherit, "CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES"), None);
+    let replace = plan(
+        &options(EnvironmentMode::Replace, &[]),
+        &inherited(&[("CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES", "1")]),
+    );
+    assert!(
+        replace.remove.is_empty()
+            || !replace
+                .remove
+                .contains(&OsString::from("CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES"))
+    );
+}

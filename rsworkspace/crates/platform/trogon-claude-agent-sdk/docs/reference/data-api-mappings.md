@@ -102,6 +102,13 @@ integrity-verified published `0.3.319` declaration archive.
 | `Error::JsonDecode(JsonDecodeError)`, `JsonDecodeSourceError` | `CLIJSONDecodeError` (`line`, `original_error`: a `JSONDecodeError`, or the `ValueError("Buffer size L exceeds limit N")` of the `max_buffer_size` guard) | not applicable (line skipped, no line limit) |
 | `ClaudeAgentOptions::plugins`, `LocalPlugin` | `plugins` (`SdkPluginConfig`) | `plugins` (`SdkPluginConfig`, `skipMcpDiscovery`) |
 | `ClaudeAgentOptions::plugin_delivery`, `PluginDelivery` | not applicable | `pluginDelivery` (`argv` or `initialize`) |
+| `ClaudeAgentOptions::system_prompt`, `SystemPrompt`, `CustomPrompt`, `PresetPrompt` | `system_prompt` as `--system-prompt`, `--system-prompt-file` or `--append-system-prompt`; `excludeDynamicSections` and `systemPromptSnapshot` in `initialize` | `systemPrompt` in `initialize` (`systemPrompt` list, `appendSystemPrompt`, `systemPromptSnapshot`, `excludeDynamicSections`); no prompt flag |
+| `ClaudeAgentOptions::plan_mode_instructions`, `append_subagent_system_prompt`, `tool_aliases`, `code_running_mcp_tools`, `title`, `web_search_isolation_exempt_mcp_servers` | not applicable | `planModeInstructions`, `appendSubagentSystemPrompt`, `toolAliases`, `codeRunningMcpTools`, `title`, `webSearchIsolationExemptMcpServers` in `initialize` |
+| `ClaudeAgentOptions::prompt_suggestions`, `agent_progress_summaries`, `per_task_stop_affordance`, `rapid_followup_preempt`, `forward_nested_subagent_tool_calls` | not applicable | same names in `initialize`; `agentProgressSummaries` also deletes an inherited `CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES` in `EnvironmentMode::Inherit` |
+| `ClaudeAgentOptions::forward_subagent_text` | `forward_subagent_text` (sent only when true) | `forwardSubagentText` (`false` is sent) |
+| `ClaudeAgentOptions::workspace_trust`, `WorkspaceTrust` | not applicable | `workspaceTrust`; an accepted trust without an absolute directory is dropped with a warning |
+| `ClaudeAgentOptions::capture_sdk_mcp_manifests`, `captures_sdk_mcp_manifests` | not applicable | `captureSdkMcpManifests`, default off when `CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS` is truthy; gates a manifest capture this crate does not do yet |
+| `ClaudeAgentOptions::verbatim_prompts`, `VerbatimPrompts` | `verbatim_prompts` (`client_composed` on each user message; warns below CLI 2.1.248) | `verbatimPrompts` (`client_composed`) |
 | `Error::MessageParse(MessageParseError)` | `MessageParseError` (`data`) | not applicable |
 | `Transport` | `Transport` | not applicable |
 | `Transport::read_message` | `Transport.read_messages` | not applicable |
@@ -128,6 +135,7 @@ integrity-verified published `0.3.319` declaration archive.
 | --- | --- | --- |
 | `Settings` (generated, all 182 declared keys plus unknown keys) | no type; the `settings` option is a string | `Settings` |
 | `SettingsInput::{Path, Json, Inline}` | `settings` string, path or JSON by braces | `Options.settings: string \| Settings` |
+| `ClaudeAgentOptions::managed_settings`, `ManagedSettingsDelivery::{Argv, Initialize}` | none (ignored) | `Options.managedSettings`, `managedSettingsDelivery` |
 | `SandboxSettings`, `SandboxNetworkConfig`, `SandboxFilesystemConfig`, `SandboxCredentialsConfig`, `SandboxIgnoreViolations` (aliases of the generated `Settings.sandbox` types) | `SandboxSettings`, `SandboxNetworkConfig`, `SandboxIgnoreViolations` TypedDicts (subset of the keys) | `SandboxSettings` and its parts |
 | `ResolvedSettings`, `ProvenanceEntry`, `ResolvedSettingSource`, `PolicySettingsOrigin`, `ResolveSettingsOptions`, `SDKSettingsParseError` | no type | same names |
 | `resolve_settings`, `resolve_settings_with`, `filter_escalating_default_mode` | no function | `resolveSettings`, `filterEscalatingDefaultMode` |

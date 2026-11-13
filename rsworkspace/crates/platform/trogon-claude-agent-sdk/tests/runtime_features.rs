@@ -170,7 +170,7 @@ async fn embedded_mcp_server_keeps_its_session_across_rpc_calls() -> TestResult 
     let observed = Arc::clone(&calls);
     let schema = McpToolInputSchema::new(serde_json::from_value(
         json!({"type":"object","required":["value"],"properties":{"value":{"type":"string"}}}),
-    )?)?;
+    )?);
     let tool = SdkTool::from(SdkToolOptions {
         name: McpToolName::from("echo"),
         description: "Echo".into(),
@@ -204,12 +204,12 @@ async fn embedded_mcp_server_keeps_its_session_across_rpc_calls() -> TestResult 
 #[tokio::test]
 async fn structured_input_and_declarative_configuration_reach_the_cli() -> TestResult {
     let mut options = options("structured")?;
-    options.max_budget_usd = Some(UsdBudget::new(0.25)?);
+    options.max_budget_usd = Some(UsdBudget::new(0.25));
     options.effort = Some(EffortLevel::High);
     options.file_checkpointing = FileCheckpointing::Enabled;
     options.output_schema = Some(OutputSchema::new(serde_json::from_value(
         json!({"type":"object","properties":{"ok":{"type":"boolean"}}}),
-    )?)?);
+    )?));
     options.agents.insert(
         AgentName::from("reviewer"),
         AgentDefinition::new("Review", Prompt::from("Review the code")),

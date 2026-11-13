@@ -75,10 +75,11 @@ every registered tool; an unknown tool or a failing handler returns
 `{content, isError: true}` rather than a JSON-RPC error. Permission modes and
 user content blocks pass through unvalidated; an unknown mode is kept in
 `PermissionMode::Unknown`. Other independent input constraints belong to
-value objects with private fields and typed construction errors. Its
-`McpToolInputSchema` compiles the JSON schema and requires the
-top-level `type` to be `object`, preserving local references and rejecting
-external references. Neither value object exposes mutable access to its value.
+value objects with private fields. Its `McpToolInputSchema::new` keeps the JSON
+schema verbatim, as both upstream SDKs do; a schema that does not compile fails
+each call with its error as the tool result. `McpToolInputSchema::validated`
+opts in to requiring a top-level `object` type and rejecting external
+references. Neither value object exposes mutable access to its value.
 `SdkTool::from` assembles its fields infallibly.
 
 Duplicate names are a constraint across the collection of tools.

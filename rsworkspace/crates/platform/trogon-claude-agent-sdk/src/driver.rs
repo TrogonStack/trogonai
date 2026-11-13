@@ -13,7 +13,7 @@ use tokio::{
 
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
-    PermissionDecision, ProtocolError, StderrTail, SystemPrompt, ToolPermissionHandler, Transport,
+    PermissionDecision, ProtocolError, StderrTail, ToolPermissionHandler, Transport,
     wire::{
         self, ControlResponse, Frame, IncomingControl,
         runtime_payload::{
@@ -274,6 +274,10 @@ where
     last_error_result: Option<JsonObject>,
     /// The CLI path until the first `system`/`init` message has been checked, then `None`.
     version_check: Option<String>,
+    /// `verbatim_prompts`: every user message is marked `client_composed`.
+    verbatim_prompts: bool,
+    /// Python warns at the first init message when the CLI predates `client_composed`; TypeScript does not.
+    warn_unsupported_verbatim: bool,
 }
 
 type MirrorBarrier =
@@ -310,6 +314,10 @@ fn hook_timeout_seconds(timeout: Duration) -> Option<serde_json::Number> {
     } else {
         serde_json::Number::from_f64(timeout.as_secs_f64())
     }
+}
+
+fn strings(values: &[String]) -> serde_json::Value {
+    serde_json::Value::Array(values.iter().cloned().map(serde_json::Value::String).collect())
 }
 
 /// The object a control response carries, with an absent or null `response` read as an empty one.
@@ -404,23 +412,55 @@ fn initialize_config(
             .map(crate::DialogKind::as_str)
             .collect()
     });
-    // TypeScript delivers the system prompt in the initialize request, Python on the command line.
-    let (system_prompt, append_system_prompt) = match &options.system_prompt {
-        SystemPrompt::Empty => (Some(vec![""]), None),
-        SystemPrompt::Custom(prompt) => (Some(vec![prompt.as_str()]), None),
-        SystemPrompt::ClaudeCode => (None, None),
-        SystemPrompt::ClaudeCodeWithAppend(append) => (None, Some(append.as_str())),
+    // TypeScript delivers the system prompt in the initialize request, Python on the command line and only the
+    // two flags the Python projection keeps.
+    let prompt = if options.argv_style == crate::ArgvStyle::Python {
+        options.system_prompt.python_initialize()
+    } else {
+        options.system_prompt.typescript_initialize()
     };
+    let flag = |value: Option<bool>| value.map(serde_json::Value::Bool);
+    let text = |value: &Option<String>| value.clone().map(serde_json::Value::String);
     let request = InitializeRequest {
         hooks: (!options.hooks.is_empty()).then_some(hooks),
         json_schema: options.output_schema.as_ref().map(crate::OutputSchema::as_json),
-        system_prompt,
-        append_system_prompt,
+        system_prompt: prompt.system_prompt,
+        append_system_prompt: prompt.append_system_prompt,
+        plan_mode_instructions: text(&options.plan_mode_instructions),
+        system_prompt_snapshot: flag(prompt.snapshot),
+        append_subagent_system_prompt: text(&options.append_subagent_system_prompt),
+        tool_aliases: options.tool_aliases.as_ref().map(|aliases| {
+            serde_json::Value::Object(
+                aliases
+                    .iter()
+                    .map(|(name, target)| (name.clone(), serde_json::Value::String(target.clone())))
+                    .collect(),
+            )
+        }),
+        code_running_mcp_tools: options.code_running_mcp_tools.as_deref().map(strings),
+        exclude_dynamic_sections: flag(prompt.exclude_dynamic_sections),
         agents,
+        title: text(&options.title),
         skills: crate::skills::initialize_skills(options),
+        web_search_isolation_exempt_mcp_servers: options
+            .web_search_isolation_exempt_mcp_servers
+            .as_deref()
+            .map(strings),
+        prompt_suggestions: flag(options.prompt_suggestions),
+        agent_progress_summaries: flag(options.agent_progress_summaries),
+        forward_subagent_text: flag(options.forward_subagent_text),
         supported_dialog_kinds,
+        per_task_stop_affordance: flag(options.per_task_stop_affordance),
+        rapid_followup_preempt: flag(options.rapid_followup_preempt),
+        forward_nested_subagent_tool_calls: flag(options.forward_nested_subagent_tool_calls),
+        workspace_trust: options
+            .workspace_trust
+            .as_ref()
+            .and_then(crate::WorkspaceTrust::validated)
+            .map(|trust| serde_json::Value::Object(trust.to_object())),
         plugins: plugins_via_initialize(options)
             .then(|| options.plugins.iter().map(crate::plugin::PluginPayload::from).collect()),
+        managed_settings: crate::settings_option::initialize_managed_settings(options)?,
         ..InitializeRequest::default()
     };
     expectations.managed_settings = request.managed_settings.is_some();
@@ -620,6 +660,9 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         message_decoding: options.message_decoding,
         last_error_result: None,
         version_check,
+        verbatim_prompts: options.verbatim_prompts == crate::VerbatimPrompts::Enabled,
+        warn_unsupported_verbatim: options.verbatim_prompts == crate::VerbatimPrompts::Enabled
+            && options.argv_style == crate::ArgvStyle::Python,
     };
     Ok(tokio::spawn(driver.run(terminal)))
 }
@@ -977,7 +1020,12 @@ where
                     let _ = response.send(Err(Error::TooManyInputs));
                     return Ok(());
                 }
-                let frame = input.to_wire_json().map_err(ProtocolError::from)?;
+                let mut frame = input.to_wire_json().map_err(ProtocolError::from)?;
+                if self.verbatim_prompts
+                    && let Some(object) = frame.as_object_mut()
+                {
+                    object.insert("client_composed".into(), true.into());
+                }
                 self.write(frame).await?;
                 self.state = State::Running;
                 self.run_state.result_received = false;
@@ -1084,15 +1132,19 @@ where
                 if let Message::System(system) = &message
                     && system.subtype == "init"
                     && let Some(cli_path) = self.version_check.take()
-                    && let Some(warning) = crate::version_check::unreported_version_warning(
-                        system
-                            .data
-                            .get("claude_code_version")
-                            .and_then(serde_json::Value::as_str),
-                        &cli_path,
-                    )
                 {
-                    tracing::warn!(%warning, "Claude Code version warning");
+                    let version = system
+                        .data
+                        .get("claude_code_version")
+                        .and_then(serde_json::Value::as_str);
+                    if let Some(warning) = crate::version_check::unreported_version_warning(version, &cli_path) {
+                        tracing::warn!(%warning, "Claude Code version warning");
+                    }
+                    if self.warn_unsupported_verbatim
+                        && let Some(warning) = crate::version_check::unsupported_verbatim_warning(version, &cli_path)
+                    {
+                        tracing::warn!(%warning, "Claude Code version warning");
+                    }
                 }
                 match &message {
                     Message::Result(result) if result.status == crate::ResultStatus::Error => {

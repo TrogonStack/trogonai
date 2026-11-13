@@ -1,0 +1,179 @@
+{
+ "default": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   ""
+  ]
+ },
+ "sp_string": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"be brief\"]}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   "be brief"
+  ]
+ },
+ "sp_array": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"a\",\"b\"]}"
+ },
+ "sp_empty_string": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   ""
+  ]
+ },
+ "sp_custom": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"p\"],\"systemPromptSnapshot\":true}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null,\"systemPromptSnapshot\":true}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   "p"
+  ]
+ },
+ "sp_custom_nosnap": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"p\"]}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   "p"
+  ]
+ },
+ "sp_custom_array": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"x\",\"y\"],\"systemPromptSnapshot\":false}"
+ },
+ "sp_preset": {
+  "ts_request": "{\"subtype\":\"initialize\"}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": []
+ },
+ "sp_preset_append": {
+  "ts_request": "{\"subtype\":\"initialize\",\"appendSystemPrompt\":\"more\"}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": [
+   "--append-system-prompt",
+   "more"
+  ]
+ },
+ "sp_preset_append_empty": {
+  "ts_request": "{\"subtype\":\"initialize\",\"appendSystemPrompt\":\"\"}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": [
+   "--append-system-prompt",
+   ""
+  ]
+ },
+ "sp_preset_all": {
+  "ts_request": "{\"subtype\":\"initialize\",\"appendSystemPrompt\":\"more\",\"systemPromptSnapshot\":false,\"excludeDynamicSections\":true}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null,\"excludeDynamicSections\":true,\"systemPromptSnapshot\":false}",
+  "py_prompt_argv": [
+   "--append-system-prompt",
+   "more"
+  ]
+ },
+ "sp_preset_eds_false": {
+  "ts_request": "{\"subtype\":\"initialize\",\"excludeDynamicSections\":false}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null,\"excludeDynamicSections\":false}",
+  "py_prompt_argv": []
+ },
+ "sp_preset_snapshot_true": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPromptSnapshot\":true}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null,\"systemPromptSnapshot\":true}",
+  "py_prompt_argv": []
+ },
+ "sp_file": {
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": [
+   "--system-prompt-file",
+   "prompt.txt"
+  ]
+ },
+ "misc_all": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"planModeInstructions\":\"plan it\",\"appendSubagentSystemPrompt\":\"sub\",\"toolAliases\":{\"Bash\":\"mcp__w__bash\",\"Read\":\"mcp__w__read\"},\"codeRunningMcpTools\":[\"mcp__a__run\"],\"title\":\"My title\",\"webSearchIsolationExemptMcpServers\":[\"srv1\",\"srv2\"],\"promptSuggestions\":true,\"agentProgressSummaries\":true,\"forwardSubagentText\":true,\"perTaskStopAffordance\":true,\"rapidFollowupPreempt\":true,\"forwardNestedSubagentToolCalls\":true}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null,\"forwardSubagentText\":true}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   ""
+  ]
+ },
+ "misc_false": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"promptSuggestions\":false,\"agentProgressSummaries\":false,\"forwardSubagentText\":false,\"perTaskStopAffordance\":false,\"rapidFollowupPreempt\":false,\"forwardNestedSubagentToolCalls\":false}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   ""
+  ]
+ },
+ "misc_empty": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"planModeInstructions\":\"\",\"appendSubagentSystemPrompt\":\"\",\"toolAliases\":{},\"codeRunningMcpTools\":[],\"title\":\"\",\"webSearchIsolationExemptMcpServers\":[]}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   ""
+  ]
+ },
+ "trust_abs": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"workspaceTrust\":{\"accepted\":true,\"directory\":\"/work/space\"}}"
+ },
+ "trust_win_drive": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"workspaceTrust\":{\"accepted\":true,\"directory\":\"C:\\\\work\"}}"
+ },
+ "trust_win_unc": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"workspaceTrust\":{\"accepted\":true,\"directory\":\"\\\\\\\\srv\\\\share\"}}"
+ },
+ "trust_win_rooted": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"workspaceTrust\":{\"accepted\":true,\"directory\":\"\\\\work\"}}"
+ },
+ "trust_win_drive_rel": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}"
+ },
+ "trust_no_dir": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}"
+ },
+ "trust_relative": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}"
+ },
+ "trust_empty_dir": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}"
+ },
+ "trust_declined": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"workspaceTrust\":{\"accepted\":false}}"
+ },
+ "trust_declined_dir": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"workspaceTrust\":{\"accepted\":false,\"directory\":\"rel\"}}"
+ },
+ "trust_empty": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"workspaceTrust\":{}}"
+ },
+ "with_neighbours": {
+  "ts_request": "{\"subtype\":\"initialize\",\"appendSystemPrompt\":\"a\",\"systemPromptSnapshot\":true,\"toolAliases\":{\"A\":\"B\"},\"excludeDynamicSections\":true,\"agents\":{\"rev\":{\"description\":\"d\",\"prompt\":\"p\"}},\"title\":\"t\",\"skills\":[\"s1\"],\"forwardSubagentText\":true,\"supportedDialogKinds\":[\"refusal_fallback_prompt\"],\"perTaskStopAffordance\":true}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null,\"agents\":{\"rev\":{\"description\":\"d\",\"prompt\":\"p\"}},\"excludeDynamicSections\":true,\"systemPromptSnapshot\":true,\"skills\":[\"s1\"],\"forwardSubagentText\":true}",
+  "py_prompt_argv": [
+   "--append-system-prompt",
+   "a"
+  ]
+ },
+ "verbatim": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+  "ts_user_client_composed": true,
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   ""
+  ],
+  "py_user_client_composed": true
+ },
+ "verbatim_off": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+  "ts_user_client_composed": false,
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   ""
+  ],
+  "py_user_client_composed": false
+ }
+}

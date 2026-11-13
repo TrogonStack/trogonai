@@ -10,7 +10,7 @@ fn user_messages_keep_text_blocks_injected_origin_and_tool_metadata() -> Result<
         parent_tool_use_id: Some(ToolUseId::from("parent-one")),
         session_id: Some(SessionId::from("session-one")),
         uuid: Some(MessageId::from("user-one")),
-        origin: Some(MessageOrigin::new("channel", fields.clone())?),
+        origin: Some(MessageOrigin::new("channel", fields.clone())),
         tool_use_result: Some(serde_json::to_value(&fields)?),
         additional_fields: fields.clone(),
         message_fields: fields.clone(),

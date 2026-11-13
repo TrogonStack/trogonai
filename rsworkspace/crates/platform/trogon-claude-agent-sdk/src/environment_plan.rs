@@ -2,7 +2,7 @@
 //!
 //! `Overlay` follows Python `subprocess_cli.py` (0.2.181) and `Replace`/`Inherit` follow `sdk.mjs` (0.3.323).
 
-use crate::constants::{DEFAULT_ENTRYPOINT, SDK_VERSION};
+use crate::constants::{AGENT_PROGRESS_SUMMARIES_ENV, DEFAULT_ENTRYPOINT, SDK_VERSION};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::{OsStr, OsString},
@@ -87,6 +87,14 @@ pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> Envir
             }
             plan.set.insert("CLAUDE_AGENT_SDK_VERSION".into(), SDK_VERSION.into());
             plan.remove.insert("NODE_OPTIONS".into());
+            // `OD` deletes this variable, matched without regard to case, because the TypeScript SDK sends the
+            // setting in the initialize request instead and never sets the variable itself.
+            plan.remove.extend(
+                inherited
+                    .keys()
+                    .filter(|key| key.to_string_lossy().eq_ignore_ascii_case(AGENT_PROGRESS_SUMMARIES_ENV))
+                    .cloned(),
+            );
             if truthy(inherited.get(OsStr::new("DEBUG_CLAUDE_AGENT_SDK"))) {
                 plan.set.insert("DEBUG".into(), "1".into());
             } else {

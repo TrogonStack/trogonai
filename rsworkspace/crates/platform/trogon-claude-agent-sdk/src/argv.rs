@@ -7,7 +7,8 @@ use std::{ffi::OsString, path::Path};
 
 use crate::{
     ClaudeAgentOptions, Customizations, DangerousPermissionSkip, DebugOutput, Error, ExtraArgument, HookEvents,
-    OptionError, PartialMessages, ProtocolError, SessionPersistence, SystemPrompt, ThinkingConfig, ToolSet,
+    OptionError, PartialMessages, ProtocolError, SessionPersistence, ThinkingConfig, ToolSet,
+    adapters::{NativeHost, ReadFile},
     process_options::ArgvStyle,
     skills::python_repr,
     wire::runtime_payload::{EmbeddedMcpPayload, McpConfigPayload},
@@ -44,10 +45,25 @@ pub(crate) fn request_await_initialize(options: &mut ClaudeAgentOptions) {
 
 /// `derived_debug_file` is the TypeScript default debug file, which only a native spawn derives.
 pub(crate) fn build(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -> Result<Vec<OsString>, Error> {
+    build_with(options, derived_debug_file, &NativeHost)
+}
+
+/// [`build`] with the file reader Python's settings merge uses for a settings file path.
+pub(crate) fn build_with<R>(
+    options: &ClaudeAgentOptions,
+    derived_debug_file: Option<&Path>,
+    files: &R,
+) -> Result<Vec<OsString>, Error>
+where
+    R: ReadFile<Error = std::io::Error>,
+{
     crate::shadow_warning::reject_handler_with_tool_name(options)?;
+    if options.argv_style == ArgvStyle::TypeScript {
+        options.system_prompt.reject_for_typescript()?;
+    }
     match options.argv_style {
         ArgvStyle::TypeScript => typescript(options, derived_debug_file),
-        ArgvStyle::Python => python(options),
+        ArgvStyle::Python => python(options, files),
     }
 }
 
@@ -129,7 +145,8 @@ fn mcp_config(options: &ClaudeAgentOptions) -> Result<Option<String>, Error> {
 /// Both SDKs spell a free-form flag as one token when the value starts with `-` and as two otherwise.
 fn push_spaced(arguments: &mut Vec<OsString>, flag: &str, value: impl Into<OsString>) {
     let value = value.into();
-    if value.to_string_lossy().starts_with('-') {
+    // `yE`: a lone `-` is still a separate token.
+    if value.len() > 1 && value.to_string_lossy().starts_with('-') {
         let mut token = OsString::from(format!("{flag}="));
         token.push(&value);
         arguments.push(token);
@@ -144,6 +161,15 @@ fn push_extra(arguments: &mut Vec<OsString>, extra: &[ExtraArgument]) {
         match value {
             None => arguments.push(format!("--{flag}").into()),
             Some(value) => push_spaced(arguments, &format!("--{flag}"), value.as_str()),
+        }
+    }
+}
+
+fn push_entries(arguments: &mut Vec<OsString>, entries: Vec<crate::settings_option::ExtraEntry>) {
+    for (flag, value) in entries {
+        match value {
+            None => arguments.push(format!("--{flag}").into()),
+            Some(value) => push_spaced(arguments, &format!("--{flag}"), value),
         }
     }
 }
@@ -212,7 +238,7 @@ fn typescript(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -
         equals(&mut a, "--max-turns", turns.to_string());
     }
     if let Some(budget) = &options.max_budget_usd {
-        equals(&mut a, "--max-budget-usd", budget.get().to_string());
+        equals(&mut a, "--max-budget-usd", budget.typescript_text());
     }
     if let Some(budget) = options.task_budget {
         equals(&mut a, "--task-budget", budget.total.to_string());
@@ -356,10 +382,18 @@ fn typescript(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -
     if options.session_persistence == SessionPersistence::Disabled {
         a.push("--no-session-persistence".into());
     }
+    if crate::settings_option::managed_via_initialize(options) {
+        if !crate::driver::plugins_via_initialize(options) {
+            a.push("--await-initialize".into());
+        }
+        a.push("--managed-settings-in-initialize".into());
+    } else if let Some(managed) = crate::settings_option::managed_settings_json(options)? {
+        push_spaced(&mut a, "--managed-settings", managed);
+    }
     if options.customizations == Customizations::Bare {
         a.push("--bare".into());
     }
-    push_extra(&mut a, &options.extra_args);
+    push_entries(&mut a, crate::settings_option::typescript_extra_entries(options)?);
     Ok(a)
 }
 
@@ -398,27 +432,16 @@ fn python_thinking(a: &mut Vec<OsString>, options: &ClaudeAgentOptions) -> Resul
     Ok(())
 }
 
-fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
+fn python<R>(options: &ClaudeAgentOptions, files: &R) -> Result<Vec<OsString>, Error>
+where
+    R: ReadFile<Error = std::io::Error>,
+{
     let allowed_tools = crate::skills::effective_allowed_tools(options)?;
     let setting_sources = crate::skills::effective_setting_sources(options);
     let mut a: Vec<OsString> = ["--output-format", "stream-json", "--verbose"]
         .map(OsString::from)
         .into();
-    match &options.system_prompt {
-        SystemPrompt::Empty => {
-            a.push("--system-prompt".into());
-            a.push("".into());
-        }
-        SystemPrompt::Custom(prompt) => {
-            a.push("--system-prompt".into());
-            a.push(prompt.into());
-        }
-        SystemPrompt::ClaudeCode => {}
-        SystemPrompt::ClaudeCodeWithAppend(prompt) => {
-            a.push("--append-system-prompt".into());
-            a.push(prompt.into());
-        }
-    }
+    a.extend(options.system_prompt.python_argv()?);
     if let ToolSet::Only(tools) = &options.tools {
         a.push("--tools".into());
         a.push(joined(tools.iter().map(|t| t.as_str())).into());
@@ -433,7 +456,7 @@ fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     }
     if let Some(budget) = &options.max_budget_usd {
         a.push("--max-budget-usd".into());
-        a.push(budget.get().to_string().into());
+        a.push(budget.python_text().into());
     }
     if !options.disallowed_tools.is_empty() {
         a.push("--disallowedTools".into());
@@ -488,6 +511,10 @@ fn python(options: &ClaudeAgentOptions) -> Result<Vec<OsString>, Error> {
     }
     if let Some(session) = options.session_id.as_ref().filter(|id| !id.as_str().is_empty()) {
         equals(&mut a, "--session-id", session.as_str());
+    }
+    if let Some(settings) = crate::settings_option::python_settings_value(options, files)? {
+        a.push("--settings".into());
+        a.push(settings.into());
     }
     for directory in &options.additional_directories {
         a.push("--add-dir".into());

@@ -11,8 +11,14 @@ use serde_json::json;
 
 #[test]
 fn extensions_cannot_override_origin_kind() -> Result<(), Box<dyn std::error::Error>> {
+    let fields: JsonObject = serde_json::from_value(json!({"kind":"task-notification","source":"caller"}))?;
+    let origin = MessageOrigin::new("human", fields.clone());
+    assert_eq!(
+        serde_json::to_value(&origin)?,
+        json!({"kind":"human","source":"caller"})
+    );
     assert!(matches!(
-        MessageOrigin::new("human", serde_json::from_value(json!({"kind":"task-notification"}))?),
+        MessageOrigin::validated("human", fields),
         Err(MessageOriginError::ReservedField)
     ));
     let origin: MessageOrigin = serde_json::from_value(json!({"kind":"human","source":"caller"}))?;

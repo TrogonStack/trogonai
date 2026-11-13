@@ -136,7 +136,7 @@ test('every heavy job is gated, including comparison failures and cancellation',
     assert.equal(workflow.jobs.changes.uses, './.github/workflows/ci-selection.yml');
     assert.equal(workflow.jobs.changes.permissions['pull-requests'], 'read');
     for (const [id, job] of Object.entries(workflow.jobs)) {
-      if (id === 'changes' || (suite === 'codeql' && id === 'result')) continue;
+      if (id === 'changes' || id === 'result') continue;
       assert.equal(job.needs, 'changes');
       for (const result of ['success', 'failure']) {
         const outputs = { rust: 'false', go: 'false', proto: 'false', changes: '[]' };
@@ -198,6 +198,34 @@ test('CodeQL result reports every outcome so branch rules can require it', () =>
     const env = { ...process.env, SELECTION_RESULT: selection, SELECTED_LANGUAGES: languages, ANALYZE_RESULT: analyze };
     const run = spawnSync('bash', ['-c', step.run], { env, encoding: 'utf8' });
     assert.equal(run.status, status, `selection ${selection} ${languages}, analyze ${analyze}`);
+  }
+});
+
+test('Rust, Go and Proto results cover every job so branch rules can require them', () => {
+  for (const [suite, name] of [['rust', 'Rust'], ['go', 'Go'], ['proto', 'Proto']]) {
+    const { result, ...jobs } = workflows[suite].jobs;
+    assert.equal(result.name, `${name} result`);
+    assert.deepEqual(result.needs, Object.keys(jobs), `${suite} result needs every job`);
+    assert.equal(result.if, '${{ always() }}');
+    const step = result.steps.at(-1);
+    assert.equal(step.env.SELECTION_RESULT, '${{ needs.changes.result }}');
+    assert.equal(step.env.SELECTED, `\${{ needs.changes.outputs.${suite} }}`);
+    for (const id of Object.keys(jobs).filter((id) => id !== 'changes')) {
+      assert.ok(step.env.JOB_RESULTS.includes(`needs.${id}.result`), `${suite} result checks ${id}`);
+    }
+    for (const [selection, selected, results, status] of [
+      ['success', 'true', 'success success', 0],
+      ['failure', '', 'success success', 0],
+      ['success', 'false', 'skipped skipped', 0],
+      ['cancelled', '', 'skipped skipped', 1],
+      ['success', 'true', 'success skipped', 1],
+      ['success', 'true', 'success failure', 1],
+      ['success', 'true', 'cancelled success', 1],
+    ]) {
+      const env = { ...process.env, SELECTION_RESULT: selection, SELECTED: selected, JOB_RESULTS: results };
+      const run = spawnSync('bash', ['-c', step.run], { env, encoding: 'utf8' });
+      assert.equal(run.status, status, `${suite}: selection ${selection} ${selected}, jobs ${results}`);
+    }
   }
 });
 

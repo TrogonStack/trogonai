@@ -132,8 +132,11 @@ metadata, input schema and async handler. Construct its `McpToolName` and
 `McpToolInputSchema` first. `McpToolName` stores any text; `LocalMcpServer::from`
 logs a warning for a name outside the MCP protocol limits (one to 128 ASCII
 letters, digits, underscores, hyphens or periods), and `tools/list` still lists it.
-`McpToolInputSchema` enforces a valid object input schema. `SdkTool::from` then
-assembles its inputs without returning an error.
+`McpToolInputSchema::new` keeps any schema verbatim, as both upstream SDKs do;
+a call to a tool whose schema does not compile returns that error as the tool
+result. `McpToolInputSchema::validated` opts in to requiring a compiling object
+schema without external references. `SdkTool::from` then assembles its inputs
+without returning an error.
 `LocalMcpServerOptions.tools` requires an immutable `SdkTools` collection.
 Use `tool.into()` for one tool, `SdkTools::default()` for none, or
 `SdkTools::new([first, second])?` to reject duplicate names when assembling
@@ -197,7 +200,9 @@ upstream SDKs).
 - `ArgvStyle::TypeScript` (default) emits TypeScript `0.3.323` argv: `--flag=value`
   spelling, upstream flag order, and the system prompt inside the `initialize`
   request (`systemPrompt` defaults to `[""]`; a preset with an append sends
-  `appendSystemPrompt`). `ArgvStyle::Python` emits Python `0.2.181` argv. The two
+  `appendSystemPrompt`; `tests/initialize_options.rs` pins every system prompt form
+  and the other initialize-only options against captured upstream bytes).
+  `ArgvStyle::Python` emits Python `0.2.181` argv. The two
   upstream SDKs disagree, so both are exposed and TypeScript is the default.
 - `EnvironmentMode::Overlay` (default, Python): inherited environment, then
   `options.env`. `Replace` (TypeScript with `options.env`): only `options.env`
@@ -307,8 +312,17 @@ upstream SDKs).
   Python refuses an enabled thinking config without a budget. The shadow
   advisory for `bypassPermissions` or allowed tools is reported through
   `tracing`.
-- Deferred to other tracks: remote `--sdk-url` transports. Settings, managed
-  settings, sandbox, flag settings and `updateSettings` are not covered.
+- `settings` (a path, JSON text or a `Settings` object), `sandbox`,
+  `managed_settings` and `managed_settings_delivery` follow both dialects.
+  TypeScript serializes objects with `JSON.stringify` bytes and merges the
+  sandbox into the settings document (a settings file path together with a
+  sandbox is refused); Python reads the settings file relative to the working
+  directory, replaces the `sandbox` key and writes `json.dumps` text. Managed
+  settings go by `--managed-settings` or, with
+  `ManagedSettingsDelivery::Initialize`, in the `initialize` request; the Python
+  dialect ignores them.
+- Deferred to other tracks: remote `--sdk-url` transports, flag settings and
+  `updateSettings`.
 
 Model strings and paths are stored without extra identifier restrictions.
 `env` values are `ConfigValue`s, which convert from strings as `Sensitive`;
@@ -317,7 +331,8 @@ and prints sensitive values as `<redacted>`. MCP stdio arguments and
 environment values and HTTP or SSE header values follow the same rule.
 `ModelName` keeps the model out of debug output, so options debug output shows
 every other setting without listing fields by hand.
-Windows batch paths are refused only at process start.
+A Windows `.bat` or `.cmd` CLI path starts, as in TypeScript;
+`WindowsBatchCli::Refuse` selects Python's refusal at process start.
 Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L93)
 and [`disconnect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L607)
 on an existing client. Rust intentionally uses an async factory for `connect`
@@ -327,14 +342,19 @@ uses `Query` and `WarmQuery` with `close()` instead.
 
 Options include programmatic agents, model/effort, tool rules, budget, output
 schema, checkpointing, environment, additional directories, resume and fork.
-`OutputSchema` compiles locally and rejects nonlocal references. `UsdBudget`
-rejects nonfinite/negative values. Rewind requires checkpointing and CLI support.
+`OutputSchema::new` and `UsdBudget::new` keep any value and pass it on, as both
+upstream SDKs do; `OutputSchema::validated` and `UsdBudget::checked` opt in to
+rejecting nonlocal references and nonfinite or negative amounts. Rewind
+requires checkpointing and CLI support.
 
 The default system prompt is empty; choose `SystemPrompt::ClaudeCode` for the
-CLI preset. Filesystem settings inherit CLI defaults when `setting_sources` is
+CLI preset. `SystemPrompt` also carries a list of texts, the custom and preset
+objects with `snapshot` and `exclude_dynamic_sections`, and Python's prompt
+file; a form that only one dialect has is refused in the other. `verbatim_prompts`
+marks each user message `client_composed`. Filesystem settings inherit CLI defaults when `setting_sources` is
 `None`; `Some(vec![])` disables user/project/local settings. Explicit lists retain
-caller order and duplicates. MCP discovery is disabled unless selected through
-`McpDiscovery::CliDefault`. `Customizations::Bare` disables further CLI
+caller order and duplicates. MCP discovery follows the CLI default, as upstream
+does, unless `McpDiscovery::Disabled` is selected. `Customizations::Bare` disables further CLI
 customizations when supported.
 
 `Limits::default()` matches the TypeScript SDK: no stdout line cap, the last
@@ -409,7 +429,8 @@ The references are Python SDK
 and published TypeScript SDK `0.3.319`, paired with CLI `2.1.319`.
 This independent Rust implementation does not provide TypeScript browser/bridge
 hosting, every upstream convenience option or the complete MCP server protocol.
-Windows requires a native executable; batch scripts are refused.
+Windows batch scripts start as in TypeScript unless `WindowsBatchCli::Refuse`
+is selected.
 
 ```sh
 mise exec -- cargo test --locked -p trogon-claude-agent-sdk --all-features

@@ -1236,7 +1236,7 @@ fn js_number(number: &serde_json::Number) -> String {
 }
 
 /// `Number.prototype.toString` for a finite double.
-fn js_float(value: f64) -> String {
+pub(crate) fn js_float(value: f64) -> String {
     if !value.is_finite() {
         return "null".to_owned();
     }

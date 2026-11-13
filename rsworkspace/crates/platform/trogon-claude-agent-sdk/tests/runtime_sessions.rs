@@ -231,7 +231,7 @@ async fn s20_a_final_mirror_failure_does_not_fail_disconnect() -> TestResult {
 }
 
 fn echo_registry(counter: Arc<AtomicUsize>) -> Result<Arc<dyn SdkMcpServer>, Box<dyn StdError>> {
-    let schema = McpToolInputSchema::new(serde_json::from_value(json!({"type":"object"}))?)?;
+    let schema = McpToolInputSchema::new(serde_json::from_value(json!({"type":"object"}))?);
     let tool = SdkTool::from(SdkToolOptions {
         name: McpToolName::from("echo"),
         description: "Echo".into(),
