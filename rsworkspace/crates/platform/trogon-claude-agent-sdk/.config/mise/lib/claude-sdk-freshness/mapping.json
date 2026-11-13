@@ -1287,6 +1287,14 @@
           "name": "js_string_matches_the_javascript_string_conversion"
         },
         {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "typescript_dialect_validates_like_the_bundled_zod_and_mcp_sdk"
+        },
+        {
+          "path": "src/sdk_mcp_zod_tests.rs",
+          "name": "embedded_call_tool_result_schema_builds_the_bundled_zod_checks"
+        },
+        {
           "path": "src/sdk_mcp_server_tests.rs",
           "name": "server_retains_initialize_and_runs_typed_tool"
         },

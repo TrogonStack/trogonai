@@ -62,7 +62,11 @@ mod queue_capacity;
 #[cfg(unix)]
 mod run_as;
 mod runtime_options;
+mod sdk_mcp_js;
 mod sdk_mcp_server;
+mod sdk_mcp_zod;
+mod sdk_mcp_zod_issue;
+mod sdk_mcp_zod_run;
 mod sdk_tool;
 mod sdk_tools;
 mod sensitive_string;

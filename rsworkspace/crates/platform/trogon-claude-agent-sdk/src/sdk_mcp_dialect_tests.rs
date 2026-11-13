@@ -9,13 +9,16 @@
 )]
 
 use super::*;
-use crate::{McpToolName, McpToolOutput, McpToolRequest, SdkTool, SdkToolOptions, ToolResultStatus};
+use crate::{
+    McpToolName, McpToolOutput, McpToolRequest, SdkTool, SdkToolOptions, ToolResultStatus, settings_json::js_stringify,
+};
 use serde_json::json;
 use tokio::sync::Notify;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 const FIXTURE: &str = include_str!("../tests/fixtures/sdk_mcp/dialects.json");
+const ZOD_FIXTURE: &str = include_str!("../tests/fixtures/sdk_mcp/typescript_zod.json");
 
 fn failed(message: &str) -> CallbackError {
     CallbackError::Failed(Box::new(std::io::Error::other(message.to_owned())))
@@ -52,8 +55,31 @@ fn output(handler: &str, request: &McpToolRequest) -> Result<McpToolOutput, Call
             ..McpToolOutput::text("x")
         }),
         "boom" => Err(failed("boom")),
-        other => Err(failed(other)),
+        // The parsed arguments, as the generator's handler echoes `JSON.stringify(args)`.
+        "args" => Ok(text(&js_stringify(&Value::Object(request.arguments.clone())))),
+        other => match other.strip_prefix("result:") {
+            Some(result) => result_output(result),
+            None => Err(failed(other)),
+        },
     }
+}
+
+/// A handler that returns `{content?, structuredContent?, isError?}` exactly as the generator's does.
+fn result_output(result: &str) -> Result<McpToolOutput, CallbackError> {
+    let parsed: JsonObject = serde_json::from_str(result).map_err(|error| failed(&error.to_string()))?;
+    let content = match parsed.get("content") {
+        Some(Value::Array(blocks)) => blocks.iter().filter_map(Value::as_object).cloned().collect(),
+        _ => Vec::new(),
+    };
+    Ok(McpToolOutput {
+        content,
+        structured_content: parsed.get("structuredContent").and_then(Value::as_object).cloned(),
+        status: match parsed.get("isError").and_then(Value::as_bool) {
+            None => ToolResultStatus::NotReported,
+            Some(true) => ToolResultStatus::Error,
+            Some(false) => ToolResultStatus::Success,
+        },
+    })
 }
 
 fn field<'a>(value: &'a Value, name: &str) -> Result<&'a Value, String> {
@@ -71,7 +97,9 @@ fn tool(definition: &Value) -> Result<SdkTool, Box<dyn std::error::Error>> {
         .as_str()
         .ok_or("handler is not a string")?
         .to_owned();
-    if !["echo", "ok", "empty", "empty_false", "rich", "boom"].contains(&handler.as_str()) {
+    if !(["echo", "ok", "empty", "empty_false", "rich", "boom", "args"].contains(&handler.as_str())
+        || handler.starts_with("result:"))
+    {
         return Err(format!("unknown fixture handler {handler}").into());
     }
     let schema = field(definition, "schema")?
@@ -118,11 +146,22 @@ async fn replay(
     suite: &str,
     render: fn(&JsonObject) -> Result<String, serde_json::Error>,
 ) -> TestResult {
-    let fixture: Value = serde_json::from_str(FIXTURE)?;
+    replay_fixture(FIXTURE, dialect, suite, render, (30, 90)).await
+}
+
+/// Replays `suite` of `fixture`, requiring more than `minimum` cases and exchanges.
+async fn replay_fixture(
+    fixture: &str,
+    dialect: McpServerDialect,
+    suite: &str,
+    render: fn(&JsonObject) -> Result<String, serde_json::Error>,
+    minimum: (usize, usize),
+) -> TestResult {
+    let fixture: Value = serde_json::from_str(fixture)?;
     let suite = field(&fixture, suite)?;
     let servers = field(suite, "servers")?;
     let cases = field(suite, "cases")?.as_array().ok_or("cases is not a list")?;
-    assert!(cases.len() > 30);
+    assert!(cases.len() > minimum.0);
     let mut exchanged = 0;
     for (index, case) in cases.iter().enumerate() {
         let name = field(case, "server")?.as_str().ok_or("case server is not a string")?;
@@ -144,7 +183,7 @@ async fn replay(
             exchanged += 1;
         }
     }
-    assert!(exchanged > 90);
+    assert!(exchanged > minimum.1);
     Ok(())
 }
 
@@ -154,6 +193,20 @@ async fn typescript_dialect_answers_like_create_sdk_mcp_server() -> TestResult {
         McpServerDialect::TypeScript,
         "typescript",
         serde_json::to_string::<JsonObject>,
+    )
+    .await
+}
+
+/// Zod issues, object modes, unions, formats, handler results and the protocol envelope, each answer
+/// recorded from the bundled zod and MCP SDK.
+#[tokio::test]
+async fn typescript_dialect_validates_like_the_bundled_zod_and_mcp_sdk() -> TestResult {
+    replay_fixture(
+        ZOD_FIXTURE,
+        McpServerDialect::TypeScript,
+        "typescript",
+        serde_json::to_string::<JsonObject>,
+        (60, 600),
     )
     .await
 }
@@ -712,15 +765,14 @@ fn recorded(result: &str) -> Result<Value, serde_json::Error> {
     serde_json::from_str(result)
 }
 
-/// A keyword that the walk does not model still fails the call with the `McpServer` validation error.
 #[tokio::test]
-async fn typescript_dialect_rejects_arguments_that_fail_a_keyword_it_does_not_walk() -> TestResult {
+async fn typescript_dialect_reports_a_minimum_like_the_bundled_zod() -> TestResult {
     let listed = r##"{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"n":{"type":"number","minimum":5}},"required":["n"]}"##;
-    let result = typescript_call(listed, json!({"name":"t","arguments":{"n":1}})).await?;
-    let message = error_text(&result)?;
-    assert!(
-        message.starts_with("MCP error -32602: Input validation error: Invalid arguments for tool t: "),
-        "{message}"
+    assert_eq!(
+        typescript_call(listed, json!({"name":"t","arguments":{"n":1}})).await?,
+        recorded(
+            r##"{"content":[{"type":"text","text":"MCP error -32602: Input validation error: Invalid arguments for tool t: [\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 5,\n    \"inclusive\": true,\n    \"path\": [\n      \"n\"\n    ],\n    \"message\": \"Too small: expected number to be >=5\"\n  }\n]"}],"isError":true}"##
+        )?
     );
     assert_eq!(
         typescript_call(listed, json!({"name":"t","arguments":{"n":6}})).await?,

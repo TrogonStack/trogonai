@@ -149,7 +149,16 @@ Each client opens its own session. The built-in server supports initialize,
 initialized notification, cancellation, ping and tool listing/calls.
 `McpServerDialect::TypeScript`, the default, answers like `createSdkMcpServer`:
 it drops messages it cannot read, reports parameter errors as `-32603` and
-lists each schema with its draft-07 `$schema`. `McpServerDialect::Python`
+lists each schema with its draft-07 `$schema`. It validates tool arguments,
+handler results and the JSON-RPC envelope the way the bundled zod and MCP SDK
+do, with their issue paths, codes, messages and order. The zod schema is
+rebuilt from the listed JSON Schema, so what JSON Schema cannot tell apart
+follows zod's own mapping: a discriminated union is a plain union, `nullable`
+and a union with `null` are the same, `length(n)` is `min(n).max(n)`, regular
+expression flags are lost, transforms and refinements are invisible, and the
+Rust regular expression and URL parsers stand in for the JavaScript ones.
+Schemas that use keywords zod cannot express (`allOf`, `oneOf`, `$ref` and the
+like) are also checked by the JSON Schema validator. `McpServerDialect::Python`
 answers like `create_sdk_mcp_server`: it reports unreadable messages as
 `McpServerError::Protocol`, refuses requests before `initialize` and answers a
 cancelled call with `-32800`. Custom
