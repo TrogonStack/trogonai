@@ -644,3 +644,158 @@ pub(crate) const AGENT_PROGRESS_SUMMARIES_ENV: &str = "CLAUDE_CODE_AGENT_PROGRES
 
 /// Python `VERBATIM_PROMPTS_MINIMUM_CLAUDE_CODE_VERSION`: the first CLI that honors `client_composed`.
 pub(crate) const VERBATIM_PROMPTS_MINIMUM: [u32; 3] = [2, 1, 248];
+
+/// Value of `managedSourcesBehavior` that merges the managed tiers instead of letting the first win.
+pub(crate) const MANAGED_SOURCES_MERGE: &str = "merge";
+
+/// Keys whose arrays a managed tier replaces whole instead of unioning (`UX` upstream).
+pub(crate) const REPLACED_ADMIN_ARRAY_KEYS: [&str; 5] = [
+    "allowedMcpServers",
+    "availableModels",
+    "strictKnownMarketplaces",
+    "allowedChannelPlugins",
+    "allowedProviders",
+];
+
+/// Keys a lower managed tier also replaces whole, but the top tier unions (`AQe` upstream).
+pub(crate) const LOWER_TIER_REPLACED_KEYS: [&str; 2] = ["awsPairs", "ripgrep"];
+
+/// Key of the sandbox AWS credential pairs the merge treats specially.
+pub(crate) const AWS_PAIRS_KEY: &str = "awsPairs";
+
+/// AWS credential variables a pair can name (`qi` upstream).
+pub(crate) const AWS_CREDENTIAL_VARIABLES: [&str; 3] =
+    ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"];
+
+/// Prefix of the suppressor variable a merged AWS pair gets (`ES` upstream).
+pub(crate) const AWS_PAIR_SUPPRESSOR_PREFIX: &str = "_PARENT_PAIR_SUPPRESSOR_";
+
+/// Fields of an AWS pair entry that name a variable (`cX` upstream).
+pub(crate) const AWS_PAIR_FIELDS: [&str; 3] = ["accessKeyIdVar", "secretAccessKeyVar", "sessionTokenVar"];
+
+/// Paths a lower managed tier never contributes (`mQe` upstream).
+pub(crate) const LOWER_TIER_DROPPED_PATHS: [&[&str]; 2] = [
+    &["permissions", "defaultMode"],
+    &["modelPicker", "replaceBuiltInOptions"],
+];
+
+/// Keys a lower managed tier never contributes (`YX()` upstream).
+pub(crate) const LOWER_TIER_STRIPPED_KEYS: [&str; 17] = [
+    "apiKeyHelper",
+    "awsAuthRefresh",
+    "awsCredentialExport",
+    "gcpAuthRefresh",
+    "otelHeadersHelper",
+    "proxyAuthHelper",
+    "forceLoginOrgUUID",
+    "forceLoginMethod",
+    "forceLoginGatewayUrl",
+    "gatewayInternalNetworks",
+    "parentSettingsBehavior",
+    "env",
+    "modelPicker",
+    "policyHelper",
+    "policyHelpers",
+    "managedSourcesBehavior",
+    "wslInheritsWindowsSettings",
+];
+
+/// Path of the sandbox platform list a lower managed tier is checked against.
+pub(crate) const SANDBOX_PLATFORMS_PATH: [&str; 2] = ["sandbox", "enabledPlatforms"];
+
+/// Key that unions across managed tiers in the restrictive pass.
+pub(crate) const STRICT_PLUGIN_ONLY_KEY: &str = "strictPluginOnlyCustomization";
+
+/// Key whose value one managed tier owns whole (`CQe` upstream).
+pub(crate) const MODEL_OVERRIDES_KEY: &str = "modelOverrides";
+
+/// Key that tells which managed tier owns the model overrides (`CQe` upstream).
+pub(crate) const AVAILABLE_MODELS_KEY: &str = "availableModels";
+
+/// Each restrictive rule: its settings path and the JSON values it ranks, most restrictive first (`Go()` upstream).
+pub(crate) const RESTRICTIVE_RULES: [(&[&str], &[&str]); 72] = [
+    (&["allowManagedPermissionRulesOnly"], &["true"]),
+    (&["allowManagedHooksOnly"], &["true"]),
+    (&["allowManagedMcpServersOnly"], &["true"]),
+    (&["enforceAvailableModels"], &["true"]),
+    (&["disableAllHooks"], &["true"]),
+    (&["disableClaudeAiConnectors"], &["true"]),
+    (&["disableCommandPluginSources"], &["true"]),
+    (&["disableSideloadFlags"], &["true"]),
+    (&["disableSkillShellExecution"], &["true"]),
+    (&["disableWindowsBashCommandSplit"], &["true"]),
+    (&["disableRemoteControl"], &["true"]),
+    (&["disableAgentView"], &["true"]),
+    (&["disableWorkflows"], &["true"]),
+    (&["disableArtifact"], &["true"]),
+    (&["disableBundledSkills"], &["true"]),
+    (&["fastModePerSessionOptIn"], &["true"]),
+    (&["isolatePeerMachines"], &["true"]),
+    (&["strictPluginOnlyCustomization"], &["true"]),
+    (&["disableAutoMode"], &["\"disable\""]),
+    (&["disableDeepLinkRegistration"], &["\"disable\""]),
+    (&["permissions", "disableBypassPermissionsMode"], &["\"disable\""]),
+    (&["permissions", "disableAutoMode"], &["\"disable\""]),
+    (&["permissions", "blockReadsOutsideWorkingDirectories"], &["true"]),
+    (&["permissions", "blockWritesOutsideWorkingDirectories"], &["true"]),
+    (&["permissions", "denyInsteadOfPrompting"], &["true"]),
+    (&["autoMode", "classifyAllShell"], &["true"]),
+    (&["worktree", "bgIsolation"], &["\"worktree\""]),
+    (&["enableArtifact"], &["false"]),
+    (&["enableWorkflows"], &["false"]),
+    (&["syncClaudeAiSkills"], &["false"]),
+    (&["syncClaudeAiPlugins"], &["false"]),
+    (&["useAutoModeDuringPlan"], &["false"]),
+    (&["skipDangerousModePermissionPrompt"], &["false"]),
+    (&["skipAutoPermissionPrompt"], &["false"]),
+    (&["enableAllProjectMcpServers"], &["false"]),
+    (&["channelsEnabled"], &["false"]),
+    (&["skipWebFetchPreflight"], &["false"]),
+    (&["skipWorkflowUsageWarning"], &["false"]),
+    (&["autoUploadSessions"], &["false"]),
+    (&["remoteControlAtStartup"], &["false"]),
+    (&["remoteTools", "allowUnattendedServing"], &["false"]),
+    (&["autoContinueAtUsageLimit"], &["false"]),
+    (&["responseComparisonEnabled"], &["false"]),
+    (&["attribution", "sessionUrl"], &["false"]),
+    (&["crossSessionInbound"], &["\"refuse\"", "\"hold\""]),
+    (&["remoteControl", "shareHostProfile"], &["\"off\"", "\"basic\""]),
+    (&["modelProposedGoals"], &["\"disabled\"", "\"alwaysAsk\""]),
+    (
+        &["maxEffortLevel"],
+        &["\"low\"", "\"medium\"", "\"high\"", "\"xhigh\"", "\"max\""],
+    ),
+    (&["feedbackDrafts"], &["\"off\""]),
+    (&["availableModelsMatch"], &["\"exact\""]),
+    (&["askUserQuestionTimeout"], &["\"never\""]),
+    (&["dialogExpiry"], &["\"never\""]),
+    (&["sandbox", "enabled"], &["true"]),
+    (&["sandbox", "failIfUnavailable"], &["true"]),
+    (&["sandbox", "autoAllowBashIfSandboxed"], &["false"]),
+    (&["sandbox", "allowUnsandboxedCommands"], &["false"]),
+    (&["sandbox", "enableWeakerNestedSandbox"], &["false"]),
+    (&["sandbox", "enableWeakerNetworkIsolation"], &["false"]),
+    (&["sandbox", "allowAppleEvents"], &["false"]),
+    (&["sandbox", "allowNestedUserNamespaces"], &["false"]),
+    (&["sandbox", "network", "allowManagedDomainsOnly"], &["true"]),
+    (&["sandbox", "network", "strictAllowlist"], &["true"]),
+    (&["sandbox", "network", "allowAllUnixSockets"], &["false"]),
+    (&["sandbox", "network", "allowLocalBinding"], &["false"]),
+    (&["sandbox", "filesystem", "allowManagedReadPathsOnly"], &["true"]),
+    (&["sandbox", "filesystem", "disabled"], &["false"]),
+    (&["sandbox", "credentials", "allowPlaintextInject"], &["false"]),
+    (&["sandbox", "credentials", "sigv4", "streaming"], &["\"deny\""]),
+    (&["sandbox", "credentials", "sigv4", "presigned"], &["\"deny\""]),
+    (&["sandbox", "credentials", "sigv4", "sigv4a"], &["\"deny\""]),
+    (&["isolation", "required"], &["true"]),
+    (&["isolation", "persistHome"], &["false"]),
+];
+
+/// Settings key that pins the organization a login must belong to.
+pub(crate) const LOGIN_ORGANIZATION_KEY: &str = "forceLoginOrgUUID";
+
+/// Settings key that pins the login method.
+pub(crate) const LOGIN_METHOD_KEY: &str = "forceLoginMethod";
+
+/// Login methods the machine policy can pin.
+pub(crate) const LOGIN_METHODS: [&str; 2] = ["claudeai", "console"];

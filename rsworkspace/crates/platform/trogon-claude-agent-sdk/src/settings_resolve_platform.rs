@@ -32,6 +32,19 @@ pub(crate) enum PlatformKind {
     Unknown,
 }
 
+impl PlatformKind {
+    /// The name `getPlatform()` upstream returns.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Macos => "macos",
+            Self::Windows => "windows",
+            Self::Wsl => "wsl",
+            Self::Linux => "linux",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 fn variable_is_set<H: EnvironmentVariable>(host: &H, name: &str) -> bool {
     host.var_os(OsStr::new(name)).is_some_and(|value| !value.is_empty())
 }

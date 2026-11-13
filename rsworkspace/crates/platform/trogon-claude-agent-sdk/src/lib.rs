@@ -95,6 +95,7 @@ mod settings_read;
 mod settings_read_hooks;
 mod settings_read_spec;
 mod settings_resolve;
+mod settings_resolve_admin;
 mod settings_resolve_env;
 mod settings_resolve_parent;
 mod settings_resolve_platform;
