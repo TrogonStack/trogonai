@@ -318,6 +318,16 @@ pub struct ClaudeAgentOptions {
     pub elicitation_handler: Option<Arc<dyn ElicitationHandler>>,
     pub user_dialog_handler: Option<Arc<dyn UserDialogHandler>>,
     pub supported_dialog_kinds: Vec<DialogKind>,
+    /// TypeScript `getOAuthToken`. Setting it also sets `CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH=1`. Without a handler a
+    /// token request is answered with `getOAuthToken callback is not provided.`.
+    pub oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
+    /// TypeScript `getHostAuthToken`. Setting it also sets `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH=1`.
+    pub host_auth_token_handler: Option<Arc<dyn crate::HostAuthTokenHandler>>,
+    /// TypeScript `toolConfig`, delivered as environment variables. Ignored with `ArgvStyle::Python`.
+    pub tool_config: crate::ToolConfig,
+    /// TypeScript `workload`: `--workload <value>` after every built-in flag, replacing the value of an `extra_args`
+    /// entry of the same name in place. An empty string sends nothing. Ignored with `ArgvStyle::Python`.
+    pub workload: Option<String>,
     pub argv_style: ArgvStyle,
     /// How the messages the CLI writes are decoded: `TypeScript` (the default) yields every message, `Python`
     /// rejects the ones `parse_message` rejects and skips the ones it skips.

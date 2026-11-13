@@ -14,7 +14,7 @@ use tokio::{
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
     PermissionDecision, ProtocolError, StderrTail, ToolPermissionHandler, Transport,
-    constants::TYPESCRIPT_INITIALIZE_TIMEOUT,
+    constants::{HOST_AUTH_CALLBACK_MISSING, OAUTH_CALLBACK_MISSING, TYPESCRIPT_INITIALIZE_TIMEOUT},
     wire::{
         self, ControlResponse, Frame, IncomingControl,
         runtime_payload::{
@@ -273,6 +273,8 @@ where
     initialize_timeout: Option<Duration>,
     elicitation_handler: Option<Arc<dyn crate::ElicitationHandler>>,
     user_dialog_handler: Option<Arc<dyn crate::UserDialogHandler>>,
+    oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
+    host_auth_token_handler: Option<Arc<dyn crate::HostAuthTokenHandler>>,
     dialog_kinds: HashSet<String>,
     session: Option<crate::SessionRuntime<F>>,
     mirror_flush: Option<MirrorBarrier>,
@@ -657,6 +659,8 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         initialize_timeout: initialization.timeout,
         elicitation_handler: options.elicitation_handler,
         user_dialog_handler: options.user_dialog_handler,
+        oauth_token_handler: options.oauth_token_handler,
+        host_auth_token_handler: options.host_auth_token_handler,
         dialog_kinds: options
             .supported_dialog_kinds
             .iter()
@@ -1424,6 +1428,55 @@ where
                         wire::success_response(&response_id, response.to_wire_json()?)
                     });
                 }
+                (IncomingControl::OAuthTokenRefresh { kind, token_state }, _) => {
+                    if !self.admit_callback(&id).await? {
+                        return Ok(());
+                    }
+                    let Some(handler) = self.oauth_token_handler.clone() else {
+                        self.write_response(wire::callback_error_response(&id, OAUTH_CALLBACK_MISSING))
+                            .await?;
+                        return Ok(());
+                    };
+                    let signal = crate::CancellationToken::new();
+                    let request = crate::OAuthTokenRequest {
+                        kind,
+                        token_state: crate::OAuthTokenState::from_wire(token_state.as_deref()),
+                        signal: signal.clone(),
+                    };
+                    let response_id = id.clone();
+                    let fallback = wire::callback_error_response(&id, "getOAuthToken callback timed out");
+                    self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                        match handler.call(request).await {
+                            Ok(response) => wire::success_response(&response_id, response.to_wire_json()),
+                            Err(error) => wire::callback_error_response(&response_id, &callback_failure(&error)),
+                        }
+                    });
+                }
+                (IncomingControl::HostAuthTokenRefresh { status }, _) => {
+                    if !self.admit_callback(&id).await? {
+                        return Ok(());
+                    }
+                    let Some(handler) = self.host_auth_token_handler.clone() else {
+                        self.write_response(wire::callback_error_response(&id, HOST_AUTH_CALLBACK_MISSING))
+                            .await?;
+                        return Ok(());
+                    };
+                    let signal = crate::CancellationToken::new();
+                    let request = crate::HostAuthTokenRequest {
+                        status,
+                        signal: signal.clone(),
+                    };
+                    let response_id = id.clone();
+                    let fallback = wire::callback_error_response(&id, "getHostAuthToken callback timed out");
+                    self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                        match handler.call(request).await {
+                            Ok(token) => {
+                                wire::success_response(&response_id, crate::auth_token::host_auth_wire_json(&token))
+                            }
+                            Err(error) => wire::callback_error_response(&response_id, &callback_failure(&error)),
+                        }
+                    });
+                }
             },
             Frame::Cancel { id } => {
                 if let Some(handle) = self.callback_handles.remove(&id) {
@@ -1625,6 +1678,14 @@ where
             _ = &mut self.shutdown => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
             result = async { match limit { Some(limit) => timeout(limit, self.transport.write(&text)).await.map_err(|_| Error::WriteTimeout)?, None => self.transport.write(&text).await } } => result,
         }
+    }
+}
+
+/// A thrown error becomes the response's `error` text, as `TE.processControlRequest` does with `message`.
+fn callback_failure(error: &crate::CallbackError) -> String {
+    match error {
+        crate::CallbackError::Failed(source) => source.to_string(),
+        crate::CallbackError::Cancelled => "Callback cancelled".to_owned(),
     }
 }
 

@@ -212,3 +212,117 @@ fn inherit_deletes_the_agent_progress_summaries_variable_in_any_case_and_never_s
                 .contains(&OsString::from("CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES"))
     );
 }
+
+fn with_tool_config(mode: EnvironmentMode, env: &[(&str, &str)]) -> ClaudeAgentOptions {
+    ClaudeAgentOptions {
+        tool_config: crate::ToolConfig {
+            ask_user_question: crate::AskUserQuestionConfig {
+                preview_format: Some(crate::QuestionPreviewFormat::Html),
+                extended_questions: true,
+                optional_descriptions: false,
+            },
+        },
+        ..options(mode, env)
+    }
+}
+
+#[test]
+fn tool_config_sets_its_variables_and_cleans_an_inherited_environment_in_any_case() {
+    let plan = plan(
+        &with_tool_config(EnvironmentMode::Inherit, &[]),
+        &inherited(&[
+            ("claude_code_question_extended", "old"),
+            ("Claude_Code_Question_Optional_Descriptions", "x"),
+            ("CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES", "1"),
+        ]),
+    );
+    assert_eq!(
+        set(&plan, "CLAUDE_CODE_QUESTION_PREVIEW_FORMAT").as_deref(),
+        Some("html")
+    );
+    assert_eq!(set(&plan, "CLAUDE_CODE_QUESTION_EXTENDED").as_deref(), Some("1"));
+    // A truthy value only writes the exact name; another spelling of it stays.
+    assert!(!plan.remove.contains(&OsString::from("claude_code_question_extended")));
+    assert!(
+        plan.remove
+            .contains(&OsString::from("Claude_Code_Question_Optional_Descriptions"))
+    );
+    assert!(
+        plan.remove
+            .contains(&OsString::from("CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES"))
+    );
+    assert_eq!(set(&plan, "CLAUDE_CODE_QUESTION_OPTIONAL_DESCRIPTIONS"), None);
+}
+
+#[test]
+fn tool_config_with_an_explicit_environment_never_deletes() {
+    let plan = plan(
+        &with_tool_config(EnvironmentMode::Replace, &[("claude_code_question_extended", "q")]),
+        &inherited(&[]),
+    );
+    assert_eq!(set(&plan, "CLAUDE_CODE_QUESTION_EXTENDED").as_deref(), Some("1"));
+    assert_eq!(set(&plan, "claude_code_question_extended").as_deref(), Some("q"));
+    assert!(
+        !plan
+            .remove
+            .contains(&OsString::from("CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES"))
+    );
+}
+
+#[test]
+fn an_empty_tool_config_only_cleans_in_inherit_mode() {
+    let inherit = plan(&options(EnvironmentMode::Inherit, &[]), &inherited(&[]));
+    for name in [
+        "CLAUDE_CODE_QUESTION_EXTENDED",
+        "CLAUDE_CODE_QUESTION_OPTIONAL_DESCRIPTIONS",
+        "CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES",
+    ] {
+        assert!(inherit.remove.contains(&OsString::from(name)), "{name}");
+    }
+    let replace = plan(&options(EnvironmentMode::Replace, &[]), &inherited(&[]));
+    assert!(
+        !replace
+            .remove
+            .contains(&OsString::from("CLAUDE_CODE_QUESTION_EXTENDED"))
+    );
+    let overlay = plan(&options(EnvironmentMode::Overlay, &[]), &inherited(&[]));
+    assert!(
+        !overlay
+            .remove
+            .contains(&OsString::from("CLAUDE_CODE_QUESTION_EXTENDED"))
+    );
+}
+
+#[test]
+fn python_dialect_ignores_tool_config() {
+    let mut python = with_tool_config(EnvironmentMode::Overlay, &[]);
+    python.argv_style = crate::ArgvStyle::Python;
+    let plan = plan(&python, &inherited(&[]));
+    assert_eq!(set(&plan, "CLAUDE_CODE_QUESTION_PREVIEW_FORMAT"), None);
+    assert_eq!(set(&plan, "CLAUDE_CODE_QUESTION_EXTENDED"), None);
+}
+
+#[test]
+fn token_callbacks_announce_themselves_in_every_mode() {
+    let handler: std::sync::Arc<dyn crate::OAuthTokenHandler> =
+        std::sync::Arc::new(|_request: crate::OAuthTokenRequest| async { Ok(crate::OAuthTokenResponse::default()) });
+    let host: std::sync::Arc<dyn crate::HostAuthTokenHandler> =
+        std::sync::Arc::new(|_request: crate::HostAuthTokenRequest| async { Ok(None) });
+    for mode in [
+        EnvironmentMode::Overlay,
+        EnvironmentMode::Replace,
+        EnvironmentMode::Inherit,
+    ] {
+        let bare = plan(&options(mode, &[]), &inherited(&[]));
+        assert_eq!(set(&bare, "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH"), None);
+        let mut both = options(mode, &[]);
+        both.oauth_token_handler = Some(handler.clone());
+        both.host_auth_token_handler = Some(host.clone());
+        let plan = plan(&both, &inherited(&[]));
+        assert_eq!(set(&plan, "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH").as_deref(), Some("1"));
+        assert_eq!(
+            set(&plan, "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH").as_deref(),
+            Some("1")
+        );
+    }
+}

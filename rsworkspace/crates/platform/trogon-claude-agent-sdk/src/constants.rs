@@ -887,3 +887,19 @@ pub(crate) const STDERR_SETTLE: Duration = Duration::from_millis(200);
 
 /// Python: each wait of its close sequence.
 pub(crate) const PYTHON_CLOSE_WAIT: Duration = Duration::from_secs(5);
+
+pub(crate) const OAUTH_REFRESH_ENV: &str = "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH";
+pub(crate) const HOST_AUTH_REFRESH_ENV: &str = "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH";
+pub(crate) const QUESTION_PREVIEW_FORMAT_ENV: &str = "CLAUDE_CODE_QUESTION_PREVIEW_FORMAT";
+pub(crate) const QUESTION_EXTENDED_ENV: &str = "CLAUDE_CODE_QUESTION_EXTENDED";
+pub(crate) const QUESTION_OPTIONAL_DESCRIPTIONS_ENV: &str = "CLAUDE_CODE_QUESTION_OPTIONAL_DESCRIPTIONS";
+
+/// Variables upstream deletes from an inherited environment (in any letter case) unless `toolConfig` sets them.
+pub(crate) const TOOL_CONFIG_ENVS: [&str; 3] = [
+    QUESTION_EXTENDED_ENV,
+    QUESTION_OPTIONAL_DESCRIPTIONS_ENV,
+    AGENT_PROGRESS_SUMMARIES_ENV,
+];
+
+pub(crate) const OAUTH_CALLBACK_MISSING: &str = "getOAuthToken callback is not provided.";
+pub(crate) const HOST_AUTH_CALLBACK_MISSING: &str = "getHostAuthToken callback is not provided.";

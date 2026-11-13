@@ -30,16 +30,37 @@ pub(crate) fn mentions_sdk_url(options: &ClaudeAgentOptions) -> bool {
 /// (no `pathToClaudeCodeExecutable`, no custom spawn) and no `--sdk-url`, by appending `await-initialize` to
 /// `extraArgs`. Python never sends it.
 pub(crate) fn request_await_initialize(options: &mut ClaudeAgentOptions) {
+    // The upstream `extraArgs` object receives `workload` first and `await-initialize` after it.
+    if options.argv_style == crate::ArgvStyle::TypeScript
+        && let Some(workload) = options.workload.take()
+    {
+        set_extra(&mut options.extra_args, "workload", &workload);
+    }
     if options.cli_path.is_none()
         && options.argv_style == crate::ArgvStyle::TypeScript
         && (options.resume.is_some() || options.continue_conversation == crate::ContinueConversation::Yes)
         && !mentions_sdk_url(options)
-        && !options.extra_args.iter().any(|extra| extra.flag == "await-initialize")
     {
-        options.extra_args.push(ExtraArgument {
-            flag: "await-initialize".into(),
-            value: None,
-        });
+        set_extra_value(&mut options.extra_args, "await-initialize", None);
+    }
+}
+
+/// `{...extraArgs, workload}`: an existing key keeps its position and takes the new value, a new key goes last. An
+/// empty workload is falsy upstream and sends nothing.
+fn set_extra(extra: &mut Vec<ExtraArgument>, flag: &str, value: &str) {
+    if !value.is_empty() {
+        set_extra_value(extra, flag, Some(value));
+    }
+}
+
+fn set_extra_value(extra: &mut Vec<ExtraArgument>, flag: &str, value: Option<&str>) {
+    let value = value.map(str::to_owned);
+    match extra.iter_mut().find(|existing| existing.flag == flag) {
+        Some(existing) => existing.value = value,
+        None => extra.push(ExtraArgument {
+            flag: flag.into(),
+            value,
+        }),
     }
 }
 

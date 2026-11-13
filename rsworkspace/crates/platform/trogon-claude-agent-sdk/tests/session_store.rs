@@ -623,6 +623,30 @@ async fn a_listed_subagent_without_entries_is_skipped() -> TestResult {
 }
 
 #[tokio::test]
+async fn python_dialect_reports_the_resume_materialization_text() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut options = options(Arc::new(PendingLoadStore), root.path())?;
+    options.limits.load_timeout = Timeout::new(Duration::from_millis(20));
+    options.dialect = SummaryDialect::Python;
+    let outcome = SessionRuntime::prepare(
+        &options,
+        StoreResume::Session(SessionId::from(SESSION)),
+        root.path(),
+        &Environment::default(),
+        Default::default(),
+    )
+    .await;
+    let Err(error) = outcome else {
+        return Err("expected a load timeout".into());
+    };
+    assert_eq!(
+        error.to_string(),
+        format!("SessionStore.load() for session {SESSION} timed out after 20ms during resume materialization")
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn mirror_flush_observes_ordered_appends_and_rejects_outside_paths() -> TestResult {
     let root = tempfile::tempdir()?;
     let store = Arc::new(InMemorySessionStore::new());

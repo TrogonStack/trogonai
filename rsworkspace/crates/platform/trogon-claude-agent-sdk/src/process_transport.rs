@@ -29,10 +29,21 @@ use crate::{
     process_options::EnvironmentMode,
 };
 
-fn is_script(path: &Path) -> bool {
-    path.extension()
-        .and_then(OsStr::to_str)
-        .is_some_and(|extension| SCRIPT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
+/// TypeScript's `endsWith` test is case-sensitive and works on the whole path string; Python has no script
+/// runtime, so its dialect keeps the lenient extension check.
+fn is_script(path: &Path, style: ArgvStyle) -> bool {
+    match style {
+        ArgvStyle::TypeScript => {
+            let path = path.to_string_lossy();
+            SCRIPT_EXTENSIONS
+                .iter()
+                .any(|extension| path.ends_with(&format!(".{extension}")))
+        }
+        ArgvStyle::Python => path
+            .extension()
+            .and_then(OsStr::to_str)
+            .is_some_and(|extension| SCRIPT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())),
+    }
 }
 
 /// Builds the child command. A script path runs under `script_runtime.executable` (default `node`), as the
@@ -44,7 +55,7 @@ pub(crate) fn command(
     derived_debug_file: Option<&Path>,
 ) -> Result<ProcessCommand, Error> {
     let arguments = argv::build(options, derived_debug_file)?;
-    let mut command = if is_script(cli_path) {
+    let mut command = if is_script(cli_path, options.argv_style) {
         let runtime = options
             .script_runtime
             .executable
@@ -55,7 +66,12 @@ pub(crate) fn command(
         command.arg(cli_path);
         command
     } else {
-        ProcessCommand::new(cli_path)
+        let mut command = ProcessCommand::new(cli_path);
+        // TypeScript puts `executableArgs` before the arguments of a native binary too.
+        if options.argv_style == ArgvStyle::TypeScript {
+            command.args(&options.script_runtime.arguments);
+        }
+        command
     };
     command.args(arguments);
     if let Some(cwd) = &options.cwd {
@@ -440,3 +456,6 @@ impl Transport for ProcessTransport {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod command_tests;
