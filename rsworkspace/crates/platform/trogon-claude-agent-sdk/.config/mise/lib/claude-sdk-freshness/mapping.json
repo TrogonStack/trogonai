@@ -1631,11 +1631,11 @@
         },
         {
           "path": "tests/session_failure_contracts.rs",
-          "name": "resume_rejects_relative_configuration_and_requires_listing_for_latest"
+          "name": "python_resume_joins_relative_configuration_and_requires_listing_for_latest"
         }
       ],
       "status": "supported",
-      "rationale": "Store-backed resume follows both upstream SDKs, selected by SessionStoreOptions.dialect with TypeScript as the default: TypeScript continue takes only the newest listed session, preserves source modes on copied auth files, writes settings at 0600, fails on unreadable credentials, accepts a relative home directory, derives the project key from options.env or the process environment as Wn does, and sets CLAUDE_SECURESTORAGE_CONFIG_DIR on Windows; Python walks newest first past sidechains and unusable candidates and skips unreadable optional files. Materialization runs on every platform, and project keys over 200 characters are truncated with the upstream hash suffix. Resume entry, byte and subkey limits are opt-in and unlimited by default; custom stores declare optional operations through SessionStore::supports."
+      "rationale": "Store-backed resume follows both upstream SDKs, selected by SessionStoreOptions.dialect with TypeScript as the default: TypeScript continue takes only the newest listed session, preserves source modes on copied auth files, writes settings at 0600, fails on unreadable credentials, derives the project key from options.env or the process environment as Wn does, and sets CLAUDE_SECURESTORAGE_CONFIG_DIR on Windows; Python walks newest first past sidechains and unusable candidates and skips unreadable optional files. Both accept a relative configuration or home directory as given unless SessionStoreOptions::require_absolute_config_paths is set, and a TypeScript resume writes every listSubkeys subpath its check lets through. Materialization runs on every platform, and project keys over 200 characters are truncated with the upstream hash suffix. Resume entry, byte and subkey limits are opt-in and unlimited by default, and the transcript mirror reports every failure and waits for a flush without a deadline unless SessionStoreLimits sets max_retained_failures or flush_timeout; custom stores declare optional operations through SessionStore::supports."
     },
     {
       "id": "structured-input",

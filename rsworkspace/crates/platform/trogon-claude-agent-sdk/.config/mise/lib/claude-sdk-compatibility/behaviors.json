@@ -1477,7 +1477,7 @@
         "kind": "upstream"
       },
       "contracts": [
-        "session_failure_contracts::resume_rejects_relative_configuration_and_requires_listing_for_latest",
+        "session_failure_contracts::python_resume_joins_relative_configuration_and_requires_listing_for_latest",
         "session_failure_contracts::ts_resume_accepts_relative_configuration_and_requires_listing_for_latest"
       ],
       "rust": [
@@ -2181,15 +2181,21 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream relies on UUID checks and subpath skipping instead of a key type."
+        "behavior": "Upstream skips a non-UUID resume id and, with a warning, every listSubkeys subpath that is empty, absolute, has a .. segment or resolves outside the session directory, and writes the rest; Python also skips . segments, drive prefixes and NUL bytes. Rust follows the selected dialect's rule, so the TypeScript default writes ./agent where TypeScript does."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Keys become path components, so the type refuses traversal at construction."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "session_filesystem::s22_a_non_uuid_resume_id_skips_materialization",
+        "session_filesystem::s24_unsafe_subkeys_from_the_store_are_skipped",
+        "session_filesystem::s24_ts_a_dot_component_subpath_is_written_where_typescript_writes_it",
+        "session_store::store_paths_reject_traversal_and_windows_aliases"
+      ],
       "rust": [
-        "src/session_key.rs"
+        "src/session_key.rs",
+        "src/session_subpath.rs",
+        "src/session_resume.rs"
       ]
     },
     {
@@ -2205,13 +2211,18 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Store loads are unbounded upstream."
+        "behavior": "Store loads are unbounded upstream. Rust is unbounded by default; max_resume_entries, max_resume_bytes and max_subkeys opt into EntryLimit, ByteLimit and SubpathLimit."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds memory and disk written from an untrusted store."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "in_memory_session_store::options_wrap_shared_stores_with_default_limits",
+        "session_store::resume_entry_and_byte_limits_refuse_materialization_without_transcript_files",
+        "session_store::resume_subkey_limit_cleans_an_already_seeded_main_transcript",
+        "session_failure_contracts::resume_counts_transcript_newlines_and_metadata_against_budgets",
+        "session_failure_contracts::latest_resume_limits_the_candidate_listing_before_materialization"
+      ],
       "rust": [
         "src/session_resume.rs",
         "src/session_store.rs"
@@ -2253,15 +2264,20 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream creates its own temp config dir."
+        "behavior": "Upstream creates its own temp config dir and copies auth files from the caller's config dir or home directory, joining a relative path as given; TypeScript keeps an empty options.env value while Python falls through to the next source. Rust does the same by default; SessionStoreOptions::require_absolute_config_paths opts into UnsafeConfigPath."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Resume copies auth files from the caller or environment config dir into its temp dir, so a relative path or a missing home directory is a typed error instead of resolving against the working directory."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "session_failure_contracts::python_resume_joins_relative_configuration_and_requires_listing_for_latest",
+        "session_failure_contracts::ts_resume_accepts_relative_configuration_and_requires_listing_for_latest",
+        "session_filesystem::w3_a_relative_home_directory_is_used_as_given_unless_absolute_paths_are_required",
+        "session_filesystem::w3_ts_a_relative_home_directory_is_used_as_given"
+      ],
       "rust": [
-        "src/session_resume.rs"
+        "src/session_resume.rs",
+        "src/session_store.rs"
       ]
     },
     {

@@ -486,19 +486,34 @@ fn resume_directories(filesystem: &RecordingFileSystem) -> io::Result<Vec<PathBu
 }
 
 #[tokio::test(start_paused = true)]
-async fn resume_rejects_relative_configuration_and_requires_listing_for_latest() -> TestResult {
+async fn python_resume_joins_relative_configuration_and_requires_listing_for_latest() -> TestResult {
     let store = Arc::new(BasicStore);
     let filesystem = RecordingFileSystem::new()?;
     let config = filesystem.path("config");
     let mut options = resume_options(store, &config)?;
     options.dialect = SummaryDialect::Python;
-    for path in ["", "relative"] {
-        options.config_directory = Some(path.into());
+    // `Path(caller_config_dir)` keeps a relative directory as given.
+    options.config_directory = Some("relative".into());
+    let runtime = prepare(&options, StoreResume::None, filesystem.clone()).await?;
+    assert!(runtime.materialized.is_none());
+    // An empty value is falsy, so Python falls through to the home directory, which this environment lacks.
+    options.config_directory = Some("".into());
+    assert!(matches!(
+        prepare(&options, StoreResume::None, filesystem.clone()).await,
+        Err(SessionError::MissingConfigDirectory)
+    ));
+    // The opt-in check refuses a relative directory with the typed error in either dialect.
+    options.require_absolute_config_paths = true;
+    for dialect in [SummaryDialect::Python, SummaryDialect::TypeScript] {
+        options.dialect = dialect;
+        options.config_directory = Some("relative".into());
         assert!(matches!(
             prepare(&options, StoreResume::None, filesystem.clone()).await,
             Err(SessionError::UnsafeConfigPath)
         ));
     }
+    options.require_absolute_config_paths = false;
+    options.dialect = SummaryDialect::Python;
     options.config_directory = Some(config.clone());
     assert!(matches!(
         prepare(&options, StoreResume::Latest, filesystem.clone()).await,

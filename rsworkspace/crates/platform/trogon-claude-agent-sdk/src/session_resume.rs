@@ -168,7 +168,7 @@ impl<F: SessionFileSystem> SessionRuntime<F> {
         let caller_config_dir = caller_config_dir(options, environment, ts)?;
         let source_config_dir = match &caller_config_dir {
             Some(directory) => directory.clone(),
-            None => home_dir(environment, ts)?.join(".claude"),
+            None => home_dir(environment, options.require_absolute_config_paths)?.join(".claude"),
         };
         let project = match (&options.project_key, ts) {
             (Some(key), _) => key.clone(),
@@ -351,21 +351,30 @@ fn caller_config_dir<E: EnvironmentVariable>(
     environment: &E,
     ts: bool,
 ) -> Result<Option<PathBuf>, SessionError> {
-    if ts {
+    let directory = if ts {
         // `options.env?.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR`: nullish, so an empty value stays.
-        return Ok(options
+        options
             .config_directory
             .clone()
-            .or_else(|| environment.var_os(OsStr::new("CLAUDE_CONFIG_DIR")).map(PathBuf::from)));
-    }
-    let directory = options.config_directory.clone().or_else(|| {
-        environment
-            .var_os(OsStr::new("CLAUDE_CONFIG_DIR"))
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-    });
+            .or_else(|| environment.var_os(OsStr::new("CLAUDE_CONFIG_DIR")).map(PathBuf::from))
+    } else {
+        // `opt_env.get("CLAUDE_CONFIG_DIR") or os.environ.get("CLAUDE_CONFIG_DIR")`: falsy, so an empty value falls
+        // through to the next source and then to the home directory.
+        options
+            .config_directory
+            .clone()
+            .filter(|directory| !directory.as_os_str().is_empty())
+            .or_else(|| {
+                environment
+                    .var_os(OsStr::new("CLAUDE_CONFIG_DIR"))
+                    .filter(|value| !value.is_empty())
+                    .map(PathBuf::from)
+            })
+    };
     match directory {
-        Some(directory) if !directory.is_absolute() => Err(SessionError::UnsafeConfigPath),
+        Some(directory) if options.require_absolute_config_paths && !directory.is_absolute() => {
+            Err(SessionError::UnsafeConfigPath)
+        }
         directory => Ok(directory),
     }
 }
@@ -399,13 +408,15 @@ fn project_key_ts<F: SessionFileSystem, E: EnvironmentVariable>(
     )
 }
 
-fn home_dir<E: EnvironmentVariable>(environment: &E, ts: bool) -> Result<PathBuf, SessionError> {
+/// Both SDKs join a relative home directory as given; `require_absolute` is the opt-in
+/// [`SessionStoreOptions::require_absolute_config_paths`] check.
+fn home_dir<E: EnvironmentVariable>(environment: &E, require_absolute: bool) -> Result<PathBuf, SessionError> {
     let home = environment
         .var_os(OsStr::new(if cfg!(windows) { "USERPROFILE" } else { "HOME" }))
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .ok_or(SessionError::MissingConfigDirectory)?;
-    if !ts && !home.is_absolute() {
+    if require_absolute && !home.is_absolute() {
         return Err(SessionError::UnsafeConfigPath);
     }
     Ok(home)
@@ -513,11 +524,16 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
                 tracing::warn!(%subpath, "skipping unsafe subpath from list_subkeys");
                 continue;
             }
-            let subpath = match SessionSubpath::new(subpath) {
-                Ok(subpath) => subpath,
-                Err(error) => {
-                    tracing::warn!(%error, "skipping unsafe subpath from list_subkeys");
-                    continue;
+            let subpath = if self.ts {
+                // `Jtt` writes every subpath its check above lets through, `./agent` and `C:agent` included.
+                SessionSubpath::listed_by_typescript(subpath)
+            } else {
+                match SessionSubpath::new(subpath) {
+                    Ok(subpath) => subpath,
+                    Err(error) => {
+                        tracing::warn!(%error, "skipping unsafe subpath from list_subkeys");
+                        continue;
+                    }
                 }
             };
             let subkey = key.clone().with_subpath(subpath.clone());
@@ -842,7 +858,7 @@ where
     }
     let base = match configured_directory {
         Some(directory) => directory.to_path_buf(),
-        None => home_dir(environment, true)?,
+        None => home_dir(environment, false)?,
     };
     copy_if_present(
         filesystem,
