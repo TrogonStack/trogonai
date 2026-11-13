@@ -14,7 +14,7 @@ mod python;
 
 /// What one message line becomes.
 pub(crate) enum Decoded {
-    /// A message for the caller.
+    /// A message for the caller, boxed because the other variants carry nothing.
     Message(Box<Message>),
     /// TypeScript consumes `keep_alive` before anything else sees it.
     KeepAlive,
