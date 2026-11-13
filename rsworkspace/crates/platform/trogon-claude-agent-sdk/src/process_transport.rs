@@ -167,7 +167,7 @@ impl ProcessTransport {
         if let Some(config_dir) = config_dir {
             command.env("CLAUDE_CONFIG_DIR", config_dir);
         }
-        crate::cli_path::reject_windows_batch_cli(cli_path.as_os_str())?;
+        crate::cli_path::reject_windows_batch_cli(cli_path.as_os_str(), options.windows_batch_cli)?;
         let mut child = process.spawn(&mut command).map_err(|error| {
             if error.kind() == io::ErrorKind::NotFound {
                 match options.cwd.as_ref() {

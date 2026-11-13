@@ -15,7 +15,7 @@ use std::{collections::BTreeMap, ffi::OsString, path::PathBuf, sync::Arc};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
     ArgvStyle, ClaudeAgentOptions, ClaudeCodeMarker, ClaudeSdkClient, Environment, EnvironmentMode, ExtraArgument,
-    HookEvent, HookOutput, HookRegistration, McpDiscovery, ScriptRuntime, SystemPrompt, TraceContext,
+    HookEvent, HookOutput, HookRegistration, McpDiscovery, ScriptRuntime, SystemPrompt, TraceContext, UsdBudget,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -311,5 +311,33 @@ async fn a_custom_spawner_skips_cli_discovery_like_upstream_custom_transports() 
             .iter()
             .any(|argument| argument == "--await-initialize")
     );
+    Ok(())
+}
+
+/// Neither SDK validates the budget, so every amount reaches argv in the selected SDK's spelling.
+#[tokio::test]
+async fn r03_budgets_reach_argv_unvalidated_in_each_sdk_spelling() -> Result<(), Box<dyn std::error::Error>> {
+    for (amount, typescript, python) in [
+        (0.0, "--max-budget-usd=0", "0.0"),
+        (-1.0, "--max-budget-usd=-1", "-1.0"),
+        (1e-7, "--max-budget-usd=1e-7", "1e-07"),
+        (f64::NAN, "--max-budget-usd=NaN", "nan"),
+        (f64::INFINITY, "--max-budget-usd=Infinity", "inf"),
+    ] {
+        let mut options = base();
+        options.max_budget_usd = Some(UsdBudget::new(amount));
+        let capture = run(options, &[]).await?;
+        assert!(arguments(&capture).iter().any(|value| value == typescript), "{amount}");
+
+        let mut options = base();
+        options.argv_style = ArgvStyle::Python;
+        options.max_budget_usd = Some(UsdBudget::new(amount));
+        let arguments = arguments(&run(options, &[]).await?);
+        let flag = arguments
+            .iter()
+            .position(|value| value == "--max-budget-usd")
+            .ok_or("missing --max-budget-usd")?;
+        assert_eq!(arguments.get(flag + 1).map(String::as_str), Some(python), "{amount}");
+    }
     Ok(())
 }

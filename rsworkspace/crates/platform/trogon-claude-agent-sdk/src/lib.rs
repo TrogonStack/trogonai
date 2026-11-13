@@ -134,7 +134,7 @@ pub use bundled_cli::{
     bundled_cli_derives_client_app, find_bundled_cli, find_native_cli, meets_derived_client_app_minimum,
 };
 pub use cli_discovery::CliNotFoundError;
-pub use cli_path::CliPathError;
+pub use cli_path::{CliPathError, WindowsBatchCli};
 pub use client::{
     ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_turn_with_transport,
     query_with_adapters, query_with_transport,

@@ -238,7 +238,7 @@ fn typescript(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -
         equals(&mut a, "--max-turns", turns.to_string());
     }
     if let Some(budget) = &options.max_budget_usd {
-        equals(&mut a, "--max-budget-usd", budget.get().to_string());
+        equals(&mut a, "--max-budget-usd", budget.typescript_text());
     }
     if let Some(budget) = options.task_budget {
         equals(&mut a, "--task-budget", budget.total.to_string());
@@ -456,7 +456,7 @@ where
     }
     if let Some(budget) = &options.max_budget_usd {
         a.push("--max-budget-usd".into());
-        a.push(budget.get().to_string().into());
+        a.push(budget.python_text().into());
     }
     if !options.disallowed_tools.is_empty() {
         a.push("--disallowedTools".into());

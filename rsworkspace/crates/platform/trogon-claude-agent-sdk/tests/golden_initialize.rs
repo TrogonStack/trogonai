@@ -164,7 +164,7 @@ async fn typescript_initialize_matches_sdk_mjs_bytes() -> Result<(), Box<dyn std
     let schema: JsonObject = serde_json::from_str(r#"{"type":"object","properties":{"a":{"type":"string"}}}"#)?;
     let mut options = base();
     options.hooks = captured_hooks()?;
-    options.output_schema = Some(OutputSchema::new(schema)?);
+    options.output_schema = Some(OutputSchema::new(schema));
     options.system_prompt = SystemPrompt::Custom("be brief".into());
     options.supported_dialog_kinds = vec![DialogKind::from("k")];
     options.user_dialog_handler = Some(dialog_handler());

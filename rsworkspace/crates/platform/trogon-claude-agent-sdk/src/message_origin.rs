@@ -22,15 +22,22 @@ pub enum MessageOriginError {
 }
 
 impl MessageOrigin {
-    pub fn new(kind: impl Into<String>, additional_fields: JsonObject) -> Result<Self, MessageOriginError> {
-        let kind = kind.into();
+    /// Keeps `kind` and every other field, as both upstream SDKs pass an origin through. A `kind` inside
+    /// `additional_fields` is dropped, because an origin object, like the JavaScript one upstream, has one `kind`.
+    pub fn new(kind: impl Into<String>, mut additional_fields: JsonObject) -> Self {
+        additional_fields.shift_remove("kind");
+        Self {
+            kind: kind.into(),
+            additional_fields,
+        }
+    }
+
+    /// Opt-in: refuses a `kind` inside `additional_fields` instead of dropping it.
+    pub fn validated(kind: impl Into<String>, additional_fields: JsonObject) -> Result<Self, MessageOriginError> {
         if additional_fields.contains_key("kind") {
             return Err(MessageOriginError::ReservedField);
         }
-        Ok(Self {
-            kind,
-            additional_fields,
-        })
+        Ok(Self::new(kind, additional_fields))
     }
 
     pub fn kind(&self) -> &str {
@@ -44,7 +51,7 @@ impl MessageOrigin {
 impl TryFrom<MessageOriginWire> for MessageOrigin {
     type Error = MessageOriginError;
     fn try_from(value: MessageOriginWire) -> Result<Self, Self::Error> {
-        Self::new(value.kind, value.additional_fields)
+        Self::validated(value.kind, value.additional_fields)
     }
 }
 
