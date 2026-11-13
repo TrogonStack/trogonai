@@ -1,8 +1,7 @@
 use crate::registration_connection::RegistrationConnection;
 use crate::{
-    RegistrationArchiveConfig, RegistrationArchiveCreate, RegistrationArchiveError as Error,
-    RegistrationArchiveProfile, RegistrationArchiveRole, RegistrationArtifact, RegistrationArtifactInput,
-    RegistrationArtifactKind, Sha256Digest,
+    RegistrationArchiveConfig, RegistrationArchiveError as Error, RegistrationArchiveProfile, RegistrationArchiveRole,
+    RegistrationArtifact, RegistrationArtifactInput, RegistrationArtifactKind, Sha256Digest,
 };
 use async_nats::jetstream::{Context, kv, message::StreamMessage, stream::Info};
 use std::{
@@ -12,17 +11,20 @@ use std::{
     time::{Instant, SystemTime},
 };
 use trogon_nats::jetstream::{
-    JetStreamConditionalKvUpdate, NativeKvCasError, NativeKvExpectation, NativeKvKey, NativeKvScope, NativeKvUpdate,
-    StrictNativeStreamReader, strict_native_kv_operation,
+    NativeKvCasError, NativeKvExpectation, NativeKvKey, NativeKvScope, NativeKvUpdate, StrictNativeStreamReader,
+    conditional_native_kv_update, strict_native_kv_operation,
 };
 use trogon_nats::{NatsAuth, NatsConfig, NatsTls, NatsToken, connect_once_with_reconnect_quarantine};
 
+#[path = "registration_archive_create.rs"]
+mod registration_archive_create;
 #[path = "registration_archive_receipt.rs"]
 mod registration_archive_receipt;
 #[path = "registration_archive_source.rs"]
 mod registration_archive_source;
 #[path = "registration_artifact_observation.rs"]
 mod registration_artifact_observation;
+pub use registration_archive_create::RegistrationArchiveCreate;
 pub use registration_archive_receipt::RegistrationArchiveReceipt;
 use registration_archive_source::RegistrationArchiveSource;
 pub use registration_artifact_observation::RegistrationArtifactObservation;
@@ -195,10 +197,7 @@ impl RegistrationArchive {
             Arc::clone(self),
         ))
     }
-    pub(crate) async fn revalidate_original(
-        self: &Arc<Self>,
-        original: &RegistrationArtifactObservation,
-    ) -> Result<(), Error> {
+    async fn revalidate_original(self: &Arc<Self>, original: &RegistrationArtifactObservation) -> Result<(), Error> {
         let deadline = Instant::now() + crate::constants::OPERATION_TIMEOUT;
         let (artifact, revision) = self
             .read(
@@ -253,12 +252,11 @@ impl RegistrationArchive {
             expectation,
             NonZeroUsize::new(kind.maximum_message_bytes()).ok_or(Error::ArtifactBounds)?,
         );
-        let source = self.source(kind)?;
-        let source_created = source.created;
+        let source_created = self.source(kind)?.created;
         self.check_remaining(deadline)?;
         let native_revision = match tokio::time::timeout_at(
             deadline.into(),
-            source.bucket.conditional_update(&self.context, request),
+            conditional_native_kv_update(&self.context, request),
         )
         .await
         {

@@ -1,5 +1,4 @@
-const APPROVAL_WRAPPER_FRAMING_BYTES: usize = 70;
-const MAX_NATIVE_HEADER_BYTES: usize = 16 * 1024;
+use crate::constants::{APPROVAL_WRAPPER_FRAMING_BYTES, MAX_NATIVE_HEADER_BYTES};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegistrationArtifactKind {

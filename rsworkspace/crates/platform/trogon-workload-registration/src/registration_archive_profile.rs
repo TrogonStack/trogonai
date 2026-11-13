@@ -56,12 +56,8 @@ impl RegistrationArchiveProfile {
         }
     }
     pub fn inbox_prefix(&self, role: RegistrationArchiveRole) -> Result<DottedNatsToken, RegistrationArchiveError> {
-        DottedNatsToken::new(format!(
-            "_INBOX.registration_archive.{}.{}",
-            self.approval,
-            role.token()
-        ))
-        .map_err(RegistrationArchiveError::Subject)
+        DottedNatsToken::new(format!("_INBOX.ra.{}.{}", self.approval, role.token()))
+            .map_err(RegistrationArchiveError::Subject)
     }
     pub fn publish_allowlist(&self, role: RegistrationArchiveRole) -> Vec<String> {
         let mut result = Vec::new();

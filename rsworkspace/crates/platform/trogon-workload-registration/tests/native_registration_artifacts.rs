@@ -9,10 +9,11 @@ use buffa::{EnumValue, Message, MessageField};
 use buffa_types::google::protobuf::Timestamp;
 use bytes::Bytes;
 use ed25519_dalek::{Signer, SigningKey};
+use registration_archive_fixture::RegistrationArchiveFixture;
 use trogon_audit::{AuditName, AuditWriter, MemorySink, Stamper, WriterConfig, WriterId, WriterIdentity};
 use trogon_nats::jetstream::{
-    JetStreamConditionalKvUpdate, NativeKvExpectation, NativeKvKey, NativeKvScope, NativeKvUpdate,
-    StrictNativeStreamReader,
+    NativeKvExpectation, NativeKvKey, NativeKvScope, NativeKvUpdate, StrictNativeStreamReader,
+    conditional_native_kv_update,
 };
 use trogon_nats::{NatsToken, connect_once_with_inbox_prefix, test_support::TlsJetStreamCluster};
 use trogon_std::{SystemClock, UuidV7Generator};
@@ -168,8 +169,7 @@ async fn archive_create_requires_actual_ack_after_native_original_bytes_and_roll
     let scope = NativeKvScope::new(NatsToken::new(profile.bucket(RegistrationArtifactKind::OriginalApproval)).unwrap())
         .unwrap();
     let key = NativeKvKey::new(original.digest().to_hex()).unwrap();
-    let bucket = bounded(native.get_key_value(scope.bucket().as_str())).await.unwrap();
-    let acknowledged = bounded(bucket.conditional_update(
+    let acknowledged = bounded(conditional_native_kv_update(
         &native,
         NativeKvUpdate::new(
             &scope,
@@ -324,8 +324,7 @@ async fn archive_only_create_requires_native_ack_and_exact_original_byte_receipt
     let scope = NativeKvScope::new(NatsToken::new(profile.bucket(RegistrationArtifactKind::OriginalApproval)).unwrap())
         .unwrap();
     let key = NativeKvKey::new(original.digest().to_hex()).unwrap();
-    let bucket = bounded(native.get_key_value(scope.bucket().as_str())).await.unwrap();
-    let acknowledged = bounded(bucket.conditional_update(
+    let acknowledged = bounded(conditional_native_kv_update(
         &native,
         NativeKvUpdate::new(
             &scope,
@@ -383,7 +382,6 @@ mod registration_archive_fixture;
 
 #[tokio::test]
 async fn neutral_archive_preserves_ack_bytes_existing_observations_integrity_capacity_and_source_identity() {
-    use registration_archive_fixture::RegistrationArchiveFixture;
     let fixture = RegistrationArchiveFixture::start(4).await;
     let (_, first) = approval(&fixture.config, 1);
     let receipt = match fixture.archive.create_once(first.clone()).await.unwrap() {

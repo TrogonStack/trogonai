@@ -1,4 +1,4 @@
-use crate::{RegistrationArchiveReceipt, RegistrationArtifactObservation};
+use super::{RegistrationArchiveReceipt, RegistrationArtifactObservation};
 
 #[derive(Debug)]
 pub enum RegistrationArchiveCreate {

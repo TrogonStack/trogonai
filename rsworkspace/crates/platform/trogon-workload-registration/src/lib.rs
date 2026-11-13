@@ -15,7 +15,6 @@ mod publication_receipt;
 mod registration_archive;
 mod registration_archive_capacity;
 mod registration_archive_config;
-mod registration_archive_create;
 mod registration_archive_error;
 mod registration_archive_profile;
 mod registration_archive_role;
@@ -49,10 +48,11 @@ pub use error::RegistrationError;
 pub use producer_config::ProducerConfig;
 pub use producer_status::ProducerStatus;
 pub use publication_receipt::PublicationReceipt;
-pub use registration_archive::{RegistrationArchive, RegistrationArchiveReceipt, RegistrationArtifactObservation};
+pub use registration_archive::{
+    RegistrationArchive, RegistrationArchiveCreate, RegistrationArchiveReceipt, RegistrationArtifactObservation,
+};
 pub use registration_archive_capacity::RegistrationArchiveCapacity;
 pub use registration_archive_config::RegistrationArchiveConfig;
-pub use registration_archive_create::RegistrationArchiveCreate;
 pub use registration_archive_error::RegistrationArchiveError;
 pub use registration_archive_profile::RegistrationArchiveProfile;
 pub use registration_archive_role::RegistrationArchiveRole;
