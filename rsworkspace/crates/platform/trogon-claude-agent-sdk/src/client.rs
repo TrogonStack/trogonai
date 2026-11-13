@@ -183,9 +183,12 @@ impl ClaudeSdkClient {
         crate::shadow_warning::emit(&options);
         let initialization = driver::Initialization::new(&options, &adapters.environment)?;
         let closed = Closed::default();
+        // The transport forwards this controller to a `spawn_claude_code_process` process, so it is created here.
+        options.abort_controller.get_or_insert_default();
         // TypeScript derives a default debug file only when the SDK spawns the CLI and none was given.
         let derived_debug_file = (derive_debug_file
             && options.argv_style == crate::ArgvStyle::TypeScript
+            && options.spawn_claude_code_process.is_none()
             && options
                 .debug_file
                 .as_ref()
@@ -209,6 +212,11 @@ impl ClaudeSdkClient {
                 )
             }),
             closed: closed.clone(),
+            parent_environment: if options.spawn_claude_code_process.is_some() {
+                adapters.environment.vars_os()
+            } else {
+                Vec::new()
+            },
         })?;
         let version_check = (!crate::version_check::skip_requested(
             inherited

@@ -3245,13 +3245,24 @@
             "Options.spawnClaudeCodeProcess",
             "core.Options.spawnClaudeCodeProcess"
           ],
-          "prefixes": []
+          "prefixes": [
+            "SpawnOptions",
+            "core.SpawnOptions",
+            "SpawnedProcess",
+            "core.SpawnedProcess"
+          ]
         }
       },
       "rust_api": [
         "adapters::RuntimeAdapters",
         "adapters::SpawnProcess",
         "adapters::TokioProcessSpawner",
+        "ClaudeAgentOptions.spawn_claude_code_process",
+        "SpawnClaudeCodeProcess",
+        "SpawnOptions",
+        "ClaudeAgentOptions.on_process_spawned",
+        "OnProcessSpawned",
+        "ProcessSpawnInfo",
         "Transport",
         "ClaudeSdkClient::connect_with_adapters",
         "ClaudeSdkClient::connect_with_transport",
@@ -3317,10 +3328,30 @@
         {
           "path": "tests/transport.rs",
           "name": "t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirror"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "a_failing_custom_spawner_is_a_spawn_error"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "the_forwarded_signal_is_cancelled_only_once_an_aborted_client_has_closed"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "on_process_spawned_reports_the_pid_of_the_sdk_spawn"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "a_panicking_on_process_spawned_does_not_stop_the_query"
         }
       ],
       "status": "supported",
-      "rationale": "The public Transport trait is Python's Transport (connect, write, read_message in place of read_messages, close, is_ready, end_input) with a provided kill for TypeScript's abort. ClaudeSdkClient::connect_with_transport, query_with_transport and query_turn_with_transport inject one; the subprocess implementation is the default and the SpawnProcess adapter stays TypeScript's spawnClaudeCodeProcess. A custom transport gets no CLI discovery, argument list or store-backed resume materialization (the mirror still runs), as upstream."
+      "rationale": "The public Transport trait is Python's Transport (connect, write, read_message in place of read_messages, close, is_ready, end_input) with a provided kill for TypeScript's abort. ClaudeSdkClient::connect_with_transport, query_with_transport and query_turn_with_transport inject one; the subprocess implementation is the default. ClaudeAgentOptions.spawn_claude_code_process is TypeScript's spawnClaudeCodeProcess: it gets SpawnOptions with the command, arguments, working directory, the whole child environment and the forwarded abort signal, which is cancelled only when the client closes after its abort controller was cancelled, past the close grace. It returns a tokio Child in place of SpawnedProcess (stdin and stdout piped, stderr read when piped), so it runs anything a local command reaches, such as a container or remote shell; a peer that is not a process uses the Transport trait. As upstream, a custom spawn derives no default debug file and gets no onProcessSpawned call. ClaudeAgentOptions.on_process_spawned is TypeScript's onProcessSpawned, a runtime option its declarations omit: it gets the pid and spawnSyncMs of the SDK's own spawn, and a panic in it is logged and ignored as TypeScript ignores a throw. SpawnOptions.uid carries Python's user or run_as_uid for a spawner on Unix. The SpawnProcess adapter remains the injection seam for tests and hosts. A custom transport gets no CLI discovery, argument list or store-backed resume materialization (the mirror still runs), as upstream."
     },
     {
       "id": "browser-websocket-transport",

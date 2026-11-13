@@ -85,6 +85,68 @@ impl std::fmt::Debug for StderrHandler {
     }
 }
 
+/// TypeScript `SpawnOptions`: what [`SpawnClaudeCodeProcess`] receives.
+#[derive(Clone)]
+pub struct SpawnOptions {
+    /// The program: the CLI itself, or the script runtime when the CLI is a script.
+    pub command: OsString,
+    pub args: Vec<OsString>,
+    pub cwd: Option<PathBuf>,
+    /// The whole environment the CLI gets, not only the changes to the caller's.
+    pub env: std::collections::BTreeMap<OsString, OsString>,
+    /// TypeScript's forwarded abort signal: cancelled when the client closes after the query's abort controller was
+    /// cancelled, once the close grace is over, so hanging teardown on it never cuts the graceful shutdown short.
+    /// Cancelling it does not abort the query.
+    pub signal: crate::CancellationToken,
+    /// Python's `user` or `run_as_uid`, resolved to a uid (Unix only). TypeScript has no such option.
+    pub uid: Option<u32>,
+}
+
+impl std::fmt::Debug for SpawnOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SpawnOptions")
+            .field("command", &self.command)
+            .field("args", &self.args)
+            .field("cwd", &self.cwd)
+            .field("env", &self.env.keys().collect::<Vec<_>>())
+            .field("uid", &self.uid)
+            .finish_non_exhaustive()
+    }
+}
+
+/// TypeScript `spawnClaudeCodeProcess`: starts the CLI in place of the SDK. The child must have piped stdin and
+/// stdout; its stderr is read when piped. As in TypeScript, the SDK then derives no default debug file and does not
+/// call [`OnProcessSpawned`]. A failure is [`crate::Error::Spawn`].
+#[derive(Clone)]
+pub struct SpawnClaudeCodeProcess(
+    pub Arc<dyn Fn(SpawnOptions) -> std::io::Result<tokio::process::Child> + Send + Sync>,
+);
+
+impl std::fmt::Debug for SpawnClaudeCodeProcess {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("SpawnClaudeCodeProcess").finish_non_exhaustive()
+    }
+}
+
+/// The second argument of TypeScript's `onProcessSpawned`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProcessSpawnInfo {
+    /// `spawnSyncMs`: milliseconds the spawn call itself took.
+    pub spawn_sync_ms: f64,
+}
+
+/// TypeScript `onProcessSpawned`, a runtime option its declarations omit: called with the process id once the SDK
+/// has started the CLI itself. A panic in it is logged and ignored, as TypeScript ignores a throw.
+#[derive(Clone)]
+pub struct OnProcessSpawned(pub Arc<dyn Fn(u32, ProcessSpawnInfo) + Send + Sync>);
+
+impl std::fmt::Debug for OnProcessSpawned {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("OnProcessSpawned").finish_non_exhaustive()
+    }
+}
+
 /// One `extraArgs` entry. A `None` value is a bare flag. The flag is passed without the leading dashes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExtraArgument {

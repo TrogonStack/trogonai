@@ -337,6 +337,16 @@ upstream SDKs).
   argument list and no store-backed resume materialization, while the session
   store mirror still runs, as in Python. `read_message` must be cancel safe, and
   an `Err` from any method ends the run as `Error::Transport` surfaces it.
+- `spawn_claude_code_process` is TypeScript's `spawnClaudeCodeProcess`: the SDK
+  builds the command and hands `SpawnOptions` (command, arguments, working
+  directory, the whole child environment, a forwarded abort signal and, on Unix,
+  the uid from `user` or `run_as_uid`) to the callback, which returns a tokio
+  `Child` with piped stdin and stdout, so a container or remote shell can host the
+  CLI. The forwarded signal is cancelled only when the client closes after its
+  abort controller was cancelled, past the close grace. As in TypeScript, a
+  custom spawn gets no default debug file. `on_process_spawned` is TypeScript's
+  undeclared `onProcessSpawned`: after the SDK's own spawn it receives the pid
+  and `spawn_sync_ms`, and a panic in it is logged and ignored.
 - Bundled executables are caller-driven lookups, not part of `connect`.
   `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check.
   `bundled_cli_derives_client_app` and `meets_derived_client_app_minimum` port

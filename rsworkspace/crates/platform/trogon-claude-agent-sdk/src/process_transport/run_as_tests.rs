@@ -74,6 +74,7 @@ async fn killing_a_process_that_already_exited_succeeds_and_marks_the_stop_as_fo
         config_dir: None,
         derived_debug_file: None,
         secure_storage_config_dir: None,
+        parent_environment: Vec::new(),
         closed: super::Closed::default(),
     })?;
     let child = transport.child.as_mut().ok_or("the child was handed off")?;

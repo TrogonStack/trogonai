@@ -251,8 +251,8 @@ pub use permission_update::{
 };
 pub use plugin::{LocalPlugin, PluginDelivery};
 pub use process_options::{
-    ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, ScriptRuntime, StderrDelivery, StderrHandler,
-    TraceContext,
+    ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, OnProcessSpawned, ProcessSpawnInfo, ScriptRuntime,
+    SpawnClaudeCodeProcess, SpawnOptions, StderrDelivery, StderrHandler, TraceContext,
 };
 pub use prompt::Prompt;
 pub use python_json_value::{

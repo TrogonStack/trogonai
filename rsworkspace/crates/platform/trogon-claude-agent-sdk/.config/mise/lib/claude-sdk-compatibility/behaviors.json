@@ -3626,6 +3626,72 @@
         "src/driver.rs",
         "src/options.rs"
       ]
+    },
+    {
+      "id": "c21-custom-spawn",
+      "concept": "A caller-supplied spawn function starts the CLI",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources spawn the CLI only through their own subprocess transport; a custom peer is a Transport."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Ye={command:Mt,args:ln,cwd:o,env:c,signal:this.forwardedAbort.signal};if(this.options.spawnClaudeCodeProcess)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 207,
+        "sha256": "c46915dea3a9add0b1393846e8359a27930bbf3e106635960af81ce820ac2e87"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript hands spawnClaudeCodeProcess the command, arguments, working directory, the whole child environment and its forwarded abort signal, uses the process it returns in place of its own spawn, derives no default debug file for it, and aborts the forwarded signal only after the close grace when the caller's controller was aborted."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "subprocess::a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query",
+        "subprocess::a_failing_custom_spawner_is_a_spawn_error",
+        "subprocess::the_forwarded_signal_is_cancelled_only_once_an_aborted_client_has_closed"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/process_options.rs",
+        "src/process_transport.rs"
+      ]
+    },
+    {
+      "id": "c22-on-process-spawned",
+      "concept": "The SDK reports the process it spawned",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no spawn callback."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "i=performance.now(),a=Ket(t,n,{cwd:r,stdio:[\"pipe\",\"pipe\",\"pipe\"],signal:s,env:o,windowsHide:!0}),l=performance.now()-i;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 154,
+        "sha256": "6f6a8a4892fb80ac2d34eaea8210440aa465ad629488147fcd6a06b7c4224700"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "After its own spawn, TypeScript calls onProcessSpawned with the pid and the milliseconds the spawn call took, only when the pid is known, and logs and ignores a throw from it."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "subprocess::on_process_spawned_reports_the_pid_of_the_sdk_spawn",
+        "subprocess::a_panicking_on_process_spawned_does_not_stop_the_query"
+      ],
+      "rust": [
+        "src/process_options.rs",
+        "src/process_transport.rs"
+      ]
     }
   ]
 }

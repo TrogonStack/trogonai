@@ -93,6 +93,8 @@ integrity-verified published `0.3.319` declaration archive.
 | `trace_context: Option<TraceContext>` | `TRACEPARENT`, `TRACESTATE` | `TRACEPARENT`, `TRACESTATE` |
 | `stderr_handler: Option<StderrHandler>` | `stderr` callback (lines) | `stderr` callback (chunks) |
 | `abort_controller: Option<CancellationToken>` | not applicable | `abortController` |
+| `spawn_claude_code_process: Option<SpawnClaudeCodeProcess>` | not applicable | `spawnClaudeCodeProcess` (returns a tokio `Child` in place of `SpawnedProcess`) |
+| `on_process_spawned: Option<OnProcessSpawned>` | not applicable | `onProcessSpawned` (runtime option, not declared) |
 | `extra_args: Vec<ExtraArgument>` | `extra_args` | `extraArgs` |
 | `tools: ToolSet` (`CliDefault`, `Only`, `ClaudeCodePreset`) | `tools` list, empty list or `{type: "preset", preset: "claude_code"}` | `tools` list or preset object |
 | `script_runtime: ScriptRuntime` | not applicable | `executable`, `executableArgs` (a native path runs directly with the arguments first; a path ending in `.js`, `.mjs`, `.ts`, `.tsx` or `.jsx`, matched case-sensitively, runs under the executable) |

@@ -844,3 +844,186 @@ async fn compatibility_stream_event_retains_outer_metadata_separately() -> TestR
     );
     Ok(())
 }
+
+type Recorded<T> = Arc<std::sync::Mutex<Vec<T>>>;
+
+fn recorded<T: Clone>(slot: &Recorded<T>) -> Result<Vec<T>, Box<dyn StdError>> {
+    Ok(slot.lock().map_err(|_| std::io::Error::other("poisoned"))?.clone())
+}
+
+/// A `spawn_claude_code_process` that records what it was given and runs it as the SDK would.
+fn recording_spawner(
+    seen: Recorded<trogon_claude_agent_sdk::SpawnOptions>,
+) -> trogon_claude_agent_sdk::SpawnClaudeCodeProcess {
+    trogon_claude_agent_sdk::SpawnClaudeCodeProcess(Arc::new(move |spawn: trogon_claude_agent_sdk::SpawnOptions| {
+        let mut command = tokio::process::Command::new(&spawn.command);
+        command.args(&spawn.args).env_clear().envs(&spawn.env);
+        if let Some(cwd) = &spawn.cwd {
+            command.current_dir(cwd);
+        }
+        command
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        if let Ok(mut seen) = seen.lock() {
+            seen.push(spawn);
+        }
+        command.spawn()
+    }))
+}
+
+fn spawn_reporter(calls: Recorded<(u32, f64)>) -> trogon_claude_agent_sdk::OnProcessSpawned {
+    trogon_claude_agent_sdk::OnProcessSpawned(Arc::new(
+        move |pid: u32, info: trogon_claude_agent_sdk::ProcessSpawnInfo| {
+            if let Ok(mut calls) = calls.lock() {
+                calls.push((pid, info.spawn_sync_ms));
+            }
+        },
+    ))
+}
+
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    allow(
+        std_env_access,
+        reason = "The spawner must receive the inherited PATH, so the test reads the real process environment."
+    )
+)]
+#[tokio::test]
+async fn a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let seen = Recorded::default();
+    let calls = Recorded::default();
+    let mut options = options("normal")?;
+    options.cwd = Some(directory.path().to_path_buf());
+    options.env.insert("SPAWN_MARKER".into(), "custom".into());
+    options.spawn_claude_code_process = Some(recording_spawner(seen.clone()));
+    options.on_process_spawned = Some(spawn_reporter(calls.clone()));
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("through the spawner")).await?;
+    assert_eq!(read_result(&mut client).await?, "through the spawner");
+    client.disconnect().await?;
+    let seen = recorded(&seen)?;
+    let [spawn] = seen.as_slice() else {
+        return Err(std::io::Error::other(format!("expected one spawn, got {}", seen.len())).into());
+    };
+    assert_eq!(
+        std::path::Path::new(&spawn.command),
+        std::path::absolute(env!("CARGO_BIN_EXE_claude-sdk-fixture"))?
+    );
+    assert!(
+        spawn
+            .args
+            .iter()
+            .any(|arg| arg.to_string_lossy().contains("fixture:normal"))
+    );
+    // TypeScript derives no default debug file for a custom spawner.
+    assert!(
+        !spawn
+            .args
+            .iter()
+            .any(|arg| arg.to_string_lossy().starts_with("--debug-file"))
+    );
+    assert_eq!(spawn.cwd.as_deref(), Some(directory.path()));
+    assert_eq!(
+        spawn
+            .env
+            .get(std::ffi::OsStr::new("SPAWN_MARKER"))
+            .map(|value| value.as_os_str()),
+        Some(std::ffi::OsStr::new("custom"))
+    );
+    // The spawner gets the whole environment, the caller's included, not only the SDK's changes.
+    if let Some(path) = std::env::var_os("PATH") {
+        assert_eq!(spawn.env.get(std::ffi::OsStr::new("PATH")), Some(&path));
+    }
+    assert_eq!(spawn.uid, None);
+    // Closing without an abort leaves the forwarded signal alone, and TypeScript reports no spawn it did not make.
+    assert!(!spawn.signal.is_cancelled());
+    assert!(recorded(&calls)?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failing_custom_spawner_is_a_spawn_error() -> TestResult {
+    let mut options = options("normal")?;
+    options.spawn_claude_code_process = Some(trogon_claude_agent_sdk::SpawnClaudeCodeProcess(Arc::new(
+        |_: trogon_claude_agent_sdk::SpawnOptions| -> std::io::Result<tokio::process::Child> {
+            Err(std::io::Error::other("no machine"))
+        },
+    )));
+    let error = ClaudeSdkClient::connect(options)
+        .await
+        .err()
+        .ok_or_else(|| std::io::Error::other("connect succeeded without a process"))?;
+    assert!(
+        matches!(&error, Error::Spawn(source) if source.to_string() == "no machine"),
+        "{error:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_forwarded_signal_is_cancelled_only_once_an_aborted_client_has_closed() -> TestResult {
+    let seen = Recorded::default();
+    let controller = trogon_claude_agent_sdk::CancellationToken::new();
+    let mut options = options("blocked-stdin")?;
+    options.abort_controller = Some(controller.clone());
+    options.spawn_claude_code_process = Some(recording_spawner(seen.clone()));
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    let signal = recorded(&seen)?
+        .first()
+        .map(|spawn| spawn.signal.clone())
+        .ok_or_else(|| std::io::Error::other("the spawner was not called"))?;
+    controller.cancel();
+    // The forwarded signal is not the caller's: it waits for the close.
+    assert!(!signal.is_cancelled());
+    let end = timeout(Duration::from_secs(10), async {
+        loop {
+            match client.next_message().await {
+                Ok(Some(_)) => {}
+                Ok(None) => return None,
+                Err(error) => return Some(error),
+            }
+        }
+    })
+    .await?;
+    assert!(matches!(end, Some(Error::Aborted(_))), "{end:?}");
+    let _ = client.disconnect().await;
+    assert!(signal.is_cancelled());
+    Ok(())
+}
+
+#[tokio::test]
+async fn on_process_spawned_reports_the_pid_of_the_sdk_spawn() -> TestResult {
+    let calls = Recorded::default();
+    let mut options = options("normal")?;
+    options.on_process_spawned = Some(spawn_reporter(calls.clone()));
+    let client = ClaudeSdkClient::connect(options).await?;
+    let process_id = client.process_id();
+    client.disconnect().await?;
+    let calls = recorded(&calls)?;
+    let [(pid, spawn_sync_ms)] = calls.as_slice() else {
+        return Err(std::io::Error::other(format!("expected one report, got {}", calls.len())).into());
+    };
+    assert_eq!(Some(*pid), process_id);
+    assert!(spawn_sync_ms.is_finite() && *spawn_sync_ms >= 0.0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_panicking_on_process_spawned_does_not_stop_the_query() -> TestResult {
+    let mut options = options("normal")?;
+    options.on_process_spawned = Some(trogon_claude_agent_sdk::OnProcessSpawned(Arc::new(
+        |pid: u32, _: trogon_claude_agent_sdk::ProcessSpawnInfo| {
+            if pid > 0 {
+                std::panic::resume_unwind(Box::new("scripted onProcessSpawned failure"));
+            }
+        },
+    )));
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("still runs")).await?;
+    assert_eq!(read_result(&mut client).await?, "still runs");
+    client.disconnect().await?;
+    Ok(())
+}
