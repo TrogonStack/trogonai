@@ -21,7 +21,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     JsonObject, SdkSessionInfo, SessionId, SummaryDialect,
-    session_project_key::{canonicalize_lenient, sanitize_path},
+    session_project_key::{canonicalize_lenient, platform_nfc, sanitize_path},
     session_prompt::{PromptMode, entry_first_prompt_with, iso_to_epoch_ms},
     session_transcript::MessagePage,
 };
@@ -186,7 +186,7 @@ impl SessionFiles {
         if let Some(dir) = self.find_project_dir(canonical) {
             candidates.push((dir, canonical.to_owned()));
         }
-        for worktree in worktree_paths(canonical) {
+        for worktree in worktree_paths(canonical, SummaryDialect::Python) {
             if worktree == canonical {
                 continue;
             }
@@ -200,7 +200,7 @@ impl SessionFiles {
     fn sessions_for_project(&self, directory: &Path, include_worktrees: bool) -> Vec<SdkSessionInfo> {
         let canonical = canonicalize_lenient(directory);
         let worktrees = if include_worktrees {
-            worktree_paths(&canonical)
+            worktree_paths(&canonical, SummaryDialect::Python)
         } else {
             Vec::new()
         };
@@ -537,7 +537,7 @@ pub(crate) fn parse_session_info_from_lite(
 
 /// Runs `git worktree list --porcelain` in `cwd` with upstream's five second limit. Empty when git is missing or
 /// `cwd` is not in a repository.
-pub(crate) fn worktree_paths(cwd: &str) -> Vec<String> {
+pub(crate) fn worktree_paths(cwd: &str, dialect: SummaryDialect) -> Vec<String> {
     let Ok(mut child) = Command::new("git")
         .args([
             "-c",
@@ -585,7 +585,7 @@ pub(crate) fn worktree_paths(cwd: &str) -> Vec<String> {
     output
         .split('\n')
         .filter_map(|line| line.strip_prefix("worktree "))
-        .map(|path| path.nfc().collect())
+        .map(|path| platform_nfc(path, dialect))
         .collect()
 }
 

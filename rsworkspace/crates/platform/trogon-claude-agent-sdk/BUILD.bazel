@@ -22,7 +22,10 @@ rust_binary(
 
 workspace_crate(
     name = "trogon-claude-agent-sdk",
-    compile_data = ["README.md"] + glob(["tests/fixtures/fork_ts/*.jsonl"]),
+    compile_data = ["README.md"] + glob([
+        "tests/fixtures/fork_ts/*.jsonl",
+        "tests/fixtures/probe_ts/*.jsonl",
+    ]),
     crate_features = ["test-support"],
     # resolve_settings_differential reads its fixture tree through
     # CARGO_MANIFEST_DIR at run time, so it runs only under Cargo.

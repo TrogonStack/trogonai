@@ -1470,7 +1470,7 @@ async fn startup_fails_before_a_healthy_shutdown() -> Result<bool, Box<dyn std::
     std::thread::sleep(Duration::from_millis(100));
     drop(cli.stdout);
     drop(cli.stderr);
-    Ok(matches!(querying.await?, Err(Error::DriverStopped)))
+    Ok(matches!(querying.await?, Err(Error::NotReadyForWriting)))
 }
 
 #[tokio::test]
@@ -1500,7 +1500,7 @@ async fn a_startup_failure_is_reported_beside_the_error_that_stopped_the_session
     assert!(matches!(
         querying.await?,
         Err(Error::Cleanup { primary, cleanup })
-            if matches!(*primary, Error::DriverStopped) && matches!(*cleanup, Error::JsonDecode(_))
+            if matches!(*primary, Error::WriteToTerminatedProcess { .. }) && matches!(*cleanup, Error::JsonDecode(_))
     ));
     Ok(())
 }

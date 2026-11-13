@@ -446,7 +446,7 @@ async fn dropping_owner_shuts_down_even_when_command_handle_survives() -> TestRe
     observer.wait_for(ScriptedProcessEvent::StdinClosed).await?;
     assert!(matches!(
         handle.mcp_status().await,
-        Err(trogon_claude_agent_sdk::Error::DriverStopped)
+        Err(trogon_claude_agent_sdk::Error::NotReadyForWriting)
     ));
     Ok(())
 }

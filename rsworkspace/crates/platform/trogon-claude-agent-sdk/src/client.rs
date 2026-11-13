@@ -484,7 +484,7 @@ impl ClientHandle {
     pub async fn send_input(&self, input: crate::UserInput) -> Result<(), Error> {
         let (response, receiver) = oneshot::channel();
         self.enqueue(Command::Prompt { input, response }).await?;
-        receiver.await.map_err(|_| Error::DriverStopped)?
+        receiver.await.map_err(|_| self.stopped_error())?
     }
 
     pub async fn interrupt(&self) -> Result<crate::InterruptReceipt, Error> {
@@ -640,8 +640,15 @@ impl ClientHandle {
 
     async fn finish_with(&self, completion: Completion) -> Result<(), Error> {
         let (response, receiver) = oneshot::channel();
-        self.enqueue(Command::FinishInput { completion, response }).await?;
-        receiver.await.map_err(|_| Error::DriverStopped)?
+        let command = Command::FinishInput { completion, response };
+        match timeout(self.timeout, self.commands.send(command)).await {
+            Err(_) => Err(Error::CommandQueueTimeout),
+            // Upstream `endInput()` (TypeScript) and `end_input()` (Python) only close stdin and never fail, so ending
+            // the input of a run that already stopped is a no-op; the run's own error surfaces from the message
+            // stream.
+            Ok(Err(_)) => Ok(()),
+            Ok(Ok(())) => receiver.await.unwrap_or(Ok(())),
+        }
     }
 
     async fn control(&self, operation: ControlOperation, request: serde_json::Value) -> Result<JsonObject, Error> {
@@ -652,21 +659,26 @@ impl ClientHandle {
             response,
         })
         .await?;
-        receiver.await.map_err(|_| Error::DriverStopped)?
+        receiver.await.map_err(|_| self.stopped_error())?
     }
 
     async fn enqueue(&self, command: Command) -> Result<(), Error> {
         timeout(self.timeout, self.commands.send(command))
             .await
             .map_err(|_| Error::CommandQueueTimeout)?
-            .map_err(|_| {
-                // TypeScript: a write after the abort signal fired throws `AbortError("Operation aborted")`.
-                if self.aborted.load(std::sync::atomic::Ordering::SeqCst) {
-                    crate::AbortError::OPERATION.into()
-                } else {
-                    self.closed.write_error().unwrap_or(Error::DriverStopped)
-                }
-            })
+            .map_err(|_| self.stopped_error())
+    }
+
+    /// The error for a write that the stopped driver did not (or could not) accept. The driver records how the
+    /// process ended before it drops its queue, so a command still buffered when it stopped gets the same error as one
+    /// sent afterwards.
+    fn stopped_error(&self) -> Error {
+        // TypeScript: a write after the abort signal fired throws `AbortError("Operation aborted")`.
+        if self.aborted.load(std::sync::atomic::Ordering::SeqCst) {
+            crate::AbortError::OPERATION.into()
+        } else {
+            self.closed.write_error().unwrap_or(Error::DriverStopped)
+        }
     }
 }
 
