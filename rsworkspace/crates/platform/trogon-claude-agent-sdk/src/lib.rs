@@ -53,6 +53,14 @@ mod message_decode;
 mod message_id;
 mod message_origin;
 mod model_name;
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "the connector folder check starts calling these in a later change"
+    )
+)]
+mod node_path;
 mod option_error;
 mod options;
 mod output_schema;
