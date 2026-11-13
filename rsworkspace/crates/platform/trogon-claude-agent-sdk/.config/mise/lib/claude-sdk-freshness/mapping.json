@@ -1102,7 +1102,9 @@
       "rust_api": [
         "ToolPermissionHandler",
         "ToolPermissionRequest",
-        "PermissionDecision"
+        "PermissionDecision",
+        "ToolPermissionRequest.typed_input",
+        "PermissionDecision.allow_with_input"
       ],
       "tests": [
         {
@@ -1136,10 +1138,14 @@
         {
           "path": "tests/golden_inbound_control.rs",
           "name": "python_answers_requests_without_a_handler_like_claude_agent_sdk"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "permission_requests_expose_a_typed_input_that_allows_with_an_updated_input"
         }
       ],
       "status": "supported",
-      "rationale": "can_use_tool answers match sdk.mjs 0.3.323 and claude_agent_sdk 0.2.181 byte for byte in each ArgvStyle. TypeScript appends toolUseID, keeps decisionClassification, writes nothing for AnsweredOutOfBand, still writes a cancelled handler's answer and skips a redelivered in-flight request id; Python echoes the original input on allow, rejects a null result with its TypeError text, drops a cancelled handler without a response and runs a redelivered id twice (DuplicateControlRequests::RunBoth, opt-in). A missing handler is answered with each SDK's own error text. CLI rules can authorize before consulting the host."
+      "rationale": "can_use_tool answers match sdk.mjs 0.3.323 and claude_agent_sdk 0.2.181 byte for byte in each ArgvStyle. TypeScript appends toolUseID, keeps decisionClassification, writes nothing for AnsweredOutOfBand, still writes a cancelled handler's answer and skips a redelivered in-flight request id; Python echoes the original input on allow, rejects a null result with its TypeError text, drops a cancelled handler without a response and runs a redelivered id twice (DuplicateControlRequests::RunBoth, opt-in). A missing handler is answered with each SDK's own error text. CLI rules can authorize before consulting the host. ToolPermissionRequest.typed_input views input as the sdk-tools input type of tool_name, and PermissionDecision::allow_with_input sends a typed input back as updatedInput exactly as it encodes."
     },
     {
       "id": "permission-types",
@@ -1179,7 +1185,9 @@
         "ToolPermissionRequest",
         "McpServerProvenance",
         "ComputerFolder",
-        "MatchedAskRule"
+        "MatchedAskRule",
+        "ToolPermissionRequest.typed_input",
+        "PermissionDecision.allow_with_input"
       ],
       "tests": [
         {
@@ -1201,6 +1209,10 @@
         {
           "path": "tests/golden_inbound_control.rs",
           "name": "python_permission_answers_echo_the_original_input"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "permission_requests_expose_a_typed_input_that_allows_with_an_updated_input"
         }
       ],
       "status": "supported",
@@ -1246,7 +1258,9 @@
         "HookOutput.Json",
         "HookFailureMode",
         "HookInput",
-        "HookJSONOutput"
+        "HookJSONOutput",
+        "HookRequest.typed_tool_input",
+        "HookRequest.typed_tool_response"
       ],
       "tests": [
         {
@@ -1284,10 +1298,14 @@
         {
           "path": "tests/upstream_hooks.rs",
           "name": "an_output_no_member_declares_is_sent_unchanged"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "hook_requests_expose_typed_tool_inputs_and_responses"
         }
       ],
       "status": "supported",
-      "rationale": "Hook routing, cancellation (HookContext.signal is HookRequest.signal) and fail-closed blocking registration match upstream. HookRequest.typed_input decodes every input into the upstream HookInput union, and HookOutput.Json sends any upstream HookJSONOutput, sync or async, exactly as given, so no event-specific field is narrowed or dropped."
+      "rationale": "Hook routing, cancellation (HookContext.signal is HookRequest.signal) and fail-closed blocking registration match upstream. HookRequest.typed_input decodes every input into the upstream HookInput union, and HookOutput.Json sends any upstream HookJSONOutput, sync or async, exactly as given, so no event-specific field is narrowed or dropped. typed_tool_input and typed_tool_response view a tool event's tool_input and tool_response as the sdk-tools types of its tool_name; the input object is untouched, which is the dict and Any Python passes."
     },
     {
       "id": "hook-events",
@@ -2325,7 +2343,9 @@
         "AssistantMessage.to_sdk_message",
         "ResultMessage.to_sdk_message",
         "upstream::messages::SDKAssistantMessage",
-        "upstream::messages::SDKResultMessage"
+        "upstream::messages::SDKResultMessage",
+        "PermissionDenial",
+        "ResultMessage.typed_permission_denials"
       ],
       "tests": [
         {
@@ -2339,10 +2359,14 @@
         {
           "path": "tests/message_decoding.rs",
           "name": "python_decoding_yields_what_the_pinned_python_query_yields"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "permission_denials_keep_every_entry_with_raw_and_typed_access"
         }
       ],
       "status": "supported",
-      "rationale": "Every message keeps its exact wire object in raw, and to_sdk_message returns the generated upstream::messages type for it, so identity, origin, stop, terminal, model usage, permission denial and nested usage fields are typed as sdk.d.ts declares them. The corpus goldens from the pinned TypeScript and Python query() pin both views."
+      "rationale": "Every message keeps its exact wire object in raw, and to_sdk_message returns the generated upstream::messages type for it, so identity, origin, stop, terminal, model usage, permission denial and nested usage fields are typed as sdk.d.ts declares them. The corpus goldens from the pinned TypeScript and Python query() pin both views. typed_permission_denials wraps each permission_denials entry, as written, in a PermissionDenial whose raw value stays intact beside its tool_name, tool_use_id, tool_input, typed_input and SDKPermissionDenial views; Python keeps the same entries as list[Any]."
     },
     {
       "id": "future-messages",
@@ -2586,7 +2610,8 @@
         "upstream::messages::SDKMessage",
         "upstream::messages::SDKActiveGoalMessage",
         "Message.to_sdk_message",
-        "Message.to_active_goal_message"
+        "Message.to_active_goal_message",
+        "ContentBlock.typed_input"
       ],
       "tests": [
         {
@@ -2616,6 +2641,10 @@
         {
           "path": "tests/upstream_messages.rs",
           "name": "only_an_active_goal_message_types_as_one"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "tool_use_blocks_expose_a_typed_input_and_keep_the_raw_one"
         }
       ],
       "status": "supported",
@@ -3471,7 +3500,8 @@
       "rust_api": [
         "UserMessage.tool_use_result",
         "UserMessage.tool_use_result_object",
-        "UserMessage.to_sdk_message"
+        "UserMessage.to_sdk_message",
+        "UserMessage.typed_tool_use_result"
       ],
       "tests": [
         {
@@ -3489,10 +3519,18 @@
         {
           "path": "tests/message_decoding.rs",
           "name": "python_decoding_yields_what_the_pinned_python_query_yields"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "user_messages_expose_a_typed_tool_use_result_and_keep_the_raw_one"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "recorded_cli_tool_calls_decode_to_the_declared_types"
         }
       ],
       "status": "supported",
-      "rationale": "tool_use_result keeps any JSON value with omission distinct from null, which is what both pinned SDKs pass through on the wire; tool_use_result_object gives the dictionary view Python annotates. The goldens include list and null results."
+      "rationale": "tool_use_result keeps any JSON value with omission distinct from null, which is what both pinned SDKs pass through on the wire; tool_use_result_object gives the dictionary view Python annotates. The goldens include list and null results. typed_tool_use_result views the same value as the sdk-tools output type of the named tool, Unknown when that type does not reproduce it, and leaves tool_use_result unchanged."
     },
     {
       "id": "partial-event-envelope-metadata",
@@ -4652,6 +4690,122 @@
       ],
       "status": "supported",
       "rationale": "The first-party names each Python module imports are reachable from the crate root."
+    },
+    {
+      "id": "sdk-tool-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "modules.sdk-tools.d.ts.imports"
+          ],
+          "prefixes": [
+            "sdk-tools"
+          ]
+        }
+      },
+      "rust_api": [
+        "upstream::tool_inputs",
+        "upstream::tool_outputs",
+        "upstream::tool_inputs::ToolInputSchemas",
+        "upstream::tool_outputs::ToolOutputSchemas",
+        "ToolInputSchemas.for_tool",
+        "ToolOutputSchemas.for_tool"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_tool_inputs_fixtures.rs",
+          "name": "fixtures_cover_exactly_the_declared_inputs"
+        },
+        {
+          "path": "tests/upstream_tool_inputs_fixtures.rs",
+          "name": "every_built_in_tool_input_round_trips_its_upstream_shaped_fixture"
+        },
+        {
+          "path": "tests/upstream_tool_inputs_fixtures.rs",
+          "name": "the_input_union_round_trips_every_fixture_without_falling_back"
+        },
+        {
+          "path": "tests/upstream_tool_inputs_fixtures.rs",
+          "name": "the_input_union_has_exactly_the_members_upstream_declares"
+        },
+        {
+          "path": "tests/upstream_tool_outputs_fixtures.rs",
+          "name": "fixtures_cover_exactly_the_declared_outputs"
+        },
+        {
+          "path": "tests/upstream_tool_outputs_fixtures.rs",
+          "name": "every_built_in_tool_output_round_trips_its_upstream_shaped_fixture"
+        },
+        {
+          "path": "tests/upstream_tool_outputs_fixtures.rs",
+          "name": "the_output_union_round_trips_every_fixture"
+        },
+        {
+          "path": "tests/upstream_tool_inputs.rs",
+          "name": "string_literal_fields_decode_known_values_and_keep_unlisted_ones"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "every_declared_input_decodes_to_its_tool_type_and_reencodes_unchanged"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "every_declared_output_decodes_to_its_tool_type_and_reencodes_unchanged"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "union_outputs_pick_the_member_the_generated_union_picks"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "legacy_aliases_decode_to_the_type_of_the_tool_they_resolve_to"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "values_the_named_type_does_not_reproduce_stay_unknown_and_unchanged"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "recorded_cli_tool_calls_decode_to_the_declared_types"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Every input and output type in the pinned sdk-tools.d.ts, the ToolInputSchemas and ToolOutputSchemas unions included, is generated with undeclared keys kept in order so encoding reproduces the value. ToolInputSchemas::for_tool and ToolOutputSchemas::for_tool pick the type sdk-tools declares for a tool name (legacy aliases resolved as the pinned CLI resolves them, mcp__ names as McpInput and McpOutput) and fall back to Unknown with the value unchanged, never validating or rewriting it. Python declares no tool types; its tool_use_result, tool_input and tool_response stay the raw JSON values the Rust messages also keep. Tool calls recorded from the pinned CLI decode to the declared types."
+    },
+    {
+      "id": "builtin-tool-names",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "BUILTIN_TOOL_NAMES",
+            "core.BUILTIN_TOOL_NAMES"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "BuiltinToolName",
+        "BuiltinToolName.ALL",
+        "BuiltinToolName.LEGACY_ALIASES",
+        "BuiltinToolName.canonical_name",
+        "BuiltinToolName.REFRESH_MCP_TOOLS"
+      ],
+      "tests": [
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "builtin_constants_name_every_cli_tool_in_cli_order"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "legacy_aliases_resolve_like_the_cli_and_other_names_pass_through"
+        },
+        {
+          "path": "tests/builtin_tool_name.rs",
+          "name": "builtin_names_preserve_open_ended_names_and_converted_tool_names"
+        }
+      ],
+      "status": "supported",
+      "rationale": "BuiltinToolName::ALL lists the BUILTIN_TOOL_NAMES tuple in its order, each with its own constant, and any other name is still accepted as written. LEGACY_ALIASES and canonical_name resolve the legacy names the pinned CLI still accepts; the Eval alias is left out because the CLI applies it only in its gated REPL mode. Python exports no such list."
     }
   ]
 }
