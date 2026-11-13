@@ -20,6 +20,22 @@ mod client;
 mod client_app;
 mod client_app_derivation;
 mod config_value;
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "the connector folder check starts calling these in a later change"
+    )
+)]
+mod connector_folder;
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "the connector folder check starts calling these in a later change"
+    )
+)]
+mod connector_vetting;
 mod constants;
 mod control;
 mod control_request_id;

@@ -132,11 +132,21 @@ fn eq_str(s: &[u16], text: &str) -> bool {
 }
 
 /// `toLowerCase` keeps lone surrogates, and a lone surrogate ends the final-sigma context.
-fn lower(s: &[u16]) -> JsString {
-    fn flush(run: &mut String, out: &mut JsString) {
-        out.extend(run.to_lowercase().encode_utf16());
+pub(crate) fn lower(s: &[u16]) -> JsString {
+    map_runs(s, str::to_lowercase)
+}
+
+/// `toUpperCase`, keeping lone surrogates the same way.
+pub(crate) fn upper(s: &[u16]) -> JsString {
+    map_runs(s, str::to_uppercase)
+}
+
+/// Applies a whole-string conversion to each run of well-formed text, passing lone surrogates through untouched.
+pub(crate) fn map_runs(s: &[u16], convert: impl Fn(&str) -> String) -> JsString {
+    let flush = |run: &mut String, out: &mut JsString| {
+        out.extend(convert(run.as_str()).encode_utf16());
         run.clear();
-    }
+    };
     let mut out = JsString::with_capacity(s.len());
     let mut run = String::new();
     for unit in char::decode_utf16(s.iter().copied()) {
