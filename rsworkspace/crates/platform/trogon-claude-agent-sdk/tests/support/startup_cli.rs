@@ -47,8 +47,13 @@ pub struct Script {
     pub claim_init: Option<Value>,
     /// Lines read after the initialize request before any of them is answered.
     pub hold: usize,
-    /// Answers a user message with this frame and exits at once instead of the success result.
-    /// The exit code the process reports once the input ended or an error result was sent.
+    /// Answers the initialize request with this frame and exits at once, as a CLI that refuses to start does.
+    pub error_on_init: Option<Value>,
+    /// Answers the first prompt with this frame instead of a success result, then waits for the input to end.
+    pub error_on_user: Option<Value>,
+    /// Frames written this long after the process started, in order.
+    pub timeline: Vec<(Duration, Value)>,
+    /// The exit code the process reports once the input ended or it refused to start.
     pub exit_code: i32,
 }
 
@@ -88,8 +93,8 @@ pub async fn answer(stdout: &mut tokio::io::DuplexStream, script: &Script, line:
     let refuse =
         |error: &str| json!({"type":"control_response","response":{"subtype":"error","request_id":id,"error":error}});
     let frame = if request["type"] == "user" {
-        json!({"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,
-            "result":"ok","session_id":"s","total_cost_usd":0,"usage":{},"modelUsage":{},"permission_denials":[],"uuid":uuid(2)})
+        script.error_on_user.clone().unwrap_or_else(|| json!({"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,
+            "result":"ok","session_id":"s","total_cost_usd":0,"usage":{},"modelUsage":{},"permission_denials":[],"uuid":uuid(2)}))
     } else {
         let subtype = request["request"]["subtype"].as_str().unwrap_or_default();
         if subtype == "initialize" {
@@ -126,8 +131,35 @@ pub async fn serve(process: ScriptedProcessHarness, script: Script) -> io::Resul
         send(&mut stdout, frame).await?;
     }
     let mut held: Option<Vec<String>> = None;
-    while let Some(line) = lines.next_line().await? {
+    let origin = tokio::time::Instant::now();
+    let mut timeline: std::collections::VecDeque<(Duration, Value)> = script.timeline.iter().cloned().collect();
+    loop {
+        let next = timeline.front().map(|(after, _)| origin + *after);
+        let due = async {
+            match next {
+                Some(at) => tokio::time::sleep_until(at).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        let line = tokio::select! {
+            () = due => {
+                if let Some((_, frame)) = timeline.pop_front() {
+                    send(&mut stdout, &frame).await?;
+                }
+                continue;
+            }
+            line = lines.next_line() => line?,
+        };
+        let Some(line) = line else {
+            break;
+        };
         written.push(line.clone());
+        if let Some(frame) = &script.error_on_init
+            && line.contains("\"subtype\":\"initialize\"")
+        {
+            send(&mut stdout, frame).await?;
+            break;
+        }
         if let Some(batch) = held.as_mut() {
             batch.push(line);
             if batch.len() < script.hold {

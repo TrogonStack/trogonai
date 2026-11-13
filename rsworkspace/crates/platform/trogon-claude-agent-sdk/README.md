@@ -84,7 +84,7 @@ returns a `WarmQuery`. `WarmQuery::query(prompt)` writes the prompt to that proc
 SessionStart or Setup hook running, for at most 10 minutes; a value you pass counts throughout. A timeout is
 `Error::InitializeTimeout` with the upstream text, the `initialize_timeout` error class, the last startup mark
 (or `none`) and its age. The process gets `CLAUDE_CODE_SDK_READS_STARTUP_MARKS=1` unless the environment has that
-key in any letter case.
+key in any letter case. An error result exit carries `ResultError::startup_failure_reason`.
 
 ## Messages and controls
 

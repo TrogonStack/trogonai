@@ -4818,7 +4818,10 @@
         "typescript": {
           "symbols": [
             "startup",
-            "core.startup"
+            "core.startup",
+            "SDKStartupFailureReason",
+            "core.SDKStartupFailureReason",
+            "sdk.coreTypes.SDKStartupFailureReason"
           ],
           "prefixes": [
             "WarmQuery",
@@ -4835,6 +4838,7 @@
         "WarmQuery.close",
         "WarmQuery.dispose",
         "InitializeTimeoutError",
+        "ResultError.startup_failure_reason",
         "StartupHooksRunning"
       ],
       "tests": [
@@ -4863,6 +4867,42 @@
           "name": "the_timeout_says_what_the_reported_hooks_did"
         },
         {
+          "path": "tests/golden_startup.rs",
+          "name": "an_error_result_exit_names_why_startup_failed"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_waits_sixty_seconds_when_no_hook_is_reported"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_does_not_count_one_hooks_time"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_counts_overlapping_hooks_once"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_stops_not_counting_hook_time_after_ten_minutes"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "an_error_result_after_a_prompt_is_a_message_and_a_nonzero_exit_then_names_it"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "an_error_result_after_a_prompt_ends_the_stream_cleanly_when_the_process_exits_zero"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "a_reason_the_sdk_does_not_list_is_kept_and_a_non_string_is_dropped"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_error_result_text_trims_and_joins_the_errors_or_uses_the_result_of_a_success_subtype"
+        },
+        {
           "path": "src/startup_timeout_tests.rs",
           "name": "a_passed_limit_counts_hook_time"
         },
@@ -4889,10 +4929,14 @@
         {
           "path": "src/startup_timeout_tests.rs",
           "name": "frames_map_to_startup_events"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "an_error_result_exposes_the_startup_failure_reason"
         }
       ],
       "status": "supported",
-      "rationale": "startup() returns a WarmQuery after the initialize handshake, with the TypeScript initialize timer (60000 ms default, SessionStart and Setup hook time uncounted for at most 10 minutes only when no value is passed) and startup marks. Goldens were captured live from the real sdk.mjs 0.3.323 talking to a scripted CLI, except the default timer hook accounting, covered by unit tests of the same code paths. Python 0.2.181 has no pre-warming. WarmQuery::query consumes self instead of throwing on a second call, so the once-only rule is enforced by Rust's type system."
+      "rationale": "startup() returns a WarmQuery after the initialize handshake, with the TypeScript initialize timer (60000 ms default, SessionStart and Setup hook time uncounted for at most 10 minutes only when no value is passed), startup marks and the SDKStartupFailureReason on the error result exit. Every golden, including the error result exit text and the default timer hook accounting, was captured live from the real sdk.mjs 0.3.323 talking to a scripted CLI (the default timer runs about 60 seconds there and under paused time here). Python 0.2.181 has no pre-warming. WarmQuery::query consumes self instead of throwing on a second call, so the once-only rule is enforced by Rust's type system."
     }
   ]
 }

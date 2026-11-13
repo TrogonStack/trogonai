@@ -3961,14 +3961,18 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "startup() races the initialize answer against a timer. Without initializeTimeoutMs it allows 60000 ms and does not count the time in which Claude Code reports a SessionStart or Setup hook running, for at most 600000 ms; a value the caller passes counts throughout. The error names the limit, the uncounted seconds and what the reported hooks did, and carries the errorClass initialize_timeout with its first sentence as telemetryMessage."
+        "behavior": "startup() races the initialize answer against a timer. Without initializeTimeoutMs it allows 60000 ms and does not count the time in which Claude Code reports a SessionStart or Setup hook running, for at most 600000 ms; a value the caller passes counts throughout. The error names the limit, the uncounted seconds and what the reported hooks did, and carries the errorClass initialize_timeout with its first sentence as telemetryMessage. The default 60000 ms run and its uncounted hook seconds were captured live with a node harness that sent the hook frames at fixed offsets and never answered initialize. The ten minute cap was captured the same way: a Setup hook open from 20 seconds on made the timeout fire at 660 seconds and report 600 uncounted seconds."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
         "golden_startup::a_passed_timeout_counts_from_the_start_and_names_the_last_mark",
-        "golden_startup::the_timeout_says_what_the_reported_hooks_did"
+        "golden_startup::the_timeout_says_what_the_reported_hooks_did",
+        "golden_startup::the_default_timeout_waits_sixty_seconds_when_no_hook_is_reported",
+        "golden_startup::the_default_timeout_does_not_count_one_hooks_time",
+        "golden_startup::the_default_timeout_counts_overlapping_hooks_once",
+        "golden_startup::the_default_timeout_stops_not_counting_hook_time_after_ten_minutes"
       ],
       "rust": [
         "src/startup_timeout.rs",
@@ -4072,6 +4076,41 @@
       "rust": [
         "src/prewarm.rs",
         "src/client.rs"
+      ]
+    },
+    {
+      "id": "p01-startup-failure-reason",
+      "concept": "Why an error result exit names a startup failure",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Claude Code returned an error result: ${t}`),{telemetryMessage:\"Claude Code returned an error result\",errorClass:\"error_result\",startupFailureReason:this.lastStartupFailureReason}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "e32a4bcde810b829667169dce0382775f276082c55425eac14e787fc73091ad9"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The error that replaces a failed exit carries startupFailureReason, the startup_failure_reason of the last error result when it is a string, so a host can tell a refusal to start from any other failure. The error text is the result text of a success subtype or the trimmed, non-empty errors joined by a semicolon and a space. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI. An error result that follows a prompt reaches the caller as a message; the stream throws the replacement error only when the process then exits with a nonzero code, and a zero exit ends it without an error."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_startup::an_error_result_exit_names_why_startup_failed",
+        "golden_startup::a_reason_the_sdk_does_not_list_is_kept_and_a_non_string_is_dropped",
+        "golden_startup::the_error_result_text_trims_and_joins_the_errors_or_uses_the_result_of_a_success_subtype",
+        "golden_startup::an_error_result_after_a_prompt_is_a_message_and_a_nonzero_exit_then_names_it",
+        "golden_startup::an_error_result_after_a_prompt_ends_the_stream_cleanly_when_the_process_exits_zero"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/error.rs"
       ]
     }
   ]

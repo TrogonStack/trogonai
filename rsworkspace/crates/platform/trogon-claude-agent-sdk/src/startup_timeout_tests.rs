@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
+use crate::upstream::messages::SDKStartupFailureReason;
 
 fn at(base: Instant, millis: u64) -> Instant {
     base + Duration::from_millis(millis)
@@ -215,4 +216,18 @@ fn frames_map_to_startup_events() {
         now,
     );
     assert!(matches!(done, Some(StartupEvent::HookResponse { id, .. }) if id == "undefined"));
+}
+
+#[test]
+fn an_error_result_exposes_the_startup_failure_reason() {
+    let error = |raw: &str| crate::ResultError::new("boom".to_owned(), frame(raw), Some(1));
+    assert_eq!(
+        error(r#"{"type":"result","startup_failure_reason":"cwd_unavailable"}"#).startup_failure_reason(),
+        Some(SDKStartupFailureReason::CwdUnavailable)
+    );
+    assert_eq!(
+        error(r#"{"type":"result","startup_failure_reason":7}"#).startup_failure_reason(),
+        None
+    );
+    assert_eq!(error(r#"{"type":"result"}"#).startup_failure_reason(), None);
 }

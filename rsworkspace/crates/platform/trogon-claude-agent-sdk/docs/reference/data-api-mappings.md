@@ -144,6 +144,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `StartupOptions.initialize_timeout` (`None`: 60000 ms, hook time uncounted up to 10 minutes) | not applicable | `initializeTimeoutMs` |
 | `StartupOptions.on_startup_hooks_running`, `StartupHooksRunning` | not applicable | `onStartupHooksRunning` |
 | `Error::InitializeTimeout`, `InitializeTimeoutError` | not applicable | `errorClass: "initialize_timeout"`, `startupMark`, `startupMarkAgeMs` |
+| `ResultError::startup_failure_reason` | not applicable | `startupFailureReason` |
 
 ## Query controls
 

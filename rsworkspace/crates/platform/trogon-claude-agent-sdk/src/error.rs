@@ -627,6 +627,15 @@ impl ResultError {
     pub fn session_id(&self) -> Option<&str> {
         self.data.get("session_id").and_then(serde_json::Value::as_str)
     }
+
+    /// TypeScript's `startupFailureReason`: the error result's `startup_failure_reason` when it is a string.
+    pub fn startup_failure_reason(&self) -> Option<crate::upstream::messages::SDKStartupFailureReason> {
+        let reason = self.data.get("startup_failure_reason")?;
+        if !reason.is_string() {
+            return None;
+        }
+        serde_json::from_value(reason.clone()).ok()
+    }
 }
 
 /// Python `CLINotFoundError.__init__(message, cli_path)`: the message (default `Claude Code not found`), then
