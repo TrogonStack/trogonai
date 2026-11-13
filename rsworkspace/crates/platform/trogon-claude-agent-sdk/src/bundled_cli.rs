@@ -12,8 +12,10 @@ use std::{
 };
 
 use crate::{
-    adapters::{CanonicalizePath, ReadMetadata},
-    constants::{BUNDLED_DIRECTORY, PACKAGE_SCOPE_NAME},
+    adapters::{CanonicalizePath, ReadFile, ReadMetadata},
+    constants::{
+        BUNDLED_CLI_VERSION_FILE, BUNDLED_DIRECTORY, DERIVED_CLIENT_APP_MINIMUM_CLAUDE_CODE_VERSION, PACKAGE_SCOPE_NAME,
+    },
 };
 
 fn is_file<F: ReadMetadata>(filesystem: &F, path: &Path) -> bool {
@@ -27,6 +29,58 @@ pub fn find_bundled_cli<F: ReadMetadata>(package_root: &Path, windows: bool, fil
         .join(BUNDLED_DIRECTORY)
         .join(if windows { "claude.exe" } else { "claude" });
     is_file(filesystem, &candidate).then_some(candidate)
+}
+
+/// The leading `major.minor.patch` of a version string, like Python's `re.match(r"(\d{1,9})\.(\d{1,9})\.(\d{1,9})")`:
+/// anchored at the start, nothing is required after the patch number and a patch run longer than nine digits is
+/// cut at nine. Only ASCII digits count, where `\d` also accepts other Unicode decimal digits.
+fn leading_version(version: &str) -> Option<[u32; 3]> {
+    fn number(text: &str, exact: bool) -> Option<(u32, &str)> {
+        let digits = text.bytes().take_while(u8::is_ascii_digit).count();
+        let take = if exact { digits } else { digits.min(9) };
+        if take == 0 || take > 9 {
+            return None;
+        }
+        text[..take].parse().ok().map(|value| (value, &text[take..]))
+    }
+    let (major, rest) = number(version, true)?;
+    let (minor, rest) = number(rest.strip_prefix('.')?, true)?;
+    let (patch, _) = number(rest.strip_prefix('.')?, false)?;
+    Some([major, minor, patch])
+}
+
+/// Python `_meets_derived_client_app_minimum`: the version starts with `major.minor.patch` and that triple is not
+/// below `999.0.0`, compared as a list. Nothing qualifies until upstream lowers the minimum.
+pub fn meets_derived_client_app_minimum(version: &str) -> bool {
+    leading_version(version).is_some_and(|parsed| parsed >= DERIVED_CLIENT_APP_MINIMUM_CLAUDE_CODE_VERSION)
+}
+
+/// Python `_derive_client_app` for the bundled executable: whether `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` is
+/// derived. It is when the pinned CLI version of the SDK package (`pinned_cli_version`, Python's
+/// `__cli_version__`) meets the minimum, `cli_path` is the bundled executable that [`find_bundled_cli`] finds
+/// under `package_root`, and the `claude.version` file beside it records a version that meets the minimum. A
+/// missing or unreadable record, or one that is not UTF-8, means no. Any other executable counts as too old.
+///
+/// TypeScript has neither the gate nor the trigger, so `connect` does not call this; the caller that derives
+/// the label asks here when it uses the bundled executable.
+pub fn bundled_cli_derives_client_app<F: ReadMetadata, H: ReadFile>(
+    cli_path: &Path,
+    package_root: &Path,
+    windows: bool,
+    pinned_cli_version: &str,
+    filesystem: &F,
+    host: &H,
+) -> bool {
+    if !meets_derived_client_app_minimum(pinned_cli_version) {
+        return false;
+    }
+    if find_bundled_cli(package_root, windows, filesystem).as_deref() != Some(cli_path) {
+        return false;
+    }
+    host.read_file(&cli_path.with_file_name(BUNDLED_CLI_VERSION_FILE))
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .is_some_and(|recorded| meets_derived_client_app_minimum(&recorded))
 }
 
 /// The platform a native package is selected for, spelled like Node's `process.platform` and `process.arch`.

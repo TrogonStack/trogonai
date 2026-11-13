@@ -39,8 +39,8 @@
       "concept": "Non-JSON CLI stdout lines",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 199,
-        "line_end": 221,
+        "line_start": 213,
+        "line_end": 235,
         "sha256": "82674a3b8e39ff834085da7b9c07508d6d4b24ef16533cbc6f80472e502db608"
       },
       "typescript": {
@@ -50,7 +50,7 @@
         "occurrences": 1,
         "span_before": 120,
         "span_after": 60,
-        "sha256": "69863888977cd6dfdc89bc3a0f20611c599ee56212d5f02755c8fa70396f0299"
+        "sha256": "724eb2414aeecfd605805181d2e29f219b237739288822374175ebcd4cbf3780"
       },
       "upstream": {
         "verdict": "disagree",
@@ -84,7 +84,7 @@
         "occurrences": 3,
         "span_before": 30,
         "span_after": 420,
-        "sha256": "897542e981051a733da65f79d20c39ae547b37e4bd2a8004c813abd8fe30b6f6"
+        "sha256": "7ef142a5b7d65e80235c910cd4cd7454cafa6f76ce7cfb1d0839e1cd974092bd"
       },
       "upstream": {
         "verdict": "agree",
@@ -149,7 +149,7 @@
         "occurrences": 1,
         "span_before": 110,
         "span_after": 50,
-        "sha256": "23bc19154e1be97e8efccfeba1a909ef6e566c14e1c5facfe5fbc093a4a1a2bf"
+        "sha256": "d4e7d1456ec778820278ace5a3f84818c0d0059e0406e866e35190f1aa78d457"
       },
       "upstream": {
         "verdict": "agree",
@@ -214,7 +214,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 320,
-        "sha256": "0e4f10c056329c0462ac9f8d611594c6d9dcb4629a2d17e7fd5b840c79d920a1"
+        "sha256": "92e7576785b4625d03dfba5fb061a4b1525715f54dac2226b00c72485bdc1d19"
       },
       "upstream": {
         "verdict": "agree",
@@ -244,7 +244,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 320,
-        "sha256": "0e4f10c056329c0462ac9f8d611594c6d9dcb4629a2d17e7fd5b840c79d920a1"
+        "sha256": "92e7576785b4625d03dfba5fb061a4b1525715f54dac2226b00c72485bdc1d19"
       },
       "upstream": {
         "verdict": "agree",
@@ -274,7 +274,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 320,
-        "sha256": "0e4f10c056329c0462ac9f8d611594c6d9dcb4629a2d17e7fd5b840c79d920a1"
+        "sha256": "92e7576785b4625d03dfba5fb061a4b1525715f54dac2226b00c72485bdc1d19"
       },
       "upstream": {
         "verdict": "agree",
@@ -304,7 +304,7 @@
         "occurrences": 1,
         "span_before": 70,
         "span_after": 2,
-        "sha256": "517601c6e5d57e22f115a753e7af6a9340c3c4a0723cf7a4c94c4d2dbb28ac08"
+        "sha256": "ef1af33f781fe535f15907e755ccc7771f4e612fd87c97669000d9c4077af8bb"
       },
       "upstream": {
         "verdict": "agree",
@@ -335,7 +335,7 @@
         "occurrences": 1,
         "span_before": 200,
         "span_after": 60,
-        "sha256": "3b72a80b04294b823f5f322c352068ac0a16ff96b1a3e6a910b06a65e0b2cc30"
+        "sha256": "f9f4e745afad4ee138ad23a7a12499b9edb89cc875a5b3ae7279a165a1dc949d"
       },
       "upstream": {
         "verdict": "agree",
@@ -367,7 +367,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 520,
-        "sha256": "3617e51e1edcd3812973a43ff060f8bfefcc2fdc7f4bd5267505544359b678c6"
+        "sha256": "bc5ffe95ef140369072521fdc443c7a14831eb36fc8c73c97c84b29a9a38e8db"
       },
       "upstream": {
         "verdict": "agree",
@@ -421,8 +421,8 @@
       "concept": "tools, allowedTools and disallowedTools argv",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 527,
-        "line_end": 552,
+        "line_start": 541,
+        "line_end": 566,
         "sha256": "479069eb36f4a7eab2e79fade36c255755925777fa643ca06612b249ceec1477"
       },
       "typescript": {
@@ -432,7 +432,7 @@
         "occurrences": 1,
         "span_before": 170,
         "span_after": 60,
-        "sha256": "dee400545c0c024a4184b82c9d9bc661d03dcec55bc794b7acf437ce70549bc0"
+        "sha256": "db11172b3dff7b3c339408a348e84490485e6e8fcf8bc5588ee26b7656da61f9"
       },
       "upstream": {
         "verdict": "agree",
@@ -464,7 +464,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 520,
-        "sha256": "3617e51e1edcd3812973a43ff060f8bfefcc2fdc7f4bd5267505544359b678c6"
+        "sha256": "bc5ffe95ef140369072521fdc443c7a14831eb36fc8c73c97c84b29a9a38e8db"
       },
       "upstream": {
         "verdict": "agree",
@@ -565,7 +565,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 520,
-        "sha256": "3617e51e1edcd3812973a43ff060f8bfefcc2fdc7f4bd5267505544359b678c6"
+        "sha256": "bc5ffe95ef140369072521fdc443c7a14831eb36fc8c73c97c84b29a9a38e8db"
       },
       "upstream": {
         "verdict": "agree",
@@ -597,7 +597,7 @@
         "occurrences": 1,
         "span_before": 1150,
         "span_after": 0,
-        "sha256": "93be44fa8a2f030fb1a18738aa6e21ce02165cba372be91d46a5d635d36fce7e"
+        "sha256": "990f1575605973ba930aa88daadc65f75b8fc7a8d2f6508e0dca9651f1036b8d"
       },
       "upstream": {
         "verdict": "agree",
@@ -632,7 +632,7 @@
         "occurrences": 1,
         "span_before": 40,
         "span_after": 80,
-        "sha256": "ae445ed7bb743ba23215b0ec4d97cd9d0b394adfbcc35e82a32baaacdf049cdb"
+        "sha256": "020bd286980a30775323d2e49b15083f4c7d60267f61900e9e243898d6f32cd3"
       },
       "upstream": {
         "verdict": "agree",
@@ -662,7 +662,7 @@
         "occurrences": 1,
         "span_before": 70,
         "span_after": 120,
-        "sha256": "8c19c888800b0d019d0c3d06da2d9431a5b9352fcc7f8510075bb9881107b540"
+        "sha256": "68fbc903dc33f0375d384b3593b1efedb1a6a4848e8432baff77778c3f935c3c"
       },
       "upstream": {
         "verdict": "agree",
@@ -694,7 +694,7 @@
         "occurrences": 1,
         "span_before": 260,
         "span_after": 0,
-        "sha256": "e6d11d1fb28008a6ae5e2e80189873230bfaec4fb946b54dda1e3bb209ab978d"
+        "sha256": "d08247be1ee37ea810ee6d436a577ed254bb0788e8cb06cea033d4dfb0edb327"
       },
       "upstream": {
         "verdict": "agree",
@@ -726,7 +726,7 @@
         "occurrences": 1,
         "span_before": 260,
         "span_after": 0,
-        "sha256": "e6d11d1fb28008a6ae5e2e80189873230bfaec4fb946b54dda1e3bb209ab978d"
+        "sha256": "d08247be1ee37ea810ee6d436a577ed254bb0788e8cb06cea033d4dfb0edb327"
       },
       "upstream": {
         "verdict": "agree",
@@ -758,7 +758,7 @@
         "occurrences": 1,
         "span_before": 150,
         "span_after": 30,
-        "sha256": "c7fd3ea3519954a8e7a7d3649b29a4fd9382814175c8d6d4e62af19acdb2d219"
+        "sha256": "a244fb112df641bc1c40f081d269e61724f3e083fbe6101092ffdc7c290b6304"
       },
       "upstream": {
         "verdict": "agree",
@@ -792,7 +792,7 @@
         "occurrences": 3,
         "span_before": 0,
         "span_after": 420,
-        "sha256": "bd8a73f0c47593dd4f8fffe8a7bb2c7236d6aa2bafeb9a159d229887743d86b9"
+        "sha256": "9782fb65800bea8a8496a1a4c9406602fe6fcebba2b841396be7563872f34fd4"
       },
       "upstream": {
         "verdict": "agree",
@@ -824,7 +824,7 @@
         "occurrences": 2,
         "span_before": 0,
         "span_after": 300,
-        "sha256": "45dab0a1d580b0243566345ce0166e659b4ad743bf9b11c9058aa9a4630117ea"
+        "sha256": "58e78633ec3fb950e261a46c4e6a95ed9a5ff057d06b0bd04f44fd95c71f90d4"
       },
       "upstream": {
         "verdict": "disagree",
@@ -928,7 +928,7 @@
         "occurrences": 1,
         "span_before": 60,
         "span_after": 230,
-        "sha256": "e455e0c542113b9a769700da1b1ca8a994f8953c102b39f411d6ac4a381ccb3c"
+        "sha256": "66a4bdfd531eef8408f1612fad507a466d3c1eb3c3e03d4cdc49252dd53aa9c2"
       },
       "upstream": {
         "verdict": "agree",
@@ -962,7 +962,7 @@
         "occurrences": 1,
         "span_before": 20,
         "span_after": 100,
-        "sha256": "eb96d63130c1e5363a441f27f8c7b49263adc6b00822a9d3c560f7d58424cdb0"
+        "sha256": "c69983680ceb126a16f17fa240e53077462d1681563bfda2801e0e0e32f449aa"
       },
       "upstream": {
         "verdict": "agree",
@@ -995,7 +995,7 @@
         "occurrences": 1,
         "span_before": 30,
         "span_after": 220,
-        "sha256": "9b5e98ce2d28c19e417d53539deeaac0b9eb2c9f7519a06547bdb8bfdbf1434e"
+        "sha256": "e492cdcb202af5a5a2b169c8e9d75db4e8ee273fe5c6c256b4ecb645a514b7b7"
       },
       "upstream": {
         "verdict": "agree",
@@ -1073,7 +1073,7 @@
         "occurrences": 1,
         "span_before": 1500,
         "span_after": 0,
-        "sha256": "ad3bd79a2da95951542ff453692af67a754fb20cd3c6064e8e86e87cbe47726e"
+        "sha256": "be91179bafba586e50a2b5e598bc269ca0d9bf33eda62cc5097398dbe7ef289b"
       },
       "upstream": {
         "verdict": "agree",
@@ -1105,7 +1105,7 @@
         "occurrences": 1,
         "span_before": 400,
         "span_after": 80,
-        "sha256": "aae6b3c30e4d161c530d8f3936964e4707101c54b415ab51a8fca7d0dd31d09b"
+        "sha256": "375251652a1fe819d0f12115b89cde33ff72777fc67eb2cb2fa2bfca3316ea33"
       },
       "upstream": {
         "verdict": "agree",
@@ -1135,7 +1135,7 @@
         "occurrences": 1,
         "span_before": 0,
         "span_after": 100,
-        "sha256": "7bb69142edd82b06d7568ce29f17c80f5c8c8aa678e1b112829e67dbac37c2aa"
+        "sha256": "348732e08d469f3d92047abe0b35c24614ca7523ac73ecc910f47ee66f66df19"
       },
       "upstream": {
         "verdict": "agree",
@@ -1195,7 +1195,7 @@
         "occurrences": 2,
         "span_before": 120,
         "span_after": 120,
-        "sha256": "fe2e1dec936fba4516e0a8d3916e3b72cee00852ff559ec103a607db5d386f5c"
+        "sha256": "312b3567436db9a84e9e3143d4323a0037e15657d5e17ccb77ea86b83596bc78"
       },
       "upstream": {
         "verdict": "disagree",
@@ -1228,7 +1228,7 @@
         "occurrences": 1,
         "span_before": 90,
         "span_after": 40,
-        "sha256": "58037355866ec978918e45a8e67482d853b174481cf483bcba144ad42b388f1d"
+        "sha256": "8d7e1f6a1a487455dc6db042c2d0f87e39b470925dfdcf32714dfbcf39da48b5"
       },
       "upstream": {
         "verdict": "agree",
@@ -1247,8 +1247,8 @@
       "concept": "Size of one inbound stdout message",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 1041,
-        "line_end": 1049,
+        "line_start": 1065,
+        "line_end": 1073,
         "sha256": "25220afa8f0f949ff30edb7b31ef75ca7ff11e96e3e09fe32651febde5a078f0"
       },
       "typescript": {
@@ -1258,7 +1258,7 @@
         "occurrences": 1,
         "span_before": 430,
         "span_after": 0,
-        "sha256": "c0d00169e6a3b5bbbc3519f31af58b8e97b9acede5bc12d755b7125c47b7fedb"
+        "sha256": "922a7ed61827dbac40222e5ae1fbea78fb8cedb8fa150fc61247a17e6ba53243"
       },
       "upstream": {
         "verdict": "disagree",
@@ -1291,7 +1291,7 @@
         "occurrences": 1,
         "span_before": 260,
         "span_after": 0,
-        "sha256": "e6d11d1fb28008a6ae5e2e80189873230bfaec4fb946b54dda1e3bb209ab978d"
+        "sha256": "d08247be1ee37ea810ee6d436a577ed254bb0788e8cb06cea033d4dfb0edb327"
       },
       "upstream": {
         "verdict": "agree",
@@ -1321,7 +1321,7 @@
         "occurrences": 1,
         "span_before": 60,
         "span_after": 230,
-        "sha256": "e455e0c542113b9a769700da1b1ca8a994f8953c102b39f411d6ac4a381ccb3c"
+        "sha256": "66a4bdfd531eef8408f1612fad507a466d3c1eb3c3e03d4cdc49252dd53aa9c2"
       },
       "upstream": {
         "verdict": "agree",
@@ -1351,7 +1351,7 @@
         "occurrences": 2,
         "span_before": 0,
         "span_after": 300,
-        "sha256": "45dab0a1d580b0243566345ce0166e659b4ad743bf9b11c9058aa9a4630117ea"
+        "sha256": "58e78633ec3fb950e261a46c4e6a95ed9a5ff057d06b0bd04f44fd95c71f90d4"
       },
       "upstream": {
         "verdict": "disagree",
@@ -1382,7 +1382,7 @@
         "occurrences": 1,
         "span_before": 160,
         "span_after": 120,
-        "sha256": "f200f529e12b76e8df7ff7e22334435a9847053a8bf11751b380445993dd31f1"
+        "sha256": "37b89939ad5867be2731186f3143d4cbbbbcc6fa3cf40f6b691752e33546415c"
       },
       "upstream": {
         "verdict": "agree",
@@ -1412,7 +1412,7 @@
         "occurrences": 1,
         "span_before": 100,
         "span_after": 120,
-        "sha256": "82be17d1917ea259bdeb06211e941267644748e9d23354c2fdf5182e73505feb"
+        "sha256": "6c86f4eefffe90b864c7a6c3432dafcdd757f823eed1cb46f7bf6ec44cc32ebd"
       },
       "upstream": {
         "verdict": "agree",
@@ -1445,7 +1445,7 @@
         "occurrences": 2,
         "span_before": 40,
         "span_after": 0,
-        "sha256": "3e2080506c57b2dfd404ea27fdc992997e8fc18f743fcd7ef14b68f48487368a"
+        "sha256": "a627589c07e7d3c130aae5486004d42ec66f54176f1bf6b0a42fbe6abf29aec5"
       },
       "upstream": {
         "verdict": "agree",
@@ -1512,8 +1512,8 @@
       "concept": "max budget value",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 548,
-        "line_end": 549,
+        "line_start": 562,
+        "line_end": 563,
         "sha256": "e0a39434998bceb62f39e109e205dfa73582df97c620b10354dc5239caa343ed"
       },
       "typescript": {
@@ -1523,7 +1523,7 @@
         "occurrences": 1,
         "span_before": 30,
         "span_after": 10,
-        "sha256": "10f7395de703b0f2a37063420d02306d727d4fed3792beb72503a8c3198613af"
+        "sha256": "c04aa0d3cd293ac753ceb6fc3c9e75ac4c69fb72181e1f16fa6b6e8414454b6c"
       },
       "upstream": {
         "verdict": "agree",
@@ -1543,8 +1543,8 @@
       "concept": "CLI path that is a .bat or .cmd script",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 400,
-        "line_end": 412,
+        "line_start": 414,
+        "line_end": 426,
         "sha256": "54022ffc8773e108a89250f9f0214329dac899376aef665f27a03aedfeed9227"
       },
       "typescript": {
@@ -1916,7 +1916,7 @@
         "occurrences": 1,
         "span_before": 40,
         "span_after": 30,
-        "sha256": "d58cad6420b88ee7cac829e1dc9c727dd9bbf7fc303f9d3dc4996fee0528abba"
+        "sha256": "b5a0b701d34f6f5b5abff3ff491cd110d2c565154cca586774edecf79d7e7d5f"
       },
       "upstream": {
         "verdict": "agree",
@@ -1945,7 +1945,7 @@
         "occurrences": 3,
         "span_before": 260,
         "span_after": 0,
-        "sha256": "82f1a191b352f00d54124922399ac7df93f75eacd55ed44d5f4ae493169e907f"
+        "sha256": "f47a6bc651ffe5390382d02a46fd7e00c249669674146b2b26d0c75ec614240c"
       },
       "upstream": {
         "verdict": "agree",
@@ -2247,7 +2247,7 @@
         "occurrences": 1,
         "span_before": 250,
         "span_after": 300,
-        "sha256": "f79d49bb55a4c49036eb9788743c8b251df77c5b6c1a8f022538f1f82a2983dd"
+        "sha256": "61933b7902d6497974205322b9fca582b3302cb6067a67a1b1efcee6fea52a04"
       },
       "upstream": {
         "verdict": "disagree",
@@ -2269,8 +2269,8 @@
       "concept": "Bundled Claude Code executable beside the Python package",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 316,
-        "line_end": 329,
+        "line_start": 330,
+        "line_end": 343,
         "sha256": "f161f93044d567459ac107e9071547b615df8d87b9951c0f812dcbdd0aa4d0c8"
       },
       "typescript": {
@@ -2301,12 +2301,12 @@
       },
       "typescript": {
         "file": "package/sdk.mjs",
-        "anchor": "function vJ(e,t={})",
+        "anchor": "function A8(e,t={})",
         "occurrence": 0,
         "occurrences": 1,
         "span_before": 0,
         "span_after": 397,
-        "sha256": "2b219e3c500fbe50d5c65bcede1f6a5789bc3023186ee5b23262df358c4d33e1"
+        "sha256": "c90347975dc7fa5928971e981735552414c263652ec0fd7f4f6aad134672d04b"
       },
       "upstream": {
         "verdict": "agree",
@@ -2323,6 +2323,64 @@
         "bundled_cli::a_miss_names_the_platform_and_the_upstream_remedy",
         "bundled_cli::lookup_directories_follow_node_order",
         "bundled_cli::lookup_resolves_the_nearest_file_to_its_canonical_path"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "s33-bundled-cli-version-gate",
+      "concept": "Minimum version a bundled Claude Code record must meet to derive an app label",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 1145,
+        "line_end": 1151,
+        "sha256": "5b7b54ba56bab28391913c221dabce6d252d6839e4be66d2629105e48491b3be"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs has no derived client app minimum and reads no version record."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The recorded version must start with major.minor.patch (up to nine digits each) and that triple, compared as a list, must not be below 999.0.0 (DERIVED_CLIENT_APP_MINIMUM_CLAUDE_CODE_VERSION). Nothing qualifies until upstream lowers the minimum."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Only ASCII digits count, where Python's \\d accepts other Unicode decimal digits. The minimum is a crate constant, exposed through meets_derived_client_app_minimum, and connect does not call it."
+      },
+      "contracts": [
+        "bundled_cli::derived_client_app_minimum_compares_the_leading_triple_as_a_list"
+      ],
+      "rust": [
+        "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "s34-bundled-cli-derived-client-app-trigger",
+      "concept": "Bundled Claude Code executable as the trigger for a derived client app label",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 1120,
+        "line_end": 1143,
+        "sha256": "d00e58fde9505de93e02121f775054f1e6bbc6ee531256aaf6695058e469abda"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs derives no client app label from the executable that it spawns."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A label is derived only when the SDK package pin (__cli_version__) meets the minimum, the spawned CLI is the bundled executable, and the claude.version file beside it records a version that meets the minimum. Any other CLI counts as too old, a bundled one with no readable record does too, and a failure to read never breaks connect."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "bundled_cli_derives_client_app answers the trigger for a caller-supplied package root and pin, because a Rust crate has no package directory or __cli_version__. The label itself is not derived here and connect does not call it, so TypeScript's behavior stays the default."
+      },
+      "contracts": [
+        "bundled_cli::the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
+        "bundled_cli::a_bundled_cli_without_a_record_counts_as_too_old",
+        "bundled_cli::only_the_executable_found_in_the_bundled_directory_derives_a_label"
       ],
       "rust": [
         "src/bundled_cli.rs"
