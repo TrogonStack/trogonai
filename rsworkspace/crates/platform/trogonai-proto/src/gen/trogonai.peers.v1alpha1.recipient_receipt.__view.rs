@@ -9,17 +9,18 @@ pub struct RecipientReceiptView<'a> {
     /// Field 2: `recipient_peer_id`
     pub recipient_peer_id: ::core::option::Option<&'a str>,
     /// Field 3: `outcome`
-    pub outcome: ::core::option::Option<
-        ::buffa::EnumValue<super::super::PreparationOutcome>,
-    >,
+    pub outcome: ::core::option::Option<::buffa::EnumValue<super::super::PreparationOutcome>>,
     /// Field 4: `batch_id`
     pub batch_id: ::core::option::Option<&'a str>,
     /// Field 5: `recipient_revision`
     pub recipient_revision: ::core::option::Option<u64>,
     /// Field 6: `decided_at`
-    pub decided_at: ::buffa::MessageFieldView<
-        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
-    >,
+    pub decided_at: ::buffa::MessageFieldView<::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>>,
+    /// Absent only in legacy receipts. New settlement requires this binding or
+    /// recovery from the recipient's immutable intake metadata.
+    ///
+    /// Field 7: `sender_peer_id`
+    pub sender_peer_id: ::core::option::Option<&'a str>,
 }
 impl<'a> ::buffa::MessageView<'a> for RecipientReceiptView<'a> {
     type Owned = super::super::RecipientReceipt;
@@ -28,8 +29,7 @@ impl<'a> ::buffa::MessageView<'a> for RecipientReceiptView<'a> {
         let __elem = ::core::cell::Cell::new(::buffa::DEFAULT_ELEMENT_MEMORY_LIMIT);
         <Self as ::buffa::MessageView>::decode_view_ctx(
             buf,
-            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit)
-                .with_element_memory(&__elem),
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit).with_element_memory(&__elem),
         )
     }
     fn decode_view_with_ctx(
@@ -52,53 +52,31 @@ impl<'a> ::buffa::MessageView<'a> for RecipientReceiptView<'a> {
         let mut cur = cur;
         match tag.field_number() {
             1u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
+                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::LengthDelimited)?;
                 view.message_id = Some(::buffa::types::borrow_str(&mut cur)?);
             }
             2u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
+                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::LengthDelimited)?;
                 view.recipient_peer_id = Some(::buffa::types::borrow_str(&mut cur)?);
             }
             3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                view.outcome = Some(
-                    ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
-                );
+                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::Varint)?;
+                view.outcome = Some(::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?));
             }
             4u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
+                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::LengthDelimited)?;
                 view.batch_id = Some(::buffa::types::borrow_str(&mut cur)?);
             }
             5u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
+                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::Varint)?;
                 view.recipient_revision = Some(::buffa::types::decode_uint64(&mut cur)?);
             }
             6u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
+                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::LengthDelimited)?;
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 match view.decided_at.as_mut() {
-                    Some(existing) => {
-                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
-                    }
+                    Some(existing) => ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?,
                     None => {
                         view.decided_at = ::buffa::MessageFieldView::set(
                             <::buffa_types::google::protobuf::__buffa::view::TimestampView as ::buffa::MessageView>::decode_view_ctx(
@@ -109,15 +87,17 @@ impl<'a> ::buffa::MessageView<'a> for RecipientReceiptView<'a> {
                     }
                 }
             }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::LengthDelimited)?;
+                view.sender_peer_id = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
         }
         ::core::result::Result::Ok(cur)
     }
-    fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::RecipientReceipt, ::buffa::DecodeError> {
+    fn to_owned_message(&self) -> ::core::result::Result<super::super::RecipientReceipt, ::buffa::DecodeError> {
         self.to_owned_from_source(None)
     }
     #[allow(clippy::useless_conversion, clippy::needless_update)]
@@ -135,14 +115,13 @@ impl<'a> ::buffa::MessageView<'a> for RecipientReceiptView<'a> {
             batch_id: self.batch_id.map(|s| s.to_string()),
             recipient_revision: self.recipient_revision,
             decided_at: match self.decided_at.as_option() {
-                Some(v) => {
-                    ::buffa::MessageField::<
-                        ::buffa_types::google::protobuf::Timestamp,
-                        ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
-                    >::some(v.to_owned_from_source(__buffa_src)?)
-                }
+                Some(v) => ::buffa::MessageField::<
+                    ::buffa_types::google::protobuf::Timestamp,
+                    ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
+                >::some(v.to_owned_from_source(__buffa_src)?),
                 None => ::buffa::MessageField::none(),
             },
+            sender_peer_id: self.sender_peer_id.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -172,18 +151,15 @@ impl<'a> ::buffa::ViewEncode<'a> for RecipientReceiptView<'a> {
             let __slot = __cache.reserve();
             let inner_size = self.decided_at.compute_size(__cache);
             __cache.set(__slot, inner_size);
-            size
-                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
-                    + inner_size as u64;
+            size += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64 + inner_size as u64;
+        }
+        if let Some(ref v) = self.sender_peer_id {
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(
-        &self,
-        __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::EncodeSink,
-    ) {
+    fn write_to(&self, __cache: &mut ::buffa::SizeCache, buf: &mut impl ::buffa::EncodeSink) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if let Some(ref v) = self.message_id {
@@ -202,12 +178,11 @@ impl<'a> ::buffa::ViewEncode<'a> for RecipientReceiptView<'a> {
             ::buffa::types::put_uint64_field(5u32, v, buf);
         }
         if self.decided_at.is_set() {
-            ::buffa::types::put_len_delimited_header(
-                6u32,
-                u64::from(__cache.consume_next()),
-                buf,
-            );
+            ::buffa::types::put_len_delimited_header(6u32, u64::from(__cache.consume_next()), buf);
             self.decided_at.write_to(__cache, buf);
+        }
+        if let Some(ref v) = self.sender_peer_id {
+            ::buffa::types::put_string_field(7u32, v, buf);
         }
     }
 }
@@ -223,10 +198,7 @@ impl<'a> ::buffa::ViewEncode<'a> for RecipientReceiptView<'a> {
 /// known map lengths (e.g. `bincode`) will return a runtime error.
 /// Use the owned message type for those formats.
 impl<'__a> ::serde::Serialize for RecipientReceiptView<'__a> {
-    fn serialize<__S: ::serde::Serializer>(
-        &self,
-        __s: __S,
-    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+    fn serialize<__S: ::serde::Serializer>(&self, __s: __S) -> ::core::result::Result<__S::Ok, __S::Error> {
         use ::serde::ser::SerializeMap as _;
         let mut __map = __s.serialize_map(::core::option::Option::None)?;
         if let ::core::option::Option::Some(__v) = self.message_id {
@@ -242,16 +214,15 @@ impl<'__a> ::serde::Serialize for RecipientReceiptView<'__a> {
             __map.serialize_entry("batchId", __v)?;
         }
         if let ::core::option::Option::Some(__v) = self.recipient_revision {
-            __map
-                .serialize_entry(
-                    "recipientRevision",
-                    &::buffa::json_helpers::ProtoJson(&__v),
-                )?;
+            __map.serialize_entry("recipientRevision", &::buffa::json_helpers::ProtoJson(&__v))?;
         }
         {
             if let ::core::option::Option::Some(__v) = self.decided_at.as_option() {
                 __map.serialize_entry("decidedAt", __v)?;
             }
+        }
+        if let ::core::option::Option::Some(__v) = self.sender_peer_id {
+            __map.serialize_entry("senderPeerId", __v)?;
         }
         __map.end()
     }
@@ -266,9 +237,9 @@ impl<'a> ::buffa::MessageName for RecipientReceiptView<'a> {
 ::buffa::impl_view_reborrow!(RecipientReceiptView);
 /** Self-contained, `'static` owned view of a `RecipientReceipt` message.
 
- Wraps [`::buffa::OwnedView`]`<`[`RecipientReceiptView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+Wraps [`::buffa::OwnedView`]`<`[`RecipientReceiptView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
 
- Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`RecipientReceiptView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`RecipientReceiptView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
 #[derive(Clone, Debug)]
 pub struct RecipientReceiptOwnedView(::buffa::OwnedView<RecipientReceiptView<'static>>);
 impl RecipientReceiptOwnedView {
@@ -281,12 +252,8 @@ impl RecipientReceiptOwnedView {
     ///
     /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
     /// protobuf data.
-    pub fn decode(
-        bytes: ::buffa::bytes::Bytes,
-    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-        ::core::result::Result::Ok(
-            RecipientReceiptOwnedView(::buffa::OwnedView::decode(bytes)?),
-        )
+    pub fn decode(bytes: ::buffa::bytes::Bytes) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(RecipientReceiptOwnedView(::buffa::OwnedView::decode(bytes)?))
     }
     /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
     /// max message size).
@@ -299,11 +266,9 @@ impl RecipientReceiptOwnedView {
         bytes: ::buffa::bytes::Bytes,
         opts: &::buffa::DecodeOptions,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-        ::core::result::Result::Ok(
-            RecipientReceiptOwnedView(
-                ::buffa::OwnedView::decode_with_options(bytes, opts)?,
-            ),
-        )
+        ::core::result::Result::Ok(RecipientReceiptOwnedView(::buffa::OwnedView::decode_with_options(
+            bytes, opts,
+        )?))
     }
     /// Build from an owned message via an encode → decode round-trip.
     ///
@@ -313,12 +278,8 @@ impl RecipientReceiptOwnedView {
     /// message's encoded size exceeds the 2 GiB protobuf limit, or
     /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
-    pub fn from_owned(
-        msg: &super::super::RecipientReceipt,
-    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-        ::core::result::Result::Ok(
-            RecipientReceiptOwnedView(::buffa::OwnedView::from_owned(msg)?),
-        )
+    pub fn from_owned(msg: &super::super::RecipientReceipt) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(RecipientReceiptOwnedView(::buffa::OwnedView::from_owned(msg)?))
     }
     /// Borrow the full [`RecipientReceiptView`] with its lifetime tied to `&self`.
     #[must_use]
@@ -358,9 +319,7 @@ impl RecipientReceiptOwnedView {
     }
     /// Field 3: `outcome`
     #[must_use]
-    pub fn outcome(
-        &self,
-    ) -> ::core::option::Option<::buffa::EnumValue<super::super::PreparationOutcome>> {
+    pub fn outcome(&self) -> ::core::option::Option<::buffa::EnumValue<super::super::PreparationOutcome>> {
         self.0.reborrow().outcome
     }
     /// Field 4: `batch_id`
@@ -377,26 +336,29 @@ impl RecipientReceiptOwnedView {
     #[must_use]
     pub fn decided_at(
         &self,
-    ) -> &::buffa::MessageFieldView<
-        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
-    > {
+    ) -> &::buffa::MessageFieldView<::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>> {
         &self.0.reborrow().decided_at
     }
+    /// Absent only in legacy receipts. New settlement requires this binding or
+    /// recovery from the recipient's immutable intake metadata.
+    ///
+    /// Field 7: `sender_peer_id`
+    #[must_use]
+    pub fn sender_peer_id(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().sender_peer_id
+    }
 }
-impl ::core::convert::From<::buffa::OwnedView<RecipientReceiptView<'static>>>
-for RecipientReceiptOwnedView {
+impl ::core::convert::From<::buffa::OwnedView<RecipientReceiptView<'static>>> for RecipientReceiptOwnedView {
     fn from(inner: ::buffa::OwnedView<RecipientReceiptView<'static>>) -> Self {
         RecipientReceiptOwnedView(inner)
     }
 }
-impl ::core::convert::From<RecipientReceiptOwnedView>
-for ::buffa::OwnedView<RecipientReceiptView<'static>> {
+impl ::core::convert::From<RecipientReceiptOwnedView> for ::buffa::OwnedView<RecipientReceiptView<'static>> {
     fn from(wrapper: RecipientReceiptOwnedView) -> Self {
         wrapper.0
     }
 }
-impl ::core::convert::AsRef<::buffa::OwnedView<RecipientReceiptView<'static>>>
-for RecipientReceiptOwnedView {
+impl ::core::convert::AsRef<::buffa::OwnedView<RecipientReceiptView<'static>>> for RecipientReceiptOwnedView {
     fn as_ref(&self) -> &::buffa::OwnedView<RecipientReceiptView<'static>> {
         &self.0
     }
@@ -406,10 +368,7 @@ impl ::buffa::HasMessageView for super::super::RecipientReceipt {
     type ViewHandle = RecipientReceiptOwnedView;
 }
 impl ::serde::Serialize for RecipientReceiptOwnedView {
-    fn serialize<__S: ::serde::Serializer>(
-        &self,
-        __s: __S,
-    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+    fn serialize<__S: ::serde::Serializer>(&self, __s: __S) -> ::core::result::Result<__S::Ok, __S::Error> {
         ::serde::Serialize::serialize(&self.0, __s)
     }
 }
