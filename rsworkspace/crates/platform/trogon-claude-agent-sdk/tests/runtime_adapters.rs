@@ -864,7 +864,8 @@ async fn s12_outbound_prompts_and_controls_are_never_capped_by_the_inbound_frame
     let result = client
         .handle()
         .set_mcp_servers(replacement, SdkMcpServers::new())
-        .await?;
+        .await?
+        .decode()?;
     assert_eq!(result.added, ["large"]);
     client.disconnect().await?;
     assert_eq!(server.await??, ["initialize", "user:2048", "mcp_set_servers"]);

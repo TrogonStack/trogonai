@@ -266,7 +266,7 @@ async fn rejected_mcp_replacement_still_disconnects_removed_in_process_servers()
     let mut client = ClaudeSdkClient::connect(options("mcp")?).await?;
     let handle = client.handle();
     let servers = SdkMcpServers::from([(McpServerName::from("local"), echo_registry(calls.clone())?)]);
-    let installed = handle.set_mcp_servers(McpServers::new(), servers).await?;
+    let installed = handle.set_mcp_servers(McpServers::new(), servers).await?.decode()?;
     assert_eq!(installed.added, ["local"]);
     let rejected = SdkMcpServers::from([(McpServerName::from("reject"), echo_registry(rejected_calls.clone())?)]);
     assert!(matches!(
