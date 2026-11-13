@@ -15,6 +15,7 @@ use crate::{
         RESTRICT_PERMISSION_KEYS, RESTRICT_PERMISSION_LISTS, RESTRICT_SKIPPED_KEYS, RESTRICTIVE_RULES,
         RESTRICTIVE_TRUE, SECURITY_PLUGIN_ID, SETTINGS_SCHEMA_ARRAY_SECTIONS, STRICT_PLUGIN_ONLY_KEY,
     },
+    settings_numbers::same_value_zero,
     settings_resolve_values::{SettingsMap, get_path, set_path},
 };
 
@@ -44,10 +45,11 @@ fn differs(original: &SettingsMap, restricted: &SettingsMap) -> bool {
     })
 }
 
-/// lodash `isEqual` over JSON values: numbers compare by value, objects regardless of key order.
+/// lodash `isEqual` over JSON values: numbers compare by the double they stand for as `SameValueZero` does, so a
+/// number the Python dialect keeps exact equals its double, and objects compare regardless of key order.
 pub(crate) fn js_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
-        (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
+        (Value::Number(_), Value::Number(_)) => same_value_zero(left, right),
         (Value::Array(left), Value::Array(right)) => {
             left.len() == right.len() && left.iter().zip(right).all(|(left, right)| js_equal(left, right))
         }

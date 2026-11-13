@@ -1,9 +1,13 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
-use super::restrict_policy_document;
-use crate::settings_json::js_stringify;
+use super::{js_equal, restrict_policy_document};
+use crate::{
+    python_json_value::PythonNumber,
+    settings_json::js_stringify,
+    settings_numbers::{PythonNumbers, python_number},
+};
 
 #[test]
 fn every_recorded_restriction_matches_the_pinned_resolver() {
@@ -30,4 +34,15 @@ fn the_recorded_probes_cover_kept_and_replaced_documents() {
     let probes = recorded["probes"].as_array().expect("probes");
     assert!(probes.iter().any(|probe| probe["output"].is_null()));
     assert!(probes.iter().any(|probe| probe["output"].is_object()));
+}
+
+#[test]
+fn numbers_the_python_dialect_keeps_exact_compare_by_the_double_they_stand_for() {
+    let _numbers = PythonNumbers::start();
+    let whole = python_number(PythonNumber::Float(1.0));
+    let negative_zero = python_number(PythonNumber::Float(-0.0));
+
+    assert!(js_equal(&whole, &json!(1)));
+    assert!(js_equal(&json!({"a": [negative_zero]}), &json!({"a": [0]})));
+    assert!(!js_equal(&whole, &json!(2)));
 }
