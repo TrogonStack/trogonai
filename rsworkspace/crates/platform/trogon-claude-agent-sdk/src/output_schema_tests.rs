@@ -9,16 +9,29 @@
 use super::*;
 use serde_json::json;
 #[test]
-fn schema_construction_rejects_invalid_or_remote_references() -> Result<(), Box<dyn std::error::Error>> {
-    assert!(OutputSchema::new(serde_json::from_value(json!({"type":"invalid"}))?).is_err());
+fn validated_schemas_reject_invalid_or_remote_references() -> Result<(), Box<dyn std::error::Error>> {
+    assert!(OutputSchema::validated(serde_json::from_value(json!({"type":"invalid"}))?).is_err());
     assert!(matches!(
-        OutputSchema::new(serde_json::from_value(json!({"$ref":"https://example.com/schema"}))?),
+        OutputSchema::validated(serde_json::from_value(json!({"$ref":"https://example.com/schema"}))?),
         Err(OutputSchemaError::ExternalReference)
     ));
-    let schema = OutputSchema::new(serde_json::from_value(
+    let schema = OutputSchema::validated(serde_json::from_value(
         json!({"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}),
     )?)?;
     assert!(schema.is_valid(&json!({"ok":true})));
     assert!(!schema.is_valid(&json!({"ok":"true"})));
+    assert_eq!(schema.compile_error(), None);
+    Ok(())
+}
+
+#[test]
+fn schemas_are_kept_verbatim_even_when_they_do_not_compile() -> Result<(), Box<dyn std::error::Error>> {
+    for original in [json!({"type":"invalid"}), json!({"$ref":"https://example.com/schema"})] {
+        let schema = OutputSchema::new(serde_json::from_value(original.clone())?);
+        assert_eq!(Value::Object(schema.as_json().clone()), original);
+        assert!(schema.compile_error().is_some());
+        assert!(!schema.is_valid(&json!({})));
+        assert!(schema.validation_error(&json!({})).is_some());
+    }
     Ok(())
 }
