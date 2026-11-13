@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             matcher: None,
             callbacks: vec![Arc::new(|_: HookRequest| async { Ok(HookOutput::default()) })],
             timeout: None,
-            on_failure: HookFailureMode::Block,
+            on_failure: Some(HookFailureMode::Block),
         }],
         sdk_mcp_servers: BTreeMap::from([(name, Arc::new(server) as Arc<dyn SdkMcpServer>)]),
         ..ClaudeAgentOptions::default()

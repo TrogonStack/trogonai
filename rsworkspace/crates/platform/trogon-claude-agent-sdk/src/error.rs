@@ -68,6 +68,8 @@ pub enum Error {
     #[error("the CLI path cannot be started safely")]
     CliPath(#[from] crate::CliPathError),
     #[error(transparent)]
+    CliNotFound(#[from] crate::CliNotFoundError),
+    #[error(transparent)]
     Session(#[from] crate::SessionError),
     #[error("could not start the Claude Code executable")]
     Spawn(#[source] io::Error),

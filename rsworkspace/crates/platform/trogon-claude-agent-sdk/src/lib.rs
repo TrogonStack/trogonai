@@ -9,9 +9,12 @@ pub mod test_support;
 
 mod agent_definition;
 mod agent_name;
+mod argv;
 mod builtin_tool_name;
+mod cli_discovery;
 mod cli_path;
 mod client;
+mod client_app;
 mod config_value;
 mod constants;
 mod control;
@@ -21,6 +24,7 @@ mod dialog_kind;
 mod driver;
 mod effort_level;
 mod environment;
+mod environment_plan;
 mod error;
 mod framing;
 mod hooks;
@@ -38,8 +42,10 @@ mod output_schema;
 mod permission;
 mod permission_mode;
 mod permission_update;
+mod process_options;
 mod prompt;
 mod queue_capacity;
+mod run_as;
 mod sdk_mcp_server;
 mod sdk_tool;
 mod sdk_tools;
@@ -71,15 +77,18 @@ mod tool_use_id;
 mod transcript_mirror;
 mod usd_budget;
 mod user_input;
+mod version_check;
 mod wire;
 
 pub use agent_definition::{AgentDefinition, AgentExecution, AgentMcpServerSpec};
 pub use agent_name::AgentName;
 pub use builtin_tool_name::BuiltinToolName;
+pub use cli_discovery::CliNotFoundError;
 pub use cli_path::CliPathError;
 pub use client::{
     ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_with_adapters,
 };
+pub use client_app::{format_client_app, normalize_client_app};
 pub use config_value::ConfigValue;
 pub use control::{
     ConnectionInfo, ContextUsageCategory, ContextUsageResponse, FeatureSupport, InterruptReceipt, McpEnabled,
@@ -93,6 +102,7 @@ pub use dialog::{
 pub use dialog_kind::DialogKind;
 pub use effort_level::EffortLevel;
 pub use environment::Environment;
+pub use environment_plan::{DEFAULT_ENTRYPOINT, EnvironmentPlan, SDK_VERSION};
 pub use error::{ControlOperation, ControlRejectionError, Error, ProtocolError};
 pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
@@ -122,6 +132,10 @@ pub use permission::{
 pub use permission_mode::PermissionMode;
 pub use permission_update::{
     PermissionBehavior, PermissionRuleValue, PermissionUpdate, PermissionUpdateDestination, PermissionUpdateError,
+};
+pub use process_options::{
+    ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, ScriptRuntime, StderrDelivery, StderrHandler,
+    TraceContext,
 };
 pub use prompt::Prompt;
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
@@ -171,6 +185,7 @@ pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 pub use user_input::{InputBlock, UserInput};
+pub use version_check::{MINIMUM_CLAUDE_CODE_VERSION, parse_version, unreported_version_warning};
 
 /// A JSON object whose schema is owned by an individual tool or upstream event.
 pub type JsonObject = serde_json::Map<String, serde_json::Value>;

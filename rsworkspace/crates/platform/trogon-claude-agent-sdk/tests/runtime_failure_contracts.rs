@@ -227,6 +227,7 @@ async fn declarative_cli_choices_preserve_named_arguments() -> TestResult {
         let (client, cli) = connect(configured).await?;
         let commands = cli.observer.commands()?;
         let arguments = &commands[0].arguments;
+        // The default TypeScript argv shape uses `--flag=value` tokens.
         for expected in [
             "--agent=reviewer",
             "--max-turns=3",
@@ -236,14 +237,16 @@ async fn declarative_cli_choices_preserve_named_arguments() -> TestResult {
             "--bare",
             "--add-dir=folder with spaces",
         ] {
-            assert!(arguments.iter().any(|argument| argument == expected));
+            assert!(
+                arguments.iter().any(|argument| argument == expected),
+                "{expected} missing from {arguments:?}"
+            );
         }
-        assert!(!arguments.iter().any(|argument| argument == "--system-prompt="));
-        assert_eq!(
-            arguments
+        // The TypeScript shape delivers the system prompt through `initialize`, never on argv.
+        assert!(
+            !arguments
                 .iter()
-                .any(|argument| argument == "--append-system-prompt=extra context"),
-            matches!(system, SystemPrompt::ClaudeCodeWithAppend(_))
+                .any(|argument| argument.to_string_lossy().contains("system-prompt"))
         );
         cli.disconnect(client).await?;
     }
@@ -258,7 +261,7 @@ async fn s13_empty_hooks_are_ignored_and_hook_callback_count_is_unbounded() -> T
         matcher: None,
         callbacks: vec![],
         timeout: None,
-        on_failure: HookFailureMode::Continue,
+        on_failure: Some(HookFailureMode::Continue),
     };
     let mut configured = options()?;
     configured.hooks = vec![registration.clone()];
@@ -397,7 +400,7 @@ async fn callback_failures_return_bounded_protocol_fallbacks_without_stopping_co
                     matcher: None,
                     callbacks: vec![Arc::new(|_: HookRequest| async { Err(CallbackError::Cancelled) })],
                     timeout: None,
-                    on_failure: HookFailureMode::Continue,
+                    on_failure: Some(HookFailureMode::Continue),
                 }];
                 (
                     json!({"subtype":"hook_callback","callback_id":"hook_0","input":{}}),

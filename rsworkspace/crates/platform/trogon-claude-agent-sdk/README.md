@@ -169,6 +169,45 @@ docs both describe omission as loading all CLI sources and an empty list as
 disabling filesystem settings. Rust preserves `None`, `Some(vec![])`, and caller
 order when building CLI arguments.
 
+### Process launch
+
+The launch contract is pinned by `tests/golden_argv_env.rs` (argv, environment and
+the stdin `initialize` bytes).
+
+- `ArgvStyle::TypeScript` (default) emits TypeScript `0.3.323` argv: `--flag=value`
+  spelling, upstream flag order, and the system prompt inside the `initialize`
+  request (`systemPrompt` defaults to `[""]`; a preset with an append sends
+  `appendSystemPrompt`). `ArgvStyle::Python` emits Python `0.2.181` argv. The two
+  upstream SDKs disagree, so both are exposed and TypeScript is the default.
+- `EnvironmentMode::Overlay` (default, Python): inherited environment, then
+  `options.env`. `Replace` (TypeScript with `options.env`): only `options.env`
+  plus the SDK defaults. `Inherit` (TypeScript without `options.env`).
+  `CLAUDECODE` is removed unless `ClaudeCodeMarker::Keep` is chosen.
+  `CLAUDE_CODE_ENTRYPOINT` defaults to `sdk-trogon-rs` and is configurable.
+  `CLAUDE_CODE_SDK_READS_SESSION_STATE=1` is added unless a case-insensitive match
+  exists; the inherited check covers only the variable names the SDK captures.
+- `McpDiscovery` defaults to `CliDefault`; `--strict-mcp-config` is emitted only for
+  the explicit `Disabled` opt-in. `--permission-prompt-tool stdio` is sent only
+  when a tool permission handler exists. `HookRegistration::on_failure` is an
+  `Option` and the wire field is omitted when unset.
+- `ClaudeSdkClient::connect` discovers the CLI in Python's order when `cli_path` is
+  omitted (no bundled binary exists in this crate); a miss is `CliNotFoundError`
+  with Python's hint text. `connect_with_adapters` never discovers, matching
+  Python's custom transport and TypeScript's `spawnClaudeCodeProcess`: its
+  spawner receives `claude` when `cli_path` is omitted.
+- `ArgvStyle::TypeScript` appends `--await-initialize` through extra arguments
+  when `connect` resumes or continues without `cli_path` and without `sdk-url`,
+  as `sdk.mjs` does for its resolved executable. Python never sends it.
+- `user` runs the CLI as the named account (`Popen(user=...)`: the name is read
+  from `/etc/passwd` and only the uid changes, Unix only); `run_as_uid` is the
+  numeric form.
+- `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` is removed from the child environment and
+  never derived. Python derives it only for its bundled CLI at version
+  `999.0.0` or later and from Python distribution metadata, neither of which
+  exists here.
+- Deferred to other tracks: remote `--sdk-url` transports, the bundled or musl
+  binary lookup, and the thinking, betas and task-budget options.
+
 Model strings and paths are stored without extra identifier restrictions.
 `env` values are `ConfigValue`s, which convert from strings as `Sensitive`;
 debug output lists every variable name, shows values the caller marks `Plain`,
