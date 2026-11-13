@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { NUMBER_DOCUMENTS } from './settings_number_battery.mjs';
 import { KEYED, TEXTS } from './settings_read_battery.mjs';
 
 const args = process.argv.slice(2);
@@ -101,7 +102,7 @@ async function main() {
 
 // Pretty prints the document but keeps each recorded probe list and battery on one line.
 const INLINE_KEYS = new Set(['probes', 'string', 'object', 'value', 'rule']);
-const LINE_PER_ITEM_KEYS = new Set(['documents']);
+const LINE_PER_ITEM_KEYS = new Set(['documents', 'numbers']);
 function render(document) {
   const inline = [];
   const text = JSON.stringify(
@@ -274,6 +275,10 @@ function readSection(read, roots) {
       root: entry.schema === read.zS ? 'allowedMcpServer' : entry.schema === read.BS ? 'deniedMcpServer' : null,
     })),
     documents: probes,
+    numbers: NUMBER_DOCUMENTS.map((input) => {
+      const { settings } = read.lE(input, 'f', false);
+      return { input, output: JSON.stringify(settings) };
+    }),
   };
 }
 

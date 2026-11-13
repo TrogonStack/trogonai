@@ -5,6 +5,8 @@ use serde_json::{Map, Value};
 use crate::{
     adapters::{NativeHost, SettingsHost},
     constants::{DEFAULT_SETTING_SOURCES, ESCALATING_DEFAULT_MODES, SOURCE_ORDER, STRICT_ESCALATING_DEFAULT_MODES},
+    settings_dialect::SettingsDialect,
+    settings_numbers::normalize_numbers,
     settings_resolve_platform::{evaluate_policy, read_policy},
     settings_resolve_policy::{PolicyResolution, resolve_policy},
     settings_resolve_sources::{
@@ -113,6 +115,15 @@ pub fn resolve_settings_with<H: SettingsHost>(
     host: &H,
     options: &ResolveSettingsOptions,
 ) -> Result<ResolvedSettings, ResolveSettingsError> {
+    resolve_settings_in_dialect_with(host, options, SettingsDialect::TypeScript)
+}
+
+/// [`resolve_settings_with`] reading numbers like the chosen SDK's JSON parser.
+pub fn resolve_settings_in_dialect_with<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    dialect: SettingsDialect,
+) -> Result<ResolvedSettings, ResolveSettingsError> {
     let cwd = resolve_cwd(host, options.cwd.as_deref()).map_err(ResolveSettingsError::CurrentDirectory)?;
     let allowed = allowed_sources(options);
     let parent = options.managed_settings.as_ref().and_then(to_map).map(|mut parent| {
@@ -130,6 +141,12 @@ pub fn resolve_settings_with<H: SettingsHost>(
         file_did_not_load,
         ..
     } = resolve_policy(host, parent.as_ref(), remote.as_ref(), &evaluation);
+    let policy_settings = policy_settings.map(|mut settings| {
+        for entry in settings.values_mut() {
+            normalize_numbers(entry, dialect);
+        }
+        settings
+    });
     let origin = origin.map(|origin| origin.as_str());
 
     let mut per_source: Vec<(&str, Option<PathBuf>, Option<SettingsMap>)> = Vec::new();
@@ -142,17 +159,17 @@ pub fn resolve_settings_with<H: SettingsHost>(
         let (path, settings) = match name {
             "userSettings" => {
                 let path = user_settings_path(host);
-                let settings = read_settings_file(host, &path);
+                let settings = read_settings_file(host, &path, dialect);
                 (Some(path), settings)
             }
             "projectSettings" => {
                 let path = project_settings_path(&cwd);
-                let settings = read_settings_file(host, &path);
+                let settings = read_settings_file(host, &path, dialect);
                 (Some(path), settings)
             }
             "localSettings" => {
                 let path = local_settings_path(&cwd);
-                let settings = read_settings_file(host, &path);
+                let settings = read_settings_file(host, &path, dialect);
                 (Some(path), settings)
             }
             "policySettings" => (None, policy_settings.clone()),
@@ -238,8 +255,16 @@ pub fn resolve_settings_with<H: SettingsHost>(
 
 /// `resolveSettings` upstream: reads the real host once and merges every enabled source.
 pub async fn resolve_settings(options: &ResolveSettingsOptions) -> Result<ResolvedSettings, ResolveSettingsError> {
+    resolve_settings_in_dialect(options, SettingsDialect::TypeScript).await
+}
+
+/// [`resolve_settings`] reading numbers like the chosen SDK's JSON parser.
+pub async fn resolve_settings_in_dialect(
+    options: &ResolveSettingsOptions,
+    dialect: SettingsDialect,
+) -> Result<ResolvedSettings, ResolveSettingsError> {
     let options = options.clone();
-    tokio::task::spawn_blocking(move || resolve_settings_with(&NativeHost, &options))
+    tokio::task::spawn_blocking(move || resolve_settings_in_dialect_with(&NativeHost, &options, dialect))
         .await
         .map_err(ResolveSettingsError::Join)?
 }
