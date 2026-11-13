@@ -14,7 +14,9 @@ use url::Url;
 
 use crate::{
     constants::{SETTINGS_SCHEMA_JSON, SETTINGS_SCHEMA_SAFE_INTEGER},
-    settings_schema_builtins::{Predicate, Transform, predicate_for, sentinel, transform_for},
+    settings_schema_builtins::{
+        Batteries, Payload, Predicate, Transform, payload_for, predicate_for, sentinel, transform_for,
+    },
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -58,8 +60,8 @@ enum Check {
     StartsWith(String),
     Url,
     Predicate(Predicate),
-    /// A refinement whose body is not part of the description (upstream `superRefine`).
-    Opaque,
+    /// A refinement that reports through `issues` (upstream `superRefine` and `check`).
+    Payload(Payload),
 }
 
 #[derive(Debug)]
@@ -122,11 +124,19 @@ pub(crate) fn schema() -> Option<&'static SettingsSchema> {
 impl SettingsSchema {
     pub(crate) fn parse(text: &str) -> Result<Self, SettingsSchemaError> {
         let document: Value = serde_json::from_str(text)?;
-        let string: Vec<Value> = array_of(&document["batteries"], "string")?
-            .iter()
-            .map(expand_battery)
-            .collect();
-        let builder = Builder::new(&document, &string)?;
+        let battery = |name: &str| -> Result<Vec<Value>, SettingsSchemaError> {
+            Ok(array_of(&document["batteries"], name)?
+                .iter()
+                .map(expand_battery)
+                .collect())
+        };
+        let batteries = Batteries {
+            string: battery("string")?,
+            object: battery("object")?,
+            value: battery("value")?,
+            rule: battery("rule")?,
+        };
+        let builder = Builder::new(&document, &batteries)?;
         let keys: Vec<String> = array_of(&document, "keys")?
             .iter()
             .map(|key| key.as_str().map(str::to_owned).ok_or_else(|| malformed("key")))
@@ -198,16 +208,16 @@ pub(crate) fn expand_battery(input: &Value) -> Value {
 
 struct Builder<'a> {
     definitions: &'a Map<String, Value>,
-    battery: &'a [Value],
+    batteries: &'a Batteries,
     built: std::cell::RefCell<HashMap<String, Arc<Node>>>,
     building: std::cell::RefCell<HashSet<String>>,
 }
 
 impl<'a> Builder<'a> {
-    fn new(document: &'a Value, battery: &'a [Value]) -> Result<Self, SettingsSchemaError> {
+    fn new(document: &'a Value, batteries: &'a Batteries) -> Result<Self, SettingsSchemaError> {
         Ok(Self {
             definitions: object_of(document, "definitions")?,
-            battery,
+            batteries,
             built: Default::default(),
             building: Default::default(),
         })
@@ -291,7 +301,7 @@ impl<'a> Builder<'a> {
                     .get("source")
                     .and_then(Value::as_str)
                     .ok_or_else(|| malformed("source"))?;
-                Node::Transform(transform_for(source))
+                Node::Transform(transform_for(source, description, self.batteries))
             }
             "object" => {
                 let mode = match description.get("mode").and_then(Value::as_str) {
@@ -319,11 +329,11 @@ impl<'a> Builder<'a> {
         let Some(entries) = description.get("checks").and_then(Value::as_array) else {
             return Ok(Vec::new());
         };
-        entries.iter().map(|entry| check_from(entry, self.battery)).collect()
+        entries.iter().map(|entry| check_from(entry, self.batteries)).collect()
     }
 }
 
-fn check_from(entry: &Value, battery: &[Value]) -> Result<Check, SettingsSchemaError> {
+fn check_from(entry: &Value, batteries: &Batteries) -> Result<Check, SettingsSchemaError> {
     let kind = entry
         .get("check")
         .and_then(Value::as_str)
@@ -376,13 +386,22 @@ fn check_from(entry: &Value, battery: &[Value]) -> Result<Check, SettingsSchemaE
             Some("url") => Check::Url,
             _ => return Err(malformed("string format")),
         },
-        "custom" => match entry
-            .get("fn")
-            .and_then(|function| function.get("source"))
-            .and_then(Value::as_str)
-        {
-            Some(source) => Check::Predicate(predicate_for(source, entry, battery)),
-            None => Check::Opaque,
+        "custom" => match (entry.get("fn"), entry.get("payloadCheck")) {
+            (Some(function), _) => {
+                let source = function
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| malformed("function source"))?;
+                Check::Predicate(predicate_for(source, entry, batteries))
+            }
+            (None, Some(payload)) => {
+                let source = payload
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| malformed("payload source"))?;
+                Check::Payload(payload_for(source, payload, batteries))
+            }
+            (None, None) => return Err(malformed("custom check")),
         },
         other => return Err(SettingsSchemaError::Malformed(format!("unsupported check {other}"))),
     })
@@ -424,14 +443,14 @@ impl Check {
             Check::StartsWith(prefix) => value.as_str().is_none_or(|text| text.starts_with(prefix.as_str())),
             Check::Url => value.as_str().is_none_or(|text| Url::parse(text).is_ok()),
             Check::Predicate(predicate) => predicate.passes(value),
-            Check::Opaque => true,
+            Check::Payload(payload) => payload.issues(value) == 0,
         }
     }
 
     fn unported(&self) -> Option<String> {
         match self {
             Check::Predicate(predicate) => predicate.unported_source(),
-            Check::Opaque => Some("opaque refinement".to_owned()),
+            Check::Payload(payload) => payload.unported_source(),
             _ => None,
         }
     }
