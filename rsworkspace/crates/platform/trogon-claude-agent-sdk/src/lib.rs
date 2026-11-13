@@ -50,6 +50,7 @@ mod session_files;
 mod session_id;
 mod session_info;
 mod session_key;
+mod session_mutations;
 mod session_path_component;
 mod session_project_key;
 mod session_prompt;
@@ -137,6 +138,9 @@ pub use session_files::{
 pub use session_id::SessionId;
 pub use session_info::SdkSessionInfo;
 pub use session_key::{SessionKey, SessionKeyError};
+pub use session_mutations::{
+    ForkSessionResult, SessionMutationError, delete_session, fork_session, rename_session, tag_session,
+};
 pub use session_project_key::{SessionProjectKey, SessionProjectKeyError, project_key_for_directory};
 pub use session_resume::{MaterializedSession, SessionPreparationOptions, SessionRuntime, StoreResume};
 pub use session_store::{
