@@ -25,6 +25,23 @@ integrity-verified published `0.3.319` declaration archive.
 | `allowed_tools: Vec<ToolRule>` | [`allowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2353) | `allowedTools` |
 | `disallowed_tools: Vec<ToolRule>` | [`disallowed_tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2431) | `disallowedTools` |
 | `resume: Option<SessionId>` | [`resume`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2408) | `resume` |
+| `thinking: Option<ThinkingConfig>` | `thinking` | `thinking` |
+| `max_thinking_tokens: Option<u64>` | `max_thinking_tokens` | `maxThinkingTokens` |
+| `task_budget: Option<TaskBudget>` | `task_budget` | `taskBudget` |
+| `betas: Vec<SdkBeta>` | `betas` | `betas` |
+| `fallback_model: Option<ModelName>` | `fallback_model` | `fallbackModel` |
+| `permission_prompt_tool_name: Option<String>` | `permission_prompt_tool_name` | `permissionPromptToolName` |
+| `permission_prompts: Option<PermissionPrompts>` | Not exposed in pinned Python | `permissionPrompts` |
+| `channels: Vec<String>` | Not exposed in pinned Python | CLI bundle only |
+| `debug: DebugOutput` | Not exposed in pinned Python | `debug` |
+| `debug_file: Option<PathBuf>` | Not exposed in pinned Python | `debugFile` |
+| `include_hook_events: HookEvents` | `include_hook_events` | `includeHookEvents` |
+| `session_id: Option<SessionId>` | `session_id` | `sessionId` |
+| `resume_session_at: Option<String>` | `resume_session_at` | `resumeSessionAt` |
+| `resume_drops_turn: Option<String>` | `resume_drops_turn` | `resumeDropsTurn` |
+| `allow_dangerously_skip_permissions: DangerousPermissionSkip` | Not exposed in pinned Python | `allowDangerouslySkipPermissions` |
+| `project_config_root: Option<PathBuf>` | Not exposed in pinned Python | `projectConfigRoot` |
+| `skills: Option<Skills>` | `skills` | `skills` |
 
 | Rust value | Upstream scalar or purpose | Value contract |
 | --- | --- | --- |
@@ -32,7 +49,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `SessionId` | [Python `ResultMessage.session_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1714) / TypeScript `SDKResultSuccess.session_id` | Infallible opaque text; every string is stored verbatim. |
 | `MessageId` | [Python `UserMessage.uuid`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1378) / TypeScript `SDKUserMessage.uuid`; Rust does not require UUID syntax | Infallible opaque text; every string is stored verbatim. |
 | `ToolUseId` | [Python `ToolUseBlock.id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1223) / TypeScript `UserDialogRequest.toolUseID` | Infallible opaque text; every string is stored verbatim. |
-| `ControlRequestId` | [Python protocol `SDKControlRequest.request_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2885); an internal control-envelope string, not a published TypeScript wrapper class | Infallible opaque text; every string is stored verbatim. |
+| `ControlRequestId` | [Python protocol `SDKControlRequest.request_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2885); an internal control-envelope string, not a published TypeScript wrapper class | Infallible opaque text; every string is stored verbatim. Outbound ids follow the dialect: TypeScript `Math.random().toString(36).substring(2,15)`, Python `req_{counter}_{os.urandom(4).hex()}`. |
 | `TaskId` | [Python `TaskStartedMessage.task_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1568) / TypeScript `SDKTaskStartedMessage.task_id` | Infallible opaque text; every string is stored verbatim. |
 | `ToolName` | [Python `ToolUseBlock.name`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1224); the tool-call name string | Infallible opaque text; every string is stored verbatim. |
 | `BuiltinToolName` | [Python `ClaudeAgentOptions.tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2342) / TypeScript `Options.tools` string-list selection | Infallible opaque text. Names are joined into the `--tools` argument unvalidated, as both upstream SDKs do; callers must avoid commas and the CLI validates each name. |
@@ -41,6 +58,84 @@ integrity-verified published `0.3.319` declaration archive.
 | `McpToolName` | [Python `SdkMcpTool.name`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/__init__.py#L270) / TypeScript `SdkMcpToolDefinition.name` | Infallible opaque text. The built-in MCP server warns about a name outside one to 128 ASCII letters, digits, underscores, hyphens or periods, and still lists it. |
 | `ToolRule` | Python `allowed_tools` / `disallowed_tools` entry; TypeScript `allowedTools` / `disallowedTools` entry | Infallible opaque text. Rules are joined with commas unvalidated, as both upstream SDKs do; callers must avoid commas, which the CLI would split into separate rules. |
 | `AgentName` | TypeScript `Options.agent`; not exposed in pinned Python | Infallible opaque text; every string is stored verbatim. |
-| `QueueCapacity` | Rust host-side bounded-channel policy; not an upstream SDK class | Positive and no larger than Tokio's `Semaphore::MAX_PERMITS`; the value creates no channel. |
-| `Timeout` | Rust host-side wait policy; not an upstream SDK class | A positive duration no longer than the runtime draft's 24-hour maximum; no clock is read. |
+| `QueueCapacity` | Rust host-side bounded-channel policy; not an upstream SDK class | Positive and no larger than Tokio's `Semaphore::MAX_PERMITS`; the value creates no channel. Only opted-in bounds use it; queues are unbounded by default. |
+| `Timeout` | Rust host-side wait policy; not an upstream SDK class | Any duration; `Timeout::checked` rejects zero and values past 24 hours. A deadline past the clock's range never fires. No clock is read. |
 | `StderrTail` | Rust diagnostic byte container for child-process failures; not an upstream SDK class | Read-only public bytes and a content-free debug representation. Only the empty default is directly publicly constructible. |
+| `SessionSummaryEntry` | Python `SessionSummaryEntry` / TypeScript `SessionSummaryEntry`; `modified_at_ms` is upstream `mtime` | `data` is an opaque JSON object persisted verbatim; the fold never touches the write time unless one is passed. |
+| `SummaryDialect` | Rust selector for the two upstream fold layouts | `TypeScript` (default) stores camelCase `data` keys, honors `relocated` entries and shows bash input as `! command`; `Python` stores snake_case keys. |
+| `SdkSessionInfo` | Python `SDKSessionInfo` / TypeScript `SDKSessionInfo` | `file_size` is empty for store-backed listings; `created_at` is milliseconds since the Unix epoch. |
+| `SessionFiles` | Python `list_sessions`, `get_session_info`, `get_session_messages`, `list_subagents`, `get_subagent_messages` / the TypeScript functions of the same names | Reads transcripts under the Claude config directory with Python semantics (64 KiB head/tail lite reads, parent-chain walk, parallel tool-result recovery) and the TypeScript newest-first tie-break by session id. `MessagePage` treats a zero or absent limit as unlimited. |
+| `project_key_for_directory` | Python `_sanitize_path` / TypeScript `sanitizePath` | Realpath and NFC normalization, hyphen sanitization, and the base36 hash suffix beyond 200 characters; TypeScript hashes UTF-16 units. |
+| `SessionMutationError` | Python `ValueError` / `FileNotFoundError` raised by `rename_session`, `tag_session`, `delete_session`, `fork_session` | Distinguishes invalid ids, empty title or tag, a missing session or message, and I/O failure. |
+| `ForkSessionResult` | Python `ForkSessionResult` / TypeScript `ForkSessionResult` | Holds the new session id; `SessionFiles::fork_session` writes the copy beside its source with owner-only permissions on Unix. |
+| `list_sessions_from_store` and the other `*_from_store` readers | Python / TypeScript store-backed session helpers | Async free functions over any `SessionStore`. Listing uses summary sidecars with gap-fill from `load` and otherwise loads each session sixteen at a time; subagent helpers need `list_subkeys`. Project keys use the TypeScript sanitization the mirror uses. `StoreListOptions` carries the summary dialect. |
+| `rename_session_via_store`, `tag_session_via_store`, `delete_session_via_store`, `fork_session_via_store` | Python / TypeScript store mutations | Append `custom-title` and `tag` entries or a forked transcript; delete is a no-op for stores without `delete`. |
+| `import_session_to_store`, `ImportOptions` | Python `import_session_to_store` / TypeScript `importSessionToStore` | Replays the main transcript, subagent transcripts and `.meta.json` sidecars in batches of 500 entries or 1 MiB, keyed by the on-disk project directory name. |
+| `SessionStoreHelperError` | Python `ValueError` / `FileNotFoundError` plus store failures | Wraps `SessionMutationError`, `SessionStoreError`, key errors, unsupported-store capability and import I/O or JSON failures. |
+| `SessionStoreFlush` | Python `session_store_flush` / TypeScript `sessionStoreFlush` | `Batched` (default) flushes on a result or past the pending limits; `Eager` appends every frame as it is read. |
+| `MirrorSizeEstimate` | Pending-frame size heuristic of each upstream batcher | `TypeScript` (default) counts UTF-16 units of compact JSON; `Python` counts `json.dumps` characters with ASCII escaping. |
+
+## Process launch options
+
+| Rust field | Python equivalent | TypeScript equivalent |
+| --- | --- | --- |
+| `argv_style: ArgvStyle` | `subprocess_cli.py` argv shape | `sdk.mjs` argv shape (default) |
+| `environment_mode: EnvironmentMode` | env overlay (default) | `env` replace/inherit |
+| `claude_code_marker: ClaudeCodeMarker` | removes `CLAUDECODE` | keeps inherited value |
+| `entrypoint: Option<String>` | `CLAUDE_CODE_ENTRYPOINT` | `CLAUDE_CODE_ENTRYPOINT` |
+| `client_app: Option<String>` | `CLAUDE_AGENT_SDK_CLIENT_APP` | `CLAUDE_AGENT_SDK_CLIENT_APP` |
+| `client_app_derivation: ClientAppDerivation` | `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` (bundled CLI at 999.0.0 or later; this crate's identity replaces the distribution metadata) | none |
+| `trace_context: Option<TraceContext>` | `TRACEPARENT`, `TRACESTATE` | `TRACEPARENT`, `TRACESTATE` |
+| `stderr_handler: Option<StderrHandler>` | `stderr` callback (lines) | `stderr` callback (chunks) |
+| `extra_args: Vec<ExtraArgument>` | `extra_args` | `extraArgs` |
+| `script_runtime: ScriptRuntime` | not applicable | `executable`, `executableArgs` |
+| `user: Option<String>` | `user` | not applicable |
+| `run_as_uid: Option<u32>` | `user` as an int | `spawn` `uid` |
+| `Error::CliNotFoundAt(path)` | `CLINotFoundError` | not applicable |
+| `Error::WorkingDirectoryMissing(path)` | `CLIConnectionError` (cwd) | not applicable |
+| `Error::Process { .. }`, `exit_code()`, `typescript_message()` | `ProcessError` | exit-code error text |
+| `Error::Result(ResultError)` | `ResultError` | error result text |
+| `Error::Aborted(AbortError)`, `abort()` | not applicable | `AbortError` |
+| `Error::NotReadyForWriting` | `CLIConnectionError` (not ready for writing) | same text |
+| `Error::WriteToTerminatedProcess { exit_code }` | `CLIConnectionError` (terminated process) | same text without the code |
+| `Error::WriteFailed(io::Error)` | `CLIConnectionError` (write failed) | same text |
+| `Error::JsonDecode(JsonDecodeError)`, `JsonDecodeSourceError` | `CLIJSONDecodeError` (`line`, `original_error`: a `JSONDecodeError`, or the `ValueError("Buffer size L exceeds limit N")` of the `max_buffer_size` guard) | not applicable (line skipped, no line limit) |
+| `ClaudeAgentOptions::plugins`, `LocalPlugin` | `plugins` (`SdkPluginConfig`) | `plugins` (`SdkPluginConfig`, `skipMcpDiscovery`) |
+| `ClaudeAgentOptions::plugin_delivery`, `PluginDelivery` | not applicable | `pluginDelivery` (`argv` or `initialize`) |
+| `ClaudeAgentOptions::system_prompt`, `SystemPrompt`, `CustomPrompt`, `PresetPrompt` | `system_prompt` as `--system-prompt`, `--system-prompt-file` or `--append-system-prompt`; `excludeDynamicSections` and `systemPromptSnapshot` in `initialize` | `systemPrompt` in `initialize` (`systemPrompt` list, `appendSystemPrompt`, `systemPromptSnapshot`, `excludeDynamicSections`); no prompt flag |
+| `ClaudeAgentOptions::plan_mode_instructions`, `append_subagent_system_prompt`, `tool_aliases`, `code_running_mcp_tools`, `title`, `web_search_isolation_exempt_mcp_servers` | not applicable | `planModeInstructions`, `appendSubagentSystemPrompt`, `toolAliases`, `codeRunningMcpTools`, `title`, `webSearchIsolationExemptMcpServers` in `initialize` |
+| `ClaudeAgentOptions::prompt_suggestions`, `agent_progress_summaries`, `per_task_stop_affordance`, `rapid_followup_preempt`, `forward_nested_subagent_tool_calls` | not applicable | same names in `initialize`; `agentProgressSummaries` also deletes an inherited `CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES` in `EnvironmentMode::Inherit` |
+| `ClaudeAgentOptions::forward_subagent_text` | `forward_subagent_text` (sent only when true) | `forwardSubagentText` (`false` is sent) |
+| `ClaudeAgentOptions::workspace_trust`, `WorkspaceTrust` | not applicable | `workspaceTrust`; an accepted trust without an absolute directory is dropped with a warning |
+| `ClaudeAgentOptions::capture_sdk_mcp_manifests`, `captures_sdk_mcp_manifests` | not applicable | `captureSdkMcpManifests`, default off when `CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS` is truthy; gates a manifest capture this crate does not do yet |
+| `ClaudeAgentOptions::verbatim_prompts`, `VerbatimPrompts` | `verbatim_prompts` (`client_composed` on each user message; warns below CLI 2.1.248) | `verbatimPrompts` (`client_composed`) |
+| `Error::MessageParse(MessageParseError)` | `MessageParseError` (`data`) | not applicable |
+| `Transport` | `Transport` | not applicable |
+| `Transport::read_message` | `Transport.read_messages` | not applicable |
+| `Transport::kill` | not applicable | abort signal |
+| `ClaudeSdkClient::connect_with_transport`, `query_with_transport` | `ClaudeSDKClient(transport=...)`, `query(transport=...)` | not applicable |
+| `Error::Transport(..)` | exception raised by the transport | not applicable |
+
+## Messages
+
+| Rust | Python | TypeScript |
+| --- | --- | --- |
+| `Message` (`raw()`, `to_sdk_message()`) | `Message` union | `SDKMessage` (generated as `upstream::messages::SDKMessage`, every member plus `Unknown`) |
+| `MessageDecoding::{TypeScript, Python}`, `ClaudeAgentOptions::message_decoding` | `parse_message` | `query()` message stream |
+| `Message::RateLimit(RateLimitEvent)`, `RateLimitInfo` | `RateLimitEvent`, `RateLimitInfo` | `SDKRateLimitEvent` |
+| `Message::ConversationReset(ConversationResetMessage)` | `ConversationResetMessage` | `SDKConversationResetMessage` |
+| `SystemEvent::{TaskStarted, TaskProgress, TaskNotification, TaskUpdated, MirrorError, Hook}` | `TaskStartedMessage` and the other `SystemMessage` subclasses | `SDKTaskStartedMessage` and the other system members |
+| `ResultMessage::deferred_tool()` | `DeferredToolUse` | `SDKResultSuccess.deferred_tool_use` |
+| `ContentBlock::{ServerToolUse, ServerToolResult}` | `ServerToolUseBlock`, `ServerToolResultBlock` | server tool blocks of `BetaMessage` |
+| `Error::MessageParse(MessageParseError)` with Python decoding | `MessageParseError` (`KeyError` text) | not applicable |
+
+## Settings
+
+| Rust | Python | TypeScript |
+| --- | --- | --- |
+| `Settings` (generated, all 182 declared keys plus unknown keys) | no type; the `settings` option is a string | `Settings` |
+| `SettingsInput::{Path, Json, Inline}` | `settings` string, path or JSON by braces | `Options.settings: string \| Settings` |
+| `ClaudeAgentOptions::managed_settings`, `ManagedSettingsDelivery::{Argv, Initialize}` | none (ignored) | `Options.managedSettings`, `managedSettingsDelivery` |
+| `SandboxSettings`, `SandboxNetworkConfig`, `SandboxFilesystemConfig`, `SandboxCredentialsConfig`, `SandboxIgnoreViolations` (aliases of the generated `Settings.sandbox` types) | `SandboxSettings`, `SandboxNetworkConfig`, `SandboxIgnoreViolations` TypedDicts (subset of the keys) | `SandboxSettings` and its parts |
+| `ResolvedSettings`, `ProvenanceEntry`, `ResolvedSettingSource`, `PolicySettingsOrigin`, `ResolveSettingsOptions`, `SDKSettingsParseError` | no type | same names |
+| `resolve_settings`, `resolve_settings_with`, `filter_escalating_default_mode` | no function | `resolveSettings`, `filterEscalatingDefaultMode` |
