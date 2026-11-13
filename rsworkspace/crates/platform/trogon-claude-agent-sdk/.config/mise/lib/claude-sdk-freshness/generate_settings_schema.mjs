@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { NUMBER_DOCUMENTS } from './settings_number_battery.mjs';
+import { MERGE_PAIRS } from './settings_merge_battery.mjs';
 import { KEYED, TEXTS } from './settings_read_battery.mjs';
 
 const args = process.argv.slice(2);
@@ -37,7 +38,7 @@ const REFINE_ANCHOR = ',e(r.value,r)),t);return n}';
 // the schemas the in-place sanitizers validate entries with and the constants they consult.
 const READ_PATH_NAMES = [
   'lE', 'cm', 'Zk', 'Qk', 'Xk', 'Jk', 'yk', 'vS', 'zS', 'BS', 'K7e', 'Iu', 'GS', 'Es', 'Vf', 'b6', 'em', '$S',
-  'D7e', 'I7e', 'J5e', 'm7e', 'm3', 'qJe', 'W3e',
+  'D7e', 'I7e', 'J5e', 'm7e', 'm3', 'qJe', 'W3e', 'On', 'ao',
 ];
 // The schemas the sanitizers validate single entries with, by the name the Rust side looks them up under.
 const READ_ROOTS = {
@@ -102,7 +103,7 @@ async function main() {
 
 // Pretty prints the document but keeps each recorded probe list and battery on one line.
 const INLINE_KEYS = new Set(['probes', 'string', 'object', 'value', 'rule']);
-const LINE_PER_ITEM_KEYS = new Set(['documents', 'numbers']);
+const LINE_PER_ITEM_KEYS = new Set(['documents', 'numbers', 'merges']);
 function render(document) {
   const inline = [];
   const text = JSON.stringify(
@@ -244,7 +245,7 @@ function serialize({ fields, active }, read) {
   for (const key of keys) shape[key] = emit(built.get(key));
   const roots = {};
   for (const [name, schema] of Object.entries(rootSchemas)) roots[name] = emit(schema);
-  return { keys, active, read: readSection(read, roots), batteries: { value: encodeBattery(VALUE_BATTERY), string: encodeBattery(STRING_BATTERY), object: encodeBattery(OBJECT_BATTERY), rule: encodeBattery(RULE_BATTERY) }, fields: shape, definitions };
+  return { keys, active, read: readSection(read, roots), merge: mergeSection(read), batteries: { value: encodeBattery(VALUE_BATTERY), string: encodeBattery(STRING_BATTERY), object: encodeBattery(OBJECT_BATTERY), rule: encodeBattery(RULE_BATTERY) }, fields: shape, definitions };
 }
 
 // The constants of the read path and what the pinned `lE` produced for every battery document.
@@ -279,6 +280,26 @@ function readSection(read, roots) {
       const { settings } = read.lE(input, 'f', false);
       return { input, output: JSON.stringify(settings) };
     }),
+  };
+}
+
+// The rules of the customizer the upstream deep merge runs with (`ao`), read from its source so a changed
+// customizer fails the run instead of drifting, plus what the real merge (`On`) produced for each pair.
+const CUSTOMIZER =
+  /^function ao\(e,t,n\)\{if\(n==="([^"]+)"&&t!==void 0\)return JX\(t\);if\(Array\.isArray\(e\)&&Array\.isArray\(t\)\)\{if\(n==="([^"]+)"\)return t;return Xe\(\[\.\.\.e,\.\.\.t\]\)\}if\(\(n==="([^"]+)"\|\|n==="([^"]+)"\)&&V\(e\)&&V\(t\)\)return GQe\(e,t\);return\}$/;
+function mergeSection(read) {
+  const match = CUSTOMIZER.exec(read.ao.toString());
+  if (!match) throw new Error('the upstream merge customizer no longer has the shape the generator understands');
+  const [, replaced, replacedArray, shallowA, shallowB] = match;
+  return {
+    replacedKeys: [replaced],
+    replacedArrayKeys: [replacedArray],
+    shallowObjectKeys: [shallowA, shallowB],
+    merges: MERGE_PAIRS.map(([destination, source]) => ({
+      destination,
+      source,
+      output: JSON.parse(JSON.stringify(read.On(structuredClone(destination), structuredClone(source), read.ao))),
+    })),
   };
 }
 
