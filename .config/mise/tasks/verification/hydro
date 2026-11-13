@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Check scheduler decisions across Hydro-generated client orderings"
+set -euo pipefail
+
+exec "$MISE_PROJECT_ROOT/projects/hydro-verification/.config/mise/lib/verify" "$@"
