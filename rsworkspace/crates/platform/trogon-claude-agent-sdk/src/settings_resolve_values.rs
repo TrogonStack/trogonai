@@ -1,6 +1,8 @@
 use serde_json::{Map, Value};
 
-use crate::constants::{POLICY_META_KEYS, REPLACED_ARRAY_KEYS, SETTINGS_SCHEMA_KEY_ORDER};
+use crate::settings_schema::{SettingsSchema, schema};
+
+use crate::constants::{POLICY_META_KEYS, REPLACED_ARRAY_KEYS};
 
 pub(crate) type SettingsMap = Map<String, Value>;
 
@@ -96,9 +98,9 @@ pub(crate) fn get_path<'a>(settings: &'a SettingsMap, path: &[&str]) -> Option<&
 /// schema order, then every other key in its original order.
 pub(crate) fn in_schema_order(settings: &SettingsMap) -> SettingsMap {
     let mut ordered = SettingsMap::new();
-    for key in SETTINGS_SCHEMA_KEY_ORDER {
+    for key in schema().map(SettingsSchema::keys).unwrap_or_default() {
         if let Some(value) = settings.get(key) {
-            ordered.insert(key.to_owned(), value.clone());
+            ordered.insert(key.clone(), value.clone());
         }
     }
     for (key, value) in settings {
