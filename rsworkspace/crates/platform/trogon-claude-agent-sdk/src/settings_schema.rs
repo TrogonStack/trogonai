@@ -14,6 +14,7 @@ use url::Url;
 
 use crate::{
     constants::{SETTINGS_SCHEMA_JSON, SETTINGS_SCHEMA_SAFE_INTEGER},
+    settings_read_spec::ReadSpec,
     settings_schema_builtins::{
         Batteries, Payload, Predicate, Transform, payload_for, predicate_for, sentinel, transform_for,
     },
@@ -33,6 +34,9 @@ type Validation = Result<Option<Value>, ()>;
 pub(crate) struct SettingsSchema {
     keys: Vec<String>,
     fields: HashMap<String, Arc<Node>>,
+    /// The schemas the in-place sanitizers validate single entries with, by name.
+    roots: HashMap<String, Arc<Node>>,
+    read: ReadSpec,
 }
 
 #[derive(Debug)]
@@ -145,7 +149,35 @@ impl SettingsSchema {
         for (key, node) in object_of(&document, "fields")? {
             fields.insert(key.clone(), builder.node(node)?);
         }
-        Ok(Self { keys, fields })
+        let read = document.get("read").ok_or_else(|| malformed("read"))?;
+        let mut roots = HashMap::new();
+        for (name, node) in object_of(read, "roots")? {
+            roots.insert(name.clone(), builder.node(node)?);
+        }
+        Ok(Self {
+            keys,
+            fields,
+            roots,
+            read: ReadSpec::from_json(read).map_err(SettingsSchemaError::Malformed)?,
+        })
+    }
+
+    pub(crate) fn read_spec(&self) -> &ReadSpec {
+        &self.read
+    }
+
+    /// Whether the named sanitizer schema accepts the entry (`safeParse(...).success`).
+    pub(crate) fn root_accepts(&self, name: &str, value: &Value) -> bool {
+        self.root_output(name, Some(value)).is_some()
+    }
+
+    /// The parsed output of the named sanitizer schema, or `None` when it rejects the entry.
+    pub(crate) fn root_parse(&self, name: &str, value: &Value) -> Option<Value> {
+        self.root_output(name, Some(value))?
+    }
+
+    fn root_output(&self, name: &str, value: Option<&Value>) -> Option<Option<Value>> {
+        self.roots.get(name)?.validate(value).ok()
     }
 
     /// Top-level keys in schema order.
@@ -157,16 +189,19 @@ impl SettingsSchema {
     /// unknown keys pass through. Returns the parsed document, or `None` when validation fails.
     pub(crate) fn parse_document(&self, document: &Map<String, Value>) -> Option<Map<String, Value>> {
         let mut parsed = Map::new();
+        // The document schema holds the present schema keys in schema order, then passes unknown keys
+        // through in document order.
+        for key in &self.keys {
+            let (Some(value), Some(node)) = (document.get(key), self.fields.get(key)) else {
+                continue;
+            };
+            if let Some(output) = node.validate(Some(value)).ok()? {
+                parsed.insert(key.clone(), output);
+            }
+        }
         for (key, value) in document {
-            match self.fields.get(key) {
-                Some(node) => {
-                    if let Some(output) = node.validate(Some(value)).ok()? {
-                        parsed.insert(key.clone(), output);
-                    }
-                }
-                None => {
-                    parsed.insert(key.clone(), value.clone());
-                }
+            if !self.fields.contains_key(key) {
+                parsed.insert(key.clone(), value.clone());
             }
         }
         Some(parsed)
@@ -175,7 +210,7 @@ impl SettingsSchema {
     /// Source texts of the schema functions the interpreter does not reproduce yet.
     pub(crate) fn unported_sources(&self) -> Vec<String> {
         let mut found = Vec::new();
-        for node in self.fields.values() {
+        for node in self.fields.values().chain(self.roots.values()) {
             node.collect_unported(&mut found);
         }
         found.sort();

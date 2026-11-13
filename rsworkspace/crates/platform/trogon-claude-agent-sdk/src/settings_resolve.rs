@@ -220,9 +220,18 @@ pub fn resolve_settings_with<H: SettingsHost>(
         did_not_load(outcome_lost, mdm_did_not_load, file_did_not_load),
     );
     let mut result = Map::new();
-    result.insert("effective".to_owned(), Value::Object(effective));
-    result.insert("provenance".to_owned(), Value::Object(provenance));
-    result.insert("sources".to_owned(), Value::Array(sources));
+    result.insert(
+        "effective".to_owned(),
+        crate::settings_read::js_property_order(Value::Object(effective)),
+    );
+    result.insert(
+        "provenance".to_owned(),
+        crate::settings_read::js_property_order(Value::Object(provenance)),
+    );
+    result.insert(
+        "sources".to_owned(),
+        crate::settings_read::js_property_order(Value::Array(sources)),
+    );
     result.insert("machinePolicy".to_owned(), Value::Object(machine_policy));
     serde_json::from_value(Value::Object(result)).map_err(ResolveSettingsError::Decode)
 }

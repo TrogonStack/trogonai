@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { KEYED, TEXTS } from './settings_read_battery.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => {
@@ -31,6 +32,23 @@ const HOOK_ANCHOR = 'this.keys=Object.keys(e).filter((n)=>e[n]!==void 0)';
 // zod's `superRefine` wraps the refinement in a closure, so the copy keeps the refinement on the check
 // where the serializer can read its source.
 const REFINE_ANCHOR = ',e(r.value,r)),t);return n}';
+// Module-scope names of the settings document read path that the copy exports for the serializer:
+// the schemas the in-place sanitizers validate entries with and the constants they consult.
+const READ_PATH_NAMES = [
+  'lE', 'cm', 'Zk', 'Qk', 'Xk', 'Jk', 'yk', 'vS', 'zS', 'BS', 'K7e', 'Iu', 'GS', 'Es', 'Vf', 'b6', 'em', '$S',
+  'D7e', 'I7e', 'J5e', 'm7e', 'm3', 'qJe', 'W3e',
+];
+// The schemas the sanitizers validate single entries with, by the name the Rust side looks them up under.
+const READ_ROOTS = {
+  marketplaceEntry: 'Zk',
+  modelPickerRow: 'Qk',
+  pricingMultiplier: 'Xk',
+  pricingRates: 'Jk',
+  hookMatcher: 'yk',
+  hookEntry: 'vS',
+  allowedMcpServer: 'zS',
+  deniedMcpServer: 'BS',
+};
 const unique = (text, anchor, what) => {
   const first = text.indexOf(anchor);
   if (first === -1 || text.indexOf(anchor, first + 1) !== -1) {
@@ -48,7 +66,8 @@ async function main() {
     unique(text, REFINE_ANCHOR, 'superRefine');
     const hook = `${HOOK_ANCHOR};if(this.keys.includes("permissions")&&!globalThis.__settingsSchema){globalThis.__settingsSchema={fields:this.fields,active:[...this.activeWhenAbsent]}}`;
     const refine = ',e(r.value,r)),t);n._zod.refinement=e;return n}';
-    fs.writeFileSync(bundle, text.replace(HOOK_ANCHOR, hook).replace(REFINE_ANCHOR, refine));
+    const capture = `\n;globalThis.__settingsRead={${READ_PATH_NAMES.join(',')}};\n`;
+    fs.writeFileSync(bundle, text.replace(HOOK_ANCHOR, hook).replace(REFINE_ANCHOR, refine) + capture);
     const sdk = await import(pathToFileURL(bundle).href);
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'settings-schema-home-'));
     const previousHome = process.env.HOME;
@@ -64,7 +83,7 @@ async function main() {
     }
     captured = globalThis.__settingsSchema;
     if (!captured) throw new Error('the settings schema holder never ran');
-    const document = serialize(captured);
+    const document = serialize(captured, globalThis.__settingsRead);
     const rendered = render(document);
     if (check) {
       const existing = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '';
@@ -82,11 +101,16 @@ async function main() {
 
 // Pretty prints the document but keeps each recorded probe list and battery on one line.
 const INLINE_KEYS = new Set(['probes', 'string', 'object', 'value', 'rule']);
+const LINE_PER_ITEM_KEYS = new Set(['documents']);
 function render(document) {
   const inline = [];
   const text = JSON.stringify(
     document,
     (key, value) => {
+      if (LINE_PER_ITEM_KEYS.has(key) && Array.isArray(value)) {
+        inline.push(`[\n${value.map((item) => `    ${JSON.stringify(item)}`).join(',\n')}\n  ]`);
+        return `@@${inline.length - 1}@@`;
+      }
       if (INLINE_KEYS.has(key) && Array.isArray(value)) {
         inline.push(JSON.stringify(value));
         return `@@${inline.length - 1}@@`;
@@ -104,7 +128,7 @@ function definitionOf(schema) {
   return def;
 }
 
-function serialize({ fields, active }) {
+function serialize({ fields, active }, read) {
   // First pass: count how often each schema object is reached so shared and recursive ones become
   // named definitions and everything else is inlined.
   const reach = new Map();
@@ -127,7 +151,9 @@ function serialize({ fields, active }) {
   };
   const keys = Object.keys(fields).filter((key) => fields[key] !== undefined);
   const built = new Map(keys.map((key) => [key, fields[key]()]));
+  const rootSchemas = Object.fromEntries(Object.entries(READ_ROOTS).map(([name, source]) => [name, read[source]()]));
   for (const schema of built.values()) visit(schema);
+  for (const schema of Object.values(rootSchemas)) visit(schema);
   const named = new Map();
   const definitions = {};
   const emit = (schema) => {
@@ -215,7 +241,40 @@ function serialize({ fields, active }) {
   };
   const shape = {};
   for (const key of keys) shape[key] = emit(built.get(key));
-  return { keys, active, batteries: { value: encodeBattery(VALUE_BATTERY), string: encodeBattery(STRING_BATTERY), object: encodeBattery(OBJECT_BATTERY), rule: encodeBattery(RULE_BATTERY) }, fields: shape, definitions };
+  const roots = {};
+  for (const [name, schema] of Object.entries(rootSchemas)) roots[name] = emit(schema);
+  return { keys, active, read: readSection(read, roots), batteries: { value: encodeBattery(VALUE_BATTERY), string: encodeBattery(STRING_BATTERY), object: encodeBattery(OBJECT_BATTERY), rule: encodeBattery(RULE_BATTERY) }, fields: shape, definitions };
+}
+
+// The constants of the read path and what the pinned `lE` produced for every battery document.
+function readSection(read, roots) {
+  const hookTypes = [...read.vS()._zod.def.options.map((option) => option._zod.def.shape.type._zod.def.values[0])];
+  const probes = [...KEYED.map((document) => JSON.stringify(document)), ...TEXTS].map((input) => {
+    const { settings } = read.lE(input, 'f', false);
+    return { input, output: settings === null ? null : JSON.parse(JSON.stringify(settings)) };
+  });
+  return {
+    roots,
+    managedOnlyKeys: [...read.K7e],
+    aliases: read.Iu,
+    nullClearedKeys: read.GS(),
+    serverListKeys: read.D7e,
+    serverListPattern: { regex: read.I7e.source, flags: read.I7e.flags },
+    hookEvents: read.Es,
+    guardEvents: [...read.Vf],
+    unscannedKeys: [...read.b6],
+    hookTypes,
+    crossSessionInbound: read.em,
+    shareHostProfile: read.$S,
+    permissionBlocks: [...read.J5e].map(([name, block]) => ({ name, ...block })),
+    knownMarketplaceSources: [...read.m3],
+    knownPluginSources: [...read.qJe],
+    mcpLists: read.m7e.map((entry) => ({
+      key: entry.key,
+      root: entry.schema === read.zS ? 'allowedMcpServer' : entry.schema === read.BS ? 'deniedMcpServer' : null,
+    })),
+    documents: probes,
+  };
 }
 
 const VALUE_BATTERY = [

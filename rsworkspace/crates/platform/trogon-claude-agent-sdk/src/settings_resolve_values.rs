@@ -2,7 +2,7 @@ use serde_json::{Map, Value};
 
 use crate::settings_schema::{SettingsSchema, schema};
 
-use crate::constants::{POLICY_META_KEYS, REPLACED_ARRAY_KEYS};
+use crate::constants::{POLICY_META_KEYS, REPLACED_ARRAY_KEYS, SHALLOW_MERGED_OBJECT_KEYS};
 
 pub(crate) type SettingsMap = Map<String, Value>;
 
@@ -58,7 +58,16 @@ fn union_arrays(left: &[Value], right: &[Value]) -> Vec<Value> {
 }
 
 fn merge_existing(key: &str, destination: &mut Value, source: &Value) {
+    if key == "modelPicker" {
+        *destination = source.clone();
+        return;
+    }
     match (destination, source) {
+        (Value::Object(left), Value::Object(right)) if SHALLOW_MERGED_OBJECT_KEYS.contains(&key) => {
+            for (name, value) in right {
+                left.insert(name.clone(), value.clone());
+            }
+        }
         (Value::Array(left), Value::Array(right)) => {
             if REPLACED_ARRAY_KEYS.contains(&key) {
                 *left = right.clone();

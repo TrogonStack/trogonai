@@ -1,0 +1,1 @@
+{"hooks":{"Stop":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo ok"},5,null,{"type":"nope"},{"type":"command"}]},5,{"hooks":"x"},{"matcher":7,"hooks":[{"type":"command","command":"echo ok"}]}],"Bogus":[],"Notification":5,"SessionStart":null,"PostToolUse":[]},"model":"m"}
