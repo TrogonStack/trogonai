@@ -1,0 +1,9 @@
+{
+  "model": "project-model",
+  "permissions": {
+    "allow": [
+      "Bash(b)",
+      "Bash(a)"
+    ]
+  }
+}
