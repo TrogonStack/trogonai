@@ -73,6 +73,14 @@ mod session_summary;
 mod session_transcript;
 mod setting_source;
 mod settings_input;
+mod settings_resolve;
+mod settings_resolve_env;
+mod settings_resolve_parent;
+mod settings_resolve_platform;
+mod settings_resolve_policy;
+mod settings_resolve_sources;
+mod settings_resolve_tier;
+mod settings_resolve_values;
 mod settings_sandbox;
 mod stderr_tail;
 mod summary_dialect;
@@ -189,6 +197,9 @@ pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_ent
 pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
 pub use settings_input::SettingsInput;
+pub use settings_resolve::{
+    ResolveSettingsError, filter_escalating_default_mode, resolve_settings, resolve_settings_with,
+};
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };
