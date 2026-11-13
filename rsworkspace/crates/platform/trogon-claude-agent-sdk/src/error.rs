@@ -19,6 +19,16 @@ pub enum ControlOperation {
     StopTask,
     BackgroundTasks,
     McpSetServers,
+    SetMcpPermissionModeOverride,
+    SetMaxThinkingTokens,
+    ApplyFlagSettings,
+    UpdateSettings,
+    GetUsage,
+    ReadFile,
+    ReloadPlugins,
+    ReloadSkills,
+    ReloadOutputStyles,
+    SeedReadState,
 }
 
 impl std::fmt::Display for ControlOperation {
@@ -37,6 +47,16 @@ impl std::fmt::Display for ControlOperation {
             Self::StopTask => "stop_task",
             Self::BackgroundTasks => "background_tasks",
             Self::McpSetServers => "mcp_set_servers",
+            Self::SetMcpPermissionModeOverride => "set_mcp_permission_mode_override",
+            Self::SetMaxThinkingTokens => "set_max_thinking_tokens",
+            Self::ApplyFlagSettings => "apply_flag_settings",
+            Self::UpdateSettings => "update_settings",
+            Self::GetUsage => "get_usage",
+            Self::ReadFile => "read_file",
+            Self::ReloadPlugins => "reload_plugins",
+            Self::ReloadSkills => "reload_skills",
+            Self::ReloadOutputStyles => "reload_output_styles",
+            Self::SeedReadState => "seed_read_state",
         })
     }
 }
@@ -56,12 +76,40 @@ pub enum ProtocolError {
 
 #[derive(thiserror::Error)]
 #[error("Claude Code rejected the control request")]
-pub struct ControlRejectionError(pub(crate) String);
+pub struct ControlRejectionError {
+    message: String,
+    error_code: Option<String>,
+}
 
 impl ControlRejectionError {
-    pub fn message(&self) -> &str {
-        &self.0
+    /// TypeScript keeps an `error_code` only when it is a lowercase identifier (`/^[a-z][a-z0-9_]{0,63}$/`);
+    /// Python never reads it.
+    pub(crate) fn new(message: String, error_code: Option<serde_json::Value>, style: crate::ArgvStyle) -> Self {
+        let error_code = match (style, error_code) {
+            (crate::ArgvStyle::TypeScript, Some(serde_json::Value::String(code))) if error_code_shape(&code) => {
+                Some(code)
+            }
+            _ => None,
+        };
+        Self { message, error_code }
     }
+
+    /// The `error` text the CLI sent.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// TypeScript's `errorCode`: the CLI's machine-readable reason, when it sent a well-formed one.
+    pub fn error_code(&self) -> Option<&str> {
+        self.error_code.as_deref()
+    }
+}
+
+fn error_code_shape(code: &str) -> bool {
+    let mut bytes = code.bytes();
+    code.len() <= 64
+        && bytes.next().is_some_and(|first| first.is_ascii_lowercase())
+        && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
 impl std::fmt::Debug for ControlRejectionError {

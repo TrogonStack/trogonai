@@ -53,14 +53,19 @@ pub struct ConnectionInfo {
     pub fast_mode_disabled_reason: Option<String>,
     /// Response fields this type does not name.
     pub additional_fields: JsonObject,
-    raw: serde_json::Value,
+    raw: Option<serde_json::Value>,
 }
 
 impl ConnectionInfo {
     /// Reads an initialize response. Any JSON value is accepted, as upstream accepts it.
     pub fn from_json(value: serde_json::Value) -> Self {
+        Self::from_response(Some(value))
+    }
+
+    /// Reads the `response` field of an initialize reply, `None` when the reply has none.
+    pub(crate) fn from_response(value: Option<serde_json::Value>) -> Self {
         let empty = JsonObject::new();
-        let object = value.as_object().unwrap_or(&empty);
+        let object = value.as_ref().and_then(serde_json::Value::as_object).unwrap_or(&empty);
         fn field<T: serde::de::DeserializeOwned>(object: &JsonObject, key: &str) -> Option<T> {
             object.get(key).and_then(|value| T::deserialize(value).ok())
         }
@@ -89,9 +94,10 @@ impl ConnectionInfo {
         }
     }
 
-    /// The response exactly as the CLI sent it, preserving omitted versus explicitly null fields.
-    pub fn as_json(&self) -> &serde_json::Value {
-        &self.raw
+    /// The response exactly as the CLI sent it, preserving omitted versus explicitly null fields. `None` when the
+    /// reply had no `response` field, where TypeScript `initializationResult()` resolves to `undefined`.
+    pub fn as_json(&self) -> Option<&serde_json::Value> {
+        self.raw.as_ref()
     }
 }
 
@@ -194,6 +200,154 @@ pub struct McpSetServersResult {
     pub errors: std::collections::BTreeMap<String, String>,
     #[serde(flatten)]
     pub additional_fields: JsonObject,
+}
+
+/// A control response kept exactly as the CLI sent it. Neither upstream SDK validates control responses, so
+/// reading one never fails here; [`ControlReply::decode`] reads it as the pinned upstream type on request.
+pub struct ControlReply<T> {
+    value: Option<serde_json::Value>,
+    shape: std::marker::PhantomData<fn() -> T>,
+}
+
+impl<T> ControlReply<T> {
+    pub(crate) fn new(value: Option<serde_json::Value>) -> Self {
+        Self {
+            value,
+            shape: std::marker::PhantomData,
+        }
+    }
+
+    /// The response as sent; `None` when the CLI sent none, where TypeScript returns `undefined`.
+    pub fn as_json(&self) -> Option<&serde_json::Value> {
+        self.value.as_ref()
+    }
+
+    pub fn into_json(self) -> Option<serde_json::Value> {
+        self.value
+    }
+}
+
+impl<T: serde::de::DeserializeOwned> ControlReply<T> {
+    /// Reads the response as the type the pinned TypeScript declarations give it; an absent response reads as
+    /// `null`.
+    pub fn decode(&self) -> Result<T, serde_json::Error> {
+        T::deserialize(self.value.as_ref().unwrap_or(&serde_json::Value::Null))
+    }
+}
+
+impl<T> Clone for ControlReply<T> {
+    fn clone(&self) -> Self {
+        Self::new(self.value.clone())
+    }
+}
+
+impl<T> std::fmt::Debug for ControlReply<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ControlReply").field(&self.value).finish()
+    }
+}
+
+impl<T> PartialEq for ControlReply<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+/// `setMcpPermissionModeOverride` modes; `None` clears the override.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum McpPermissionModeOverride {
+    Default,
+    Auto,
+}
+
+impl McpPermissionModeOverride {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Auto => "auto",
+        }
+    }
+}
+
+/// `setMaxThinkingTokens` display modes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MaxThinkingTokensDisplay {
+    Summarized,
+    Omitted,
+    Highlights,
+}
+
+impl MaxThinkingTokensDisplay {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Summarized => "summarized",
+            Self::Omitted => "omitted",
+            Self::Highlights => "highlights",
+        }
+    }
+}
+
+/// The settings file `updateSettings` writes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettingsUpdateSource {
+    LocalSettings,
+    UserSettings,
+}
+
+impl SettingsUpdateSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LocalSettings => "localSettings",
+            Self::UserSettings => "userSettings",
+        }
+    }
+}
+
+/// `getContextUsage({detail})`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContextUsageDetail {
+    Summary,
+    Full,
+}
+
+impl ContextUsageDetail {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Summary => "summary",
+            Self::Full => "full",
+        }
+    }
+}
+
+/// `readFile` encodings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReadFileEncoding {
+    Utf8,
+    Base64,
+}
+
+impl ReadFileEncoding {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Utf8 => "utf-8",
+            Self::Base64 => "base64",
+        }
+    }
+}
+
+/// `readFile(path, {maxBytes, encoding})`; an unset field is left out of the request.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ReadFileOptions {
+    pub max_bytes: Option<u64>,
+    pub encoding: Option<ReadFileEncoding>,
+}
+
+/// `reloadPlugins({holdOnCacheImpact, addPlugins})`. Like TypeScript, `hold_on_cache_impact` is sent only when
+/// set and `add_plugins` only when it lists a plugin.
+#[derive(Clone, Debug, Default)]
+pub struct ReloadPluginsOptions {
+    pub hold_on_cache_impact: bool,
+    pub add_plugins: Vec<crate::LocalPlugin>,
 }
 
 #[cfg(test)]

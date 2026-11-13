@@ -32,6 +32,7 @@ mod environment_plan;
 mod error;
 mod framing;
 mod hooks;
+mod js_json;
 mod js_object_order;
 mod managed_settings_delivery;
 mod mcp_read_resource_response;
@@ -156,8 +157,10 @@ pub use client_app_derivation::{BundledCli, ClientAppDerivation};
 pub use config_value::ConfigValue;
 pub use constants::{DEFAULT_ENTRYPOINT, MINIMUM_CLAUDE_CODE_VERSION, SDK_VERSION};
 pub use control::{
-    ConnectionInfo, ContextUsageCategory, ContextUsageResponse, FeatureSupport, InterruptReceipt, McpEnabled,
-    McpSetServersResult, McpStatusResponse, RewindFilesResult, RewindMode,
+    ConnectionInfo, ContextUsageCategory, ContextUsageDetail, ContextUsageResponse, ControlReply, FeatureSupport,
+    InterruptReceipt, MaxThinkingTokensDisplay, McpEnabled, McpPermissionModeOverride, McpSetServersResult,
+    McpStatusResponse, ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RewindFilesResult, RewindMode,
+    SettingsUpdateSource,
 };
 pub use control_request_id::ControlRequestId;
 pub use dialog::{

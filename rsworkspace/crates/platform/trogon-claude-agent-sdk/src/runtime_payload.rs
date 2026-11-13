@@ -127,18 +127,66 @@ pub(crate) enum RequestPayload<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         cancel_queued: Option<bool>,
     },
+    /// TypeScript leaves an unset model out (`Some(None)` never occurs there); Python sends `null`.
     SetModel {
-        model: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<Option<&'a str>>,
     },
     SetPermissionMode {
         mode: &'a str,
     },
     RewindFiles {
         user_message_id: &'a str,
-        dry_run: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        dry_run: Option<bool>,
     },
     McpStatus,
-    GetContextUsage,
+    GetContextUsage {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<&'static str>,
+    },
+    SetMcpPermissionModeOverride {
+        #[serde(rename = "serverName")]
+        server_name: &'a str,
+        mode: Option<&'static str>,
+    },
+    SetMaxThinkingTokens {
+        max_thinking_tokens: Option<u64>,
+        /// `None` leaves the key out, `Some(None)` sends `null`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        thinking_display: Option<Option<&'static str>>,
+    },
+    ApplyFlagSettings {
+        settings: &'a JsonObject,
+    },
+    UpdateSettings {
+        source: &'static str,
+        settings: &'a JsonObject,
+    },
+    GetUsage {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        skip_behaviors: Option<bool>,
+    },
+    ReadFile {
+        path: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max_bytes: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        encoding: Option<&'static str>,
+    },
+    ReloadPlugins {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hold_on_cache_impact: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        add_plugins: Option<Vec<crate::plugin::PluginPayload<'a>>>,
+    },
+    ReloadSkills,
+    ReloadOutputStyles,
+    SeedReadState {
+        path: &'a str,
+        /// A finite number, or `null` for NaN and the infinities as `JSON.stringify` writes them.
+        mtime: serde_json::Value,
+    },
     McpReconnect {
         #[serde(rename = "serverName")]
         server_name: &'a str,
@@ -157,6 +205,7 @@ pub(crate) enum RequestPayload<'a> {
         task_id: &'a str,
     },
     BackgroundTasks {
+        #[serde(skip_serializing_if = "Option::is_none")]
         tool_use_id: Option<&'a str>,
     },
     McpSetServers {

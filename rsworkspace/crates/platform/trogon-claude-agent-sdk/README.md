@@ -87,7 +87,9 @@ Pattern matching exposes the same fields through the box.
 `connection_info()` borrows the cached `ConnectionInfo` from that handshake,
 including support flags and additional metadata. Reading it is non-fallible and
 sends no protocol messages; `ConnectionInfo::as_json()` retains the original
-response, including omitted or explicitly null fields. Like both upstream SDKs,
+response, including omitted or explicitly null fields, or `None` when the reply
+has no `response` field, where TypeScript `initializationResult()` resolves to
+`undefined`. Like both upstream SDKs,
 the response is not validated: a known field of an unexpected type reads as
 absent, and under `ArgvStyle::Python` a response that is not an object reads as
 `{}`. The initialize checks follow `sdk.mjs` in its order: blocking hooks need
@@ -95,13 +97,28 @@ absent, and under `ArgvStyle::Python` a response that is not an object reads as
 managed settings need `managed_settings_applied`; plugins that were not
 confirmed only log a warning. Non-empty `supported_dialog_kinds` without a
 `user_dialog_handler` is refused before the CLI starts.
-The handle provides interrupt receipts, model and permission changes, rewind,
-MCP status/reconnect/toggle/replacement, context usage and task controls. Legacy
-interrupt replies remain distinct from reported empty queues. Newer controls
-depend on installed CLI support. `read_mcp_resource` follows TypeScript
-`readMcpResource`: Claude Code reads the `ui://` resource, and the reply's
-`response` field is returned as sent, without a shape check, or `None` when the
-reply has none, where TypeScript returns `undefined`.
+The handle provides every `Query` control of the pinned TypeScript SDK:
+interrupt receipts, model, permission and thinking-token changes, flag and
+settings updates, rewind, MCP status, permission override, resource reads and
+reconnect/toggle/replacement, context and usage reports, file reads, plugin,
+skill and output-style reloads, read-state seeding, task stop and backgrounding,
+and `reinitialize`. Each request matches `sdk.mjs` byte for byte by default and
+`claude_agent_sdk` under `ArgvStyle::Python`, with optional fields omitted when
+unset. Replies come back as `ControlReply<T>`: `as_json()` keeps the value the
+CLI sent, or `None` when the reply has no `response` field, where TypeScript
+returns `undefined`, and `decode()` reads it as the generated upstream type.
+Under `ArgvStyle::Python` an absent, null or non-object `response` reads as
+`{}`, as `claude_agent_sdk` does.
+`read_mcp_resource` follows TypeScript `readMcpResource`: Claude Code reads the
+`ui://` resource, and the reply's `response` field is returned as sent, without
+a shape check, or `None` when the reply has none, where TypeScript returns
+`undefined`. Each method returns what its TypeScript counterpart returns
+(`read_file` is `None` on any failure, `background_tasks` is `true` when the CLI
+omits `backgrounded`), and a rejected request keeps a well-formed TypeScript
+`error_code`.
+`supported_commands()` follows the latest `commands_changed` system message.
+Legacy interrupt replies remain distinct from reported empty queues. Newer
+controls depend on installed CLI support.
 
 ## Callbacks and MCP
 

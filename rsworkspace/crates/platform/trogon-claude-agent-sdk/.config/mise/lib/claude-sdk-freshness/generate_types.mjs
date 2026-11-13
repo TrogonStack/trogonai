@@ -187,12 +187,16 @@ function parseType(node, source) {
   }
   if (ts.isUnionTypeNode(node)) return unionOf(node.types.map(type => parseType(type, source)));
   if (ts.isTypeReferenceNode(node)) {
-    const name = node.typeName.getText(source);
+    // `coreTypes` re-exports declarations of the same file, so `coreTypes.X` is `X`.
+    const qualified = ts.isQualifiedName(node.typeName) && node.typeName.left.getText(source) === 'coreTypes';
+    const name = qualified ? node.typeName.right.text : node.typeName.getText(source);
     // `Partial<T>` only makes keys optional; a map already has optional keys.
     if (name === 'Partial' && node.typeArguments?.length === 1) return parseType(node.typeArguments[0], source);
-    // `keyof X` of an interface with a string index signature is `string | number`, and the wire
-    // key is always text.
+    // `keyof X` of an interface with a string index signature is `string | number`, and a named key
+    // type (a union of string literals such as `HookEvent`) does not limit what arrives. The wire key
+    // is always text.
     const stringKey = argument => argument.kind === ts.SyntaxKind.StringKeyword
+      || ts.isTypeReferenceNode(argument)
       || (ts.isTypeOperatorNode(argument) && argument.operator === ts.SyntaxKind.KeyOfKeyword);
     if (name === 'Record' && node.typeArguments?.length === 2 && stringKey(node.typeArguments[0])) {
       return { k: 'map', val: parseType(node.typeArguments[1], source) };

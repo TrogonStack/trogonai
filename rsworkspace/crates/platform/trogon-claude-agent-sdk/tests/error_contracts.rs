@@ -39,6 +39,19 @@ fn control_timeout_diagnostics_identify_each_wire_operation() {
         (ControlOperation::StopTask, "stop_task"),
         (ControlOperation::BackgroundTasks, "background_tasks"),
         (ControlOperation::McpSetServers, "mcp_set_servers"),
+        (
+            ControlOperation::SetMcpPermissionModeOverride,
+            "set_mcp_permission_mode_override",
+        ),
+        (ControlOperation::SetMaxThinkingTokens, "set_max_thinking_tokens"),
+        (ControlOperation::ApplyFlagSettings, "apply_flag_settings"),
+        (ControlOperation::UpdateSettings, "update_settings"),
+        (ControlOperation::GetUsage, "get_usage"),
+        (ControlOperation::ReadFile, "read_file"),
+        (ControlOperation::ReloadPlugins, "reload_plugins"),
+        (ControlOperation::ReloadSkills, "reload_skills"),
+        (ControlOperation::ReloadOutputStyles, "reload_output_styles"),
+        (ControlOperation::SeedReadState, "seed_read_state"),
     ] {
         let error = Error::ControlTimeout { operation };
         assert_eq!(error.to_string(), format!("Control request timeout: {name}"));

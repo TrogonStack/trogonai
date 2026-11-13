@@ -8,7 +8,7 @@ cov = [
     "--all-features",
     "--workspace",
     "--ignore-filename-regex",
-    '/src/gen/|/trogon-claude-agent-sdk/src/upstream/(messages|settings|settings_resolution|tool_inputs|tool_outputs)\.rs$',
+    '/src/gen/|/trogon-claude-agent-sdk/src/upstream/(control|messages|settings|settings_resolution|tool_inputs|tool_outputs)\.rs$',
 ]
 
 [target.wasm32-wasip2]

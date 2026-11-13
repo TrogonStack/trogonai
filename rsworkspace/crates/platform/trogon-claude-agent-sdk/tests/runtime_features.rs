@@ -66,11 +66,19 @@ async fn typed_controls_preserve_receipts_and_use_exact_wire_operations() -> Tes
     handle.set_permission_mode(PermissionMode::Plan).await?;
     let rewind = handle
         .rewind_files(MessageId::from("user-message"), RewindMode::DryRun)
-        .await?;
+        .await?
+        .decode()?;
     assert!(rewind.can_rewind);
     assert_eq!(rewind.files_changed, Some(vec!["README.md".to_owned()]));
-    assert_eq!(handle.mcp_status().await?.mcp_servers[0]["name"], "local");
-    assert_eq!(handle.context_usage().await?.total_tokens, 3);
+    assert_eq!(handle.mcp_status().await?.decode()?.mcp_servers[0]["name"], "local");
+    assert_eq!(
+        handle
+            .context_usage(None)
+            .await?
+            .as_json()
+            .map(|usage| &usage["totalTokens"]),
+        Some(&json!(3))
+    );
     handle.reconnect_mcp_server(McpServerName::from("local")).await?;
     handle
         .toggle_mcp_server(McpServerName::from("local"), McpEnabled::Disabled)

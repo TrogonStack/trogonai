@@ -56,7 +56,10 @@ pub(crate) enum IncomingControl {
 pub(crate) enum ControlResponse {
     /// The `response` field, `None` when the success frame has none.
     Success(Option<Value>),
-    Error(String),
+    Error {
+        message: String,
+        error_code: Option<Value>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -154,7 +157,12 @@ enum ControlResponseWire {
         response: Option<Value>,
     },
     #[serde(rename = "error")]
-    Error { request_id: String, error: String },
+    Error {
+        request_id: String,
+        error: String,
+        #[serde(default)]
+        error_code: Option<Value>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -257,9 +265,16 @@ pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<
                     id: ControlRequestId::from(request_id),
                     response: ControlResponse::Success(response),
                 },
-                ControlResponseWire::Error { request_id, error } => Frame::ControlResponse {
+                ControlResponseWire::Error {
+                    request_id,
+                    error,
+                    error_code,
+                } => Frame::ControlResponse {
                     id: ControlRequestId::from(request_id),
-                    response: ControlResponse::Error(error),
+                    response: ControlResponse::Error {
+                        message: error,
+                        error_code,
+                    },
                 },
             }
         }

@@ -24,13 +24,12 @@ use crate::{
 };
 
 pub(crate) enum Command {
-    Initialize {
-        response: oneshot::Sender<Result<crate::ConnectionInfo, Error>>,
-    },
+    /// TypeScript `initialize({first})`: the connect-time request, or `reinitialize()` resending it.
+    Initialize { first: bool, response: ControlSender },
     SetMcpServers {
         external: crate::McpServers,
         embedded: crate::SdkMcpServers,
-        response: oneshot::Sender<Result<JsonObject, Error>>,
+        response: ControlSender,
     },
     Prompt {
         input: crate::UserInput,
@@ -39,13 +38,13 @@ pub(crate) enum Command {
     Control {
         operation: ControlOperation,
         request: serde_json::Value,
-        response: oneshot::Sender<Result<JsonObject, Error>>,
+        response: ControlSender,
     },
     /// A control whose `response` field is returned as sent, `None` when the frame has none.
     RawControl {
         operation: ControlOperation,
         request: serde_json::Value,
-        response: oneshot::Sender<Result<Option<serde_json::Value>, Error>>,
+        response: ControlSender,
     },
     FinishInput {
         completion: Completion,
@@ -196,35 +195,35 @@ struct PendingControl {
     deadline: Option<Instant>,
 }
 
+/// Receives a control success's `response` field, `None` when the frame has none (TypeScript `undefined`).
+pub(crate) type ControlSender = oneshot::Sender<Result<Option<serde_json::Value>, Error>>;
+
 enum ControlResponder {
-    Initialize(oneshot::Sender<Result<crate::ConnectionInfo, Error>>),
+    Initialize {
+        first: bool,
+        response: ControlSender,
+    },
     Control {
         operation: ControlOperation,
-        response: oneshot::Sender<Result<JsonObject, Error>>,
+        response: ControlSender,
     },
     Raw {
         operation: ControlOperation,
-        response: oneshot::Sender<Result<Option<serde_json::Value>, Error>>,
+        response: ControlSender,
     },
 }
 
 impl ControlResponder {
     fn operation(&self) -> ControlOperation {
         match self {
-            Self::Initialize(_) => ControlOperation::Initialize,
+            Self::Initialize { .. } => ControlOperation::Initialize,
             Self::Control { operation, .. } | Self::Raw { operation, .. } => *operation,
         }
     }
 
     fn send_error(self, error: Error) {
         match self {
-            Self::Initialize(response) => {
-                let _ = response.send(Err(error));
-            }
-            Self::Control { response, .. } => {
-                let _ = response.send(Err(error));
-            }
-            Self::Raw { response, .. } => {
+            Self::Initialize { response, .. } | Self::Control { response, .. } | Self::Raw { response, .. } => {
                 let _ = response.send(Err(error));
             }
         }
@@ -287,6 +286,7 @@ where
     last_error_result: Option<JsonObject>,
     /// The CLI path until the first `system`/`init` message has been checked, then `None`.
     version_check: Option<String>,
+    latest_commands: LatestCommands,
     /// `verbatim_prompts`: every user message is marked `client_composed`.
     verbatim_prompts: bool,
     /// Python warns at the first init message when the CLI predates `client_composed`; TypeScript does not.
@@ -333,13 +333,18 @@ fn strings(values: &[String]) -> serde_json::Value {
     serde_json::Value::Array(values.iter().cloned().map(serde_json::Value::String).collect())
 }
 
-/// The object a control response carries, with an absent or null `response` read as an empty one.
-fn control_object(response: serde_json::Value) -> Result<JsonObject, Error> {
-    match response {
-        serde_json::Value::Null => Ok(JsonObject::new()),
-        other => serde_json::from_value(other).map_err(|error| ProtocolError::from(error).into()),
+/// The `response` a control success carries: Python reads anything but an object, an absent one included, as
+/// `{}`; TypeScript keeps the value as sent and an absent one as `undefined`, which is `None` here.
+fn control_value(style: crate::ArgvStyle, response: Option<serde_json::Value>) -> Option<serde_json::Value> {
+    match (style, response) {
+        (crate::ArgvStyle::Python, Some(serde_json::Value::Object(object))) => Some(serde_json::Value::Object(object)),
+        (crate::ArgvStyle::Python, _) => Some(serde_json::Value::Object(JsonObject::new())),
+        (crate::ArgvStyle::TypeScript, response) => response,
     }
 }
+
+/// The command list the CLI announced last, which TypeScript `supportedCommands()` prefers to the initialize one.
+pub(crate) type LatestCommands = Arc<std::sync::Mutex<Option<serde_json::Value>>>;
 
 /// JavaScript `String(value)` of an optional boolean.
 fn javascript_string(support: crate::FeatureSupport) -> &'static str {
@@ -495,6 +500,7 @@ pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
     pub initialization: Initialization,
     /// The CLI path to check against the minimum version, for a transport that runs the CLI itself.
     pub version_check: Option<String>,
+    pub latest_commands: LatestCommands,
 }
 
 /// The initialize request and the callbacks it registers, built before any transport exists so that a bad
@@ -629,6 +635,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         mut transport,
         initialization,
         version_check,
+        latest_commands,
     } = input;
     transport.connect().await?;
     let driver = Driver {
@@ -672,6 +679,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         message_decoding: options.message_decoding,
         last_error_result: None,
         version_check,
+        latest_commands,
         verbatim_prompts: options.verbatim_prompts == crate::VerbatimPrompts::Enabled,
         warn_unsupported_verbatim: options.verbatim_prompts == crate::VerbatimPrompts::Enabled
             && options.argv_style == crate::ArgvStyle::Python,
@@ -947,8 +955,13 @@ where
 
     async fn command(&mut self, command: Command) -> Result<(), Error> {
         match command {
-            Command::Initialize { response } => {
-                self.start_control(ControlResponder::Initialize(response), self.initialize_request.clone())
+            Command::Initialize { first, response } => {
+                let mut request = self.initialize_request.clone();
+                // TypeScript captures SDK MCP server manifests for the first initialize only.
+                if !first && let Some(object) = request.as_object_mut() {
+                    object.remove("sdkMcpServerManifests");
+                }
+                self.start_control(ControlResponder::Initialize { first, response }, request)
                     .await?;
             }
             Command::SetMcpServers {
@@ -1070,25 +1083,25 @@ where
         Ok(())
     }
 
-    /// Applies the initialize checks of `sdk.mjs` `Query.initialize`, in its order.
+    /// Applies the initialize checks of `sdk.mjs` `Query.initialize({first})`, in its order. A refusal ends the
+    /// session, after a `reinitialize()` too.
     fn finish_initialize(
         &mut self,
-        sender: oneshot::Sender<Result<crate::ConnectionInfo, Error>>,
-        response: serde_json::Value,
+        first: bool,
+        sender: ControlSender,
+        response: Option<serde_json::Value>,
     ) -> Result<(), Error> {
-        // Python reads anything but an object as `{}`; TypeScript keeps the value as sent.
-        let response = match (self.argv_style, response) {
-            (crate::ArgvStyle::Python, serde_json::Value::Object(object)) => serde_json::Value::Object(object),
-            (crate::ArgvStyle::Python, _) => serde_json::Value::Object(JsonObject::new()),
-            (crate::ArgvStyle::TypeScript, response) => response,
-        };
-        let connection_info = crate::ConnectionInfo::from_json(response);
+        let response = control_value(self.argv_style, response);
+        let connection_info = crate::ConnectionInfo::from_response(response.clone());
         let expectations = self.initialize_expectations;
         let refusal: Option<fn() -> Error> = if expectations.blocking_hooks
             && connection_info.hook_on_failure_supported != crate::FeatureSupport::Supported
         {
             Some(|| Error::BlockingHooksUnsupported)
-        } else if expectations.blocking_hooks && connection_info.hooks_applied == crate::FeatureSupport::Unsupported {
+        } else if expectations.blocking_hooks
+            && first
+            && connection_info.hooks_applied == crate::FeatureSupport::Unsupported
+        {
             Some(|| Error::HooksNotApplied)
         } else if expectations.managed_settings
             && connection_info.managed_settings_applied != crate::FeatureSupport::Supported
@@ -1108,8 +1121,10 @@ where
                 "[Query.initialize] Claude Code did not apply the plugins sent with pluginDelivery 'initialize'; the process is running with the plugins it was launched with."
             );
         }
-        self.state = State::Idle;
-        let _ = sender.send(Ok(connection_info));
+        if first {
+            self.state = State::Idle;
+        }
+        let _ = sender.send(Ok(response));
         Ok(())
     }
 
@@ -1164,6 +1179,15 @@ where
                     Message::System(system) if system.subtype == "session_state_changed" => {}
                     _ => self.last_error_result = None,
                 }
+                if let Message::System(system) = &message
+                    && system.subtype == "commands_changed"
+                    && let Some(commands @ serde_json::Value::Array(_)) = system.raw.get("commands")
+                {
+                    *self
+                        .latest_commands
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(commands.clone());
+                }
                 self.run_state.observe(&message, queued_limit, task_limit)?;
                 // Both SDKs drop the state changes the CLI sent only because the SDK asked for them.
                 if let Message::System(system) = &message
@@ -1210,22 +1234,26 @@ where
                 match response {
                     ControlResponse::Success(response) => {
                         let (response, sender) = match pending.response {
-                            ControlResponder::Initialize(sender) => {
-                                return self.finish_initialize(sender, response.unwrap_or_default());
+                            ControlResponder::Initialize {
+                                first,
+                                response: sender,
+                            } => {
+                                return self.finish_initialize(first, sender, response);
                             }
                             ControlResponder::Raw { response: sender, .. } => {
                                 let _ = sender.send(Ok(response));
                                 return Ok(());
                             }
                             ControlResponder::Control { response: sender, .. } => {
-                                (control_object(response.unwrap_or_default())?, sender)
+                                (control_value(self.argv_style, response), sender)
                             }
                         };
                         if operation == ControlOperation::Interrupt
+                            && let Some(object) = response.as_ref().and_then(serde_json::Value::as_object)
                             && let crate::InterruptReceipt::Reported {
                                 cancelled: Some(cancelled),
                                 ..
-                            } = crate::InterruptReceipt::from_json(response.clone())
+                            } = crate::InterruptReceipt::from_json(object.clone())
                         {
                             self.run_state
                                 .pending_inputs
@@ -1233,10 +1261,10 @@ where
                         }
                         let _ = sender.send(Ok(response));
                     }
-                    ControlResponse::Error(error) => {
+                    ControlResponse::Error { message, error_code } => {
                         pending.response.send_error(Error::ControlRejected {
                             operation,
-                            rejection: ControlRejectionError(error),
+                            rejection: ControlRejectionError::new(message, error_code, self.argv_style),
                         });
                     }
                 }
@@ -1612,7 +1640,7 @@ where
     async fn write(&mut self, frame: serde_json::Value) -> Result<(), Error> {
         // Each SDK writes its own JSON spelling: TypeScript `JSON.stringify`, Python `json.dumps`.
         let mut text = match self.argv_style {
-            crate::ArgvStyle::TypeScript => serde_json::to_string(&frame),
+            crate::ArgvStyle::TypeScript => crate::js_json::to_string(&frame),
             crate::ArgvStyle::Python => crate::python_json::to_string(&frame),
         }
         .map_err(ProtocolError::from)?;
