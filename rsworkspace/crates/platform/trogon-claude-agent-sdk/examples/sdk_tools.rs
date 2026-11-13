@@ -1,11 +1,11 @@
 #[path = "support/schema.rs"]
 mod schema;
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use trogon_claude_agent_sdk::{
     ClaudeAgentOptions, LocalMcpServer, LocalMcpServerOptions, McpServerName, McpToolInputSchema, McpToolName,
-    McpToolOutput, McpToolRequest, Message, Prompt, SdkTool, SdkToolOptions, ToolRule, query,
+    McpToolOutput, McpToolRequest, Message, Prompt, SdkMcpServers, SdkTool, SdkToolOptions, ToolRule, query,
 };
 
 #[cfg_attr(
@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tools: echo.into(),
     });
     let options = ClaudeAgentOptions {
-        sdk_mcp_servers: BTreeMap::from([(
+        sdk_mcp_servers: SdkMcpServers::from([(
             server_name,
             Arc::new(server) as Arc<dyn trogon_claude_agent_sdk::SdkMcpServer>,
         )]),

@@ -168,10 +168,6 @@ pub enum Error {
     FileCheckpointingWithSessionStore,
     #[error("continue_conversation with a session store requires the store to support listing sessions")]
     ContinueRequiresListSessions,
-    #[error("an MCP server replacement is already in progress")]
-    McpUpdateInProgress,
-    #[error("an MCP server name is configured as both external and embedded")]
-    DuplicateMcpServer,
     /// Python's text for a control request that went unanswered for the configured wait.
     #[error("Control request timeout: {operation}")]
     ControlTimeout { operation: ControlOperation },

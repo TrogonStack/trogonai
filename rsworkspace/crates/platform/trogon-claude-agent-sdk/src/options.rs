@@ -10,6 +10,11 @@ use crate::{
     },
 };
 
+/// MCP server configs keyed by name, in the order the caller inserted them.
+pub type McpServers = indexmap::IndexMap<McpServerName, McpServerOptions>;
+/// In-process MCP servers keyed by name, in the order the caller inserted them.
+pub type SdkMcpServers = indexmap::IndexMap<McpServerName, Arc<dyn SdkMcpServer>>;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum ToolSet {
     #[default]
@@ -290,8 +295,14 @@ pub struct ClaudeAgentOptions {
     pub hooks: Vec<HookRegistration>,
     pub agents: BTreeMap<AgentName, AgentDefinition>,
     pub agent: Option<AgentName>,
-    pub mcp_servers: BTreeMap<McpServerName, McpServerOptions>,
-    pub sdk_mcp_servers: BTreeMap<McpServerName, Arc<dyn SdkMcpServer>>,
+    /// Servers the CLI connects to itself, sent in insertion order like a TypeScript object.
+    pub mcp_servers: McpServers,
+    /// In-process servers. A name also present in `mcp_servers` resolves to the in-process server, the
+    /// way a TypeScript object spread does.
+    pub sdk_mcp_servers: SdkMcpServers,
+    /// Python `mcp_servers` given as a `str` or `Path`: a config file path or JSON text sent as its own
+    /// `--mcp-config` value, verbatim, after the one built from the server maps.
+    pub mcp_config: Option<std::ffi::OsString>,
     pub max_budget_usd: Option<UsdBudget>,
     pub output_schema: Option<OutputSchema>,
     pub file_checkpointing: FileCheckpointing,

@@ -36,6 +36,7 @@ mod js_object_order;
 mod managed_settings_delivery;
 mod mcp_server_name;
 mod mcp_server_options;
+mod mcp_server_tool_policy;
 mod mcp_tool_input_schema;
 mod mcp_tool_name;
 mod mcp_url;
@@ -176,7 +177,8 @@ pub use hooks::{
 };
 pub use managed_settings_delivery::ManagedSettingsDelivery;
 pub use mcp_server_name::McpServerName;
-pub use mcp_server_options::McpServerOptions;
+pub use mcp_server_options::{McpRemoteServerOptions, McpSdkServerOptions, McpServerOptions, McpStdioServerOptions};
+pub use mcp_server_tool_policy::{McpServerToolPolicy, McpToolOrgMaxPermission, McpToolPermissionPolicy};
 pub use mcp_tool_input_schema::{McpToolInputSchema, McpToolInputSchemaError};
 pub use mcp_tool_name::McpToolName;
 pub use mcp_url::{McpUrl, McpUrlError};
@@ -192,8 +194,9 @@ pub use model_name::ModelName;
 pub use option_error::OptionError;
 pub use options::{
     ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, FileCheckpointing,
-    InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, MessageBuffer, PartialMessages, RequestIdExhaustion,
-    SessionFork, SessionPersistence, Shutdown, SystemPrompt, ToolSet, VerbatimPrompts,
+    InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, McpServers, MessageBuffer, PartialMessages,
+    RequestIdExhaustion, SdkMcpServers, SessionFork, SessionPersistence, Shutdown, SystemPrompt, ToolSet,
+    VerbatimPrompts,
 };
 pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{

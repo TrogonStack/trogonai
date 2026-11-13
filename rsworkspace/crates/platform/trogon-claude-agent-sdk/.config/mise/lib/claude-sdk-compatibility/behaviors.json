@@ -1955,22 +1955,29 @@
       "concept": "Same MCP server name in SDK and external maps",
       "python": {
         "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "reason": "Python keeps one mcp_servers dict, so a name holds one config."
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "servers:{...n,...s}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 260,
+        "span_after": 0,
+        "sha256": "209528e749c102be0845a165ba305862eb266ebde67200ad95bfabdba12fecb7"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream keeps one server map, so a duplicate name cannot be expressed."
+        "behavior": "In-process servers are spread over the external configs, so an in-process server silently replaces an external config of the same name and keeps its position."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Rust splits SDK and external servers into two maps; a name in both would be ambiguous."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "runtime_failure_contracts::r17_in_process_mcp_server_replaces_an_external_config_of_the_same_name"
+      ],
       "rust": [
+        "src/argv.rs",
         "src/driver.rs"
       ]
     },
@@ -1979,21 +1986,28 @@
       "concept": "Concurrent MCP server updates",
       "python": {
         "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "reason": "The pinned Python sources have no set_mcp_servers."
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "async setMcpServers(e){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 420,
+        "sha256": "da0debdc868d9fd81e10a0750dfc0805e50436ae41f03a1b0a5891eb13a4b2b1"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Concurrent updates are not serialized upstream."
+        "behavior": "setMcpServers is not serialized: in-process servers are swapped before mcp_set_servers is sent, overlapping calls each send their request, and response errors are not reconciled."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Overlapping mcp_set_servers calls could apply out of order."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "runtime_failure_contracts::r18_mcp_replacements_are_not_serialized",
+        "runtime_failure_contracts::mcp_replacement_swaps_in_process_servers_before_the_response"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -2002,8 +2016,10 @@
       "id": "r19-mcp-url",
       "concept": "External MCP server URL",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 616,
+        "line_end": 641,
+        "sha256": "cf280bf75cce1a922de8ad73dcc8bf06fa4ab2acb10869d7eabd00d461eea28e"
       },
       "typescript": {
         "file": "package/sdk.mjs",
@@ -2016,14 +2032,19 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Server configs are serialized to --mcp-config verbatim."
+        "behavior": "Server configs, URLs included, are serialized to --mcp-config verbatim with no URL check."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Rejects non-http(s) schemes, embedded credentials and fragments before they reach argv."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "value_contracts::r19_mcp_urls_are_verbatim_unless_validation_is_requested",
+        "golden_argv_env::typescript_mcp_config_matches_upstream_bytes",
+        "golden_argv_env::python_mcp_config_matches_upstream_bytes"
+      ],
       "rust": [
+        "src/argv.rs",
+        "src/mcp_server_options.rs",
         "src/mcp_url.rs"
       ]
     },

@@ -2,7 +2,6 @@
 
 use serde_json::json;
 use std::{
-    collections::BTreeMap,
     error::Error as StdError,
     sync::{
         Arc,
@@ -254,49 +253,31 @@ fn echo_registry(counter: Arc<AtomicUsize>) -> Result<Arc<dyn SdkMcpServer>, Box
 }
 
 #[tokio::test]
-async fn dynamic_mcp_replacement_installs_handlers_and_rejection_keeps_previous() -> TestResult {
+async fn rejected_mcp_replacement_still_disconnects_removed_in_process_servers() -> TestResult {
     let calls = Arc::new(AtomicUsize::new(0));
     let rejected_calls = Arc::new(AtomicUsize::new(0));
+    let reconnected_calls = Arc::new(AtomicUsize::new(0));
     let mut client = ClaudeSdkClient::connect(options("mcp")?).await?;
     let handle = client.handle();
-    let servers = BTreeMap::from([(McpServerName::from("local"), echo_registry(calls.clone())?)]);
-    let installed = handle.set_mcp_servers(BTreeMap::new(), servers).await?;
+    let servers = SdkMcpServers::from([(McpServerName::from("local"), echo_registry(calls.clone())?)]);
+    let installed = handle.set_mcp_servers(McpServers::new(), servers).await?;
     assert_eq!(installed.added, ["local"]);
-    let rejected = BTreeMap::from([(McpServerName::from("reject"), echo_registry(rejected_calls.clone())?)]);
+    let rejected = SdkMcpServers::from([(McpServerName::from("reject"), echo_registry(rejected_calls.clone())?)]);
     assert!(matches!(
-        handle.set_mcp_servers(BTreeMap::new(), rejected).await,
+        handle.set_mcp_servers(McpServers::new(), rejected).await,
         Err(Error::ControlRejected {
             operation: ControlOperation::McpSetServers,
             ..
         })
     ));
+    let reconnected = SdkMcpServers::from([(McpServerName::from("local"), echo_registry(reconnected_calls.clone())?)]);
+    handle.set_mcp_servers(McpServers::new(), reconnected).await?;
     client.send_prompt(Prompt::from("mcp")).await?;
     assert_eq!(receive_result(&mut client).await?, "from-fixture");
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert_eq!(rejected_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(reconnected_calls.load(Ordering::SeqCst), 1);
     client.disconnect().await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn duplicate_external_and_embedded_mcp_name_fails_before_spawn() -> TestResult {
-    let mut options = options("normal")?;
-    options.cli_path = Some("nonexistent-fixture-must-not-spawn".into());
-    let name = McpServerName::from("local");
-    options.mcp_servers.insert(
-        name.clone(),
-        McpServerOptions::Http {
-            url: McpUrl::new("https://example.com/mcp")?,
-            headers: BTreeMap::new(),
-        },
-    );
-    options
-        .sdk_mcp_servers
-        .insert(name, echo_registry(Arc::new(AtomicUsize::new(0)))?);
-    assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
-        Err(Error::DuplicateMcpServer)
-    ));
     Ok(())
 }
 
@@ -314,8 +295,8 @@ async fn retained_mcp_server_keeps_the_existing_connection_session() -> TestResu
     client
         .handle()
         .set_mcp_servers(
-            BTreeMap::new(),
-            BTreeMap::from([(McpServerName::from("local"), echo_registry(replacement_calls.clone())?)]),
+            McpServers::new(),
+            SdkMcpServers::from([(McpServerName::from("local"), echo_registry(replacement_calls.clone())?)]),
         )
         .await?;
     client.send_prompt(Prompt::from("second")).await?;

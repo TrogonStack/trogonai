@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     future::{Future, pending},
     sync::Arc,
     time::Duration,
@@ -28,8 +28,8 @@ pub(crate) enum Command {
         response: oneshot::Sender<Result<crate::ConnectionInfo, Error>>,
     },
     SetMcpServers {
-        external: BTreeMap<crate::McpServerName, crate::McpServerOptions>,
-        embedded: BTreeMap<crate::McpServerName, Arc<dyn crate::SdkMcpServer>>,
+        external: crate::McpServers,
+        embedded: crate::SdkMcpServers,
         response: oneshot::Sender<Result<JsonObject, Error>>,
     },
     Prompt {
@@ -220,7 +220,7 @@ impl ControlResponder {
 
 type CallbackOutput = (ControlRequestId, Result<serde_json::Value, ProtocolError>);
 
-type McpSessions = BTreeMap<crate::McpServerName, Arc<dyn crate::SdkMcpSession>>;
+type McpSessions = indexmap::IndexMap<crate::McpServerName, Arc<dyn crate::SdkMcpSession>>;
 
 enum State {
     Initializing,
@@ -255,7 +255,6 @@ where
     detached_callbacks: HashMap<tokio::task::Id, crate::CancellationToken>,
     hook_callbacks: HashMap<String, HookCallback>,
     sdk_mcp_servers: McpSessions,
-    pending_mcp: Option<(ControlRequestId, McpSessions)>,
     initialize_request: serde_json::Value,
     initialize_expectations: InitializeExpectations,
     initialize_timeout: Option<Duration>,
@@ -341,13 +340,6 @@ fn javascript_string(support: crate::FeatureSupport) -> &'static str {
 fn initialize_config(
     options: &ClaudeAgentOptions,
 ) -> Result<(serde_json::Value, HashMap<String, HookCallback>, InitializeExpectations), Error> {
-    if options
-        .mcp_servers
-        .keys()
-        .any(|name| options.sdk_mcp_servers.contains_key(name))
-    {
-        return Err(Error::DuplicateMcpServer);
-    }
     if !options.supported_dialog_kinds.is_empty() && options.user_dialog_handler.is_none() {
         return Err(Error::DialogKindsWithoutHandler);
     }
@@ -422,8 +414,17 @@ fn initialize_config(
     };
     let flag = |value: Option<bool>| value.map(serde_json::Value::Bool);
     let text = |value: &Option<String>| value.clone().map(serde_json::Value::String);
+    // TypeScript names its in-process MCP servers in `initialize`; Python only lists them in `--mcp-config`.
+    let sdk_mcp_servers = (typescript && !options.sdk_mcp_servers.is_empty()).then(|| {
+        options
+            .sdk_mcp_servers
+            .keys()
+            .map(crate::McpServerName::as_str)
+            .collect()
+    });
     let request = InitializeRequest {
         hooks: (!options.hooks.is_empty()).then_some(hooks),
+        sdk_mcp_servers,
         json_schema: options.output_schema.as_ref().map(crate::OutputSchema::as_json),
         system_prompt: prompt.system_prompt,
         append_system_prompt: prompt.append_system_prompt,
@@ -638,7 +639,6 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
             .iter()
             .map(|(name, server)| (name.clone(), server.open_session()))
             .collect(),
-        pending_mcp: None,
         initialize_request: initialization.request,
         initialize_expectations: initialization.expectations,
         initialize_timeout: initialization.timeout,
@@ -947,14 +947,13 @@ where
                     let _ = response.send(Err(Error::NotReadyForWriting));
                     return Ok(());
                 }
-                if self.pending_mcp.is_some() {
-                    let _ = response.send(Err(Error::McpUpdateInProgress));
-                    return Ok(());
-                }
                 if self.controls_full() {
                     let _ = response.send(Err(Error::TooManyControls));
                     return Ok(());
                 }
+                // TypeScript `setMcpServers`: in-process servers are swapped before the request is sent, kept
+                // ones keep their session, and every registered one is listed after the external configs,
+                // replacing an external config of the same name in place like an object spread.
                 let mut servers = serde_json::Map::new();
                 for (name, config) in external {
                     servers.insert(
@@ -962,12 +961,8 @@ where
                         config.to_wire_json().map_err(ProtocolError::from)?,
                     );
                 }
-                let mut sessions = BTreeMap::new();
+                let mut sessions = McpSessions::new();
                 for (name, registry) in embedded {
-                    if servers.contains_key(name.as_str()) {
-                        let _ = response.send(Err(Error::DuplicateMcpServer));
-                        return Ok(());
-                    }
                     servers.insert(
                         name.as_str().to_owned(),
                         EmbeddedMcpPayload::Sdk { name: name.as_str() }.to_value()?,
@@ -979,13 +974,13 @@ where
                         .unwrap_or_else(|| registry.open_session());
                     sessions.insert(name, session);
                 }
+                self.sdk_mcp_servers = sessions;
                 let id = self.next_request_id()?;
                 let frame = wire::control_request(
                     &id,
                     RequestPayload::McpSetServers { servers }.to_value()?,
                     self.argv_style,
                 )?;
-                self.pending_mcp = Some((id.clone(), sessions));
                 self.write(frame).await?;
                 self.pending.insert(
                     id,
@@ -1210,19 +1205,6 @@ where
                                 .pending_inputs
                                 .retain(|input| input.as_ref().is_none_or(|input| !cancelled.contains(input)));
                         }
-                        if let Some((_, mut sessions)) = self.pending_mcp.take_if(|(request_id, _)| *request_id == id) {
-                            let result: crate::McpSetServersResult =
-                                serde_json::from_value(response.clone().into()).map_err(ProtocolError::from)?;
-                            for (name, previous) in &self.sdk_mcp_servers {
-                                if result.errors.contains_key(name.as_str()) {
-                                    sessions.insert(name.clone(), previous.clone());
-                                }
-                            }
-                            sessions.retain(|name, _| {
-                                !result.errors.contains_key(name.as_str()) || self.sdk_mcp_servers.contains_key(name)
-                            });
-                            self.sdk_mcp_servers = sessions;
-                        }
                         match pending.response {
                             ControlResponder::Initialize(_) => {}
                             ControlResponder::Control { response: sender, .. } => {
@@ -1231,9 +1213,6 @@ where
                         }
                     }
                     ControlResponse::Error(error) => {
-                        if operation == ControlOperation::McpSetServers {
-                            self.pending_mcp = None;
-                        }
                         pending.response.send_error(Error::ControlRejected {
                             operation,
                             rejection: ControlRejectionError(error),
@@ -1321,12 +1300,7 @@ where
                         return Ok(());
                     }
                     let name = crate::McpServerName::from(server_name);
-                    let server = self
-                        .pending_mcp
-                        .as_ref()
-                        .and_then(|(_, sessions)| sessions.get(&name))
-                        .or_else(|| self.sdk_mcp_servers.get(&name))
-                        .cloned();
+                    let server = self.sdk_mcp_servers.get(&name).cloned();
                     if let Some(server) = server {
                         let signal = crate::CancellationToken::new();
                         let callback_signal = signal.clone();

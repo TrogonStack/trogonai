@@ -495,8 +495,8 @@ impl ClientHandle {
 
     pub async fn set_mcp_servers(
         &self,
-        external: std::collections::BTreeMap<crate::McpServerName, crate::McpServerOptions>,
-        embedded: std::collections::BTreeMap<crate::McpServerName, std::sync::Arc<dyn crate::SdkMcpServer>>,
+        external: crate::McpServers,
+        embedded: crate::SdkMcpServers,
     ) -> Result<crate::McpSetServersResult, Error> {
         let (response, receiver) = oneshot::channel();
         self.enqueue(Command::SetMcpServers {

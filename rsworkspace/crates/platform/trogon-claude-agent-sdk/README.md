@@ -151,10 +151,22 @@ server does not expose server-initiated client requests.
 [The MCP-connect example](examples/mcp_connect.rs) checks the embedded server
 connection without registering hooks or sending a prompt.
 
-`McpServerOptions` configures external stdio, HTTP and SSE servers, whose
-connections the CLI owns. Pass credentials separately from URL userinfo.
-Dynamic updates retain existing same-name embedded sessions. Remove a server
-and re-add it to replace its registry instance.
+`McpServerOptions` configures the stdio, SSE, HTTP and instance-less `sdk`
+servers whose connections the CLI owns. Every upstream field is typed, and
+`extra` keys follow them verbatim. `McpServers` keeps insertion order, so the
+`--mcp-config` JSON matches what TypeScript builds from the same object. URLs
+are sent as given, like both SDKs; `McpUrl::validated` is an opt-in check for
+HTTP(S), userinfo and fragments.
+
+With the default TypeScript style, in-process servers stay out of
+`--mcp-config` and are named in the `initialize` request. With
+`ArgvStyle::Python` they appear in `--mcp-config` as `sdk` entries, and
+`ClaudeAgentOptions.mcp_config` carries Python's file path or JSON text form
+verbatim. An in-process server replaces an external config of the same name.
+
+`set_mcp_servers` is not serialized, as in TypeScript. It swaps in-process
+servers before the request is sent and keeps the session of a server that stays
+registered. Remove a server and re-add it to replace its registry instance.
 
 ## Configuration and limits
 
