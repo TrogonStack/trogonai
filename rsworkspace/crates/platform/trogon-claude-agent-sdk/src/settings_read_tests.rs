@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use super::{read_document, sanitize_policy_document};
+use super::{read_document, read_policy_document, sanitize_policy_document};
 use crate::{constants::SETTINGS_SCHEMA_JSON, settings_dialect::SettingsDialect, settings_json::js_stringify};
 
 /// Compares like JavaScript output: key order matters, and a number must be the same kind (integer or float) with
@@ -103,4 +103,48 @@ fn every_recorded_policy_document_is_sanitized_like_the_pinned_resolver() {
         }
     }
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+#[test]
+fn every_recorded_policy_document_is_read_like_the_pinned_resolver() {
+    let description: Value = serde_json::from_str(SETTINGS_SCHEMA_JSON).expect("description");
+    let documents = description["read"]["policy"]["documents"]
+        .as_array()
+        .expect("documents");
+    assert!(documents.len() > 1000);
+    let mut mismatches = Vec::new();
+    for probe in documents {
+        let input = probe["input"].as_str().expect("input");
+        let expected = &probe["output"];
+        let read = read_policy_document(input);
+        let actual = serde_json::json!({
+            "settings": read.settings.map_or(Value::Null, Value::Object),
+            "documentHasPolicyContent": read.has_policy_content.map_or(Value::Null, Value::Bool),
+            "loadState": if read.loaded { "loaded" } else { "didNotLoad" },
+        });
+        if !same(&actual, expected) {
+            mismatches.push(format!("{input}\n  rust:     {actual}\n  upstream: {expected}"));
+        }
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+#[test]
+fn a_blank_managed_document_loads_as_no_settings() {
+    for text in ["", " \n\t "] {
+        let read = read_policy_document(text);
+        assert!(read.settings.expect("settings").is_empty(), "{text:?}");
+        assert_eq!(read.has_policy_content, None, "{text:?}");
+        assert!(read.loaded, "{text:?}");
+    }
+}
+
+#[test]
+fn a_managed_document_that_is_not_an_object_does_not_load() {
+    for text in ["not json", "[1]", "5"] {
+        let read = read_policy_document(text);
+        assert!(read.settings.is_none(), "{text:?}");
+        assert_eq!(read.has_policy_content, None, "{text:?}");
+        assert!(!read.loaded, "{text:?}");
+    }
 }

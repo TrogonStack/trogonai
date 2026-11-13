@@ -309,27 +309,28 @@ fn is_array_index(name: &str) -> Option<u32> {
 pub(crate) fn js_property_order(value: Value) -> Value {
     match value {
         Value::Array(items) => Value::Array(items.into_iter().map(js_property_order).collect()),
-        Value::Object(entries) => {
-            let mut indexed: Vec<(u32, String, Value)> = Vec::new();
-            let mut named = Vec::new();
-            for (name, entry) in entries {
-                let entry = js_property_order(entry);
-                match is_array_index(&name) {
-                    Some(index) => indexed.push((index, name, entry)),
-                    None => named.push((name, entry)),
-                }
-            }
-            indexed.sort_by_key(|(index, _, _)| *index);
-            Value::Object(
-                indexed
-                    .into_iter()
-                    .map(|(_, name, entry)| (name, entry))
-                    .chain(named)
-                    .collect(),
-            )
-        }
+        Value::Object(entries) => Value::Object(js_property_order_map(entries)),
         other => other,
     }
+}
+
+/// `js_property_order` of an object, kept as the map it already is.
+fn js_property_order_map(entries: SettingsMap) -> SettingsMap {
+    let mut indexed: Vec<(u32, String, Value)> = Vec::new();
+    let mut named = Vec::new();
+    for (name, entry) in entries {
+        let entry = js_property_order(entry);
+        match is_array_index(&name) {
+            Some(index) => indexed.push((index, name, entry)),
+            None => named.push((name, entry)),
+        }
+    }
+    indexed.sort_by_key(|(index, _, _)| *index);
+    indexed
+        .into_iter()
+        .map(|(_, name, entry)| (name, entry))
+        .chain(named)
+        .collect()
 }
 
 /// A managed settings document after the policy sanitizers, before the policy schema parse.
@@ -339,6 +340,43 @@ pub(crate) fn sanitize_policy_document(text: &str) -> Option<SettingsMap> {
     let schema = schema()?;
     sanitize(&mut document, schema, schema.read_spec(), true);
     js_property_order(Value::Object(document)).as_object().cloned()
+}
+
+/// What `lE(text, file, true)` returns for a managed settings text: the settings (`None` for a document that
+/// does not load) and whether the raw document held any policy content (`None` when upstream does not say).
+#[cfg(test)]
+pub(crate) struct PolicyRead {
+    pub(crate) settings: Option<SettingsMap>,
+    pub(crate) has_policy_content: Option<bool>,
+    pub(crate) loaded: bool,
+}
+
+#[cfg(test)]
+pub(crate) fn read_policy_document(text: &str) -> PolicyRead {
+    let not_loaded = PolicyRead {
+        settings: None,
+        has_policy_content: None,
+        loaded: false,
+    };
+    if js_trim(text).is_empty() {
+        return PolicyRead {
+            settings: Some(SettingsMap::new()),
+            has_policy_content: None,
+            loaded: true,
+        };
+    }
+    let (Some(raw), Some(schema)) = (parse_object(text, SettingsDialect::TypeScript), schema()) else {
+        return not_loaded;
+    };
+    let mut document = raw.clone();
+    sanitize(&mut document, schema, schema.read_spec(), true);
+    let document = js_property_order_map(document);
+    let settings = js_property_order_map(schema.parse_policy_document(&document));
+    PolicyRead {
+        has_policy_content: Some(schema.policy_has_content(&raw, &settings)),
+        settings: Some(settings),
+        loaded: true,
+    }
 }
 
 #[cfg(test)]
