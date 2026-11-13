@@ -322,6 +322,9 @@ pub(crate) const ALLOW_LIST_KEYS: [&str; 4] = [
 /// The settings schema extracted from the pinned upstream bundle (`claude-sdk:schema`).
 pub(crate) const SETTINGS_SCHEMA_JSON: &str = include_str!("upstream/settings_schema.json");
 
+/// Magnitude up to which every integer is exactly a JavaScript number (2^53).
+pub(crate) const JS_MAX_EXACT_INTEGER: u64 = 1 << 53;
+
 /// Largest integer a JavaScript number holds exactly (`Number.MAX_SAFE_INTEGER`).
 pub(crate) const SETTINGS_SCHEMA_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 

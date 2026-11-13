@@ -127,7 +127,8 @@ fn rust_result(spec: &Value, root: &Path) -> (Value, Value) {
     )
 }
 
-fn oracle_results(package: &str, cases: &[(String, Value, PathBuf)]) -> Vec<Value> {
+/// The oracle's stdout for each case, untouched: parsing it would hide how the numbers are printed.
+fn oracle_results(package: &str, cases: &[(String, Value, PathBuf)]) -> Vec<String> {
     let scratch = tempfile::tempdir().expect("scratch");
     let mut specs = Vec::new();
     for (name, spec, root) in cases {
@@ -158,8 +159,7 @@ fn oracle_results(package: &str, cases: &[(String, Value, PathBuf)]) -> Vec<Valu
             "oracle failed for {name}: {}",
             outcome.stderr
         );
-        let mut parsed: Vec<Value> = serde_json::from_str(&outcome.stdout).expect("oracle json");
-        results.push(parsed.remove(0));
+        results.push(outcome.stdout);
     }
     results
 }
@@ -196,8 +196,8 @@ fn rust_matches_the_pinned_typescript_resolver_byte_for_byte() {
     for ((name, spec, root), upstream) in prepared.iter().zip(&oracle) {
         let (resolved, filtered) = rust_result(spec, root);
         let ours = json!({"name": name, "result": resolved, "filtered": filtered});
-        let theirs = upstream.to_string();
-        let rendered = ours.to_string();
+        let theirs = upstream.as_str();
+        let rendered = format!("[{ours}]");
         if rendered != theirs {
             mismatches.push(format!("{name}\n  rust:     {ours}\n  upstream: {theirs}"));
         }

@@ -2,8 +2,8 @@
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    ResolveSettingsOptions, ResolvedSettings, Settings, adapters::OperatingSystem, filter_escalating_default_mode,
-    resolve_settings_with,
+    ResolveSettingsOptions, ResolvedSettings, Settings, SettingsDialect, adapters::OperatingSystem,
+    filter_escalating_default_mode, resolve_settings_in_dialect_with, resolve_settings_with,
 };
 
 #[path = "support/fake_settings_host.rs"]
@@ -308,4 +308,33 @@ fn default_mode_set_by_a_user_source_is_kept() {
         ]),
     );
     assert_eq!(filtered(&resolved), json!({"permissions": {"defaultMode": "auto"}}));
+}
+
+fn custom_numbers(dialect: SettingsDialect) -> String {
+    let host = FakeHost::linux().file(
+        "/work/project/.claude/settings.json",
+        r#"{"custom":{"n":12345678901234567890,"m":9007199254740993,"z":-0,"w":1.0,"f":0.1}}"#,
+    );
+    let resolved = resolve_settings_in_dialect_with(&host, &options(json!({})), dialect).expect("resolve");
+    serde_json::to_string(&resolved.effective).expect("encode")
+}
+
+#[test]
+fn the_typescript_dialect_reads_numbers_like_json_parse() {
+    assert_eq!(
+        custom_numbers(SettingsDialect::TypeScript),
+        r#"{"custom":{"n":12345678901234567000,"m":9007199254740992,"z":0,"w":1,"f":0.1}}"#
+    );
+    assert_eq!(
+        custom_numbers(SettingsDialect::default()),
+        custom_numbers(SettingsDialect::TypeScript)
+    );
+}
+
+#[test]
+fn the_python_dialect_keeps_integer_tokens_exact() {
+    assert_eq!(
+        custom_numbers(SettingsDialect::Python),
+        r#"{"custom":{"n":12345678901234567890,"m":9007199254740993,"z":0,"w":1,"f":0.1}}"#
+    );
 }

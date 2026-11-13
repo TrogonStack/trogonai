@@ -86,8 +86,10 @@ mod session_subpath;
 mod session_summary;
 mod session_transcript;
 mod setting_source;
+mod settings_dialect;
 mod settings_input;
 mod settings_json;
+mod settings_numbers;
 mod settings_option;
 mod settings_read;
 mod settings_read_hooks;
@@ -245,9 +247,11 @@ pub use session_subpath::{SessionSubpath, SessionSubpathError};
 pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_entry_to_sdk_info};
 pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
+pub use settings_dialect::SettingsDialect;
 pub use settings_input::SettingsInput;
 pub use settings_resolve::{
-    ResolveSettingsError, filter_escalating_default_mode, resolve_settings, resolve_settings_with,
+    ResolveSettingsError, filter_escalating_default_mode, resolve_settings, resolve_settings_in_dialect,
+    resolve_settings_in_dialect_with, resolve_settings_with,
 };
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,

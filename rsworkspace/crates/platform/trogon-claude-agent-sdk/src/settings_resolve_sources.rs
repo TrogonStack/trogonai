@@ -8,6 +8,7 @@ use unicode_normalization::UnicodeNormalization;
 use crate::{
     adapters::{CurrentDirectory, EnvironmentVariable, ReadFile},
     constants::{LOCAL_SETTINGS_FILE, PROJECT_SETTINGS_FILE, USER_SETTINGS_FILE},
+    settings_dialect::SettingsDialect,
     settings_read::read_document,
     settings_resolve_values::SettingsMap,
 };
@@ -83,7 +84,11 @@ pub(crate) fn resolve_cwd<H: CurrentDirectory<Error = io::Error>>(
 }
 
 /// Reads one settings file; a missing, unreadable, non-object or invalid file yields nothing.
-pub(crate) fn read_settings_file<H: ReadFile<Error = io::Error>>(host: &H, path: &Path) -> Option<SettingsMap> {
+pub(crate) fn read_settings_file<H: ReadFile<Error = io::Error>>(
+    host: &H,
+    path: &Path,
+    dialect: SettingsDialect,
+) -> Option<SettingsMap> {
     let bytes = host.read_file(path).ok()?;
-    read_document(&String::from_utf8_lossy(&bytes))
+    read_document(&String::from_utf8_lossy(&bytes), dialect)
 }
