@@ -5,6 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
+use unicode_general_category::{GeneralCategory, get_general_category};
+
 use crate::{
     client_app::format_client_app,
     constants::{BUNDLED_CLI_VERSION_FILE, DERIVED_CLIENT_APP_MINIMUM_VERSION, SDK_PACKAGE_NAME, SDK_VERSION},
@@ -31,14 +33,37 @@ pub enum ClientAppDerivation {
     Bundled(BundledCli),
 }
 
-/// Python `_meets_derived_client_app_minimum`: `re.match(r"(\d{1,9})\.(\d{1,9})\.(\d{1,9})")` then a numeric compare.
+fn is_decimal(c: char) -> bool {
+    get_general_category(c) == GeneralCategory::DecimalNumber
+}
+
+/// The decimal value Python's `int` gives a Unicode `Nd` digit. Each script's digits sit in runs of ten
+/// consecutive code points, so the value is the offset from the start of the contiguous `Nd` block modulo ten.
+fn decimal_value(c: char) -> u64 {
+    let mut offset = 0u64;
+    let mut cursor = c as u32;
+    while let Some(previous) = cursor
+        .checked_sub(1)
+        .and_then(char::from_u32)
+        .filter(|p| is_decimal(*p))
+    {
+        offset += 1;
+        cursor = previous as u32;
+    }
+    offset % 10
+}
+
+/// Python `_meets_derived_client_app_minimum`: `re.match(r"(\d{1,9})\.(\d{1,9})\.(\d{1,9})")` then a numeric
+/// compare. Python's `\d` is any Unicode `Nd` digit and `int` reads them all.
 pub(crate) fn meets_derived_minimum(version: &str) -> bool {
     fn number(text: &str) -> Option<(u64, &str)> {
-        let end = text.find(|c: char| !c.is_ascii_digit()).unwrap_or(text.len());
-        if end == 0 || end > 9 {
+        let digits: Vec<char> = text.chars().take_while(|c| is_decimal(*c)).collect();
+        if digits.is_empty() || digits.len() > 9 {
             return None;
         }
-        Some((text[..end].parse().ok()?, &text[end..]))
+        let width: usize = digits.iter().map(|c| c.len_utf8()).sum();
+        let value = digits.iter().fold(0u64, |acc, c| acc * 10 + decimal_value(*c));
+        Some((value, &text[width..]))
     }
     let parsed = number(version)
         .and_then(|(major, rest)| Some((major, number(rest.strip_prefix('.')?)?)))

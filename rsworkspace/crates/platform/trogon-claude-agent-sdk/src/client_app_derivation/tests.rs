@@ -15,6 +15,11 @@ fn minimum_version_matches_the_leading_numbers_like_python() {
         ("v999.0.0", false),
         ("1234567890.0.0", false),
         ("", false),
+        ("\u{669}\u{669}\u{669}.0.0", true),
+        ("\u{1d7ff}\u{1d7ff}\u{1d7ff}.\u{660}.\u{660}", true),
+        ("\u{666}\u{666}\u{666}.0.0", false),
+        ("999.\u{ff10}.\u{ff10}", true),
+        ("\u{b2}99.0.0", false),
     ] {
         assert_eq!(meets_derived_minimum(version), expected, "{version}");
     }
