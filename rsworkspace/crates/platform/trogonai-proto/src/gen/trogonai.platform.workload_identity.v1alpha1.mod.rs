@@ -5,6 +5,7 @@ include!("trogonai.platform.workload_identity.v1alpha1.registration_binding.rs")
 include!("trogonai.platform.workload_identity.v1alpha1.workload_peer_evidence.rs");
 include!("trogonai.platform.workload_identity.v1alpha1.credential_activation.rs");
 include!("trogonai.platform.workload_identity.v1alpha1.registration_snapshot.rs");
+include!("trogonai.platform.workload_identity.v1alpha1.stored_registration_approval.rs");
 #[allow(
     non_camel_case_types,
     dead_code,
@@ -34,6 +35,9 @@ pub mod __buffa {
         include!(
             "trogonai.platform.workload_identity.v1alpha1.registration_snapshot.__view.rs"
         );
+        include!(
+            "trogonai.platform.workload_identity.v1alpha1.stored_registration_approval.__view.rs"
+        );
     }
     /// Register this package's `Any` type entries and extension entries.
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {
@@ -41,6 +45,7 @@ pub mod __buffa {
         reg.register_json_any(super::__WORKLOAD_PEER_EVIDENCE_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_ACTIVATION_JSON_ANY);
         reg.register_json_any(super::__REGISTRATION_SNAPSHOT_JSON_ANY);
+        reg.register_json_any(super::__STORED_REGISTRATION_APPROVAL_V1_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -59,5 +64,9 @@ pub use self::__buffa::view::CredentialActivationOwnedView;
 pub use self::__buffa::view::RegistrationSnapshotView;
 #[doc(inline)]
 pub use self::__buffa::view::RegistrationSnapshotOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::StoredRegistrationApprovalV1View;
+#[doc(inline)]
+pub use self::__buffa::view::StoredRegistrationApprovalV1OwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;
