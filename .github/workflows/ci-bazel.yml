@@ -21,6 +21,10 @@ on:
       - 'rsworkspace/crates/**'
       - 'goworkspace/**'
       - 'proto/trogonai/scheduler/schedules/v1/**'
+      - 'docs/**'
+      - 'tsworkspace/**'
+      - 'tests/github_actions/**'
+      - '.github/actions/**'
       - '.github/workflows/ci-bazel.yml'
 
 concurrency:
@@ -42,7 +46,7 @@ jobs:
       - name: Install build tools via mise
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
-          install_args: bazel buf go rust
+          install_args: bazel buf go node rust
           cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Restore Bazel cache
@@ -56,10 +60,10 @@ jobs:
           restore-keys: |
             bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.config/mise/config.toml', '.config/mise/mise.lock') }}-
 
-      - name: Test native targets
+      - name: Test Bazel targets
         run: mise run --skip-tools github:workflows:ci-bazel:test
 
-      - name: Build native artifacts
+      - name: Build Bazel targets
         run: mise run --skip-tools github:workflows:ci-bazel:build
 
       - name: Save Bazel cache

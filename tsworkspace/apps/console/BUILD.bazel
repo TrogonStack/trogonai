@@ -1,0 +1,106 @@
+load("@aspect_rules_js//js:defs.bzl", "js_run_binary")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm_tsworkspace//:defs.bzl", "npm_link_all_packages")
+load("@npm_tsworkspace//tsworkspace:oxlint/package_json.bzl", oxlint_bin = "bin")
+load("@npm_tsworkspace//tsworkspace/apps/console:@tanstack/router-cli/package_json.bzl", router_cli_bin = "bin")
+load("@npm_tsworkspace//tsworkspace/apps/console:vite/package_json.bzl", vite_bin = "bin")
+load("@npm_tsworkspace//tsworkspace/apps/console:vitest/package_json.bzl", vitest_bin = "bin")
+
+npm_link_all_packages(name = "node_modules")
+
+filegroup(
+    name = "sources",
+    srcs = glob(
+        ["src/**"],
+        exclude = ["src/routeTree.gen.ts"],
+    ),
+)
+
+# Everything vite reads besides src/: the entry document, static assets and
+# the tool configuration.
+filegroup(
+    name = "app_config",
+    srcs = [
+        "components.json",
+        "index.html",
+        "package.json",
+        "tsconfig.json",
+        "tsr.config.json",
+        "vite.config.ts",
+    ] + glob(["public/**"]),
+)
+
+router_cli_bin.tsr_binary(name = "tsr")
+
+# Route generation as a declared step. routeTree.gen.ts is gitignored, so
+# Bazel produces it instead of relying on a developer having run tsr.
+js_run_binary(
+    name = "routes",
+    srcs = [
+        "package.json",
+        "tsr.config.json",
+        ":node_modules",
+        ":sources",
+    ],
+    args = ["generate"],
+    chdir = package_name(),
+    outs = ["src/routeTree.gen.ts"],
+    tool = ":tsr",
+)
+
+ts_project(
+    name = "typecheck",
+    srcs = [
+        "vite.config.ts",
+        ":routes",
+        ":sources",
+    ],
+    no_emit = True,
+    tsconfig = "tsconfig.json",
+    deps = [
+        ":node_modules",
+        "//tsworkspace:node_modules/@types/react",
+        "//tsworkspace:node_modules/vitest",
+    ],
+)
+
+# The production build, as a single tree artifact.
+vite_bin.vite(
+    name = "build",
+    srcs = [
+        ":app_config",
+        ":node_modules",
+        ":routes",
+        ":sources",
+    ],
+    args = ["build"],
+    chdir = package_name(),
+    # Rolldown resolves index.html through its sandbox symlink to the real
+    # execroot path and then rejects the resulting relative asset name, so
+    # the build runs outside the sandbox where the two paths agree.
+    execution_requirements = {"no-sandbox": "1"},
+    out_dirs = ["dist"],
+)
+
+vitest_bin.vitest_test(
+    name = "test",
+    args = ["run"],
+    chdir = package_name(),
+    data = [
+        ":app_config",
+        ":node_modules",
+        ":routes",
+        ":sources",
+        "//tsworkspace:node_modules/vitest",
+    ],
+)
+
+oxlint_bin.oxlint_test(
+    name = "lint",
+    args = ["."],
+    chdir = package_name(),
+    data = [
+        ":app_config",
+        ":sources",
+    ],
+)

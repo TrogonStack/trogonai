@@ -1,0 +1,48 @@
+load("@aspect_rules_js//js:defs.bzl", "js_run_binary")
+load("@npm_docs//:defs.bzl", "npm_link_all_packages")
+load("@npm_docs//docs:vitepress/package_json.bzl", vitepress_bin = "bin")
+
+npm_link_all_packages(name = "node_modules")
+
+vitepress_bin.vitepress_binary(name = "vitepress")
+
+# Every file under docs/ is a build input: pages, the VitePress theme and
+# configuration, public assets, and the ADR and glossary records that the
+# configuration reads to build the sidebars.
+filegroup(
+    name = "sources",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            "BUILD.bazel",
+            "node_modules/**",
+            ".vitepress/cache/**",
+            ".vitepress/dist/**",
+        ],
+    ),
+)
+
+# The built site, as a single tree artifact.
+js_run_binary(
+    name = "site",
+    srcs = [
+        ":node_modules",
+        ":sources",
+    ],
+    args = ["build"],
+    chdir = package_name(),
+    out_dirs = [".vitepress/dist"],
+    tool = ":vitepress",
+)
+
+# The local preview server: bazel run //docs:dev
+vitepress_bin.vitepress_binary(
+    name = "dev",
+    args = ["dev"],
+    chdir = package_name(),
+    data = [
+        ":node_modules",
+        ":sources",
+    ],
+    tags = ["manual"],
+)
