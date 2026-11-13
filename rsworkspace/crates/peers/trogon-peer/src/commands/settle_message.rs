@@ -44,6 +44,9 @@ impl Decider for SettleMessage {
         if identity.owner().tenant() != &command.evidence.tenant {
             return Err(MessageError::TenantMismatch);
         }
+        if command.sender != command.evidence.sender {
+            return Err(MessageError::Conflict);
+        }
         let receipt = &command.evidence.receipt;
         let entry = state
             .outbox
@@ -53,7 +56,11 @@ impl Decider for SettleMessage {
         super::message_rules::outbox_entry(entry)?;
         super::message_rules::receipt_matches_message(receipt, &entry.message)?;
         if let Some(old) = entry.settlement.as_option() {
-            return if old == receipt {
+            let mut bound = old.clone();
+            if bound.sender_peer_id.is_none() {
+                bound.sender_peer_id = Some(command.evidence.sender.to_string());
+            }
+            return if &bound == receipt {
                 Err(MessageError::AlreadySettled(Box::new(old.clone())))
             } else {
                 Err(MessageError::Conflict)
