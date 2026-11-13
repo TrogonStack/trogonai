@@ -103,6 +103,7 @@ impl DriverFixture {
             initialize_timeout: None,
             version_check: None,
             latest_commands: LatestCommands::default(),
+            startup_tap: None,
             verbatim_prompts: false,
             warn_unsupported_verbatim: false,
             elicitation_handler: None,

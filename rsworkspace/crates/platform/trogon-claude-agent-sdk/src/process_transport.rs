@@ -182,6 +182,9 @@ pub(crate) struct ProcessSpawn<'a, P> {
     /// The caller's whole environment, which a `spawn_claude_code_process` callback receives with the changes
     /// applied. Read only when that callback is set.
     pub parent_environment: Vec<(OsString, OsString)>,
+    /// `startup()` and `prewarm()`: ask the CLI to report startup marks, unless the caller's environment already
+    /// carries the variable.
+    pub startup_marks: bool,
 }
 
 /// TypeScript's `SpawnOptions` for the command the SDK would run. `signal` is the forwarded abort signal.
@@ -270,8 +273,12 @@ impl ProcessTransport {
             secure_storage_config_dir,
             closed,
             parent_environment,
+            startup_marks,
         } = input;
         let mut command = command(options, &cli_path, inherited, derived_debug_file)?;
+        if startup_marks {
+            command.env("CLAUDE_CODE_SDK_READS_STARTUP_MARKS", "1");
+        }
         if let Some(config_dir) = config_dir {
             command.env("CLAUDE_CONFIG_DIR", config_dir);
         }

@@ -1195,3 +1195,12 @@ pub(crate) const RUN_END_CEILING_ENV: &str = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_
 pub(crate) const RUN_END_DEFAULT_CEILING_MS: u64 = 600_000;
 /// The longest run-end ceiling both upstream SDKs honor (2^31 - 1 ms), because a timer cannot run longer.
 pub(crate) const RUN_END_MAX_CEILING_MS: u64 = (1 << 31) - 1;
+
+/// `AE`: the startup initialize limit when the caller passes none.
+pub(crate) const STARTUP_DEFAULT_LIMIT: Duration = Duration::from_millis(60_000);
+/// `w8`: how long hook time stays uncounted, only when the caller passed no limit.
+pub(crate) const STARTUP_UNCOUNTED_BUDGET: Duration = Duration::from_millis(600_000);
+/// `itt`: how many hook ids are followed one by one; later ones are only counted.
+pub(crate) const STARTUP_FOLLOWED_LIMIT: usize = 64;
+/// The hook events whose running time `startup()` leaves uncounted.
+pub(crate) const STARTUP_HOOK_EVENTS: [&str; 2] = ["SessionStart", "Setup"];

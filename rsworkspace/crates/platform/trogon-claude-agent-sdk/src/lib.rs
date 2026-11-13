@@ -73,6 +73,7 @@ mod permission;
 mod permission_mode;
 mod permission_update;
 mod plugin;
+mod prewarm;
 mod process_options;
 mod process_transport;
 mod prompt;
@@ -151,6 +152,7 @@ mod settings_schema_ports;
 mod settings_schema_regexp;
 mod shadow_warning;
 mod skills;
+mod startup_timeout;
 mod stderr_tail;
 mod summary_dialect;
 mod system_prompt;
@@ -208,8 +210,9 @@ pub use effort_level::EffortLevel;
 pub use environment::Environment;
 pub use environment_plan::EnvironmentPlan;
 pub use error::{
-    AbortError, ControlOperation, ControlRejectionError, Error, JsonDecodeError, JsonDecodeSourceError,
-    MessageParseError, ProtocolError, ResultError, python_cli_not_found_text, python_process_error_text,
+    AbortError, ControlOperation, ControlRejectionError, Error, InitializeTimeoutError, JsonDecodeError,
+    JsonDecodeSourceError, MessageParseError, ProtocolError, ResultError, python_cli_not_found_text,
+    python_process_error_text,
 };
 pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
@@ -254,6 +257,7 @@ pub use permission_update::{
     PermissionBehavior, PermissionRuleValue, PermissionUpdate, PermissionUpdateDestination, PermissionUpdateError,
 };
 pub use plugin::{LocalPlugin, PluginDelivery};
+pub use prewarm::{StartupOptions, WarmQuery, startup, startup_with_adapters};
 pub use process_options::{
     ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, OnProcessSpawned, ProcessSpawnInfo, ScriptRuntime,
     SpawnClaudeCodeProcess, SpawnOptions, StderrDelivery, StderrHandler, TraceContext,
@@ -324,6 +328,7 @@ pub use settings_resolve_state::ResolverState;
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };
+pub use startup_timeout::StartupHooksRunning;
 pub use stderr_tail::StderrTail;
 pub use summary_dialect::SummaryDialect;
 pub use system_prompt::{CustomPrompt, PresetPrompt};

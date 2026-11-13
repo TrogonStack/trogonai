@@ -134,6 +134,17 @@ integrity-verified published `0.3.319` declaration archive.
 | `ClaudeSdkClient::connect_with_transport`, `query_with_transport` | `ClaudeSDKClient(transport=...)`, `query(transport=...)` | not applicable |
 | `Error::Transport(..)` | exception raised by the transport | not applicable |
 
+## Pre-warming
+
+| Rust | Python | TypeScript |
+| --- | --- | --- |
+| `startup`, `startup_with_adapters`, `StartupOptions` | not applicable | `startup({options, initializeTimeoutMs})` |
+| `WarmQuery::query` (consumes `self`) | not applicable | `WarmQuery.query` (throws on a second call) |
+| `WarmQuery::close`, `WarmQuery::dispose` | not applicable | `close`, `Symbol.asyncDispose` |
+| `StartupOptions.initialize_timeout` (`None`: 60000 ms, hook time uncounted up to 10 minutes) | not applicable | `initializeTimeoutMs` |
+| `StartupOptions.on_startup_hooks_running`, `StartupHooksRunning` | not applicable | `onStartupHooksRunning` |
+| `Error::InitializeTimeout`, `InitializeTimeoutError` | not applicable | `errorClass: "initialize_timeout"`, `startupMark`, `startupMarkAgeMs` |
+
 ## Query controls
 
 All methods are on `ClientHandle`. Requests match `sdk.mjs` by default and

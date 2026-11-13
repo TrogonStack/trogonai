@@ -6,7 +6,7 @@ use std::{
 };
 
 use tokio::{
-    sync::oneshot,
+    sync::{mpsc::UnboundedSender, oneshot},
     task::{AbortHandle, JoinHandle, JoinSet},
     time::{Instant, sleep_until, timeout},
 };
@@ -326,6 +326,8 @@ where
     /// The CLI path until the first `system`/`init` message has been checked, then `None`.
     version_check: Option<String>,
     latest_commands: LatestCommands,
+    /// See [`SpawnOptions::startup_tap`].
+    startup_tap: Option<UnboundedSender<crate::startup_timeout::StartupEvent>>,
     /// `verbatim_prompts`: every user message is marked `client_composed`.
     verbatim_prompts: bool,
     /// Python warns at the first init message when the CLI predates `client_composed`; TypeScript does not.
@@ -542,6 +544,9 @@ pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
     pub version_check: Option<String>,
     pub latest_commands: LatestCommands,
     pub host: crate::remote_control::HostState,
+    /// `startup()`: the hook and startup-mark frames, for the initialize timer. Closing the receiver ends the
+    /// observation.
+    pub startup_tap: Option<UnboundedSender<crate::startup_timeout::StartupEvent>>,
 }
 
 /// The initialize request and the callbacks it registers, built before any transport exists so that a bad
@@ -649,6 +654,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         version_check,
         latest_commands,
         host,
+        startup_tap,
     } = input;
     transport.connect().await?;
     let driver = Driver {
@@ -701,6 +707,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         last_error_result: None,
         version_check,
         latest_commands,
+        startup_tap,
         verbatim_prompts: options.verbatim_prompts == crate::VerbatimPrompts::Enabled,
         warn_unsupported_verbatim: options.verbatim_prompts == crate::VerbatimPrompts::Enabled
             && options.argv_style == crate::ArgvStyle::Python,
@@ -847,6 +854,7 @@ where
                         return if matches!(self.state, State::Running | State::Initializing) || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
                     };
                     self.wire_ids = self.transport.take_wire_ids();
+                    self.tap_startup(&message);
                     let parsed = self.decode_message(message)?;
                     self.frame(parsed).await?;
                 }
@@ -927,6 +935,18 @@ where
                     || self.host_auth_token_handler.is_some()
                     || self.host.answerer().is_some()
             }
+        }
+    }
+
+    /// Hands the frames the startup timer follows to `startup()` while it still waits for initialize.
+    fn tap_startup(&mut self, frame: &JsonObject) {
+        let Some(tap) = &self.startup_tap else {
+            return;
+        };
+        if tap.is_closed() {
+            self.startup_tap = None;
+        } else if let Some(event) = crate::startup_timeout::StartupEvent::from_frame(frame, Instant::now()) {
+            let _ = tap.send(event);
         }
     }
 
@@ -1641,6 +1661,13 @@ where
                         .latest_commands
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(commands.clone());
+                }
+                // TypeScript `dropUnreadHookProgress`: while `startup()` waits, hook progress is not kept.
+                if self.startup_tap.as_ref().is_some_and(|tap| !tap.is_closed())
+                    && let Message::System(system) = &message
+                    && system.subtype == "hook_progress"
+                {
+                    return Ok(());
                 }
                 self.run_state.observe(&message, queued_limit, task_limit)?;
                 let flushing = matches!(message, Message::Result(_)) && self.session.is_some();

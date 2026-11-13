@@ -284,6 +284,9 @@ pub enum Error {
     DriverTask(#[source] tokio::task::JoinError),
     #[error("permission callback task failed")]
     CallbackTask(#[source] tokio::task::JoinError),
+    /// TypeScript's `initialize_timeout` error: the CLI did not answer initialize within the startup limit.
+    #[error(transparent)]
+    InitializeTimeout(#[from] InitializeTimeoutError),
     #[doc(hidden)]
     #[error("the subprocess owner requested shutdown")]
     ShutdownRequested,
@@ -387,6 +390,65 @@ fn signal_name(signal: i32) -> &'static str {
         14 => "SIGALRM",
         15 => "SIGTERM",
         _ => "unknown",
+    }
+}
+
+/// TypeScript's `errorClass: "initialize_timeout"` error of `startup()` and `prewarm()`.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("{message}")]
+pub struct InitializeTimeoutError {
+    message: String,
+    hooks_open: usize,
+    startup_mark: Option<String>,
+    startup_mark_age_ms: Option<u64>,
+}
+
+impl InitializeTimeoutError {
+    pub(crate) fn new(message: String, hooks_open: usize) -> Self {
+        Self {
+            message,
+            hooks_open,
+            startup_mark: None,
+            startup_mark_age_ms: None,
+        }
+    }
+
+    /// Records the last startup mark the CLI reported, `none` when it reported no mark.
+    pub(crate) fn with_mark(mut self, mark: Option<(String, u64)>) -> Self {
+        match mark {
+            Some((mark, age)) => {
+                self.startup_mark = Some(mark);
+                self.startup_mark_age_ms = Some(age);
+            }
+            None => self.startup_mark = Some("none".to_owned()),
+        }
+        self
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// TypeScript's `telemetryMessage`: the first sentence of the message, without its period.
+    pub fn telemetry_message(&self) -> &str {
+        self.message
+            .split_once(". ")
+            .map_or(self.message.as_str(), |(head, _)| head)
+    }
+
+    /// TypeScript's `startupHooksOpen`: the SessionStart or Setup hooks still running when the wait ran out.
+    pub fn startup_hooks_open(&self) -> usize {
+        self.hooks_open
+    }
+
+    /// TypeScript's `startupMark`: the last mark the CLI reported, or `none`.
+    pub fn startup_mark(&self) -> Option<&str> {
+        self.startup_mark.as_deref()
+    }
+
+    /// TypeScript's `startupMarkAgeMs`: how long before the timeout that mark arrived.
+    pub fn startup_mark_age_ms(&self) -> Option<u64> {
+        self.startup_mark_age_ms
     }
 }
 

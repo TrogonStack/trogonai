@@ -73,6 +73,19 @@ shutdown and cleanup errors. Dropping the owner closes even when a handle
 survives, but does not await cleanup. Cleanup needs a running Tokio runtime; the
 child also has a `kill_on_drop` fallback.
 
+## Pre-warming with startup
+
+`startup(StartupOptions)` follows TypeScript `startup()`: it starts the CLI, completes the initialize handshake and
+returns a `WarmQuery`. `WarmQuery::query(prompt)` writes the prompt to that process and returns a `Query`;
+`close()` discards the process without a prompt, and `dispose()` closes it and waits for the cleanup. Python
+0.2.181 has no pre-warming. `query` takes `self`, so a second call cannot compile where TypeScript throws.
+
+`initialize_timeout` of `None` waits 60000 ms and does not count the time in which Claude Code reports a
+SessionStart or Setup hook running, for at most 10 minutes; a value you pass counts throughout. A timeout is
+`Error::InitializeTimeout` with the upstream text, the `initialize_timeout` error class, the last startup mark
+(or `none`) and its age. The process gets `CLAUDE_CODE_SDK_READS_STARTUP_MARKS=1` unless the environment has that
+key in any letter case.
+
 ## Messages and controls
 
 Every message keeps the object the CLI wrote (`Message::raw`), and

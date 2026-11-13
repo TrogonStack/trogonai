@@ -3942,6 +3942,137 @@
         "src/driver.rs",
         "src/error.rs"
       ]
+    },
+    {
+      "id": "p01-startup-initialize-timer",
+      "concept": "How long startup() waits for the CLI to answer initialize",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "class uD{clock;onRunning;limitMs;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 3169,
+        "sha256": "7721d1c340e4cd82cb81e6f0fade34a4f8203fd9d75ce6f2de1faf0dd41da5c8"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "startup() races the initialize answer against a timer. Without initializeTimeoutMs it allows 60000 ms and does not count the time in which Claude Code reports a SessionStart or Setup hook running, for at most 600000 ms; a value the caller passes counts throughout. The error names the limit, the uncounted seconds and what the reported hooks did, and carries the errorClass initialize_timeout with its first sentence as telemetryMessage."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_startup::a_passed_timeout_counts_from_the_start_and_names_the_last_mark",
+        "golden_startup::the_timeout_says_what_the_reported_hooks_did"
+      ],
+      "rust": [
+        "src/startup_timeout.rs",
+        "src/client.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "p01-startup-timeout-marks",
+      "concept": "Which startup mark an initialize timeout reports",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "catch(y){if(y instanceof Error&&\"errorClass\"in y&&y.errorClass===\"initialize_timeout\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 159,
+        "sha256": "0449b792c5afe69ab231c0e38077d57ceca6396b1f9a44caa344b091570e6910"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "An initialize timeout gains startupMark, the last startup mark the CLI reported or none, and startupMarkAgeMs, how long before the timeout that mark arrived. Only marks of at most 64 characters count, and hook progress frames are dropped while the wait lasts. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_startup::startup_marks_are_kept_up_to_sixty_four_characters",
+        "golden_startup::a_passed_timeout_counts_from_the_start_and_names_the_last_mark"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/error.rs",
+        "src/startup_timeout.rs"
+      ]
+    },
+    {
+      "id": "p01-startup-marks-flag",
+      "concept": "The environment flag that makes the CLI report startup marks",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "if(s&&!Object.keys(Ot).some((Tt)=>Tt.toUpperCase()===\"CLAUDE_CODE_SDK_READS_STARTUP_MARKS\"))Ot.CLAUDE_CODE_SDK_READS_STARTUP_MARKS=\"1\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "ee1b202f6b3b5c1d4f2dce36420cdbc8e0a9be5872a5c9521481046af9e01ac1"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A process started by startup() or prewarm() gets CLAUDE_CODE_SDK_READS_STARTUP_MARKS=1 unless the environment it starts with already has a key of that name in any letter case. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_startup::startup_writes_the_handshake_then_the_prompt",
+        "golden_startup::startup_leaves_a_marks_flag_the_caller_already_has"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/process_transport.rs"
+      ]
+    },
+    {
+      "id": "p01-startup-warm-query",
+      "concept": "What a WarmQuery does with the prompt, close and dispose",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "let g=!1;return{warm:{query(y){if(g)throw Error(\"WarmQuery.query() can only be called once\")",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 190,
+        "sha256": "f98d6cd65e95db4a1d284b133b4660204bbd1f4e7cb36d3827a4263d0e2ccca0"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "startup() resolves once initialize is answered. WarmQuery.query() may be called once and writes the prompt after the handshake that already happened; close() discards the process without writing a prompt, and disposing closes it and waits for its cleanup. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_startup::startup_writes_the_handshake_then_the_prompt",
+        "golden_startup::closing_a_warm_query_sends_no_prompt"
+      ],
+      "rust": [
+        "src/prewarm.rs",
+        "src/client.rs"
+      ]
     }
   ]
 }

@@ -4807,6 +4807,92 @@
       ],
       "status": "supported",
       "rationale": "The first-party names each Python module imports are reachable from the crate root."
+    },
+    {
+      "id": "startup",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "startup",
+            "core.startup"
+          ],
+          "prefixes": [
+            "WarmQuery",
+            "core.WarmQuery"
+          ]
+        }
+      },
+      "rust_api": [
+        "startup",
+        "startup_with_adapters",
+        "StartupOptions",
+        "WarmQuery",
+        "WarmQuery.query",
+        "WarmQuery.close",
+        "WarmQuery.dispose",
+        "InitializeTimeoutError",
+        "StartupHooksRunning"
+      ],
+      "tests": [
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "a_passed_timeout_counts_from_the_start_and_names_the_last_mark"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "closing_a_warm_query_sends_no_prompt"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "startup_writes_the_handshake_then_the_prompt"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "startup_leaves_a_marks_flag_the_caller_already_has"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "startup_marks_are_kept_up_to_sixty_four_characters"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_timeout_says_what_the_reported_hooks_did"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "a_passed_limit_counts_hook_time"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "the_default_limit_does_not_count_hook_time"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "uncounted_time_stops_at_ten_minutes"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "uncounted_seconds_round_half_up"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "hook_summaries_follow_the_upstream_wording"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "hooks_past_the_followed_limit_are_only_counted"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "frames_map_to_startup_events"
+        }
+      ],
+      "status": "supported",
+      "rationale": "startup() returns a WarmQuery after the initialize handshake, with the TypeScript initialize timer (60000 ms default, SessionStart and Setup hook time uncounted for at most 10 minutes only when no value is passed) and startup marks. Goldens were captured live from the real sdk.mjs 0.3.323 talking to a scripted CLI, except the default timer hook accounting, covered by unit tests of the same code paths. Python 0.2.181 has no pre-warming. WarmQuery::query consumes self instead of throwing on a second call, so the once-only rule is enforced by Rust's type system."
     }
   ]
 }

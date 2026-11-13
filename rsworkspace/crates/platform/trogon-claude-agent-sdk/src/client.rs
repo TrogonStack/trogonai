@@ -5,7 +5,9 @@ use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlReply, Error, JsonObject, Message, Prompt, ProtocolError,
     driver::{self, Command, Completion},
+    process_options::EnvironmentMode,
     process_transport::{Closed, ProcessSpawn, ProcessTransport},
+    startup_timeout::{StartupEvent, StartupTimer},
     upstream::control as wire_types,
     wire::runtime_payload::RequestPayload,
 };
@@ -18,6 +20,9 @@ struct StartInput<T, F: crate::adapters::SessionFileSystem> {
     version_check: Option<String>,
     closed: Closed,
     process_id: Option<u32>,
+    /// `startup()` and `prewarm()`: the initialize timer and the frames it follows.
+    startup: Option<crate::startup_timeout::StartupWatch>,
+    startup_tap: Option<tokio::sync::mpsc::UnboundedSender<crate::startup_timeout::StartupEvent>>,
 }
 
 /// Owns one Claude Code subprocess. Keep consuming messages while a turn runs.
@@ -91,6 +96,23 @@ fn debug_probe<E: crate::adapters::EnvironmentVariable>(
     probe
 }
 
+/// TypeScript `OD`: the startup marks variable is set unless the environment the CLI starts with already has it,
+/// matched without regard to case. Replace mode, the TypeScript default when `options.env` is set, starts from
+/// `options.env` alone.
+fn startup_marks_requested<E: crate::adapters::EnvironmentVariable>(
+    options: &ClaudeAgentOptions,
+    environment: &E,
+) -> bool {
+    const NAME: &str = "CLAUDE_CODE_SDK_READS_STARTUP_MARKS";
+    let mode = options.environment_mode.resolve(&options.env);
+    (mode != EnvironmentMode::Inherit && options.env.iter().any(|(key, _)| key.eq_ignore_ascii_case(NAME)))
+        || (mode != EnvironmentMode::Replace
+            && environment
+                .vars_os()
+                .iter()
+                .any(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case(NAME)))
+}
+
 fn capture_inherited<E: crate::adapters::EnvironmentVariable>(
     environment: &E,
     options: &ClaudeAgentOptions,
@@ -138,7 +160,7 @@ impl ClaudeSdkClient {
         } else {
             None
         };
-        Self::connect_resolved(options, adapters, discovered, true).await
+        Self::connect_resolved(options, adapters, discovered, true, None).await
     }
 
     /// Connects through caller-supplied adapters. The caller owns spawning, so no executable discovery runs and
@@ -154,7 +176,36 @@ impl ClaudeSdkClient {
         P: crate::adapters::SpawnProcess<Error = std::io::Error>,
         F: crate::adapters::SessionFileSystem,
     {
-        Self::connect_resolved(options, adapters, None, false).await
+        Self::connect_resolved(options, adapters, None, false, None).await
+    }
+
+    /// `startup()` and `prewarm()`: connects, then waits for initialize under the startup timer. Like `connect`, an
+    /// omitted `cli_path` is discovered when the native spawner is used.
+    pub(crate) async fn connect_startup<E, P, F>(
+        mut options: ClaudeAgentOptions,
+        adapters: crate::adapters::RuntimeAdapters<E, P, F>,
+        discover: bool,
+        startup: crate::startup_timeout::StartupSettings,
+    ) -> Result<Self, Error>
+    where
+        E: crate::adapters::EnvironmentVariable
+            + crate::adapters::CurrentDirectory<Error = std::io::Error>
+            + crate::adapters::TemporaryDirectory,
+        P: crate::adapters::SpawnProcess<Error = std::io::Error>,
+        F: crate::adapters::SessionFileSystem,
+    {
+        let discovered = if discover && options.cli_path.is_none() {
+            let inherited = capture_inherited(&adapters.environment, &options);
+            crate::argv::request_await_initialize(&mut options);
+            Some(crate::cli_discovery::discover(
+                &inherited,
+                &adapters.filesystem,
+                cfg!(windows),
+            )?)
+        } else {
+            None
+        };
+        Self::connect_resolved(options, adapters, discovered, discover, Some(startup)).await
     }
 
     async fn connect_resolved<E, P, F>(
@@ -162,6 +213,7 @@ impl ClaudeSdkClient {
         adapters: crate::adapters::RuntimeAdapters<E, P, F>,
         discovered: Option<std::path::PathBuf>,
         derive_debug_file: bool,
+        startup: Option<crate::startup_timeout::StartupSettings>,
     ) -> Result<Self, Error>
     where
         E: crate::adapters::EnvironmentVariable
@@ -221,6 +273,7 @@ impl ClaudeSdkClient {
             } else {
                 Vec::new()
             },
+            startup_marks: startup.is_some() && !startup_marks_requested(&options, &adapters.environment),
         })?;
         let version_check = (!crate::version_check::skip_requested(
             inherited
@@ -229,6 +282,16 @@ impl ClaudeSdkClient {
         ))
         .then(|| cli_path.display().to_string());
         let process_id = transport.process_id();
+        let (startup, startup_tap) = match startup {
+            Some(settings) => {
+                let (tap, events) = tokio::sync::mpsc::unbounded_channel();
+                (
+                    Some(crate::startup_timeout::StartupWatch { settings, events }),
+                    Some(tap),
+                )
+            }
+            None => (None, None),
+        };
         Self::start(StartInput {
             options,
             session,
@@ -237,6 +300,8 @@ impl ClaudeSdkClient {
             version_check,
             closed,
             process_id,
+            startup,
+            startup_tap,
         })
         .await
     }
@@ -286,6 +351,8 @@ impl ClaudeSdkClient {
             version_check: None,
             closed: Closed::default(),
             process_id: None,
+            startup: None,
+            startup_tap: None,
         })
         .await
     }
@@ -378,6 +445,8 @@ impl ClaudeSdkClient {
             version_check,
             closed,
             process_id,
+            startup,
+            startup_tap,
         } = input;
         let (command_tx, command_rx) = crate::channel::channel(options.limits.command_queue_capacity);
         let (message_tx, message_rx) = crate::channel::channel(options.limits.message_buffer.capacity());
@@ -414,6 +483,7 @@ impl ClaudeSdkClient {
             version_check,
             latest_commands,
             host,
+            startup_tap,
         })
         .await?;
         let runtime = ClientRuntime {
@@ -427,6 +497,16 @@ impl ClaudeSdkClient {
             Ok(receiver) => receiver,
             Err(error) => return Err(Self::failed_start(runtime, error).await),
         };
+        // `startup()` and `prewarm()` wait for initialize under the startup timer, whichever dialect.
+        if let Some(watch) = startup {
+            return match runtime.handle.initialize_watched(receiver, watch).await {
+                Ok(response) => {
+                    runtime.handle.initialization.send_replace(Some(Ok(response)));
+                    Ok(Self { runtime })
+                }
+                Err(error) => Err(Self::failed_start(runtime, error).await),
+            };
+        }
         match runtime.handle.style {
             // `sdk.mjs` hands back the Query as soon as the initialize request is queued. Whatever the caller
             // sends next is written behind it, and a failed initialize surfaces where the initialization result
@@ -612,6 +692,43 @@ impl ClientHandle {
             }
             if receiver.changed().await.is_err() {
                 return Err(Error::DriverStopped);
+            }
+        }
+    }
+
+    /// The initialize wait of `startup()`: TypeScript `m.race(initializationResult())`.
+    async fn initialize_watched(
+        &self,
+        initialize: oneshot::Receiver<Result<Option<serde_json::Value>, Error>>,
+        mut watch: crate::startup_timeout::StartupWatch,
+    ) -> Result<Option<serde_json::Value>, Error> {
+        let mut initialize = initialize;
+        let mut timer = StartupTimer::new(
+            watch.settings.initialize_timeout,
+            tokio::time::Instant::now(),
+            watch.settings.on_hooks_running.clone(),
+        );
+        let mut mark: Option<(String, tokio::time::Instant)> = None;
+        let mut events_open = true;
+        loop {
+            let deadline = timer.deadline();
+            tokio::select! {
+                result = &mut initialize => return result.map_err(|_| Error::DriverStopped).and_then(|response| response),
+                event = watch.events.recv(), if events_open => match event {
+                    Some(StartupEvent::Mark { mark: name, at }) => mark = Some((name, at)),
+                    Some(event) => timer.note(&event, tokio::time::Instant::now()),
+                    None => events_open = false,
+                },
+                () = tokio::time::sleep_until(deadline) => {
+                    let now = tokio::time::Instant::now();
+                    if let Some(error) = timer.fire(now) {
+                        let age = mark.map(|(name, at)| {
+                            let micros = now.saturating_duration_since(at).as_micros();
+                            (name, u64::try_from((micros + 500) / 1000).unwrap_or(u64::MAX))
+                        });
+                        return Err(error.with_mark(age).into());
+                    }
+                }
             }
         }
     }
@@ -1323,7 +1440,7 @@ pub async fn query_turn_with_transport<T: crate::Transport>(
     start_query(client, prompt.into(), Completion::Turn).await
 }
 
-async fn start_query(
+pub(crate) async fn start_query(
     client: ClaudeSdkClient,
     prompt: crate::UserInput,
     completion: Completion,
