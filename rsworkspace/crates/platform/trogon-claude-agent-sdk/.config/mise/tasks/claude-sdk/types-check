@@ -12,3 +12,5 @@ node "$lib/generate_types.mjs" --typescript-package "$scratch/package" --config 
 node "$lib/synthesize_fixtures.mjs" --typescript-package "$scratch/package" --config "$lib/types.json" --out-root "$root" --check
 node "$lib/generate_settings_schema.mjs" --package "$scratch/package" --out "$root/src/upstream/settings_schema.json" --check
 node "$lib/generate_restrict_probes.mjs" --package "$scratch/package" --out "$root/src/upstream/settings_restrict_probes.json" --check
+node "$lib/fetch_node_path.mjs" "$scratch/nodepath"
+node "$lib/connector_vetting_probes.mjs" --package "$scratch/package" --node-lib "$scratch/nodepath" --out "$root/tests/fixtures/connector_vetting/probes.json" --check

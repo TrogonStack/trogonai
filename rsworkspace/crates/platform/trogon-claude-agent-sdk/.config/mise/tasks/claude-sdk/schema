@@ -10,3 +10,5 @@ trap 'rm -rf "$scratch"' EXIT
 python3 "$lib/fetch_pinned_typescript.py" "$scratch/package"
 node "$lib/generate_settings_schema.mjs" --package "$scratch/package" --out "$root/src/upstream/settings_schema.json" "$@"
 node "$lib/generate_restrict_probes.mjs" --package "$scratch/package" --out "$root/src/upstream/settings_restrict_probes.json" "$@"
+node "$lib/fetch_node_path.mjs" "$scratch/nodepath"
+node "$lib/connector_vetting_probes.mjs" --package "$scratch/package" --node-lib "$scratch/nodepath" --out "$root/tests/fixtures/connector_vetting/probes.json" "$@"

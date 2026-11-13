@@ -482,6 +482,29 @@ async fn oversized_frame_is_rejected() -> TestResult {
 }
 
 #[tokio::test]
+async fn a_bad_frame_stops_a_cli_that_is_still_running() -> TestResult {
+    let mut options = options("oversized-live")?;
+    options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    options.limits.max_buffer_size = Some(1024);
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("oversized")).await?;
+    // The fixture sleeps for 30 seconds after the bad frame, so ending well before that means the SDK stopped it.
+    let error = timeout(Duration::from_secs(10), async {
+        loop {
+            match client.next_message().await {
+                Ok(Some(_)) => {}
+                Err(error) => return Ok(error),
+                Ok(None) => return Err(std::io::Error::other("missing error")),
+            }
+        }
+    })
+    .await??;
+    assert!(matches!(error, Error::JsonDecode(_)), "{error:?}");
+    timeout(Duration::from_secs(10), client.disconnect()).await??;
+    Ok(())
+}
+
+#[tokio::test]
 async fn process_failure_preserves_status_and_bounded_stderr() -> TestResult {
     let mut options = options("failure")?;
     options.limits.stderr_tail = 32;
