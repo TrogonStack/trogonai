@@ -7,8 +7,7 @@ description: Action that converts a Cobertura XML report into a markdown report.
 inputs:
   token:
     description: Github token to use to publish the check.
-    required: false
-    default: ${{ github.token }}
+    required: true
   path:
     description: Path to the Cobertura coverage XML report.
     required: false
