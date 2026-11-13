@@ -1,1 +1,4 @@
-exports_files(["rust.BUILD.bazel.tpl"])
+exports_files([
+    "node.BUILD.bazel.tpl",
+    "rust.BUILD.bazel.tpl",
+])

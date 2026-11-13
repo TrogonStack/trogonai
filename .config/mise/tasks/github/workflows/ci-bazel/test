@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Run native Bazel tests using the GitHub Actions caches"
+#MISE description="Run every Bazel test using the GitHub Actions caches"
 set -euo pipefail
 
 exec bazel test \

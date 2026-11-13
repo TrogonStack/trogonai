@@ -5,3 +5,6 @@ docs/node_modules
 rsworkspace/target
 projects/hydro-verification/target
 tsworkspace/node_modules
+tsworkspace/apps/console/node_modules
+tsworkspace/packages/proto/node_modules
+tsworkspace/packages/slack-bolt-fixtures/node_modules

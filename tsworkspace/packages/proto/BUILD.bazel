@@ -1,0 +1,41 @@
+load("@aspect_rules_js//npm:defs.bzl", "npm_package")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm_tsworkspace//:defs.bzl", "npm_link_all_packages")
+load("@npm_tsworkspace//tsworkspace:oxlint/package_json.bzl", oxlint_bin = "bin")
+
+npm_link_all_packages(name = "node_modules")
+
+filegroup(
+    name = "sources",
+    srcs = glob(["src/**/*.ts"]),
+)
+
+# The package exports its TypeScript source directly, so the source is the
+# package: consumers resolve @trogonai/proto to these files.
+npm_package(
+    name = "pkg",
+    srcs = [
+        "package.json",
+        ":sources",
+    ],
+    package = "@trogonai/proto",
+    visibility = ["//tsworkspace:__subpackages__"],
+)
+
+ts_project(
+    name = "typecheck",
+    srcs = [":sources"],
+    no_emit = True,
+    tsconfig = "tsconfig.json",
+    deps = [":node_modules/@bufbuild/protobuf"],
+)
+
+oxlint_bin.oxlint_test(
+    name = "lint",
+    args = ["."],
+    chdir = package_name(),
+    data = [
+        ".oxlintrc.json",
+        ":sources",
+    ],
+)

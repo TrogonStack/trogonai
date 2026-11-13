@@ -1,0 +1,12 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+# The runs-on-fallback action tests use only Node.js built-ins plus the action
+# source under .github/actions. The CI selection tests are not Bazel targets:
+# they import js-yaml and picomatch from an npm lockfile that is not a pnpm
+# lockfile, and they execute mise task scripts under .config/mise/tasks, a
+# directory that Bazel must ignore.
+js_test(
+    name = "runs_on_fallback_test",
+    data = ["//.github:actions"],
+    entry_point = "test_runs_on_fallback.mjs",
+)

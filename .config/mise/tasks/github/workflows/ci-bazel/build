@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Build native Bazel artifacts using the GitHub Actions caches"
+#MISE description="Build every Bazel target using the GitHub Actions caches"
 set -euo pipefail
 
 exec bazel build \

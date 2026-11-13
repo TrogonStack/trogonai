@@ -97,3 +97,4 @@ future implementation work.
 - [ADR#0096: An Agent Uses a Connection Through an Authorized HTTP Proxy That Injects Credentials Held by Custody (Draft)](./0096-connection-use-by-agents.md)
 - [ADR#0097: A GitHub App Installation Is a Provider Fact Learned by Reconciliation, Bound to an Owner Only by an In-Session Claim, and Never by the Setup Redirect (Draft)](./0097-github-app-installation-lifecycle.md)
 - [ADR#0098: Workload Identity Requires Attested Issuance, Rotating X.509 Credentials and Independent Authorization (Draft)](./0098-attested-workload-identity.md)
+- [ADR#0099: Bazel Builds and Tests the JavaScript and TypeScript Projects with rules_js, on the Node.js mise Installs (Draft)](./0099-bazel-javascript-with-rules-js-and-mise-node.md)

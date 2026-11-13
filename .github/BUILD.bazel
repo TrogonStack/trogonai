@@ -1,0 +1,10 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+# The JavaScript sources of the GitHub Actions in this repository, copied to
+# the output tree so the action tests under //tests/github_actions can import
+# them by their relative path.
+js_library(
+    name = "actions",
+    srcs = glob(["actions/*/lib/**/*.mjs"]),
+    visibility = ["//tests/github_actions:__pkg__"],
+)

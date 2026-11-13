@@ -208,3 +208,73 @@ function readTitle(filePath: string, content: string) {
 function parseAdrNumber(number: string) {
   return Number.parseInt(number, 10);
 }
+
+type ConnectorSidebarRecord = {
+  slug: string;
+  name: string;
+};
+
+export async function readConnectorRecords(rootDir: string): Promise<ConnectorSidebarRecord[]> {
+  const connectorsDir = path.join(rootDir, "product", "connectors");
+  const entries = await fs.promises.readdir(connectorsDir, { withFileTypes: true });
+  const files = entries.filter(isFile).map(toFileName).filter(isNonIndexMarkdownFile);
+
+  return files
+    .map((fileName) => {
+      const filePath = path.join(connectorsDir, fileName);
+      const name = matter(fs.readFileSync(filePath, "utf-8")).data.connector?.name;
+
+      if (typeof name !== "string" || name.length === 0) {
+        throw new Error(`${filePath}\n\nConnector pages must set connector.name in frontmatter.`);
+      }
+
+      return { slug: path.basename(fileName, ".md"), name };
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function toConnectorSidebarItem(record: ConnectorSidebarRecord) {
+  return { text: record.name, link: `/product/connectors/${record.slug}` };
+}
+
+type ProductAreaRecord = {
+  link: string;
+  name: string;
+  order: number;
+};
+
+export async function readProductAreaRecords(rootDir: string): Promise<ProductAreaRecord[]> {
+  const productDir = path.join(rootDir, "product");
+  const entries = await fs.promises.readdir(productDir, { withFileTypes: true });
+  const pages = [
+    ...entries
+      .filter(isFile)
+      .map(toFileName)
+      .filter(isNonIndexMarkdownFile)
+      .map((fileName) => ({ filePath: path.join(productDir, fileName), link: `/product/${path.basename(fileName, ".md")}` })),
+    ...entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({ filePath: path.join(productDir, entry.name, "index.md"), link: `/product/${entry.name}/` }))
+      .filter((page) => fs.existsSync(page.filePath)),
+  ];
+
+  return pages
+    .map(({ filePath, link }) => {
+      const product = matter(fs.readFileSync(filePath, "utf-8")).data.product;
+
+      if (typeof product?.name !== "string" || typeof product?.order !== "number") {
+        throw new Error(`${filePath}\n\nProduct pages must set product.name and product.order in frontmatter.`);
+      }
+
+      return { link, name: product.name, order: product.order };
+    })
+    .sort((left, right) => left.order - right.order);
+}
+
+export function toProductNavItem(record: ProductAreaRecord) {
+  return { text: record.name, link: record.link };
+}
+
+function isNonIndexMarkdownFile(fileName: string) {
+  return path.extname(fileName) === ".md" && fileName !== "index.md";
+}
