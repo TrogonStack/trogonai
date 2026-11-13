@@ -66,3 +66,23 @@ message EvaluationResultAlreadyRecordedError {
     visibility: VISIBILITY_PUBLIC
   };
 }
+
+message EvaluationFindingOutsideEditableSurfaceError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.bindings"
+    reason: "EVALUATION_FINDING_OUTSIDE_EDITABLE_SURFACE"
+    message: "A finding names a surface the evaluated revision does not allow a candidate to edit."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message EvaluationFindingMatchesWithheldVocabularyError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "evaluation.bindings"
+    reason: "EVALUATION_FINDING_MATCHES_WITHHELD_VOCABULARY"
+    message: "A finding matches vocabulary its rubric version withholds."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
