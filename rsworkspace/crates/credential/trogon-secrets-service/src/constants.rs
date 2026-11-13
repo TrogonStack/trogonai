@@ -52,3 +52,10 @@ pub(crate) const NOT_EXACT_HOST_CHARACTERS: [char; 3] = ['*', '/', ' '];
 /// The length of a NATS curve public key: the `X` prefix and 55 base32
 /// characters.
 pub(crate) const CURVE_KEY_LEN: usize = 56;
+
+/// The component the service's audit records name as their writer's.
+pub(crate) const AUDIT_COMPONENT: &str = "secrets_service";
+
+/// What the audit writer id of one member of the queue group starts with; the
+/// instance the operator names follows it.
+pub(crate) const AUDIT_WRITER_PREFIX: &str = "secrets-service:";

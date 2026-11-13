@@ -32,6 +32,12 @@
 //! becomes a [`ReleaseCall`], and a release still running at
 //! [`RELEASE_DEADLINE`] answers `UNAVAILABLE`.
 //!
+//! [`ServiceConfig`] is what the `trogon-secrets-service` binary runs with,
+//! merged from the built-in defaults, the configuration file, the environment,
+//! and [`ServiceArgs`], each over the one before (ADR#0007). Every setting has
+//! one canonical name, a [`ConfigSetting`], and every refusal names it without
+//! quoting a secret: the file holds references to secrets, never the secrets.
+//!
 //! # Features
 //!
 //! - `test-support`: adds `InMemoryCredentialStates` and
@@ -41,6 +47,7 @@
 
 mod admission_limit;
 mod admission_limit_error;
+mod audit_section_wire;
 mod config_setting;
 mod constants;
 mod credential_release;
@@ -54,8 +61,10 @@ mod fixtures;
 #[cfg(any(test, feature = "test-support"))]
 mod in_memory_credential_states;
 mod jetstream_credential_states;
+mod nats_section_wire;
 mod openbao_address;
 mod openbao_address_error;
+mod openbao_section_wire;
 mod owner_holding;
 #[cfg(any(test, feature = "test-support"))]
 mod recording_release_audit;
@@ -80,6 +89,7 @@ mod release_policy_wire;
 mod release_record;
 mod release_reply;
 mod release_request;
+mod release_section_wire;
 mod release_server;
 mod release_server_error;
 mod requester_xkey;
@@ -89,6 +99,10 @@ mod seal_error;
 mod sealed_release;
 mod sealed_value;
 mod sealer;
+mod service_args;
+mod service_config;
+mod service_config_error;
+mod service_config_wire;
 mod static_release_policies;
 mod static_tenant_owners;
 mod tenant_account;
@@ -142,6 +156,9 @@ pub use seal_error::SealError;
 pub use sealed_release::SealedRelease;
 pub use sealed_value::{SealedValue, SealedValueError};
 pub use sealer::Sealer;
+pub use service_args::ServiceArgs;
+pub use service_config::ServiceConfig;
+pub use service_config_error::ServiceConfigError;
 pub use static_release_policies::StaticReleasePolicies;
 pub use static_tenant_owners::StaticTenantOwners;
 pub use tenant_account::{TenantAccount, TenantAccountError};
