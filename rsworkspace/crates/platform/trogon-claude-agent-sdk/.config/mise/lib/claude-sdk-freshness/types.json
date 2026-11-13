@@ -5,6 +5,9 @@
     {
       "source": "sdk-tools.d.ts",
       "output": "src/upstream/tool_inputs.rs",
+      "extern": {
+        "ToolOutputSchemas": "super::tool_outputs::ToolOutputSchemas"
+      },
       "roots": [
         "ToolInputSchemas",
         "AgentInput",
@@ -51,6 +54,57 @@
         "PushNotificationInput",
         "EnterWorktreeInput",
         "ExitWorktreeInput"
+      ]
+    },
+    {
+      "source": "sdk-tools.d.ts",
+      "output": "src/upstream/tool_outputs.rs",
+      "roots": [
+        "ToolOutputSchemas",
+        "AgentOutput",
+        "FileReadOutput",
+        "ListMcpResourcesOutput",
+        "RefreshMcpToolsOutput",
+        "McpOutput",
+        "ArtifactOutput",
+        "ProjectsOutput",
+        "BashOutput",
+        "ExitPlanModeOutput",
+        "FileEditOutput",
+        "FileWriteOutput",
+        "GlobOutput",
+        "GrepOutput",
+        "TaskStopOutput",
+        "NotebookEditOutput",
+        "ReadMcpResourceDirOutput",
+        "ReadMcpResourceOutput",
+        "ReportFindingsOutput",
+        "TodoWriteOutput",
+        "WebFetchOutput",
+        "WebSearchOutput",
+        "AskUserQuestionOutput",
+        "SendFeedbackOutput",
+        "EnterWorktreeOutput",
+        "ExitWorktreeOutput",
+        "TaskCreateOutput",
+        "TaskGetOutput",
+        "TaskUpdateOutput",
+        "TaskListOutput",
+        "RemoteTriggerOutput",
+        "ShowOnboardingRolePickerOutput",
+        "OfferChromeSetupOutput",
+        "ReadNotificationsOutput",
+        "ScheduleWakeupOutput",
+        "MonitorOutput",
+        "ProposeSkillsOutput",
+        "ProposeGoalOutput",
+        "EnterPlanModeOutput",
+        "WorkflowOutput",
+        "CronCreateOutput",
+        "CronDeleteOutput",
+        "CronListOutput",
+        "PushNotificationOutput",
+        "ClaudeDesignOutput"
       ]
     }
   ]

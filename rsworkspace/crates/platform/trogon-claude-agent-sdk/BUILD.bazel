@@ -118,6 +118,9 @@ workspace_crate(
         "upstream_tool_inputs_fixtures": {
             "compile_data": glob(["tests/fixtures/*.json"]),
         },
+        "upstream_tool_outputs_fixtures": {
+            "compile_data": glob(["tests/fixtures/*.json"]),
+        },
         "usd_budget": {},
         "user_input": {},
         "user_message": {},
