@@ -54,6 +54,7 @@ workspace_crate(
         "allowed_tools": {},
         "assistant_message": {},
         "bridge_credentials": {"compile_data": ["tests/fixtures/bridge_credentials/goldens.json"]},
+        "bridge_worker": {"compile_data": ["tests/fixtures/bridge_worker/goldens.json"]},
         "builtin_tool_name": {},
         "builtin_tool_name_storage": {},
         "bundled_cli": {},
