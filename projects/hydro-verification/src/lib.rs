@@ -2,38 +2,24 @@
 hydro_lang::setup!();
 
 use hydro_lang::prelude::*;
+use serde::{Deserialize, Serialize};
 
-pub mod recovery;
-pub mod replicas;
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum Command {
+    Create,
+    Pause,
+    Resume,
+    Remove,
+}
 
 pub struct Scheduler;
 
-pub fn recover<'a>(
-    advances: Stream<recovery::Input, Process<'a, Scheduler>>,
-    faults: Stream<recovery::Input, Process<'a, Scheduler>>,
-) -> Stream<recovery::Observation, Process<'a, Scheduler>> {
-    advances
-        .merge_ordered(
-            faults,
-            nondet!(/** a fault may occur between any recovery phases */),
-        )
-        .scan(
-            q!(self::recovery::Recovery::default),
-            q!(|state, input| Some(state.step(input))),
-        )
-}
-
-pub fn competing_replicas<'a>(
-    older: Stream<replicas::Worker, Process<'a, Scheduler>>,
-    newer: Stream<replicas::Worker, Process<'a, Scheduler>>,
-) -> Stream<replicas::Observation, Process<'a, Scheduler>> {
-    older
-        .merge_ordered(
-            newer,
-            nondet!(/** separate instances can interleave operations for one key */),
-        )
-        .scan(
-            q!(self::replicas::Replicas::default),
-            q!(|state, worker| Some(state.step(worker))),
-        )
+pub fn client_orders<'a>(
+    left: Stream<Command, Process<'a, Scheduler>>,
+    right: Stream<Command, Process<'a, Scheduler>>,
+) -> Stream<Command, Process<'a, Scheduler>> {
+    left.merge_ordered(
+        right,
+        nondet!(/** client command streams can interleave while preserving each client's order */),
+    )
 }

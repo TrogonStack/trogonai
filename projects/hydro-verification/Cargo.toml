@@ -12,9 +12,14 @@ hydro_lang = { git = "https://github.com/hydro-project/hydro", rev = "59e9171108
 stageleft = "=0.16.0"
 serde = { version = "1", features = ["derive"] }
 
+[dev-dependencies]
+trogon-decider = { path = "../../rsworkspace/crates/decider/trogon-decider" }
+trogon-scheduler-domain = { path = "../../rsworkspace/crates/scheduler/trogon-scheduler-domain", default-features = false }
+trogonai-proto = { path = "../../rsworkspace/crates/platform/trogonai-proto", features = ["schedules"] }
+uuid = { version = "=1.24.0", default-features = false }
+
 [build-dependencies]
 stageleft_tool = "=0.16.0"
-sha2 = "=0.10.9"
 
 [lints.rust]
 unexpected_cfgs = { level = "deny", check-cfg = ['cfg(stageleft_runtime)'] }

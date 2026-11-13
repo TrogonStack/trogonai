@@ -6,9 +6,9 @@ runtime acceptance evidence.
 
 ## Development verification
 
-[Verify scheduler recovery with Hydro](./how-to/verify-scheduler-with-hydro.md)
-explores bounded scheduling, checkpoint, acknowledgment, and recovery protocols
-with an opt-in simulator. Its model evidence is separate from runtime acceptance.
+[Verify scheduler decisions with Hydro](./how-to/verify-scheduler-with-hydro.md)
+explores client command orderings and exercises the production scheduler domain
+deciders for each order. Its scope is separate from broker and processor recovery.
 
 ## Workload identity
 
