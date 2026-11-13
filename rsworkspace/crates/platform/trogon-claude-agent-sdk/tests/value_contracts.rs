@@ -70,12 +70,12 @@ fn prompt_rule_and_tool_conversions_preserve_text() {
 
 #[test]
 fn timeout_and_capacity_conversions_keep_their_public_bounds() -> TestResult {
-    assert!(matches!(Timeout::try_from(Duration::ZERO), Err(TimeoutError::Zero)));
+    assert!(matches!(Timeout::checked(Duration::ZERO), Err(TimeoutError::Zero)));
     assert!(matches!(
-        Timeout::try_from(Timeout::MAX + Duration::from_nanos(1)),
+        Timeout::checked(Timeout::MAX + Duration::from_nanos(1)),
         Err(TimeoutError::TooLarge)
     ));
-    assert_eq!(Timeout::try_from(Timeout::MAX)?.as_duration(), Timeout::MAX);
+    assert_eq!(Timeout::checked(Timeout::MAX)?.as_duration(), Timeout::MAX);
     assert!(matches!(QueueCapacity::try_from(0), Err(QueueCapacityError::Zero)));
     assert!(matches!(
         QueueCapacity::try_from(QueueCapacity::MAX + 1),

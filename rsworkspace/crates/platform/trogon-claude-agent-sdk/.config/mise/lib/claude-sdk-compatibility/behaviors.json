@@ -1203,17 +1203,22 @@
       },
       "upstream": {
         "verdict": "disagree",
-        "behavior": "Python times out after 60 s by default. TypeScript waits until the response arrives, the abort signal fires, or the query closes."
+        "behavior": "Python times out after 60 s with \"Control request timeout: {subtype}\". TypeScript waits until the response arrives, the abort signal fires, or the query closes; its only initialize deadline is 660000 ms, armed when a hook is set to block on failure or managed settings are sent."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "A CLI that never answers would otherwise hang the session; a bounded wait turns that into a typed error."
+        "kind": "follow-typescript",
+        "reason": "Limits::control_timeout is None by default and InitializeTimeout::TypeScript arms 660 s only for blocking hooks or managed settings, failing with InitializeNotConfirmed or ManagedSettingsNotConfirmed and TypeScript's text. Limits::python() selects the 60 s wait, Python's message and the CLAUDE_CODE_STREAM_CLOSE_TIMEOUT initialize wait."
       },
       "contracts": [
-        "subprocess::missing_control_reply_times_out"
+        "upstream_defaults::m06_a_control_request_has_no_deadline_by_default",
+        "subprocess::missing_control_reply_times_out",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
+        "error_contracts::control_timeout_diagnostics_identify_each_wire_operation"
       ],
       "rust": [
-        "src/driver.rs"
+        "src/driver.rs",
+        "src/options.rs",
+        "src/error.rs"
       ]
     },
     {
@@ -1266,17 +1271,20 @@
       },
       "upstream": {
         "verdict": "disagree",
-        "behavior": "Python rejects a message over max_buffer_size (1 MiB default). TypeScript reads lines with node:readline and no length limit."
+        "behavior": "Python rejects a line over max_buffer_size (1 MiB by default) with \"JSON message exceeded maximum buffer size of {N} bytes\". TypeScript reads lines with node:readline and no length limit."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "An unbounded line lets a misbehaving CLI exhaust memory; the limit is configurable for large messages."
+        "kind": "follow-typescript",
+        "reason": "Limits::max_buffer_size is None by default; Limits::python() sets Python's 1 MiB cap with its message."
       },
       "contracts": [
-        "subprocess::oversized_frame_is_rejected"
+        "upstream_defaults::m08_a_long_stdout_line_is_not_capped_by_default",
+        "subprocess::oversized_frame_is_rejected",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values"
       ],
       "rust": [
-        "src/framing.rs"
+        "src/framing.rs",
+        "src/options.rs"
       ]
     },
     {
@@ -1476,15 +1484,20 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "No queue capacity setting exists upstream."
+        "behavior": "No queue capacity setting exists upstream. Rust queues are unbounded unless a caller opts into a bound, and an opted-in QueueCapacity still rejects zero and values past the semaphore permit limit."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounded channels need a nonzero capacity within the semaphore permit limit."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "queue_capacity::unsupported_queue_capacities_fail_before_any_channel_is_created",
+        "subprocess::queue_capacity_rejects_values_that_would_panic"
+      ],
       "rust": [
-        "src/queue_capacity.rs"
+        "src/queue_capacity.rs",
+        "src/options.rs",
+        "src/channel.rs"
       ]
     },
     {
@@ -1500,15 +1513,19 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Timeouts are not range-checked upstream."
+        "behavior": "Timeouts are not range-checked upstream. Timeout::new accepts any duration and a deadline past the clock's range never fires; Timeout::checked keeps the Zero and TooLarge errors for callers that want them."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A zero or multi-day timeout is a configuration error that would fire instantly or never."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "timeout::timeouts_preserve_exact_durations_and_documented_defaults",
+        "timeout::checked_timeouts_reject_values_outside_the_supported_range",
+        "subprocess::timeout_rejects_values_that_would_overflow_an_instant"
+      ],
       "rust": [
-        "src/timeout.rs"
+        "src/timeout.rs",
+        "src/driver.rs"
       ]
     },
     {
@@ -1578,18 +1595,24 @@
         "reason": "The pinned Python sources have no equivalent bound."
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "Write buffer full, data queued",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 20,
+        "sha256": "3552af2a2a90275dbeb0d74220bcc3fa5434a3a40db6430e0a87d293e6a53a0c"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Writes to the CLI are not time-bounded upstream."
+        "behavior": "Writes to the CLI are not time-bounded upstream; TypeScript only logs when the stdin buffer is full. Rust waits for the write unless Limits::write_timeout is set, which fails a stalled write with WriteTimeout."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A stalled CLI stdin must not block the driver forever."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1607,63 +1630,89 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "No client command queue exists upstream."
+        "behavior": "No client command queue exists upstream. Rust's command queue is unbounded and never times out unless Limits::command_queue_capacity is set; Limits::command_queue_timeout then bounds the wait for room with CommandQueueTimeout."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "The client talks to the driver task through a bounded queue that must not block callers forever."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk"
+      ],
       "rust": [
-        "src/client.rs"
+        "src/client.rs",
+        "src/options.rs"
       ]
     },
     {
       "id": "r07-shutdown-timeouts",
       "concept": "Shutdown and stderr drain timeouts",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 984,
+        "line_end": 1001,
+        "sha256": "9bb7f137932cc2b23021e173f33cbc3a492fbfee80838fb81a53da41c6e19a4b"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "setTimeout((s,i)=>{if(s.exitCode!==null||s.signalCode!=null){i();return}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 260,
+        "sha256": "209549c22a7d8d37a4a9c579f04edbccd85ec665f1cd91bcb495cd5fcc3cb3a6"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "Shutdown waits are not bounded the same way upstream."
+        "verdict": "disagree",
+        "behavior": "TypeScript closes stdin, waits 2000 ms, sends SIGTERM (none on Windows) and SIGKILL 5000 ms later without waiting, gives stderr 200 ms after the exit, and never reports an error. Python waits 5 s, terminates, waits 5 s, kills and waits 5 s, suppressing every error."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Teardown must finish even when the CLI or its stderr pipe stalls."
+        "kind": "follow-typescript",
+        "reason": "Shutdown::TypeScript is the default; Limits::python() selects Shutdown::Python, and Shutdown::Strict keeps ShutdownTimeout and StderrDrainTimeout as an opt-in."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::r07_the_default_shutdown_stops_a_stuck_cli_without_an_error",
+        "runtime_failure_contracts::a_stderr_pipe_that_stays_open_after_the_cli_exits_fails_a_clean_shutdown",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values"
+      ],
       "rust": [
-        "src/driver.rs"
+        "src/process_transport.rs",
+        "src/options.rs"
       ]
     },
     {
       "id": "r08-stderr-tail",
       "concept": "Retained stderr tail size",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 1112,
+        "line_end": 1117,
+        "sha256": "a8816ec72691df050861d24afbb94d2fea668ce53b8327211005ccb5f067ea80"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "var qet=2000,iD=2048",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 10,
+        "span_after": 80,
+        "sha256": "1a15a69741457ccd5a781e68e1e1b87b1b7afca87787f2397b365204019dc8e5"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "No retained stderr tail bound exists upstream."
+        "verdict": "disagree",
+        "behavior": "TypeScript keeps the last 2048 UTF-16 code units of stderr and appends them, trimmed, to the process error. Python keeps no stderr and reports \"Check stderr output for details\"."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Only a 64 KiB tail is kept for error reports so a chatty CLI cannot grow memory."
+        "kind": "follow-typescript",
+        "reason": "Limits::stderr_tail defaults to TypeScript's 2048 units; Limits::python() sets it to 0. TypeScript's secret redaction of the tail is not ported."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::r08_a_process_error_keeps_the_last_2048_stderr_units_trimmed",
+        "subprocess::process_failure_preserves_status_and_bounded_stderr",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values"
+      ],
       "rust": [
-        "src/framing.rs"
+        "src/framing.rs",
+        "src/process_transport.rs"
       ]
     },
     {
@@ -1679,13 +1728,14 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream request ids are random strings that never run out."
+        "behavior": "Upstream request ids are random strings that never run out. The Rust counter wraps by default so ids never run out either; RequestIdExhaustion::Fail keeps RequestIdExhausted as an opt-in."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Rust uses a counter for request ids, which needs a defined overflow outcome."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1703,13 +1753,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream awaits initialization implicitly and has no typed closed-input error."
+        "behavior": "Upstream holds writes until initialize is sent and writes input sent after the caller ended its stream. Rust writes such input by default; InputAfterFinish::Reject keeps InputClosed as an opt-in. NotInitialized is only reachable from inside the driver, because the client returns only after initialize succeeds."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Typed errors replace implicit waits so misuse is visible to callers."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::s15_input_sent_during_a_turn_is_written_and_closed_input_stays_recoverable"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1727,13 +1779,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Outstanding control requests are unbounded upstream."
+        "behavior": "Outstanding control requests are unbounded upstream. Limits::max_pending_controls is opt-in and fails the excess request with TooManyControls."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds memory held by pending requests against an unresponsive CLI."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::pending_controls_and_mcp_replacements_reject_overlapping_admission"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1751,13 +1805,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Inbound callbacks are unbounded upstream."
+        "behavior": "Inbound callbacks are unbounded upstream. Limits::max_incoming_callbacks is opt-in and answers the excess request with an error response."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds concurrent callback tasks a misbehaving CLI can start."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::callback_capacity_is_bounded_and_cancellation_preserves_control_progress"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1766,24 +1822,37 @@
       "id": "r13-message-queue-full",
       "concept": "Deferred message queue capacity",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 234,
+        "line_end": 236,
+        "sha256": "7c9ac5bf77dc1a597c5a087de0e9e0351c1c5c509a6887d5f908f1b2032ddddf"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "class bf{returned;queue=[]",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 160,
+        "sha256": "63f388d228d03c99a41bca634d5296a0b3fa63cc9fdc8f89c23b3eba8f088328"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "Upstream message buffers are unbounded."
+        "verdict": "disagree",
+        "behavior": "TypeScript queues messages in an unbounded array and keeps reading stdout. Python buffers 100 messages and then stops reading until the caller takes one."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds memory when the caller stops reading messages."
+        "kind": "follow-typescript",
+        "reason": "MessageBuffer::Unbounded is the default; Limits::python() selects MessageBuffer::Backpressure(100), and MessageBuffer::FailWhenFull keeps MessageQueueFull as an opt-in."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
+        "subprocess::consumer_lag_fails_with_a_bounded_queue"
+      ],
       "rust": [
-        "src/driver.rs"
+        "src/driver.rs",
+        "src/options.rs",
+        "src/channel.rs"
       ]
     },
     {
@@ -1799,13 +1868,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Tracked tasks are unbounded upstream."
+        "behavior": "Tracked tasks are unbounded upstream. Limits::max_tracked_tasks is opt-in and fails the run with TooManyTasks."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Caps tracked task ids at 256 so task notifications cannot grow memory without bound."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::background_task_ledger_rejects_new_tasks_at_its_limit_but_accepts_duplicates"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1823,13 +1894,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Queued prompts are unbounded upstream."
+        "behavior": "Queued prompts are unbounded upstream. Limits::max_queued_inputs is opt-in and fails with TooManyInputs."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Bounds queued turns held by the driver."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "runtime_failure_contracts::a_second_input_beyond_the_queue_capacity_is_rejected_without_ending_the_session"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -1838,24 +1911,36 @@
       "id": "r16-duplicate-control-request",
       "concept": "Inbound control_request with a duplicate id",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no equivalent bound."
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 406,
+        "line_end": 415,
+        "sha256": "e8dbe4a0fc1de782e6919998a31878abcb47d3336197e3e77093967fa85d4558"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs has no equivalent bound."
+        "file": "package/sdk.mjs",
+        "anchor": "Duplicate delivery of in-flight request",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 80,
+        "sha256": "9f3cf0c8d6df7cc9cc52c4aba9bfd235c1ba91422f69b79196a1b83b71bcff58"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "Duplicate inbound request ids are not detected upstream."
+        "verdict": "disagree",
+        "behavior": "TypeScript skips an inbound request whose id is still in flight, with a debug log and no response. Python runs both handlers and both answer."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Two callbacks answering one id would send conflicting responses."
+        "kind": "follow-typescript",
+        "reason": "DuplicateControlRequests::Skip is the default; Limits::python() selects RunBoth, and DuplicateControlRequests::Fail keeps DuplicateControlRequest as an opt-in."
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
+        "runtime_failure_contracts::duplicate_callback_request_id_is_a_terminal_protocol_error"
+      ],
       "rust": [
-        "src/driver.rs"
+        "src/driver.rs",
+        "src/options.rs"
       ]
     },
     {

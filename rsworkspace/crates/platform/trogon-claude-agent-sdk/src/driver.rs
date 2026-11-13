@@ -6,7 +6,7 @@ use std::{
 };
 
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::oneshot,
     task::{AbortHandle, JoinHandle, JoinSet},
     time::{Instant, sleep_until, timeout},
 };
@@ -76,15 +76,20 @@ enum SessionState {
 }
 
 impl RunState {
-    fn observe(&mut self, message: &Message, queued_limit: usize, task_limit: usize) -> Result<(), Error> {
+    fn observe(
+        &mut self,
+        message: &Message,
+        queued_limit: Option<usize>,
+        task_limit: Option<usize>,
+    ) -> Result<(), Error> {
         match message {
             Message::Result(message) => {
                 self.result_received = true;
                 self.turn_active = false;
                 self.awaiting_continuation = false;
                 if let Some(count) = message.queued_turn_count {
-                    let count = usize::try_from(count).map_err(|_| Error::TooManyInputs)?;
-                    if count > queued_limit {
+                    let count = usize::try_from(count).unwrap_or(usize::MAX);
+                    if queued_limit.is_some_and(|limit| count > limit) {
                         return Err(Error::TooManyInputs);
                     }
                     while self.pending_inputs.len() > count {
@@ -127,7 +132,7 @@ impl RunState {
                     ) =>
                 {
                     if let Some(id) = message.data.get("task_id").and_then(serde_json::Value::as_str) {
-                        if self.tasks.len() >= task_limit && !self.tasks.contains(id) {
+                        if task_limit.is_some_and(|limit| self.tasks.len() >= limit) && !self.tasks.contains(id) {
                             return Err(Error::TooManyTasks);
                         }
                         self.tasks.insert(id.to_owned());
@@ -180,7 +185,8 @@ mod tests;
 
 struct PendingControl {
     response: ControlResponder,
-    deadline: Instant,
+    /// `None` waits for the answer however long it takes, as TypeScript does.
+    deadline: Option<Instant>,
 }
 
 enum ControlResponder {
@@ -229,20 +235,29 @@ where
     transport: T,
     /// `end_input` has been called, so nothing more is written whatever `Transport::is_ready` says.
     input_ended: bool,
-    commands: mpsc::Receiver<Command>,
-    messages: mpsc::Sender<Message>,
+    commands: crate::channel::Receiver<Command>,
+    messages: crate::channel::Sender<Message>,
+    /// Python's backpressure: messages the caller has not taken yet beyond the buffer. While any wait here,
+    /// stdout is not read.
+    overflow: VecDeque<Message>,
     shutdown: oneshot::Receiver<()>,
+    /// The shutdown signal has been taken, so the receiver must not be polled again.
+    shutdown_seen: bool,
     limits: Limits,
     handler: Option<Arc<dyn ToolPermissionHandler>>,
     pending: HashMap<ControlRequestId, PendingControl>,
     callbacks: JoinSet<CallbackOutput>,
     callback_handles: HashMap<ControlRequestId, AbortHandle>,
     callback_signals: HashMap<ControlRequestId, crate::CancellationToken>,
+    /// Python: callbacks that lost their request id to a duplicate still run and answer, but a cancel no longer
+    /// reaches them.
+    detached_callbacks: HashMap<tokio::task::Id, crate::CancellationToken>,
     hook_callbacks: HashMap<String, HookCallback>,
     sdk_mcp_servers: McpSessions,
     pending_mcp: Option<(ControlRequestId, McpSessions)>,
     initialize_request: serde_json::Value,
     initialize_expectations: InitializeExpectations,
+    initialize_timeout: Option<Duration>,
     elicitation_handler: Option<Arc<dyn crate::ElicitationHandler>>,
     user_dialog_handler: Option<Arc<dyn crate::UserDialogHandler>>,
     dialog_kinds: HashSet<String>,
@@ -266,7 +281,7 @@ type MirrorBarrier =
 #[derive(Clone)]
 struct HookCallback {
     handler: Arc<dyn crate::HookHandler>,
-    timeout: Duration,
+    timeout: Option<Duration>,
 }
 
 /// TypeScript's `pluginsViaInitialize`: `pluginDelivery: 'initialize'` with at least one plugin.
@@ -339,10 +354,12 @@ fn initialize_config(
                 id,
                 HookCallback {
                     handler: handler.clone(),
-                    timeout: registration
-                        .timeout
-                        .unwrap_or(options.limits.control_timeout)
-                        .as_duration(),
+                    // Both upstream SDKs only forward the hook timeout to the CLI; the SDK enforces one only when
+                    // the caller opted into a callback timeout.
+                    timeout: options
+                        .limits
+                        .callback_timeout
+                        .map(|limit| registration.timeout.unwrap_or(limit).as_duration()),
                 },
             );
         }
@@ -412,8 +429,8 @@ fn initialize_config(
 pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
     pub options: ClaudeAgentOptions,
     pub session: Option<crate::SessionRuntime<F>>,
-    pub commands: mpsc::Receiver<Command>,
-    pub messages: mpsc::Sender<Message>,
+    pub commands: crate::channel::Receiver<Command>,
+    pub messages: crate::channel::Sender<Message>,
     pub shutdown: oneshot::Receiver<()>,
     pub terminal: oneshot::Sender<Result<(), Error>>,
     pub transport: T,
@@ -428,17 +445,118 @@ pub(crate) struct Initialization {
     request: serde_json::Value,
     hook_callbacks: HashMap<String, HookCallback>,
     expectations: InitializeExpectations,
+    timeout: Option<Duration>,
 }
 
 impl Initialization {
-    pub(crate) fn new(options: &ClaudeAgentOptions) -> Result<Self, Error> {
+    pub(crate) fn new<E: crate::adapters::EnvironmentVariable>(
+        options: &ClaudeAgentOptions,
+        environment: &E,
+    ) -> Result<Self, Error> {
         let (request, hook_callbacks, expectations) = initialize_config(options)?;
+        let timeout = match options.limits.initialize_timeout {
+            // TypeScript arms `AE + T8` (660 seconds) only when a hook blocks on failure or managed settings are sent.
+            crate::InitializeTimeout::TypeScript => {
+                (expectations.blocking_hooks || expectations.managed_settings).then_some(TYPESCRIPT_INITIALIZE_TIMEOUT)
+            }
+            crate::InitializeTimeout::Python => Some(python_initialize_timeout(
+                environment.var_os(std::ffi::OsStr::new("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT")),
+            )?),
+            crate::InitializeTimeout::Fixed(timeout) => Some(timeout.as_duration()),
+        };
         Ok(Self {
             request,
             hook_callbacks,
             expectations,
+            timeout,
         })
     }
+}
+
+const TYPESCRIPT_INITIALIZE_TIMEOUT: Duration = Duration::from_millis(660_000);
+
+/// Python: `max(int(os.environ.get("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT", "60000")) / 1000, 60)` seconds.
+pub(crate) fn python_initialize_timeout(value: Option<std::ffi::OsString>) -> Result<Duration, Error> {
+    let floor = Duration::from_secs(60);
+    let Some(value) = value else {
+        return Ok(floor);
+    };
+    let text = value.to_string_lossy();
+    let milliseconds = python_int(&text).ok_or_else(|| Error::InvalidStreamCloseTimeout {
+        literal: python_repr(&text),
+    })?;
+    Ok(match milliseconds {
+        PythonInt::Negative => floor,
+        PythonInt::Positive(milliseconds) => Duration::from_millis(milliseconds).max(floor),
+    })
+}
+
+enum PythonInt {
+    Negative,
+    /// Saturated at `u64::MAX`, which is longer than any wait.
+    Positive(u64),
+}
+
+/// The values Python's `int(text)` accepts in base 10: surrounding whitespace, one sign, and ASCII digits with
+/// single underscores between them.
+fn python_int(text: &str) -> Option<PythonInt> {
+    let text = text.trim();
+    let (negative, digits) = match text.as_bytes().first() {
+        Some(b'-') => (true, &text[1..]),
+        Some(b'+') => (false, &text[1..]),
+        _ => (false, text),
+    };
+    if digits.is_empty() || digits.starts_with('_') || digits.ends_with('_') || digits.contains("__") {
+        return None;
+    }
+    let mut value = 0_u64;
+    for byte in digits.bytes() {
+        match byte {
+            b'_' => {}
+            b'0'..=b'9' => value = value.saturating_mul(10).saturating_add(u64::from(byte - b'0')),
+            _ => return None,
+        }
+    }
+    Some(if negative && value > 0 {
+        PythonInt::Negative
+    } else {
+        PythonInt::Positive(value)
+    })
+}
+
+/// Python's `repr` of a string, as its `int()` error quotes it.
+fn python_repr(text: &str) -> String {
+    let quote = if text.contains('\'') && !text.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
+    let mut repr = String::with_capacity(text.len() + 2);
+    repr.push(quote);
+    for character in text.chars() {
+        match character {
+            '\\' => repr.push_str("\\\\"),
+            '\n' => repr.push_str("\\n"),
+            '\r' => repr.push_str("\\r"),
+            '\t' => repr.push_str("\\t"),
+            character if character == quote => {
+                repr.push('\\');
+                repr.push(character);
+            }
+            character if u32::from(character) < 0x20 || character == '\u{7f}' => {
+                let code = u32::from(character);
+                repr.push_str("\\x");
+                repr.extend(
+                    [code >> 4, code & 0xf]
+                        .into_iter()
+                        .filter_map(|digit| char::from_digit(digit, 16)),
+                );
+            }
+            character => repr.push(character),
+        }
+    }
+    repr.push(quote);
+    repr
 }
 
 /// Connects the transport and starts the driver task.
@@ -462,13 +580,16 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         input_ended: false,
         commands,
         messages,
+        overflow: VecDeque::new(),
         shutdown,
+        shutdown_seen: false,
         limits: options.limits,
         handler: options.permission_handler,
         pending: HashMap::new(),
         callbacks: JoinSet::new(),
         callback_handles: HashMap::new(),
         callback_signals: HashMap::new(),
+        detached_callbacks: HashMap::new(),
         hook_callbacks: initialization.hook_callbacks,
         sdk_mcp_servers: options
             .sdk_mcp_servers
@@ -478,6 +599,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         pending_mcp: None,
         initialize_request: initialization.request,
         initialize_expectations: initialization.expectations,
+        initialize_timeout: initialization.timeout,
         elicitation_handler: options.elicitation_handler,
         user_dialog_handler: options.user_dialog_handler,
         dialog_kinds: options
@@ -509,7 +631,7 @@ where
             outcome => outcome,
         };
         self.callbacks.abort_all();
-        for signal in self.callback_signals.values() {
+        for signal in self.callback_signals.values().chain(self.detached_callbacks.values()) {
             signal.cancel();
         }
         self.end_input().await;
@@ -541,6 +663,7 @@ where
             },
         };
         let outcome = combine_outcomes(outcome, mirror_cleanup);
+        self.flush_overflow().await;
         for (_, pending) in self.pending.drain() {
             pending.response.send_error(Error::DriverStopped);
         }
@@ -597,32 +720,40 @@ where
     async fn event_loop(&mut self) -> Result<(), Error> {
         loop {
             if self.shutdown.try_recv().is_ok() {
+                self.shutdown_seen = true;
                 return Ok(());
             }
-            if let Some(operation) = self.expired_control() {
-                return Err(Error::ControlTimeout { operation });
+            if let Some(error) = self.expired_control() {
+                return Err(error);
             }
-            if self.run_state.settled(self.callback_handles.len()) && self.mirror_flush.is_none() {
+            if self.run_state.settled(self.running_callbacks()) && self.mirror_flush.is_none() {
                 self.end_input().await;
             }
             let between_turns = self.run_state.input_done.is_some()
                 && self.run_state.result_received
                 && !self.run_state.turn_active
-                && self.callback_handles.is_empty()
+                && self.running_callbacks() == 0
                 && self.run_state.tasks.is_empty()
                 && !matches!(self.run_state.session_state, Some(SessionState::RequiresAction));
             if between_turns && self.input_open() {
-                self.run_state
-                    .deadline
-                    .get_or_insert_with(|| Instant::now() + self.limits.run_end_timeout.as_duration());
+                if self.run_state.deadline.is_none() {
+                    self.run_state.deadline = Instant::now().checked_add(self.limits.run_end_timeout.as_duration());
+                }
             } else {
                 self.run_state.deadline = None;
             }
-            let deadline = self.pending.values().map(|request| request.deadline).min();
+            let deadline = self.pending.values().filter_map(|request| request.deadline).min();
             let run_deadline = self.run_state.deadline;
+            // Python stops reading stdout while its message buffer is full, so nothing else on stdout is handled
+            // until the caller takes a message.
+            let reading = self.overflow.is_empty() && !self.deferred_full();
             tokio::select! {
-                _ = &mut self.shutdown => return Ok(()),
-                message = self.transport.read_message() => {
+                _ = &mut self.shutdown => { self.shutdown_seen = true; return Ok(()); }
+                ready = self.messages.ready(), if !self.overflow.is_empty() => {
+                    if !ready { return Err(Error::DriverStopped); }
+                    self.drain_overflow()?;
+                }
+                message = self.transport.read_message(), if reading => {
                     let Some(message) = message? else {
                         self.finish_mirror().await?;
                         return if matches!(self.state, State::Running | State::Initializing) || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
@@ -647,13 +778,22 @@ where
                             self.callback_signals.remove(&id);
                             self.write_response(response).await?;
                         }
+                        Some(Ok((task_id, (id, response)))) if self.detached_callbacks.remove(&task_id).is_some() => {
+                            // Python's `finally` pops the request id whichever task holds it, so the live task
+                            // under that id loses its cancel route too.
+                            if let Some(handle) = self.callback_handles.remove(&id) {
+                                let signal = self.callback_signals.remove(&id).unwrap_or_default();
+                                self.detached_callbacks.insert(handle.id(), signal);
+                            }
+                            self.write_response(response).await?;
+                        }
                         Some(Err(error)) if error.is_cancelled() => {}
-                        Some(Err(error)) if self.callback_handles.values().any(|handle| handle.id() == error.id()) => return Err(Error::CallbackTask(error)),
+                        Some(Err(error)) if self.detached_callbacks.contains_key(&error.id()) || self.callback_handles.values().any(|handle| handle.id() == error.id()) => return Err(Error::CallbackTask(error)),
                         _ => {}
                     }
                 }
                 _ = async { match deadline { Some(deadline) => sleep_until(deadline).await, None => pending::<()>().await } } => {
-                    if let Some(operation) = self.expired_control() { return Err(Error::ControlTimeout { operation }); }
+                    if let Some(error) = self.expired_control() { return Err(error); }
                 }
                 _ = async { match run_deadline { Some(deadline) => sleep_until(deadline).await, None => pending::<()>().await } } => {
                     tracing::debug!(timeout = ?self.limits.run_end_timeout.as_duration(), "no idle state after the last result; ending the run");
@@ -664,23 +804,82 @@ where
         }
     }
 
-    fn expired_control(&mut self) -> Option<ControlOperation> {
+    fn running_callbacks(&self) -> usize {
+        self.callback_handles.len() + self.detached_callbacks.len()
+    }
+
+    /// The control request whose wait ran out, answered with its timeout error, which also ends the run.
+    fn expired_control(&mut self) -> Option<Error> {
         let now = Instant::now();
-        let id = self
-            .pending
-            .iter()
-            .find_map(|(id, request)| (request.deadline <= now).then(|| id.clone()))?;
+        let id = self.pending.iter().find_map(|(id, request)| {
+            request
+                .deadline
+                .is_some_and(|deadline| deadline <= now)
+                .then(|| id.clone())
+        })?;
         let request = self.pending.remove(&id)?;
         let operation = request.response.operation();
-        request.response.send_error(Error::ControlTimeout { operation });
-        Some(operation)
+        let typescript_initialize = operation == ControlOperation::Initialize
+            && self.limits.initialize_timeout == crate::InitializeTimeout::TypeScript;
+        // The hook message wins when both a blocking hook and managed settings armed the wait.
+        let expectations = self.initialize_expectations;
+        let error = || {
+            if typescript_initialize && !expectations.blocking_hooks && expectations.managed_settings {
+                Error::ManagedSettingsNotConfirmed
+            } else if typescript_initialize {
+                Error::InitializeNotConfirmed
+            } else {
+                Error::ControlTimeout { operation }
+            }
+        };
+        request.response.send_error(error());
+        Some(error())
+    }
+
+    fn control_deadline(&self, operation: ControlOperation) -> Option<Instant> {
+        let wait = match operation {
+            ControlOperation::Initialize => self.initialize_timeout,
+            _ => self.limits.control_timeout.map(crate::Timeout::as_duration),
+        }?;
+        Instant::now().checked_add(wait)
+    }
+
+    fn next_request_id(&mut self) -> Result<ControlRequestId, Error> {
+        self.next_id = match self.limits.request_id_exhaustion {
+            crate::RequestIdExhaustion::Wrap => self.next_id.wrapping_add(1),
+            crate::RequestIdExhaustion::Fail => self.next_id.checked_add(1).ok_or(Error::RequestIdExhausted)?,
+        };
+        Ok(ControlRequestId::from(format!("request-{}", self.next_id)))
+    }
+
+    fn controls_full(&self) -> bool {
+        self.limits
+            .max_pending_controls
+            .is_some_and(|limit| self.pending.len() >= limit.get())
     }
 
     async fn admit_callback(&mut self, id: &ControlRequestId) -> Result<bool, Error> {
-        if self.callback_handles.contains_key(id) {
-            return Err(ProtocolError::DuplicateControlRequest.into());
+        if let Some(handle) = self.callback_handles.get(id) {
+            match self.limits.duplicate_control_requests {
+                crate::DuplicateControlRequests::Skip => {
+                    // TypeScript logs and drops a second delivery of a request still in flight.
+                    tracing::debug!(request_id = %id.as_str(), "skipping a duplicate delivery of an in-flight control request");
+                    return Ok(false);
+                }
+                crate::DuplicateControlRequests::RunBoth => {
+                    let task = handle.id();
+                    self.callback_handles.remove(id);
+                    let signal = self.callback_signals.remove(id).unwrap_or_default();
+                    self.detached_callbacks.insert(task, signal);
+                }
+                crate::DuplicateControlRequests::Fail => return Err(ProtocolError::DuplicateControlRequest.into()),
+            }
         }
-        if self.callback_handles.len() >= self.limits.max_pending_controls.get() {
+        if self
+            .limits
+            .max_incoming_callbacks
+            .is_some_and(|limit| self.running_callbacks() >= limit.get())
+        {
             self.write_response(wire::callback_error_response(id, "Too many outstanding SDK callbacks"))
                 .await?;
             return Ok(false);
@@ -707,7 +906,7 @@ where
                     let _ = response.send(Err(Error::McpUpdateInProgress));
                     return Ok(());
                 }
-                if self.pending.len() >= self.limits.max_pending_controls.get() {
+                if self.controls_full() {
                     let _ = response.send(Err(Error::TooManyControls));
                     return Ok(());
                 }
@@ -750,7 +949,7 @@ where
                             operation: ControlOperation::McpSetServers,
                             response,
                         },
-                        deadline: Instant::now() + self.limits.control_timeout.as_duration(),
+                        deadline: self.control_deadline(ControlOperation::McpSetServers),
                     },
                 );
             }
@@ -759,7 +958,9 @@ where
                     let _ = response.send(Err(Error::NotReadyForWriting));
                     return Ok(());
                 }
-                if self.run_state.input_done.is_some() {
+                if self.run_state.input_done.is_some()
+                    && self.limits.input_after_finish == crate::InputAfterFinish::Reject
+                {
                     let _ = response.send(Err(Error::InputClosed));
                     return Ok(());
                 }
@@ -770,7 +971,11 @@ where
                     }
                     State::Idle | State::Running => {}
                 }
-                if self.run_state.pending_inputs.len() >= self.limits.command_queue_capacity.get() {
+                if self
+                    .limits
+                    .max_queued_inputs
+                    .is_some_and(|limit| self.run_state.pending_inputs.len() >= limit.get())
+                {
                     let _ = response.send(Err(Error::TooManyInputs));
                     return Ok(());
                 }
@@ -856,20 +1061,15 @@ where
             response.send_error(Error::NotReadyForWriting);
             return Ok(());
         }
-        if self.pending.len() >= self.limits.max_pending_controls.get() {
+        if self.controls_full() {
             response.send_error(Error::TooManyControls);
             return Ok(());
         }
         let id = self.next_request_id()?;
         self.write(wire::control_request(&id, request, self.argv_style)?)
             .await?;
-        self.pending.insert(
-            id,
-            PendingControl {
-                response,
-                deadline: Instant::now() + self.limits.control_timeout.as_duration(),
-            },
-        );
+        let deadline = self.control_deadline(response.operation());
+        self.pending.insert(id, PendingControl { response, deadline });
         Ok(())
     }
 
@@ -877,8 +1077,8 @@ where
         match frame {
             Frame::Message(message) => {
                 let (queued_limit, task_limit) = (
-                    self.limits.command_queue_capacity.get(),
-                    self.limits.message_queue_capacity.get(),
+                    self.limits.max_queued_inputs.map(crate::QueueCapacity::get),
+                    self.limits.max_tracked_tasks.map(crate::QueueCapacity::get),
                 );
                 if let Message::System(system) = &message
                     && system.subtype == "init"
@@ -916,7 +1116,9 @@ where
                     self.mirror_flush = barrier.take();
                 }
                 if self.mirror_flush.is_some() {
-                    if self.deferred_messages.len() >= self.limits.message_queue_capacity.get() {
+                    if let crate::MessageBuffer::FailWhenFull(capacity) = self.limits.message_buffer
+                        && self.deferred_messages.len() >= capacity.get()
+                    {
                         return Err(Error::MessageQueueFull);
                     }
                     self.deferred_messages.push_back((message, barrier));
@@ -1009,20 +1211,16 @@ where
                     }
                     let input = request.input.clone();
                     let signal = request.signal.clone();
-                    if let Some(handler) = self
-                        .handler
-                        .clone()
-                        .filter(|_| self.callback_handles.len() < self.limits.max_pending_controls.get())
-                    {
+                    if let Some(handler) = self.handler.clone() {
                         let callback_id = id.clone();
                         let fallback = wire::permission_response(
                             &id,
                             input.clone(),
                             PermissionDecision::deny("Permission callback timed out"),
                         );
-                        self.spawn_callback(id, signal, self.limits.control_timeout.as_duration(), fallback, async move {
-                                wire::permission_response(&callback_id, input, handler.decide(request).await)
-                            });
+                        self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                            wire::permission_response(&callback_id, input, handler.decide(request).await)
+                        });
                     } else {
                         self.write_response(wire::permission_response(
                             &id,
@@ -1079,20 +1277,14 @@ where
                         let callback_signal = signal.clone();
                         let response_id = id.clone();
                         let fallback = wire::callback_error_response(&id, "SDK MCP request timed out");
-                        self.spawn_callback(
-                            id,
-                            signal,
-                            self.limits.control_timeout.as_duration(),
-                            fallback,
-                            async move {
-                                match server.request(message, callback_signal).await {
-                                    Ok(response) => {
-                                        wire::success_response(&response_id, McpResponsePayload::new(response)?)
-                                    }
-                                    Err(_) => wire::callback_error_response(&response_id, "SDK MCP request failed"),
+                        self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                            match server.request(message, callback_signal).await {
+                                Ok(response) => {
+                                    wire::success_response(&response_id, McpResponsePayload::new(response)?)
                                 }
-                            },
-                        );
+                                Err(_) => wire::callback_error_response(&response_id, "SDK MCP request failed"),
+                            }
+                        });
                     } else {
                         self.write_response(wire::callback_error_response(&id, "Unknown SDK MCP server"))
                             .await?;
@@ -1132,19 +1324,13 @@ where
                                 .to_wire_json()
                                 .map_err(ProtocolError::from)?,
                         );
-                        self.spawn_callback(
-                            id,
-                            signal,
-                            self.limits.control_timeout.as_duration(),
-                            fallback,
-                            async move {
-                                let response = handler
-                                    .call(request)
-                                    .await
-                                    .unwrap_or(crate::ElicitationResponse::Cancel);
-                                wire::success_response(&response_id, response.to_wire_json()?)
-                            },
-                        );
+                        self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                            let response = handler
+                                .call(request)
+                                .await
+                                .unwrap_or(crate::ElicitationResponse::Cancel);
+                            wire::success_response(&response_id, response.to_wire_json()?)
+                        });
                     } else {
                         self.write_response(wire::success_response(
                             &id,
@@ -1180,19 +1366,13 @@ where
                             .to_wire_json()
                             .map_err(ProtocolError::from)?,
                     );
-                    self.spawn_callback(
-                        id,
-                        signal,
-                        self.limits.control_timeout.as_duration(),
-                        fallback,
-                        async move {
-                            let response = handler
-                                .call(request)
-                                .await
-                                .unwrap_or(crate::UserDialogResponse::Cancelled);
-                            wire::success_response(&response_id, response.to_wire_json()?)
-                        },
-                    );
+                    self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                        let response = handler
+                            .call(request)
+                            .await
+                            .unwrap_or(crate::UserDialogResponse::Cancelled);
+                        wire::success_response(&response_id, response.to_wire_json()?)
+                    });
                 }
             },
             Frame::Cancel { id } => {
@@ -1222,11 +1402,64 @@ where
         Ok(())
     }
 
-    fn publish(&self, message: Message) -> Result<(), Error> {
-        self.messages.try_send(message).map_err(|error| match error {
-            mpsc::error::TrySendError::Full(_) => Error::MessageQueueFull,
-            mpsc::error::TrySendError::Closed(_) => Error::DriverStopped,
-        })
+    fn publish(&mut self, message: Message) -> Result<(), Error> {
+        if !self.overflow.is_empty() {
+            self.overflow.push_back(message);
+            return Ok(());
+        }
+        match self.messages.try_send(message) {
+            Ok(()) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => Err(Error::DriverStopped),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(message)) => match self.limits.message_buffer {
+                crate::MessageBuffer::FailWhenFull(_) => Err(Error::MessageQueueFull),
+                crate::MessageBuffer::Unbounded | crate::MessageBuffer::Backpressure(_) => {
+                    self.overflow.push_back(message);
+                    Ok(())
+                }
+            },
+        }
+    }
+
+    /// Moves waiting messages into the buffer while it has room.
+    fn drain_overflow(&mut self) -> Result<(), Error> {
+        while let Some(message) = self.overflow.pop_front() {
+            match self.messages.try_send(message) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(message)) => {
+                    self.overflow.push_front(message);
+                    break;
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => return Err(Error::DriverStopped),
+            }
+        }
+        Ok(())
+    }
+
+    /// Hands every waiting message to the caller before the run's outcome, waiting for room as the caller reads.
+    /// A shutdown request drops them, as Python's cancelled reader does.
+    async fn flush_overflow(&mut self) {
+        while let Some(message) = self.overflow.pop_front() {
+            if self.shutdown_seen {
+                self.overflow.clear();
+                return;
+            }
+            let delivered = tokio::select! {
+                _ = &mut self.shutdown => { self.shutdown_seen = true; false }
+                sent = self.messages.send(message) => sent.is_ok(),
+            };
+            if !delivered {
+                self.overflow.clear();
+            }
+        }
+    }
+
+    /// Under backpressure, messages held behind a transcript flush count against the buffer too.
+    fn deferred_full(&self) -> bool {
+        matches!(self.limits.message_buffer, crate::MessageBuffer::Backpressure(capacity) if self.deferred_messages.len() >= capacity.get())
+    }
+
+    fn callback_timeout(&self) -> Option<Duration> {
+        self.limits.callback_timeout.map(crate::Timeout::as_duration)
     }
 
     fn publish_deferred(&mut self) -> Result<(), Error> {
@@ -1290,7 +1523,7 @@ where
         &mut self,
         id: ControlRequestId,
         signal: crate::CancellationToken,
-        deadline: Duration,
+        deadline: Option<Duration>,
         fallback: Result<serde_json::Value, ProtocolError>,
         future: Fut,
     ) where
@@ -1299,12 +1532,15 @@ where
         let callback_id = id.clone();
         let callback_signal = signal.clone();
         let handle = self.callbacks.spawn(async move {
-            let response = match timeout(deadline, future).await {
-                Ok(response) => response,
-                Err(_) => {
-                    callback_signal.cancel();
-                    fallback
-                }
+            let response = match deadline {
+                None => future.await,
+                Some(deadline) => match timeout(deadline, future).await {
+                    Ok(response) => response,
+                    Err(_) => {
+                        callback_signal.cancel();
+                        fallback
+                    }
+                },
             };
             (callback_id, response)
         });
@@ -1334,9 +1570,10 @@ where
         if !self.input_open() {
             return Err(Error::NotReadyForWriting);
         }
+        let limit = self.limits.write_timeout.map(crate::Timeout::as_duration);
         tokio::select! {
-            _ = &mut self.shutdown => Err(Error::ShutdownRequested),
-            result = timeout(self.limits.control_timeout.as_duration(), self.transport.write(&text)) => result.map_err(|_| Error::WriteTimeout)?,
+            _ = &mut self.shutdown => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
+            result = async { match limit { Some(limit) => timeout(limit, self.transport.write(&text)).await.map_err(|_| Error::WriteTimeout)?, None => self.transport.write(&text).await } } => result,
         }
     }
 }

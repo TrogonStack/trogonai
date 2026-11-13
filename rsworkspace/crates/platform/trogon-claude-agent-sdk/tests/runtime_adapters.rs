@@ -193,8 +193,10 @@ async fn injected_process_runs_protocol_and_closes_input_on_disconnect() -> Resu
         env: trogon_claude_agent_sdk::Environment::from([("SDK_TEST_SENTINEL".into(), "child-value".into())]),
         ..ClaudeAgentOptions::default()
     };
-    options.limits.control_timeout = trogon_claude_agent_sdk::Timeout::new(std::time::Duration::from_secs(2))?;
-    options.limits.shutdown_timeout = trogon_claude_agent_sdk::Timeout::new(std::time::Duration::from_secs(5))?;
+    options.limits.control_timeout = Some(trogon_claude_agent_sdk::Timeout::new(std::time::Duration::from_secs(2)));
+    options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(trogon_claude_agent_sdk::Timeout::new(
+        std::time::Duration::from_secs(5),
+    ));
     let adapters = RuntimeAdapters {
         environment: FixedEnvironment {
             directory: PathBuf::from("unused-directory"),
@@ -820,7 +822,7 @@ async fn s12_outbound_prompts_and_controls_are_never_capped_by_the_inbound_frame
     let (process, harness) = ScriptedProcessSpawner::new();
     let server = tokio::spawn(serve_controls(harness));
     let mut options = ClaudeAgentOptions::default();
-    options.limits.max_frame_bytes = std::num::NonZeroUsize::new(1024).ok_or("invalid limit")?;
+    options.limits.max_buffer_size = Some(std::num::NonZeroUsize::new(1024).ok_or("invalid limit")?);
     let client = ClaudeSdkClient::connect_with_adapters(options, process_adapters(process)).await?;
     client.send_prompt(Prompt::from("x".repeat(2048))).await?;
     let replacement = BTreeMap::from([(

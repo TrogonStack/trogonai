@@ -40,7 +40,7 @@ fn control_timeout_diagnostics_identify_each_wire_operation() {
         (ControlOperation::McpSetServers, "mcp_set_servers"),
     ] {
         let error = Error::ControlTimeout { operation };
-        assert_eq!(error.to_string(), format!("the {name} control request timed out"));
+        assert_eq!(error.to_string(), format!("Control request timeout: {name}"));
         assert!(error.source().is_none());
     }
 }
