@@ -19,9 +19,9 @@ use std::{
 };
 use trogon_claude_agent_sdk::{
     AgentDefinition, AgentExecution, AgentMcpServerSpec, AgentName, BuiltinToolName, CallbackError, CancellationToken,
-    ControlRequestId, DialogKind, EffortLevel, ElicitationResponse, HookContinuation, HookEvent, HookFailureMode,
-    HookOutput, HookOutputVisibility, HookPermissionDecision, HookRegistration, HookSpecificOutput, InputBlock,
-    InterruptReceipt, JsonObject, LocalMcpServer, LocalMcpServerOptions, McpServerError, McpServerName,
+    ClaudeAgentOptions, ControlRequestId, DialogKind, EffortLevel, ElicitationResponse, HookContinuation, HookEvent,
+    HookFailureMode, HookOutput, HookOutputVisibility, HookPermissionDecision, HookRegistration, HookSpecificOutput,
+    InputBlock, InterruptReceipt, JsonObject, LocalMcpServer, LocalMcpServerOptions, McpServerError, McpServerName,
     McpServerOptions, McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, McpUrl, McpUrlError, MessageId,
     MessageOrigin, OutputSchema, PermissionBehavior, PermissionMode, PermissionUpdate, PermissionUpdateDestination,
     PermissionUpdateError, Prompt, QueueCapacity, QueueCapacityError, SdkMcpServer, SdkMcpSession, SdkTool,
@@ -316,6 +316,15 @@ fn callback_configuration_debug_reports_structure_without_callback_or_input_deta
     let debug = format!("{registration:?}");
     assert!(debug.contains("callback_count: 0"));
     assert!(!debug.contains("fixture-private-matcher"));
+    let options = ClaudeAgentOptions {
+        model: Some("fixture-private-model".into()),
+        env: trogon_claude_agent_sdk::Environment::from([("FIXTURE_CONFIG".into(), "fixture-private-value".into())]),
+        ..ClaudeAgentOptions::default()
+    };
+    let debug = format!("{options:?}");
+    assert!(debug.contains("limits"));
+    assert!(!debug.contains("fixture-private-model"));
+    assert!(!debug.contains("fixture-private-value"));
     Ok(())
 }
 

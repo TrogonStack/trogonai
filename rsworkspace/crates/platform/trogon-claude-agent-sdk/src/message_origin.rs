@@ -56,3 +56,7 @@ impl From<MessageOrigin> for MessageOriginWire {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "message_origin_tests.rs"]
+mod tests;

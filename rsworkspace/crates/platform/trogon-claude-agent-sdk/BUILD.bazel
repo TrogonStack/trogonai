@@ -1,4 +1,24 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
 load("//.config/bazel:rust.bzl", "workspace_crate")
+
+rust_binary(
+    name = "claude_sdk_fixture",
+    srcs = ["tests/support/fixture_cli.rs"],
+    crate_root = "tests/support/fixture_cli.rs",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_flags = ["-Dwarnings"],
+    deps = all_crate_deps(normal = True),
+)
+
+rust_binary(
+    name = "claude_sdk_relay",
+    srcs = ["tests/support/relay.rs"],
+    crate_root = "tests/support/relay.rs",
+    edition = "2024",
+    rustc_flags = ["-Dwarnings"],
+)
 
 workspace_crate(
     name = "trogon-claude-agent-sdk",
@@ -20,6 +40,11 @@ workspace_crate(
         "disallowed_tools": {},
         "effort": {},
         "environment": {},
+        "error_contracts": {
+            "compile_data": glob(["tests/support/*.rs"]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "fixed_environment": {},
         "in_memory_session_store": {},
         "json_object": {},
@@ -39,10 +64,32 @@ workspace_crate(
         "permission_values": {},
         "process_adapter_contracts": {},
         "prompt": {},
-        "public_api": {},
+        "public_api": {
+            "compile_data": glob(["tests/support/*.rs"]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "queue_capacity": {},
         "result_message": {},
         "resume": {},
+        "runtime_adapters": {
+            "compile_data": glob(["tests/support/*.rs"]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
+        "runtime_failure_contracts": {
+            "compile_data": glob(["tests/support/*.rs"]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
+        "runtime_features": {
+            "data": [":claude_sdk_fixture"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},
+        },
+        "runtime_sessions": {
+            "data": [":claude_sdk_fixture"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},
+        },
         "sdk_tools": {},
         "session_clock": {},
         "session_failure_contracts": {"compile_data": glob(["tests/support/*.rs"])},
@@ -54,6 +101,10 @@ workspace_crate(
         "setting_sources": {},
         "stderr_tail": {},
         "stream_event": {},
+        "subprocess": {
+            "data": [":claude_sdk_fixture"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},
+        },
         "system_adapters": {},
         "system_message": {},
         "task_id": {},

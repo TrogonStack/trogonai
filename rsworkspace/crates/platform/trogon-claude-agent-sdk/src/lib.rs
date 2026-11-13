@@ -8,6 +8,7 @@ pub mod test_support;
 mod agent_definition;
 mod agent_name;
 mod builtin_tool_name;
+mod cli_path;
 mod client;
 mod config_value;
 mod constants;
@@ -15,9 +16,11 @@ mod control;
 mod control_request_id;
 mod dialog;
 mod dialog_kind;
+mod driver;
 mod effort_level;
 mod environment;
 mod error;
+mod framing;
 mod hooks;
 mod mcp_server_name;
 mod mcp_server_options;
@@ -58,11 +61,15 @@ mod tool_use_id;
 mod transcript_mirror;
 mod usd_budget;
 mod user_input;
+mod wire;
 
 pub use agent_definition::{AgentDefinition, AgentExecution, AgentMcpServerSpec};
 pub use agent_name::AgentName;
 pub use builtin_tool_name::BuiltinToolName;
-pub use client::ClaudeSdkClient;
+pub use cli_path::CliPathError;
+pub use client::{
+    ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_with_adapters,
+};
 pub use config_value::ConfigValue;
 pub use control::{
     ConnectionInfo, ContextUsageCategory, ContextUsageResponse, FeatureSupport, InterruptReceipt, McpEnabled,
@@ -76,7 +83,7 @@ pub use dialog::{
 pub use dialog_kind::DialogKind;
 pub use effort_level::EffortLevel;
 pub use environment::Environment;
-pub use error::Error;
+pub use error::{ControlOperation, ControlRejectionError, Error, ProtocolError};
 pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
     HookOutputVisibility, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, SyncHookOutput,
@@ -93,7 +100,10 @@ pub use message::{
 pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use model_name::ModelName;
-pub use options::ClaudeAgentOptions;
+pub use options::{
+    ClaudeAgentOptions, ContinueConversation, Customizations, FileCheckpointing, Limits, McpDiscovery, PartialMessages,
+    SessionFork, SessionPersistence, SystemPrompt, ToolSet,
+};
 pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{
     DenialDisposition, McpServerProvenance, PermissionDecision, PermissionFuture, ToolPermissionHandler,
