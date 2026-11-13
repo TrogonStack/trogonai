@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::{js_normalize, js_stringify, python_dumps};
+use super::{js_float, js_normalize, js_stringify, python_dumps};
 
 fn parse(text: &str) -> Value {
     serde_json::from_str(text).unwrap_or(Value::Null)
@@ -22,6 +22,13 @@ fn javascript_switches_to_exponents_at_the_same_thresholds() {
         js_stringify(&value),
         "[1e+21,1.5e-7,123456789012345680000,9007199254740992,0,0.000001]"
     );
+}
+
+#[test]
+fn javascript_prints_a_non_finite_double_as_null() {
+    assert_eq!(js_float(f64::NAN), "null");
+    assert_eq!(js_float(f64::INFINITY), "null");
+    assert_eq!(js_float(f64::NEG_INFINITY), "null");
 }
 
 #[test]

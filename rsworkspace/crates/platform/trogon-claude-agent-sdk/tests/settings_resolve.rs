@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
     ResolveSettingsOptions, ResolvedSettings, Settings, SettingsDialect, adapters::OperatingSystem,
-    filter_escalating_default_mode, resolve_settings_in_dialect_with, resolve_settings_with,
+    filter_escalating_default_mode, js_stringify, resolve_settings_in_dialect_with, resolve_settings_with,
 };
 
 #[path = "support/fake_settings_host.rs"]
@@ -310,13 +310,29 @@ fn default_mode_set_by_a_user_source_is_kept() {
     assert_eq!(filtered(&resolved), json!({"permissions": {"defaultMode": "auto"}}));
 }
 
-fn custom_numbers(dialect: SettingsDialect) -> String {
-    let host = FakeHost::linux().file(
-        "/work/project/.claude/settings.json",
-        r#"{"custom":{"n":12345678901234567890,"m":9007199254740993,"z":-0,"w":1.0,"f":0.1}}"#,
-    );
+fn effective_in(dialect: SettingsDialect, text: &str) -> Value {
+    let host = FakeHost::linux().file("/work/project/.claude/settings.json", text);
     let resolved = resolve_settings_in_dialect_with(&host, &options(json!({})), dialect).expect("resolve");
-    serde_json::to_string(&resolved.effective).expect("encode")
+    serde_json::to_value(&resolved.effective).expect("encode")
+}
+
+fn custom_numbers(dialect: SettingsDialect) -> String {
+    let text = r#"{"custom":{"n":12345678901234567890,"m":9007199254740993,"z":-0,"w":1.0,"f":0.1}}"#;
+    let effective = effective_in(dialect, text);
+    match dialect {
+        SettingsDialect::TypeScript => js_stringify(&effective),
+        _ => effective.to_string(),
+    }
+}
+
+#[test]
+fn js_stringify_prints_resolved_numbers_as_the_typescript_resolver_does() {
+    let text = r#"{"custom":{"a":18446744073709551616,"b":-9223372036854775809,"c":0.0000015,"d":1e-7,"e":1e21}}"#;
+    let effective = effective_in(SettingsDialect::TypeScript, text);
+    assert_eq!(
+        js_stringify(&effective),
+        r#"{"custom":{"a":18446744073709552000,"b":-9223372036854776000,"c":0.0000015,"d":1e-7,"e":1e+21}}"#
+    );
 }
 
 #[test]

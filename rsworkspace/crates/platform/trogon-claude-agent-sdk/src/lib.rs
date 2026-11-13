@@ -257,6 +257,7 @@ pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, Session
 pub use setting_source::SettingSource;
 pub use settings_dialect::SettingsDialect;
 pub use settings_input::SettingsInput;
+pub use settings_json::js_stringify;
 pub use settings_resolve::{
     ResolveSettingsError, filter_escalating_default_mode, resolve_settings, resolve_settings_in_dialect,
     resolve_settings_in_dialect_with, resolve_settings_in_dialect_with_state, resolve_settings_with,

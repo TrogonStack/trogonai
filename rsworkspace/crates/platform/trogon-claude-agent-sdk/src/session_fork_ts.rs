@@ -19,11 +19,11 @@ use crate::{
         TS_FLOW_VERSION, TS_FORK_CLEARED_KEYS, TS_FORK_MESSAGE_KEYS, TS_FORK_SEGMENT_KEYS, TS_FORK_TITLE_FALLBACK,
         TS_INNER_CALL_LIMIT, TS_MAX_IDENTIFIER_UNITS, TS_SAFE_INTEGER, TS_TRANSCRIPT_KINDS,
     },
-    js_object_order::js_key_order,
     session_messages_ts::{
         MessagesError, command_string, flag, kind_of, link, parent_uuid, queued_command, str_field, uuid_of,
     },
     session_prompt::{iso_from_epoch_ms, js_trim},
+    settings_json::js_stringify,
 };
 
 /// Why the TypeScript fork refuses a session.
@@ -1152,78 +1152,6 @@ pub(crate) fn serialize_entries(entries: &[JsonObject]) -> String {
         text.push('\n');
     }
     text
-}
-
-/// `JSON.stringify`: integral floats print without a fraction and numbers follow `Number::toString`.
-pub(crate) fn js_stringify(value: &Value) -> String {
-    match value {
-        Value::Null => "null".to_owned(),
-        Value::Bool(flag) => flag.to_string(),
-        Value::Number(number) => js_number(number),
-        Value::String(text) => serde_json::to_string(text).unwrap_or_default(),
-        Value::Array(items) => format!("[{}]", items.iter().map(js_stringify).collect::<Vec<_>>().join(",")),
-        Value::Object(map) => format!(
-            "{{{}}}",
-            js_key_order(map)
-                .into_iter()
-                .map(|(key, item)| format!(
-                    "{}:{}",
-                    serde_json::to_string(key).unwrap_or_default(),
-                    js_stringify(item)
-                ))
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-    }
-}
-
-fn js_number(number: &serde_json::Number) -> String {
-    const EXACT: i64 = 9_007_199_254_740_992;
-    if let Some(integer) = number.as_i64()
-        && integer.abs() <= EXACT
-    {
-        return integer.to_string();
-    }
-    if let Some(integer) = number.as_u64()
-        && integer <= EXACT as u64
-    {
-        return integer.to_string();
-    }
-    number.as_f64().map_or_else(|| "null".to_owned(), js_float)
-}
-
-/// `Number.prototype.toString` for a finite double.
-pub(crate) fn js_float(value: f64) -> String {
-    if !value.is_finite() {
-        return "null".to_owned();
-    }
-    if value == 0.0 {
-        return "0".to_owned();
-    }
-    let sign = if value < 0.0 { "-" } else { "" };
-    let scientific = format!("{:e}", value.abs());
-    let Some((mantissa, exponent)) = scientific.split_once('e') else {
-        return scientific;
-    };
-    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
-    let point: i32 = exponent.parse::<i32>().map_or(0, |exponent| exponent + 1);
-    let count = digits.len() as i32;
-    let body = if count <= point && point <= 21 {
-        format!("{digits}{}", "0".repeat((point - count) as usize))
-    } else if 0 < point && point <= 21 {
-        format!("{}.{}", &digits[..point as usize], &digits[point as usize..])
-    } else if -6 < point && point <= 0 {
-        format!("0.{}{digits}", "0".repeat((-point) as usize))
-    } else {
-        let power = point - 1;
-        let sign_char = if power < 0 { '-' } else { '+' };
-        if count == 1 {
-            format!("{digits}e{sign_char}{}", power.abs())
-        } else {
-            format!("{}.{}e{sign_char}{}", &digits[..1], &digits[1..], power.abs())
-        }
-    };
-    format!("{sign}{body}")
 }
 
 #[cfg(test)]

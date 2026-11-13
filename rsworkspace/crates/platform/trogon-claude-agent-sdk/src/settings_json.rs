@@ -4,37 +4,71 @@
 //! array-index keys first and prints a whole-valued float without a fraction, and Python separates with
 //! `", "` and `": "` and escapes every character outside printable ASCII.
 
-use serde_json::{Map, Number, Value};
+use serde_json::{Number, Value};
 
-/// JavaScript `Number::toString` for a finite number.
+use crate::{constants::JS_MAX_EXACT_INTEGER, js_object_order::js_key_order};
+
+/// JavaScript `Number::toString` for the double a JSON number token parses to.
 fn js_number(number: &Number) -> String {
-    if number.is_i64() || number.is_u64() {
-        let exact = number.as_i64().map(|n| n.unsigned_abs()).or_else(|| number.as_u64());
-        if exact.is_some_and(|n| n <= (1_u64 << 53)) {
-            return number.to_string();
-        }
-    }
-    let Some(float) = number.as_f64() else {
+    let exact = number.as_u64().or_else(|| number.as_i64().map(i64::unsigned_abs));
+    if exact.is_some_and(|magnitude| magnitude <= JS_MAX_EXACT_INTEGER) {
         return number.to_string();
-    };
-    if float == 0.0 {
-        return "0".to_owned();
     }
-    let magnitude = float.abs();
-    if (1e-6..1e21).contains(&magnitude) {
-        return float.to_string();
-    }
-    let text = format!("{float:e}");
-    match text.split_once('e') {
-        Some((mantissa, exponent)) if !exponent.starts_with('-') => format!("{mantissa}e+{exponent}"),
-        _ => text,
-    }
+    number.as_f64().map_or_else(|| "null".to_owned(), js_float)
 }
 
-/// Whether `key` is a canonical array index, which JavaScript orders first and numerically.
-fn array_index(key: &str) -> Option<u32> {
-    let index: u32 = key.parse().ok()?;
-    (index != u32::MAX && index.to_string() == key).then_some(index)
+/// `Number.prototype.toString` for a double: the shortest digits that read back as the same double, in fixed
+/// notation from 1e-6 up to 1e21 and in exponent form outside it. A non-finite double prints as `JSON.stringify`
+/// prints it, `null`.
+pub(crate) fn js_float(value: f64) -> String {
+    if !value.is_finite() {
+        return "null".to_owned();
+    }
+    if value == 0.0 {
+        return "0".to_owned();
+    }
+    let sign = if value < 0.0 { "-" } else { "" };
+    let scientific = format!("{:e}", value.abs());
+    let (mantissa, exponent) = scientific.split_once('e').unwrap_or((scientific.as_str(), "0"));
+    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    let point: i32 = exponent.parse::<i32>().map_or(0, |exponent| exponent + 1);
+    let count = digits.len() as i32;
+    let body = if count <= point && point <= 21 {
+        format!("{digits}{}", "0".repeat((point - count) as usize))
+    } else if 0 < point && point <= 21 {
+        format!("{}.{}", &digits[..point as usize], &digits[point as usize..])
+    } else if -6 < point && point <= 0 {
+        format!("0.{}{digits}", "0".repeat((-point) as usize))
+    } else {
+        let power = point - 1;
+        let sign_char = if power < 0 { '-' } else { '+' };
+        if count == 1 {
+            format!("{digits}e{sign_char}{}", power.abs())
+        } else {
+            format!("{}.{}e{sign_char}{}", &digits[..1], &digits[1..], power.abs())
+        }
+    };
+    format!("{sign}{body}")
+}
+
+/// A string literal as `JSON.stringify` writes it: the quote, the backslash and the control characters escaped,
+/// the short forms where JSON has one, and every other character as is.
+fn js_string(text: &str, out: &mut String) {
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{0}'..='\u{1f}' => out.push_str(&format!("\\u{:04x}", u32::from(ch))),
+            _ => out.push(ch),
+        }
+    }
+    out.push('"');
 }
 
 fn js_write(value: &Value, out: &mut String) {
@@ -42,7 +76,7 @@ fn js_write(value: &Value, out: &mut String) {
         Value::Null => out.push_str("null"),
         Value::Bool(flag) => out.push_str(if *flag { "true" } else { "false" }),
         Value::Number(number) => out.push_str(&js_number(number)),
-        Value::String(text) => out.push_str(&Value::String(text.clone()).to_string()),
+        Value::String(text) => js_string(text, out),
         Value::Array(items) => {
             out.push('[');
             for (position, item) in items.iter().enumerate() {
@@ -54,22 +88,12 @@ fn js_write(value: &Value, out: &mut String) {
             out.push(']');
         }
         Value::Object(map) => {
-            let mut indexed: Vec<(u32, &String, &Value)> = Vec::new();
-            let mut named: Vec<(&String, &Value)> = Vec::new();
-            for (key, item) in map {
-                match array_index(key) {
-                    Some(index) => indexed.push((index, key, item)),
-                    None => named.push((key, item)),
-                }
-            }
-            indexed.sort_by_key(|(index, _, _)| *index);
             out.push('{');
-            let entries = indexed.into_iter().map(|(_, key, item)| (key, item)).chain(named);
-            for (position, (key, item)) in entries.enumerate() {
+            for (position, (key, item)) in js_key_order(map).into_iter().enumerate() {
                 if position > 0 {
                     out.push(',');
                 }
-                out.push_str(&Value::String(key.clone()).to_string());
+                js_string(key, out);
                 out.push(':');
                 js_write(item, out);
             }
@@ -78,8 +102,21 @@ fn js_write(value: &Value, out: &mut String) {
     }
 }
 
-/// `JSON.stringify(value)`.
-pub(crate) fn js_stringify(value: &Value) -> String {
+/// The text TypeScript's `JSON.stringify(value)` prints for `value`, byte for byte.
+///
+/// Use it to serialize resolved settings (or any JSON the SDK shares with TypeScript) exactly as the TypeScript SDK
+/// would. `serde_json::to_string` keeps insertion order for every key and prints some doubles differently: whole
+/// numbers from 2^64 up and at or below -2^63, and fractions from 1e-6 up to 1e-5, come out in exponent form there.
+/// This writer follows JavaScript instead:
+///
+/// - Numbers print as the double a JavaScript number holds, with the shortest digits that read back as that double,
+///   in fixed notation from 1e-6 up to 1e21 and as `1e+21`, `1.5e-7` outside it. Integers above 2^53 print as the
+///   double they round to, and negative zero prints as `0`.
+/// - Object keys that are array indices (`"0"` up to `"4294967294"` without leading zeros) come first in ascending
+///   order, then the other keys in insertion order.
+/// - Strings escape `"`, `\` and the control characters below U+0020 (`\b`, `\f`, `\n`, `\r`, `\t`, otherwise
+///   `\u00xx`) and leave every other character, including U+007F and U+2028, as is.
+pub fn js_stringify(value: &Value) -> String {
     let mut out = String::new();
     js_write(value, &mut out);
     out
@@ -94,22 +131,12 @@ pub(crate) fn js_normalize(value: &Value) -> Value {
             serde_json::from_str::<Number>(&text).map_or_else(|_| value.clone(), Value::Number)
         }
         Value::Array(items) => Value::Array(items.iter().map(js_normalize).collect()),
-        Value::Object(map) => {
-            let mut indexed: Vec<(u32, &String, &Value)> = Vec::new();
-            let mut named: Vec<(&String, &Value)> = Vec::new();
-            for (key, item) in map {
-                match array_index(key) {
-                    Some(index) => indexed.push((index, key, item)),
-                    None => named.push((key, item)),
-                }
-            }
-            indexed.sort_by_key(|(index, _, _)| *index);
-            let mut out = Map::new();
-            for (key, item) in indexed.into_iter().map(|(_, key, item)| (key, item)).chain(named) {
-                out.insert(key.clone(), js_normalize(item));
-            }
-            Value::Object(out)
-        }
+        Value::Object(map) => Value::Object(
+            js_key_order(map)
+                .into_iter()
+                .map(|(key, item)| (key.clone(), js_normalize(item)))
+                .collect(),
+        ),
         other => other.clone(),
     }
 }

@@ -84,6 +84,7 @@ workspace_crate(
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
+        "js_stringify_goldens": {"compile_data": ["tests/fixtures/js_stringify/goldens.json"]},
         "json_object": {},
         "max_turns": {},
         "mcp_server_name": {},

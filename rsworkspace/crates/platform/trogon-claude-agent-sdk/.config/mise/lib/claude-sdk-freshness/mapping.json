@@ -2564,7 +2564,8 @@
         "ResolveSettingsError",
         "adapters::SettingsHost",
         "adapters::NativeHost",
-        "adapters::ExecuteFile"
+        "adapters::ExecuteFile",
+        "js_stringify"
       ],
       "tests": [
         {
@@ -2646,10 +2647,18 @@
         {
           "path": "tests/resolve_settings_differential.rs",
           "name": "rust_matches_the_pinned_typescript_resolver_byte_for_byte"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "js_stringify_prints_resolved_numbers_as_the_typescript_resolver_does"
+        },
+        {
+          "path": "tests/js_stringify_goldens.rs",
+          "name": "every_double_prints_like_json_stringify"
         }
       ],
       "status": "partial",
-      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 54 fixture trees (mise run claude-sdk:resolve-diff), including the read path of normal settings files (pre-parse sanitizers, managed-only key removal, document key order). Partial until the listed gaps close: the policy-tolerant schema for managed settings (catch substitutions and entry salvage), and cloud and org mode. The MDM re-read throttle follows the pinned state machine against the host clock (fixtures replay it with a fake clock); a re-read that overlaps the next call from another thread is not modeled, because the Rust readers block. Integers above 2^53 read like JSON.parse in the TypeScript dialect (the Python dialect keeps them exact), with two print differences left through serde_json: whole doubles from 2^64 up and at or below -2^63 print in exponent form, and fractions from 1e-6 up to 1e-5 print in exponent form; the values are held exactly and only the serialized text differs. Python has no equivalent."
+      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 54 fixture trees (mise run claude-sdk:resolve-diff), including the read path of normal settings files (pre-parse sanitizers, managed-only key removal, document key order). Partial until the listed gaps close: the policy-tolerant schema for managed settings (catch substitutions and entry salvage), and cloud and org mode. The MDM re-read throttle follows the pinned state machine against the host clock (fixtures replay it with a fake clock); a re-read that overlaps the next call from another thread is not modeled, because the Rust readers block. Integers above 2^53 read like JSON.parse in the TypeScript dialect (the Python dialect keeps them exact), and js_stringify prints resolved settings exactly as JSON.stringify does (checked against Node over a corpus of doubles and documents); serde_json::to_string prints some doubles in exponent form where JavaScript prints digits. Python has no equivalent."
     },
     {
       "id": "initialize-options",
