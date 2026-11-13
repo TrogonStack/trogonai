@@ -1,0 +1,11 @@
+{
+  "model": "user-model",
+  "permissions": {
+    "allow": [
+      "Bash(a)"
+    ]
+  },
+  "env": {
+    "A": "1"
+  }
+}

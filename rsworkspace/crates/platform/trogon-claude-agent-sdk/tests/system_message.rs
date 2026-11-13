@@ -1,4 +1,4 @@
-use trogon_claude_agent_sdk::{JsonObject, SessionId, SystemMessage};
+use trogon_claude_agent_sdk::{JsonObject, SessionId, SystemEvent, SystemMessage};
 
 #[test]
 fn system_messages_keep_open_subtypes_metadata_and_optional_identity() -> Result<(), Box<dyn std::error::Error>> {
@@ -7,6 +7,8 @@ fn system_messages_keep_open_subtypes_metadata_and_optional_identity() -> Result
         subtype: "session_state_changed".into(),
         session_id: None,
         data: data.clone(),
+        event: SystemEvent::Other,
+        raw: JsonObject::new(),
     };
     assert_eq!(message.subtype, "session_state_changed");
     assert!(message.session_id.is_none());
@@ -15,6 +17,8 @@ fn system_messages_keep_open_subtypes_metadata_and_optional_identity() -> Result
         subtype: "future_subtype".into(),
         session_id: Some(SessionId::from("session-one")),
         data,
+        event: SystemEvent::Other,
+        raw: JsonObject::new(),
     };
     assert_eq!(
         attributed.session_id.as_ref().map(SessionId::as_str),
