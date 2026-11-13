@@ -35,8 +35,14 @@ const SCRUBBED: [&str; 4] = [
     "CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION",
 ];
 
+/// Bazel compiles the test in a sandbox that is gone at run time, so it names the crate directory relative to the
+/// runfiles root the test starts in; Cargo runs the test from a manifest directory that still exists.
+fn crate_dir() -> PathBuf {
+    option_env!("CLAUDE_SDK_CRATE_DIR").map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from)
+}
+
 fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/resolve_settings")
+    crate_dir().join("tests/fixtures/resolve_settings")
 }
 
 fn copy_tree(from: &Path, to: &Path) {
@@ -138,8 +144,7 @@ fn oracle_results(package: &str, cases: &[(String, Value, PathBuf)]) -> Vec<Valu
             "cases": [{"name": name, "options": substitute(&spec["options"], &root_text)}],
         });
         fs::write(&file, serde_json::to_vec(&document).expect("spec")).expect("write spec");
-        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join(".config/mise/lib/claude-sdk-freshness/resolve_settings_oracle.mjs");
+        let script = crate_dir().join(".config/mise/lib/claude-sdk-freshness/resolve_settings_oracle.mjs");
         let arguments = [script.as_os_str(), OsStr::new(package), file.as_os_str()];
         let outcome = NativeHost.execute_file(&ExecuteFileRequest {
             program: OsStr::new("node"),
