@@ -407,10 +407,12 @@ fn windows_side_document<H: SettingsHost>(
     let parsed = if text.trim().is_empty() {
         Some(SettingsMap::new())
     } else {
-        serde_json::from_str::<Value>(&text).ok().and_then(|value| match value {
-            Value::Object(map) => Some(map),
-            _ => None,
-        })
+        crate::settings_parse::parse_json(&text)
+            .ok()
+            .and_then(|value| match value {
+                Value::Object(map) => Some(map),
+                _ => None,
+            })
     };
     match parsed {
         None => {
@@ -567,7 +569,10 @@ pub(crate) fn evaluate_policy<H: SettingsHost>(host: &H, read: &MdmRead) -> MdmE
         let tier = TierRead::from_hm(&text, false);
         machine_facts.blocking = tier.load_state == LoadState::DidNotLoad;
         machine = Some(tier);
-        if let Some(Value::Object(document)) = serde_json::from_str::<Value>(&text).ok().filter(|_| !text.is_empty()) {
+        if let Some(Value::Object(document)) = crate::settings_parse::parse_json(&text)
+            .ok()
+            .filter(|_| !text.is_empty())
+        {
             flag = wsl_flag(&document);
         }
     } else if read.hklm_oversize {

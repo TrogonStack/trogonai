@@ -55,4 +55,12 @@ export const NUMBER_DOCUMENTS = [
   '{"feedbackSurveyRate":0.30000000000000004}',
   '{"feedbackSurveyRate":1e400}',
   '{"n":1,"n":12345678901234567890}',
+  // Infinity survives the read path where the schema takes any value, `String()` spells it in a coerced string,
+  // and a typed field refuses it.
+  '{"env":{"A":5,"B":true,"C":null,"D":1.5e300,"E":1e400,"F":-1e400,"G":[1,[2,null]],"H":{},"I":1e21,"J":1e-7,"K":-0,"L":0.1,"M":123456789012345678901}}',
+  '{"custom":{"l":[1e400,-1e400,null],"x":1e400},"n":-1e400}',
+  '{"n":1e400,"m":1,"n":2,"k":-1e400}',
+  '{"cleanupPeriodDays":1e400}',
+  '{"model":1e400}',
+  '{"permissions":{"allow":[1e400,"Bash"]}}',
 ];

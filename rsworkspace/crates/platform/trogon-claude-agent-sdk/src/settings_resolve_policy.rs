@@ -47,7 +47,7 @@ fn read_policy_file<H: ReadFile<Error = io::Error>>(host: &H, path: &Path) -> Ti
             unreadable: false,
         };
     }
-    match serde_json::from_str::<Value>(&text) {
+    match crate::settings_parse::parse_json(&text) {
         Ok(Value::Object(document)) => TierRead {
             has_policy_content: has_policy_content(&document),
             settings: Some(document),

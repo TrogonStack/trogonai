@@ -100,6 +100,7 @@ mod settings_json;
 mod settings_merge_spec;
 mod settings_numbers;
 mod settings_option;
+mod settings_parse;
 mod settings_read;
 mod settings_read_hooks;
 mod settings_read_spec;

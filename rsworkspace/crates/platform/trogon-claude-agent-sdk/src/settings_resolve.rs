@@ -6,7 +6,7 @@ use crate::{
     adapters::{NativeHost, SettingsHost},
     constants::{DEFAULT_SETTING_SOURCES, ESCALATING_DEFAULT_MODES, SOURCE_ORDER, STRICT_ESCALATING_DEFAULT_MODES},
     settings_dialect::SettingsDialect,
-    settings_numbers::normalize_numbers,
+    settings_numbers::{infinities_to_null, normalize_numbers},
     settings_resolve_connector::skips_repository_settings,
     settings_resolve_policy::{PolicyResolution, resolve_policy},
     settings_resolve_sources::{
@@ -278,7 +278,9 @@ pub fn resolve_settings_in_dialect_with_state<H: SettingsHost>(
         crate::settings_read::js_property_order(Value::Array(sources)),
     );
     result.insert("machinePolicy".to_owned(), Value::Object(machine_policy));
-    serde_json::from_value(Value::Object(result)).map_err(ResolveSettingsError::Decode)
+    let mut result = Value::Object(result);
+    infinities_to_null(&mut result);
+    serde_json::from_value(result).map_err(ResolveSettingsError::Decode)
 }
 
 static PROCESS_STATE: LazyLock<ResolverState> = LazyLock::new(ResolverState::new);

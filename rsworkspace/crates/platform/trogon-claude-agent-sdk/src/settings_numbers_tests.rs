@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use super::normalize_numbers;
+use super::{finite_number, normalize_numbers};
 use crate::settings_dialect::SettingsDialect;
 
 fn printed(text: &str, dialect: SettingsDialect) -> String {
@@ -76,4 +76,18 @@ fn normalizing_twice_changes_nothing() {
         let once = typescript(text);
         assert_eq!(typescript(&once), once);
     }
+}
+
+#[test]
+fn a_finite_double_never_reads_back_as_an_infinity() {
+    assert_eq!(
+        finite_number(9_223_372_036_854_775_808.0),
+        Value::from(9_223_372_036_854_775_808_u64)
+    );
+    assert_eq!(
+        finite_number(-4_611_686_018_427_387_904.0),
+        Value::from(-4_611_686_018_427_387_904_i64)
+    );
+    assert_eq!(finite_number(1.5), Value::from(1.5));
+    assert_eq!(finite_number(f64::NAN), Value::Null);
 }

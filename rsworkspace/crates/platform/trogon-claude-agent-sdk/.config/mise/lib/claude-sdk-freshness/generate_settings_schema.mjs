@@ -200,6 +200,8 @@ function serialize({ fields, active }, read) {
     const withChecks = (value) => (checks.length > 0 ? { ...value, checks } : value);
     switch (def.type) {
       case 'string':
+        // `z.coerce.string()` runs the input through `String()` before it checks the type.
+        return withChecks(def.coerce ? { type: 'string', coerce: true } : { type: 'string' });
       case 'boolean':
       case 'number':
       case 'unknown':

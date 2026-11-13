@@ -854,7 +854,13 @@
     {"input":"{\"feedbackSurveyRate\":1e-1}","output":"{\"feedbackSurveyRate\":0.1}"},
     {"input":"{\"feedbackSurveyRate\":0.30000000000000004}","output":"{\"feedbackSurveyRate\":0.30000000000000004}"},
     {"input":"{\"feedbackSurveyRate\":1e400}","output":"null"},
-    {"input":"{\"n\":1,\"n\":12345678901234567890}","output":"{\"n\":12345678901234567000}"}
+    {"input":"{\"n\":1,\"n\":12345678901234567890}","output":"{\"n\":12345678901234567000}"},
+    {"input":"{\"env\":{\"A\":5,\"B\":true,\"C\":null,\"D\":1.5e300,\"E\":1e400,\"F\":-1e400,\"G\":[1,[2,null]],\"H\":{},\"I\":1e21,\"J\":1e-7,\"K\":-0,\"L\":0.1,\"M\":123456789012345678901}}","output":"{\"env\":{\"A\":\"5\",\"B\":\"true\",\"C\":\"null\",\"D\":\"1.5e+300\",\"E\":\"Infinity\",\"F\":\"-Infinity\",\"G\":\"1,2,\",\"H\":\"[object Object]\",\"I\":\"1e+21\",\"J\":\"1e-7\",\"K\":\"0\",\"L\":\"0.1\",\"M\":\"123456789012345680000\"}}"},
+    {"input":"{\"custom\":{\"l\":[1e400,-1e400,null],\"x\":1e400},\"n\":-1e400}","output":"{\"custom\":{\"l\":[null,null,null],\"x\":null},\"n\":null}"},
+    {"input":"{\"n\":1e400,\"m\":1,\"n\":2,\"k\":-1e400}","output":"{\"n\":2,\"m\":1,\"k\":null}"},
+    {"input":"{\"cleanupPeriodDays\":1e400}","output":"null"},
+    {"input":"{\"model\":1e400}","output":"null"},
+    {"input":"{\"permissions\":{\"allow\":[1e400,\"Bash\"]}}","output":"{\"permissions\":{\"allow\":[\"Bash\"]}}"}
   ],
     "policySanitized": [
     {"input":"{}","output":{}},
@@ -5168,7 +5174,8 @@
           "type": "string"
         },
         "value": {
-          "type": "string"
+          "type": "string",
+          "coerce": true
         }
       }
     },

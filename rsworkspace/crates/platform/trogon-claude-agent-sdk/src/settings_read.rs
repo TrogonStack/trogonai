@@ -8,6 +8,7 @@ use crate::{
     session_prompt::js_trim,
     settings_dialect::SettingsDialect,
     settings_numbers::normalize_numbers,
+    settings_parse::parse_json,
     settings_read_hooks::{declares_guard_hooks_outside_hooks, sanitize_hooks},
     settings_read_spec::ReadSpec,
     settings_resolve_values::SettingsMap,
@@ -39,9 +40,7 @@ pub(crate) fn read_document(text: &str, dialect: SettingsDialect) -> Option<Sett
 
 /// The document object of a settings text, with numbers the way JavaScript prints them (`Ya` plus `Tr`) for the dialect.
 fn parse_object(text: &str, dialect: SettingsDialect) -> Option<Map<String, Value>> {
-    let Value::Object(mut document) =
-        serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(text)).ok()?
-    else {
+    let Value::Object(mut document) = parse_json(text.strip_prefix('\u{feff}').unwrap_or(text)).ok()? else {
         return None;
     };
     for entry in document.values_mut() {

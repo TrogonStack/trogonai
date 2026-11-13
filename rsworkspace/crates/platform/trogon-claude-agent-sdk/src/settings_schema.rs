@@ -15,10 +15,12 @@ use url::Url;
 use crate::{
     constants::{SETTINGS_SCHEMA_JSON, SETTINGS_SCHEMA_SAFE_INTEGER},
     settings_merge_spec::MergeSpec,
+    settings_numbers::js_value,
     settings_read_spec::ReadSpec,
     settings_schema_builtins::{
         Batteries, Payload, Predicate, Transform, payload_for, predicate_for, sentinel, transform_for,
     },
+    settings_schema_ports::js_string,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -74,6 +76,8 @@ enum Check {
 enum Node {
     Optional(Arc<Node>),
     Str(Vec<Check>),
+    /// `z.coerce.string()`: the input goes through JavaScript `String()` before the checks.
+    CoercedStr(Vec<Check>),
     Num(Vec<Check>),
     Boolean,
     Unknown,
@@ -293,6 +297,7 @@ impl<'a> Builder<'a> {
         let checks = || self.checks(description);
         let node = match kind {
             "optional" => Node::Optional(inner("inner")?),
+            "string" if description.get("coerce") == Some(&Value::Bool(true)) => Node::CoercedStr(checks()?),
             "string" => Node::Str(checks()?),
             "number" => Node::Num(checks()?),
             "boolean" => Node::Boolean,
@@ -456,7 +461,7 @@ fn utf16_length(text: &str) -> usize {
 
 fn json_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
-        (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
+        (Value::Number(left), Value::Number(right)) => js_value(left) == js_value(right),
         _ => left == right,
     }
 }
@@ -544,8 +549,21 @@ impl Node {
                 Some(value @ Value::String(_)) if all_pass(checks, value) => Ok(Some(value.clone())),
                 _ => Err(()),
             },
+            Node::CoercedStr(checks) => {
+                let value = Value::String(input.map_or_else(|| "undefined".to_owned(), js_string));
+                if all_pass(checks, &value) {
+                    Ok(Some(value))
+                } else {
+                    Err(())
+                }
+            }
+            // zod v4 `z.number()` refuses the infinities.
             Node::Num(checks) => match input {
-                Some(value @ Value::Number(_)) if all_pass(checks, value) => Ok(Some(value.clone())),
+                Some(value @ Value::Number(number))
+                    if js_value(number).is_some_and(f64::is_finite) && all_pass(checks, value) =>
+                {
+                    Ok(Some(value.clone()))
+                }
                 _ => Err(()),
             },
             Node::Boolean => match input {
@@ -653,7 +671,9 @@ impl Node {
     fn collect_unported(&self, found: &mut Vec<String>) {
         match self {
             Node::Optional(inner) | Node::Lazy(inner) | Node::Catch { inner, .. } => inner.collect_unported(found),
-            Node::Str(checks) | Node::Num(checks) => found.extend(checks.iter().filter_map(Check::unported)),
+            Node::Str(checks) | Node::CoercedStr(checks) | Node::Num(checks) => {
+                found.extend(checks.iter().filter_map(Check::unported))
+            }
             Node::Array { element, checks } => {
                 element.collect_unported(found);
                 found.extend(checks.iter().filter_map(Check::unported));
