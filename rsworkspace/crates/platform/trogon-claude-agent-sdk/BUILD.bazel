@@ -37,6 +37,7 @@ workspace_crate(
         "assistant_message": {},
         "builtin_tool_name": {},
         "builtin_tool_name_storage": {},
+        "bundled_cli": {},
         "callback_handlers": {},
         "control_request_id": {},
         "control_values": {},

@@ -11,6 +11,7 @@ mod agent_definition;
 mod agent_name;
 mod argv;
 mod builtin_tool_name;
+mod bundled_cli;
 mod cli_discovery;
 mod cli_path;
 mod client;
@@ -101,6 +102,10 @@ mod wire;
 pub use agent_definition::{AgentDefinition, AgentExecution, AgentMcpServerSpec};
 pub use agent_name::AgentName;
 pub use builtin_tool_name::BuiltinToolName;
+pub use bundled_cli::{
+    NativeCliNotFoundError, NativePackageTarget, NodeModuleLookup, NodeModuleNotFoundError, ResolveNodeModule,
+    find_bundled_cli, find_native_cli,
+};
 pub use cli_discovery::CliNotFoundError;
 pub use cli_path::CliPathError;
 pub use client::{

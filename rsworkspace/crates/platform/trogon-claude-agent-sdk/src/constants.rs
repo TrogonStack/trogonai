@@ -527,3 +527,9 @@ pub(crate) const CLOUD_PROVIDER_FLAGS: [&str; 3] = [
 
 /// Upstream `aM` gives up on a path after this many symlink hops.
 pub(crate) const SYMLINK_HOP_LIMIT: usize = 64;
+
+/// Directory beside the Python package that holds the bundled Claude Code executable.
+pub(crate) const BUNDLED_DIRECTORY: &str = "_bundled";
+
+/// npm package name shared by the TypeScript SDK and its platform packages.
+pub(crate) const PACKAGE_SCOPE_NAME: &str = "@anthropic-ai/claude-agent-sdk";
