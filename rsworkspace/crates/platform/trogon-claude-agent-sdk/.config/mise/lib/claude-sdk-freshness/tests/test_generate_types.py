@@ -28,6 +28,7 @@ export interface Sample {
   questions: [{ q: string }] | [{ q: string }, { q: string }];
   lookup?: { [k: string]: string };
   open?: { type: string; [k: string]: unknown };
+  interval?: 0 | number;
 }
 export interface Empty {}
 export type Result =
@@ -130,6 +131,10 @@ class GenerateTypesTests(unittest.TestCase):
         self.assertIn("super::other::Result::best_match(value)", output)
         self.assertIn("pub struct Sample {", output)
 
+    def test_numeric_literal_types_are_numbers(self):
+        output = self.generate(self.ROOTS)
+        self.assertIn("pub interval: Option<serde_json::Number>,", output)
+
     def test_bounded_tuple_unions_collapse_to_one_vector(self):
         output = self.generate(self.ROOTS)
         self.assertIn("pub questions: Vec<SampleQuestionsItem>,", output)
@@ -144,7 +149,8 @@ class GenerateTypesTests(unittest.TestCase):
         self.assertIn("Unknown(serde_json::Value),", output)
         self.assertIn("pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)>", output)
         self.assertIn("None => Self::Unknown(value),", output)
-        self.assertIn("super::support::unknown_keys(value, ResultOk::KNOWN_KEYS)", output)
+        self.assertIn("ResultOk::match_score(value)", output)
+        self.assertIn("super::support::unlisted_literals(value, &[(\"status\", &[\"ok\"])])", output)
         # A plain map declares no keys, so any struct that does declare them is more specific.
         self.assertIn("super::support::unknown_keys(value, &[]), Self::Map(inner)", output)
         self.assertIn("pub enum Loose {", output)
@@ -188,6 +194,27 @@ class GenerateTypesTests(unittest.TestCase):
         result = self.run_generator(package, config, Path(out.name), "--check")
         self.assertEqual(result.returncode, 1)
         self.assertIn("generated.rs", result.stderr)
+
+    def test_fixture_synthesis_sets_every_field_and_splits_families(self):
+        out = tempfile.TemporaryDirectory()
+        self.addCleanup(out.cleanup)
+        config = self.config(
+            ["Sample"],
+            fixtures={"output": "fixtures.json", "roots": ["Sample", "Result"], "families": {"first": ["name", "count"]}},
+        )
+        result = subprocess.run(
+            ["node", str(LIB / "synthesize_fixtures.mjs"), "--typescript-package", str(self.package()), "--config", str(config), "--out-root", out.name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fixtures = json.loads((Path(out.name) / "fixtures.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(fixtures), {"first", "other", "Result"})
+        self.assertEqual(set(fixtures["first"][0]), {"name", "count"})
+        self.assertNotIn("name", fixtures["other"][0])
+        self.assertEqual({sample["status"] for sample in fixtures["Result"]}, {"ok", "skipped"})
+        self.assertEqual(fixtures["other"][0]["open"]["extra_key"], {"any": ["thing", None]})
 
     def test_checked_in_generator_config_is_pinned_to_the_reviewed_baseline(self):
         config = json.loads((LIB / "types.json").read_text(encoding="utf-8"))

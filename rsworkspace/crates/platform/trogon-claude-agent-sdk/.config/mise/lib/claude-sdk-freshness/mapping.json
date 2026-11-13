@@ -86,6 +86,84 @@
       "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity."
     },
     {
+      "id": "process-errors-and-shutdown",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ProcessError",
+            "ResultError",
+            "CLIConnectionError",
+            "CLINotFoundError"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "AbortError",
+            "core.AbortError"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "Error",
+        "AbortError",
+        "ResultError"
+      ],
+      "tests": [
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t04_process_error_display_is_the_python_text_and_typescript_text_is_available"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "e05_q13_python_replaces_the_exit_error_with_the_result_error"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "e05_typescript_uses_errors_and_keeps_the_process_error_when_the_text_is_blank"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t03_typescript_skips_a_corrupt_line_and_python_fails_on_it"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t03_a_corrupt_end_of_stream_tail_is_dropped_by_both_styles"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t10_a_missing_executable_is_reported_by_path_and_a_missing_cwd_by_directory"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "abort_stops_the_process_and_ends_the_run_with_an_abort_error"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "e03_json_decode_error_carries_the_line_and_the_original_error"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "e04_message_parse_error_carries_the_raw_data"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t14_a_write_after_stdin_closed_is_not_ready_or_terminated"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t14_a_write_after_abort_is_the_operation_aborted_error"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t14_a_write_after_the_cli_exited_with_an_error_reports_the_upstream_state"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data."
+    },
+    {
       "id": "permission-modes",
       "upstream": {
         "python": {
@@ -1904,6 +1982,153 @@
       ],
       "status": "partial",
       "rationale": "Timing, user-message correlation, resume reason and future envelope metadata survive Rust wire decoding in additional_fields, separately from event. Values remain raw JSON rather than typed upstream fields; retention does not implement their behavior or prove native runtime parity."
+    },
+    {
+      "id": "settings-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "Settings",
+            "core.Settings"
+          ]
+        }
+      },
+      "rust_api": [
+        "Settings",
+        "SettingsInput",
+        "upstream::settings"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "every_field_family_round_trips_its_upstream_shaped_fixtures"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "every_field_family_re_encodes_byte_identically_in_original_and_reversed_key_order"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "fixtures_cover_every_top_level_key_upstream_declares"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "unknown_top_level_keys_survive_in_place_and_in_order"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "the_permissions_object_keeps_undeclared_keys_and_unlisted_modes"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "settings_input_names_the_three_upstream_forms"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "each_hook_handler_kind_decodes_into_its_own_variant"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "each_marketplace_source_kind_decodes_into_its_own_variant"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "an_unlisted_marketplace_source_survives_as_raw_json"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "status_line_ssh_configs_and_plugin_configs_round_trip_with_unknown_members"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Settings is generated from the pinned declarations: all 182 declared top-level keys, every nested object, string-literal union and object union, the $schema key and the open index signature. Unknown keys and key order survive a decode then encode byte for byte, and a string-literal value upstream does not list is kept. Nothing is validated. Python has no Settings type; its settings option is a path or JSON string, which SettingsInput distinguishes explicitly. Wiring Settings into Options.settings is mapped separately. Hook handler kinds, marketplace and plugin sources, statusLine, sshConfigs, enabledPlugins and pluginConfigs are generated unions: a union picks the member that re-encodes to the same JSON with the fewest undeclared keys and unlisted string-literal values, so a discriminant selects its own member, and anything else is kept as raw JSON."
+    },
+    {
+      "id": "settings-sandbox",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "SandboxSettings",
+            "core.SandboxSettings",
+            "SandboxNetworkConfig",
+            "core.SandboxNetworkConfig",
+            "SandboxFilesystemConfig",
+            "core.SandboxFilesystemConfig",
+            "SandboxCredentialsConfig",
+            "core.SandboxCredentialsConfig",
+            "SandboxIgnoreViolations",
+            "core.SandboxIgnoreViolations"
+          ]
+        }
+      },
+      "rust_api": [
+        "SandboxSettings",
+        "SandboxNetworkConfig",
+        "SandboxFilesystemConfig",
+        "SandboxCredentialsConfig",
+        "SandboxIgnoreViolations"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "python_sandbox_dicts_map_byte_for_byte_onto_the_typed_sandbox"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "typescript_only_sandbox_keys_and_unknown_keys_are_kept"
+        }
+      ],
+      "status": "supported",
+      "rationale": "TypeScript declares the sandbox types as Zod inferences, which equal the generated sandbox property of Settings (16 keys, open object); the Rust names alias those types. Python SandboxSettings and SandboxNetworkConfig TypedDicts use a subset of the same keys, and fixtures show them re-encoding byte for byte. Python has no filesystem or credentials TypedDict, so those are TypeScript only."
+    },
+    {
+      "id": "settings-resolution-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "ResolvedSettings",
+            "core.ResolvedSettings",
+            "ProvenanceEntry",
+            "core.ProvenanceEntry",
+            "PolicySettingsOrigin",
+            "core.PolicySettingsOrigin",
+            "ResolvedSettingSource",
+            "core.ResolvedSettingSource",
+            "ResolveSettingsOptions",
+            "core.ResolveSettingsOptions",
+            "SDKSettingsParseError",
+            "core.SDKSettingsParseError"
+          ]
+        }
+      },
+      "rust_api": [
+        "ResolvedSettings",
+        "ProvenanceEntry",
+        "ResolvedSettingSource",
+        "PolicySettingsOrigin",
+        "ResolveSettingsOptions",
+        "SDKSettingsParseError",
+        "upstream::settings_resolution"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "resolved_settings_round_trip_with_provenance_and_machine_policy"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "every_policy_origin_and_source_name_decodes_and_unknown_ones_are_kept"
+        },
+        {
+          "path": "tests/upstream_settings_unions.rs",
+          "name": "resolve_options_and_parse_errors_round_trip"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The result, option and error shapes of resolveSettings are generated from the pinned declarations and keep unknown keys and unlisted source names. The resolveSettings function itself is mapped separately. Python has no equivalent types."
     }
   ]
 }

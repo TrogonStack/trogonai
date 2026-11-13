@@ -118,6 +118,9 @@ async fn stale_permission_completion_cannot_remove_replacement() -> Result<(), B
         next_id: 0,
         state: State::Idle,
         run_state: RunState::default(),
+        argv_style: crate::ArgvStyle::TypeScript,
+        last_error_result: None,
+        closed: Default::default(),
     };
     let id = ControlRequestId::from("reused-id");
     let permission = || -> Result<IncomingControl, ProtocolError> {
@@ -229,6 +232,9 @@ impl DriverFixture {
             next_id: 0,
             state: State::Idle,
             run_state: RunState::default(),
+            argv_style: crate::ArgvStyle::TypeScript,
+            last_error_result: None,
+            closed: Default::default(),
         };
         Ok(Self {
             driver,

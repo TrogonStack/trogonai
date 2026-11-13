@@ -1,6 +1,8 @@
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::{io, process::ExitStatus};
 
-use crate::StderrTail;
+use crate::{JsonObject, StderrTail};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ControlOperation {
@@ -71,8 +73,16 @@ pub enum Error {
     CliNotFound(#[from] crate::CliNotFoundError),
     #[error(transparent)]
     Session(#[from] crate::SessionError),
-    #[error("could not start the Claude Code executable")]
+    /// Python `CLIConnectionError("Failed to start Claude Code: ...")` for any spawn failure other than the two below.
+    #[error("Failed to start Claude Code: {0}")]
     Spawn(#[source] io::Error),
+    /// Python `CLIConnectionError("Working directory does not exist: ...")`, raised when the spawn finds no
+    /// executable and the configured working directory is missing.
+    #[error("Working directory does not exist: {}", .0.display())]
+    WorkingDirectoryMissing(std::path::PathBuf),
+    /// Python `CLINotFoundError("Claude Code not found at: ...")`, raised when the configured executable is missing.
+    #[error("Claude Code not found at: {}", .0.display())]
+    CliNotFoundAt(std::path::PathBuf),
     #[error("a piped subprocess stream was unavailable")]
     PipeUnavailable,
     #[error("Claude Code subprocess I/O failed")]
@@ -81,8 +91,34 @@ pub enum Error {
     Protocol(#[from] ProtocolError),
     #[error("protocol frame exceeds the configured byte limit ({limit})")]
     FrameTooLarge { limit: usize },
-    #[error("Claude Code exited with status {status}")]
+    /// The CLI exited unsuccessfully. `Display` is Python's `ProcessError` text and `typescript_message` is the
+    /// TypeScript text; `stderr` carries the real tail, a superset of both upstream messages.
+    #[error("{}", process_message(.status))]
     Process { status: ExitStatus, stderr: StderrTail },
+    /// Python `CLIConnectionError("ProcessTransport is not ready for writing")` and the TypeScript error of the
+    /// same text: a write after stdin was closed.
+    #[error("ProcessTransport is not ready for writing")]
+    NotReadyForWriting,
+    /// Python `CLIConnectionError("Cannot write to terminated process (exit code: N)")`. TypeScript's text carries no
+    /// exit code, see `typescript_message`.
+    #[error("Cannot write to terminated process (exit code: {})", .exit_code.map_or_else(|| "None".to_owned(), |code| code.to_string()))]
+    WriteToTerminatedProcess { exit_code: Option<i32> },
+    /// `Failed to write to process stdin: ...` in both upstream SDKs.
+    #[error("Failed to write to process stdin: {0}")]
+    WriteFailed(#[source] io::Error),
+    /// Python `CLIJSONDecodeError`.
+    #[error(transparent)]
+    JsonDecode(#[from] JsonDecodeError),
+    /// Python `MessageParseError`.
+    #[error(transparent)]
+    MessageParse(#[from] MessageParseError),
+    /// Python `ResultError` / TypeScript "Claude Code returned an error result": the CLI exited unsuccessfully
+    /// after reporting an `is_error` result, so the result replaces the bare exit error.
+    #[error(transparent)]
+    Result(#[from] ResultError),
+    /// TypeScript `AbortError`.
+    #[error(transparent)]
+    Aborted(#[from] AbortError),
     #[error("Claude Code closed stdout before completing the current operation")]
     UnexpectedEof,
     #[error("the message queue filled; consume messages or increase its capacity")]
@@ -144,4 +180,291 @@ pub enum Error {
     #[doc(hidden)]
     #[error("the subprocess owner requested shutdown")]
     ShutdownRequested,
+}
+
+fn process_message(status: &ExitStatus) -> String {
+    let code = exit_code(status).unwrap_or(-1);
+    format!("Command failed with exit code {code} (exit code: {code})\nError output: Check stderr output for details")
+}
+
+/// Python's `Process.returncode`: the exit code, or the negated signal number on Unix.
+pub(crate) fn exit_code(status: &ExitStatus) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        status.code().or_else(|| status.signal().map(|signal| -signal))
+    }
+    #[cfg(not(unix))]
+    {
+        status.code()
+    }
+}
+
+impl Error {
+    /// The exit code Python's `ProcessError.exit_code` carries (the negated signal number on Unix).
+    pub fn exit_code(&self) -> Option<i32> {
+        match self {
+            Self::Process { status, .. } => exit_code(status),
+            Self::Result(result) => result.exit_code(),
+            _ => None,
+        }
+    }
+
+    /// TypeScript's text for an unsuccessful exit: `Claude Code process exited with code N. stderr: <tail>` or
+    /// `Claude Code process terminated by signal SIG<NAME>`, with the stderr tail appended when it is not blank.
+    pub fn typescript_message(&self) -> Option<String> {
+        if matches!(self, Self::WriteToTerminatedProcess { .. }) {
+            return Some("Cannot write to terminated process".to_owned());
+        }
+        let Self::Process { status, stderr } = self else {
+            return None;
+        };
+        let tail = String::from_utf8_lossy(stderr.as_bytes());
+        let tail = tail.trim();
+        let tail = if tail.is_empty() {
+            String::new()
+        } else {
+            format!(". stderr: {tail}")
+        };
+        if let Some(code) = status.code() {
+            return Some(format!("Claude Code process exited with code {code}{tail}"));
+        }
+        #[cfg(unix)]
+        {
+            if let Some(signal) = status.signal() {
+                return Some(format!(
+                    "Claude Code process terminated by signal {}{tail}",
+                    signal_name(signal)
+                ));
+            }
+        }
+        None
+    }
+}
+
+#[cfg(unix)]
+fn signal_name(signal: i32) -> &'static str {
+    match signal {
+        1 => "SIGHUP",
+        2 => "SIGINT",
+        3 => "SIGQUIT",
+        6 => "SIGABRT",
+        9 => "SIGKILL",
+        13 => "SIGPIPE",
+        14 => "SIGALRM",
+        15 => "SIGTERM",
+        _ => "unknown",
+    }
+}
+
+/// Python `CLIJSONDecodeError`: a CLI stdout line that is not valid JSON.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to decode JSON: {}...", self.line.chars().take(100).collect::<String>())]
+pub struct JsonDecodeError {
+    line: String,
+    #[source]
+    original_error: serde_json::Error,
+}
+
+impl JsonDecodeError {
+    pub(crate) fn new(line: &[u8], original_error: serde_json::Error) -> Self {
+        Self {
+            line: String::from_utf8_lossy(line).into_owned(),
+            original_error,
+        }
+    }
+
+    /// The offending line, complete.
+    pub fn line(&self) -> &str {
+        &self.line
+    }
+
+    pub fn original_error(&self) -> &serde_json::Error {
+        &self.original_error
+    }
+}
+
+/// Python `MessageParseError`: a JSON frame that does not decode as a message, with the raw frame.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct MessageParseError {
+    message: String,
+    data: Option<JsonObject>,
+    #[source]
+    source: ProtocolError,
+}
+
+impl MessageParseError {
+    pub(crate) fn new(source: ProtocolError, data: Option<JsonObject>) -> Self {
+        Self {
+            message: source.to_string(),
+            data,
+            source,
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// The decoded JSON object the message was parsed from, when the line was an object.
+    pub fn data(&self) -> Option<&JsonObject> {
+        self.data.as_ref()
+    }
+}
+
+/// TypeScript `AbortError`: the operation was cancelled by the caller.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("{message}")]
+pub struct AbortError {
+    message: &'static str,
+}
+
+impl AbortError {
+    /// The process was stopped by the caller (`Claude Code process aborted by user`).
+    pub(crate) const PROCESS: Self = Self {
+        message: "Claude Code process aborted by user",
+    };
+    /// A write or other operation attempted after the abort (`Operation aborted`).
+    pub(crate) const OPERATION: Self = Self {
+        message: "Operation aborted",
+    };
+
+    pub fn message(&self) -> &'static str {
+        self.message
+    }
+}
+
+/// Python `ResultError`: the payload of the error `result` the CLI reported before exiting unsuccessfully.
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+#[error("{message}")]
+pub struct ResultError {
+    message: String,
+    data: JsonObject,
+    exit_code: Option<i32>,
+}
+
+impl ResultError {
+    pub(crate) fn new(message: String, data: JsonObject, exit_code: Option<i32>) -> Self {
+        Self {
+            message,
+            data,
+            exit_code,
+        }
+    }
+
+    /// `Claude Code returned an error result: <text>`.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// The raw `result` frame as the CLI emitted it.
+    pub fn data(&self) -> &JsonObject {
+        &self.data
+    }
+
+    pub fn exit_code(&self) -> Option<i32> {
+        self.exit_code
+    }
+
+    pub fn subtype(&self) -> Option<&str> {
+        self.data.get("subtype").and_then(serde_json::Value::as_str)
+    }
+
+    /// The `errors` strings, trimmed and without blanks; a bare string is accepted like Python does.
+    pub fn errors(&self) -> Vec<String> {
+        normalized_errors(self.data.get("errors"))
+    }
+
+    pub fn result(&self) -> Option<&str> {
+        self.data.get("result").and_then(serde_json::Value::as_str)
+    }
+
+    pub fn api_error_status(&self) -> Option<i64> {
+        self.data.get("api_error_status").and_then(serde_json::Value::as_i64)
+    }
+
+    pub fn terminal_reason(&self) -> Option<&str> {
+        self.data.get("terminal_reason").and_then(serde_json::Value::as_str)
+    }
+
+    pub fn session_id(&self) -> Option<&str> {
+        self.data.get("session_id").and_then(serde_json::Value::as_str)
+    }
+}
+
+fn normalized_errors(raw: Option<&serde_json::Value>) -> Vec<String> {
+    let strings: Vec<&str> = match raw {
+        Some(serde_json::Value::String(text)) => vec![text.as_str()],
+        Some(serde_json::Value::Array(items)) => items.iter().filter_map(serde_json::Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    strings
+        .into_iter()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Python `_error_result_text`: errors, then result, then a non-success subtype, then the HTTP status.
+pub(crate) fn python_error_result_text(data: &JsonObject) -> String {
+    let errors = normalized_errors(data.get("errors"));
+    if !errors.is_empty() {
+        return errors.join("; ");
+    }
+    if let Some(result) = data.get("result").and_then(serde_json::Value::as_str)
+        && !result.trim().is_empty()
+    {
+        return result.trim().to_owned();
+    }
+    if let Some(subtype) = data.get("subtype").and_then(serde_json::Value::as_str)
+        && !subtype.is_empty()
+        && subtype != "success"
+    {
+        return subtype.to_owned();
+    }
+    if let Some(status) = data.get("api_error_status")
+        && !status.is_null()
+    {
+        let status = status
+            .as_i64()
+            .map_or_else(|| status.to_string(), |number| number.to_string());
+        return format!("API error (HTTP {status})");
+    }
+    "unknown error".to_owned()
+}
+
+/// TypeScript's text: the `result` for the `success` subtype, otherwise the joined `errors`; blank means none.
+pub(crate) fn typescript_error_result_text(data: &JsonObject) -> Option<String> {
+    let text = if data.get("subtype").and_then(serde_json::Value::as_str) == Some("success") {
+        data.get("result")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    } else {
+        normalized_errors(data.get("errors")).join("; ")
+    };
+    (!text.is_empty()).then_some(text)
+}
+
+/// The `result` frame as a JSON object, for `ResultError::data`.
+pub(crate) fn error_result_data(result: &crate::ResultMessage) -> JsonObject {
+    let mut data = result.additional_fields.clone();
+    data.insert("type".into(), "result".into());
+    data.insert("subtype".into(), result.subtype.clone().into());
+    data.insert("is_error".into(), true.into());
+    data.insert("session_id".into(), result.session_id.as_str().into());
+    if let Some(text) = &result.result {
+        data.insert("result".into(), text.clone().into());
+    }
+    if let Some(errors) = &result.errors {
+        data.insert("errors".into(), errors.clone().into());
+    }
+    if let Some(status) = result.api_error_status {
+        data.insert("api_error_status".into(), status.into());
+    }
+    if let Some(reason) = &result.terminal_reason {
+        data.insert("terminal_reason".into(), reason.clone().into());
+    }
+    data
 }

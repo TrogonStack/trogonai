@@ -9,7 +9,9 @@
 use std::{error::Error, fs, path::PathBuf};
 
 use serde_json::{Value, json};
-use trogon_claude_agent_sdk::{ListSessionsOptions, MessagePage, SessionFiles, SessionMutationError};
+use trogon_claude_agent_sdk::{
+    ForkAlgorithm, JsonEscaping, ListSessionsOptions, MessagePage, SessionFiles, SessionMutationError,
+};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -136,7 +138,10 @@ fn delete_removes_the_transcript_and_subagent_directory() -> TestResult {
 #[test]
 fn fork_remaps_uuids_skips_progress_and_titles_the_copy() -> TestResult {
     let f = fixture(&transcript())?;
-    let forked = f.files.fork_session(SESSION, None, None, None)?.session_id;
+    let forked = f
+        .files
+        .fork_session_using(ForkAlgorithm::Python, SESSION, None, None, None)?
+        .session_id;
     let path = f.dir.join(format!("{}.jsonl", forked.as_str()));
     let lines: Vec<Value> = fs::read_to_string(&path)?
         .lines()
@@ -169,7 +174,7 @@ fn fork_remaps_uuids_skips_progress_and_titles_the_copy() -> TestResult {
 
     let messages = f
         .files
-        .get_session_messages(forked.as_str(), None, MessagePage::default());
+        .get_session_messages(forked.as_str(), None, MessagePage::default())?;
     assert_eq!(messages.len(), 3);
     let listed = f.files.list_sessions(&ListSessionsOptions::default());
     assert_eq!(listed.len(), 2);
@@ -181,19 +186,25 @@ fn fork_honors_the_cutoff_and_an_explicit_title() -> TestResult {
     let f = fixture(&transcript())?;
     let forked = f
         .files
-        .fork_session(SESSION, None, Some(A1), Some("  Branch  "))?
+        .fork_session_using(ForkAlgorithm::Python, SESSION, None, Some(A1), Some("  Branch  "))?
         .session_id;
     let body = fs::read_to_string(f.dir.join(format!("{}.jsonl", forked.as_str())))?;
     let lines: Vec<Value> = body.lines().map(serde_json::from_str).collect::<Result<_, _>>()?;
     assert_eq!(lines.len(), 4, "two messages, the replacement, and the title");
     assert_eq!(lines[3]["customTitle"], "Branch");
     assert!(matches!(
-        f.files
-            .fork_session(SESSION, None, Some("223e4567-e89b-42d3-a456-426614174009"), None),
+        f.files.fork_session_using(
+            ForkAlgorithm::Python,
+            SESSION,
+            None,
+            Some("223e4567-e89b-42d3-a456-426614174009"),
+            None
+        ),
         Err(SessionMutationError::MessageNotFound { .. })
     ));
     assert!(matches!(
-        f.files.fork_session(SESSION, None, Some("bad"), None),
+        f.files
+            .fork_session_using(ForkAlgorithm::Python, SESSION, None, Some("bad"), None),
         Err(SessionMutationError::InvalidMessageId(_))
     ));
     Ok(())
@@ -204,13 +215,18 @@ fn fork_derives_titles_from_existing_custom_titles_and_rejects_empty_sources() -
     let mut lines = transcript();
     lines.push(json!({"type":"custom-title","customTitle":"Original","sessionId":SESSION}));
     let f = fixture(&lines)?;
-    let forked = f.files.fork_session(SESSION, None, None, None)?.session_id;
+    let forked = f
+        .files
+        .fork_session_using(ForkAlgorithm::Python, SESSION, None, None, None)?
+        .session_id;
     let body = fs::read_to_string(f.dir.join(format!("{}.jsonl", forked.as_str())))?;
     assert!(body.lines().last().ok_or("empty")?.contains("Original (fork)"));
 
     let sidechain_only = fixture(&[json!({"type":"user","uuid":U1,"isSidechain":true})])?;
     assert!(matches!(
-        sidechain_only.files.fork_session(SESSION, None, None, None),
+        sidechain_only
+            .files
+            .fork_session_using(ForkAlgorithm::Python, SESSION, None, None, None),
         Err(SessionMutationError::NoMessages(_))
     ));
     Ok(())
@@ -223,7 +239,10 @@ fn fork_keeps_source_key_order_and_selects_the_escaping() -> TestResult {
                       "alpha":2,"teamName":"t","message":{"role":"user","content":"caf\u{e9} \u{1f600}"}});
     let f = fixture(&lines)?;
 
-    let utf8 = f.files.fork_session(SESSION, None, None, None)?.session_id;
+    let utf8 = f
+        .files
+        .fork_session_with(SESSION, None, None, None, JsonEscaping::Utf8)?
+        .session_id;
     let body = fs::read_to_string(f.dir.join(format!("{}.jsonl", utf8.as_str())))?;
     let first = body.lines().next().ok_or("empty")?;
     assert!(first.contains("caf\u{e9} \u{1f600}"));

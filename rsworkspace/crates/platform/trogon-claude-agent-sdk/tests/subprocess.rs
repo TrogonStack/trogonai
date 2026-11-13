@@ -430,7 +430,7 @@ async fn malformed_known_frame_is_a_terminal_protocol_error() -> TestResult {
             Ok(None) => return Err(std::io::Error::other("missing protocol error").into()),
         }
     };
-    assert!(matches!(error, Error::Protocol(_)));
+    assert!(matches!(error, Error::MessageParse(_)));
     client.disconnect().await?;
     Ok(())
 }
@@ -529,7 +529,7 @@ async fn malformed_initialization_is_rejected() -> TestResult {
     for mode in ["init-malformed", "init-malformed-known"] {
         assert!(matches!(
             ClaudeSdkClient::connect(options(mode)?).await,
-            Err(Error::Protocol(_))
+            Err(Error::Protocol(_) | Error::MessageParse(_))
         ));
     }
     Ok(())
@@ -636,7 +636,27 @@ async fn dropped_owner_reaps_process_even_when_handle_survives() -> TestResult {
     let handle = client.handle();
     drop(client);
     assert_reaped(pid).await?;
-    assert!(matches!(handle.interrupt().await, Err(Error::DriverStopped)));
+    // TypeScript: the exit event clears `ready`, so a later write is not ready.
+    assert!(matches!(handle.interrupt().await, Err(Error::NotReadyForWriting)));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn python_style_reports_the_terminated_process_for_a_handle_that_outlived_its_owner() -> TestResult {
+    let mut python = options("normal")?;
+    python.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    let client = ClaudeSdkClient::connect(python).await?;
+    let pid = client
+        .process_id()
+        .ok_or_else(|| std::io::Error::other("missing pid"))?;
+    let handle = client.handle();
+    drop(client);
+    assert_reaped(pid).await?;
+    assert!(matches!(
+        handle.interrupt().await,
+        Err(Error::WriteToTerminatedProcess { .. })
+    ));
     Ok(())
 }
 

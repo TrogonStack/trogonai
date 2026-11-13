@@ -3,3 +3,6 @@ src/upstream/tool_inputs.rs linguist-generated=true
 src/upstream/tool_outputs.rs linguist-generated=true
 tests/fixtures/upstream_tool_inputs.json linguist-generated=true
 tests/fixtures/upstream_tool_outputs.json linguist-generated=true
+src/upstream/settings.rs linguist-generated=true
+tests/fixtures/upstream_settings.json linguist-generated=true
+src/upstream/settings_resolution.rs linguist-generated=true

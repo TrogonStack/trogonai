@@ -19,8 +19,15 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     JsonObject, SessionFiles, SessionId,
-    session_files::{extract_first_prompt_from_head, extract_last_json_string_field, valid_uuid},
+    session_files::{
+        extract_first_prompt_from_head, extract_first_prompt_from_head_mode, extract_last_json_string_field, valid_uuid,
+    },
+    session_files_ts::{last_typed_string, sidecar_title},
+    session_fork_ts::ForkTsError,
+    session_messages_ts::MessagesError,
+    session_prompt::PromptMode,
     session_transcript::truthy,
+    summary_dialect::SummaryDialect,
 };
 
 /// Why a session mutation was refused or failed.
@@ -46,6 +53,49 @@ pub enum SessionMutationError {
     MessageNotFound { message_id: String, session_id: String },
     #[error("session file I/O failed")]
     Io(#[source] std::io::Error),
+    /// The TypeScript chain rebuild threw on malformed compaction metadata.
+    #[error("session transcript could not be linked")]
+    Messages(#[source] MessagesError),
+}
+
+impl From<ForkTsError> for SessionMutationError {
+    fn from(error: ForkTsError) -> Self {
+        match error {
+            ForkTsError::NoMessages(session_id) => Self::NoMessages(session_id),
+            ForkTsError::MessageNotFound { message_id, session_id } => Self::MessageNotFound { message_id, session_id },
+            ForkTsError::Messages(error) => Self::Messages(error),
+        }
+    }
+}
+
+/// Which upstream `forkSession` algorithm a fork follows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ForkAlgorithm {
+    /// The TypeScript SDK: state loader, chain-aware cutoff, data-flow records and a custom title.
+    #[default]
+    TypeScript,
+    /// The Python SDK: line-by-line uuid remapping.
+    Python,
+}
+
+/// TypeScript `zMe`: the title of a fork when the caller names none.
+fn ts_derived_title(content: &[u8], transcript: &Path, session_id: &str) -> String {
+    let window = LITE_READ_BUF_SIZE as usize;
+    let head = String::from_utf8_lossy(&content[..content.len().min(window)]).into_owned();
+    let tail = String::from_utf8_lossy(&content[content.len().saturating_sub(window)..]).into_owned();
+    let typed =
+        |text: &str, ty: &str, key: &str| last_typed_string(text, key, Some(ty), true).filter(|v| !v.is_empty());
+    let own = last_typed_string(&tail, "customTitle", Some("custom-title"), true);
+    let custom = if own.is_some() {
+        own
+    } else {
+        sidecar_title(transcript, session_id).or_else(|| typed(&head, "custom-title", "customTitle"))
+    };
+    custom
+        .filter(|title| !title.is_empty())
+        .or_else(|| typed(&tail, "ai-title", "aiTitle"))
+        .or_else(|| typed(&head, "ai-title", "aiTitle"))
+        .unwrap_or_else(|| extract_first_prompt_from_head_mode(&head, SummaryDialect::TypeScript, PromptMode::Shown))
 }
 
 /// The new session created by a fork (`ForkSessionResult` upstream).
@@ -162,7 +212,8 @@ impl SessionFiles {
         Ok(())
     }
 
-    /// Forks a session into a new transcript beside the source, remapping every uuid.
+    /// Forks a session into a new transcript beside the source, remapping every uuid, with the TypeScript algorithm
+    /// (`forkSession` of the TypeScript SDK).
     pub fn fork_session(
         &self,
         session_id: &str,
@@ -170,10 +221,87 @@ impl SessionFiles {
         up_to_message_id: Option<&str>,
         title: Option<&str>,
     ) -> Result<ForkSessionResult, SessionMutationError> {
-        self.fork_session_with(session_id, directory, up_to_message_id, title, JsonEscaping::default())
+        self.fork_session_using(
+            ForkAlgorithm::TypeScript,
+            session_id,
+            directory,
+            up_to_message_id,
+            title,
+        )
     }
 
-    /// [`SessionFiles::fork_session`] with a selectable serialization of non-ASCII text.
+    /// [`SessionFiles::fork_session`] with an explicit choice between the TypeScript and Python algorithms.
+    pub fn fork_session_using(
+        &self,
+        algorithm: ForkAlgorithm,
+        session_id: &str,
+        directory: Option<&Path>,
+        up_to_message_id: Option<&str>,
+        title: Option<&str>,
+    ) -> Result<ForkSessionResult, SessionMutationError> {
+        match algorithm {
+            ForkAlgorithm::TypeScript => self.fork_session_ts(session_id, directory, up_to_message_id, title),
+            ForkAlgorithm::Python => {
+                self.fork_session_with(session_id, directory, up_to_message_id, title, JsonEscaping::Ascii)
+            }
+        }
+    }
+
+    /// TypeScript `forkSession` (`IB`): no message id validation, the `ei` lookup order, the state loader and the
+    /// `NB` rewrite, written with mode 0600 and the `w` flag.
+    fn fork_session_ts(
+        &self,
+        session_id: &str,
+        directory: Option<&Path>,
+        up_to_message_id: Option<&str>,
+        title: Option<&str>,
+    ) -> Result<ForkSessionResult, SessionMutationError> {
+        let session_id = checked_session_id(session_id)?;
+        let (file_path, _) = self
+            .resolve_session_ts(session_id, directory)
+            .ok_or_else(|| not_found(session_id, directory))?;
+        let content = std::fs::read(&file_path).map_err(SessionMutationError::Io)?;
+        if content.is_empty() {
+            return Err(not_found(session_id, directory));
+        }
+        let state = crate::session_fork_ts::load_state(&content, session_id);
+        let derive_title = || ts_derived_title(&content, &file_path, session_id);
+        let mut ids = || uuid::Uuid::new_v4().to_string();
+        let mut clock = || {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .ok()
+                .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
+                .unwrap_or(0)
+        };
+        let forked = crate::session_fork_ts::fork_entries(
+            &state,
+            &crate::session_fork_ts::ForkTsRequest {
+                session_id,
+                up_to_message_id,
+                title,
+            },
+            derive_title,
+            &mut ids,
+            &mut clock,
+        )?;
+        let project_dir = file_path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let fork_path = project_dir.join(format!("{}.jsonl", forked.session_id));
+        let mut options = OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        }
+        let mut file = options.open(&fork_path).map_err(SessionMutationError::Io)?;
+        file.write_all(crate::session_fork_ts::serialize_entries(&forked.entries).as_bytes())
+            .map_err(SessionMutationError::Io)?;
+        Ok(ForkSessionResult {
+            session_id: SessionId::from(forked.session_id),
+        })
+    }
+
+    /// The Python algorithm with a selectable serialization of non-ASCII text.
     pub fn fork_session_with(
         &self,
         session_id: &str,

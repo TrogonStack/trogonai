@@ -26,7 +26,7 @@ use crate::{
         unescape_json_string, valid_uuid, worktree_paths,
     },
     session_project_key::{canonicalize_lenient, hyphenate, sanitize_path},
-    session_prompt::{entry_first_prompt, iso_to_epoch_ms},
+    session_prompt::{entry_first_prompt, iso_to_epoch_ms, js_trim},
 };
 
 enum Parsed {
@@ -158,10 +158,6 @@ fn media_summary(head: &str) -> &'static str {
         }
     }
     ""
-}
-
-fn js_trim(text: &str) -> &str {
-    text.trim_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}')
 }
 
 /// Upstream `Lz`: collapse control and format characters, drop the rest of C0 and C1, cap at 200 characters.

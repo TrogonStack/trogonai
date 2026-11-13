@@ -376,6 +376,34 @@ fn main() -> Result<(), Box<dyn Error>> {
                         io::stderr().write_all(b"diagnostic-tail")?;
                         std::process::exit(7);
                     }
+                    "error-result-exit" => {
+                        emit(
+                            json!({"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"fixture-session","errors":["  boom  ", "", "second"],"api_error_status":529}),
+                        )?;
+                        std::process::exit(1);
+                    }
+                    "error-result-success-subtype-exit" => {
+                        emit(
+                            json!({"type":"result","subtype":"success","is_error":true,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"fixture-session","result":"rate limited"}),
+                        )?;
+                        std::process::exit(1);
+                    }
+                    "error-result-blank-exit" => {
+                        emit(
+                            json!({"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"fixture-session"}),
+                        )?;
+                        std::process::exit(1);
+                    }
+                    "corrupt-line" => {
+                        io::stdout().write_all(b"{\"type\": oops\n")?;
+                        emit(assistant(prompt))?;
+                        emit(result(prompt))?;
+                    }
+                    "corrupt-tail" => {
+                        emit(result(prompt))?;
+                        io::stdout().write_all(b"{\"type\":\"resu")?;
+                        io::stdout().flush()?;
+                    }
                     "no-result" => return Ok(()),
                     "unknown-control" => emit(
                         json!({"type":"control_request","request_id":"unknown","request":{"subtype":"future_authority"}}),

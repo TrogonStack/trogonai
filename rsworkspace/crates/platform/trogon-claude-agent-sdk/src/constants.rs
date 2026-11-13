@@ -88,3 +88,102 @@ pub(crate) const PAGE_WINDOW: usize = 32;
 pub(crate) const CONTINUED_SCAN_LIMIT: u64 = 16_777_216;
 
 pub(crate) const CONTINUED_SCAN_CHUNK: usize = 1_048_576;
+
+pub(crate) const PRECOMPACT_CHUNK: usize = 1_048_576;
+
+/// Files larger than this take the pre-compact skip (`p0`).
+pub(crate) const PRECOMPACT_SKIP_THRESHOLD: u64 = 5_242_880;
+
+pub(crate) const PRECOMPACT_NEEDLE: &[u8] = b"\"compact_boundary\"";
+
+pub(crate) const PRECOMPACT_SNAPSHOT: &[u8] = b"{\"type\":\"attribution-snapshot\"";
+
+pub(crate) const PRECOMPACT_SYSTEM: &[u8] = b"{\"type\":\"system\"";
+
+pub(crate) const PRECOMPACT_NEAR: usize = 256;
+
+pub(crate) const PRECOMPACT_NEWLINE: u8 = 10;
+
+pub(crate) const TS_REPLY_PREFIXES: [&str; 10] = [
+    "[Request interrupted by user]",
+    "[Request interrupted: the session ended before this agent finished. Nobody asked it to stop.]",
+    "[Agent call interrupted: the process running this conversation stopped before this agent finished, so it returned no result. Nobody asked it to stop.]",
+    "[Request interrupted by user for tool use]",
+    "[Tool call did not complete: the turn was ended to deliver the message that follows. Nothing refused it; re-run it if still needed.]",
+    "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]",
+    "[Tool call result not in this copy: this session was copied from another session before that session recorded this call's result. The call may have finished there, may still be running there, or may never have run. Check whether it took effect before relying on it or running it again.]",
+    "The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed.",
+    "[Tool call skipped: the turn was stopped before this call ran, by the check whose denial is on another call in this batch. Nothing refused this call and it had no effects; re-run it if still needed.]",
+    "[Tool call skipped: the turn ended to deliver the message that follows before this call ran. Nothing refused it; re-run it if still needed.]",
+];
+
+pub(crate) const TS_DENIAL_KINDS: [&str; 7] = [
+    "user-rejected",
+    "permission-rule",
+    "automode-blocked",
+    "automode-unavailable",
+    "automode-parsing-error",
+    "interrupted",
+    "cancelled",
+];
+
+/// `Exe`: the trailer appended to a plugin prompt in a stored user message.
+pub(crate) const TS_PLUGIN_PROMPT_TRAILER: &str = "\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns \u{2014} it starts this turn in the user's place. Address the message above.";
+
+pub(crate) const TS_PLUGIN_PROMPT_HEADER_PREFIX: &str = "The ";
+
+pub(crate) const TS_PLUGIN_PROMPT_HEADER_SUFFIX: &str = " plugin sent a message:\n";
+
+pub(crate) const TS_PASTED_OPEN: &str = "<pasted_content id=\"";
+
+pub(crate) const TS_TRANSCRIPT_KINDS: [&str; 5] = ["user", "assistant", "attachment", "system", "progress"];
+
+/// `wMe`: the longest identifier the data-flow records accept.
+pub(crate) const TS_MAX_IDENTIFIER_UNITS: usize = 256;
+
+pub(crate) const TS_FLOW_VERSION: u64 = 1;
+
+/// `kMe`: exclusive bound of `inner_call_index`.
+pub(crate) const TS_INNER_CALL_LIMIT: f64 = 2_147_483_648.0;
+
+pub(crate) const TS_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+pub(crate) const TS_BASE58_ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+pub(crate) const TS_FLOW_TOUCHED_KINDS: [&str; 3] = ["artifact", "memory", "session"];
+
+pub(crate) const TS_FLOW_TOUCHED_ACTIONS: [&str; 3] = ["read", "write", "copy"];
+
+pub(crate) const TS_DERIVED_TYPES: [&str; 2] = ["claude_code_session", "unknown"];
+
+pub(crate) const TS_DERIVED_VIA: [&str; 11] = [
+    "clear",
+    "fork",
+    "branch",
+    "background",
+    "cloud",
+    "teleport",
+    "teammate",
+    "launch",
+    "resume",
+    "import",
+    "compact",
+];
+
+/// `MB`: keys a fork clears on every copied entry (`isSidechain` is reset to false separately).
+pub(crate) const TS_FORK_CLEARED_KEYS: [&str; 8] = [
+    "teamName",
+    "agentName",
+    "sessionKind",
+    "slug",
+    "sourceToolAssistantUUID",
+    "summarizedTurnPromptUuids",
+    "droppedPromptUuids",
+    "turnAttributionKey",
+];
+
+pub(crate) const TS_FORK_MESSAGE_KEYS: [&str; 3] = ["anchorUuid", "uuids", "allUuids"];
+
+pub(crate) const TS_FORK_SEGMENT_KEYS: [&str; 3] = ["headUuid", "anchorUuid", "tailUuid"];
+
+pub(crate) const TS_FORK_TITLE_FALLBACK: &str = "Forked session";

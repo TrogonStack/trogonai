@@ -73,3 +73,22 @@ integrity-verified published `0.3.319` declaration archive.
 | `script_runtime: ScriptRuntime` | not applicable | `executable`, `executableArgs` |
 | `user: Option<String>` | `user` | not applicable |
 | `run_as_uid: Option<u32>` | `user` as an int | `spawn` `uid` |
+| `Error::CliNotFoundAt(path)` | `CLINotFoundError` | not applicable |
+| `Error::WorkingDirectoryMissing(path)` | `CLIConnectionError` (cwd) | not applicable |
+| `Error::Process { .. }`, `exit_code()`, `typescript_message()` | `ProcessError` | exit-code error text |
+| `Error::Result(ResultError)` | `ResultError` | error result text |
+| `Error::Aborted(AbortError)`, `abort()` | not applicable | `AbortError` |
+| `Error::NotReadyForWriting` | `CLIConnectionError` (not ready for writing) | same text |
+| `Error::WriteToTerminatedProcess { exit_code }` | `CLIConnectionError` (terminated process) | same text without the code |
+| `Error::WriteFailed(io::Error)` | `CLIConnectionError` (write failed) | same text |
+| `Error::JsonDecode(JsonDecodeError)` | `CLIJSONDecodeError` (`line`, `original_error`) | not applicable (line skipped) |
+| `Error::MessageParse(MessageParseError)` | `MessageParseError` (`data`) | not applicable |
+
+## Settings
+
+| Rust | Python | TypeScript |
+| --- | --- | --- |
+| `Settings` (generated, all 182 declared keys plus unknown keys) | no type; the `settings` option is a string | `Settings` |
+| `SettingsInput::{Path, Json, Inline}` | `settings` string, path or JSON by braces | `Options.settings: string \| Settings` |
+| `SandboxSettings`, `SandboxNetworkConfig`, `SandboxFilesystemConfig`, `SandboxCredentialsConfig`, `SandboxIgnoreViolations` (aliases of the generated `Settings.sandbox` types) | `SandboxSettings`, `SandboxNetworkConfig`, `SandboxIgnoreViolations` TypedDicts (subset of the keys) | `SandboxSettings` and its parts |
+| `ResolvedSettings`, `ProvenanceEntry`, `ResolvedSettingSource`, `PolicySettingsOrigin`, `ResolveSettingsOptions`, `SDKSettingsParseError` | no type | same names |

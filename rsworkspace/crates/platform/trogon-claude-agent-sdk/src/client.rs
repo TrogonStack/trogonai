@@ -32,6 +32,8 @@ struct ClientRuntime {
 pub struct ClientHandle {
     commands: mpsc::Sender<Command>,
     timeout: std::time::Duration,
+    aborted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    closed: driver::Closed,
 }
 
 fn capture_inherited<E: crate::adapters::EnvironmentVariable>(environment: &E) -> crate::environment_plan::Inherited {
@@ -164,6 +166,8 @@ impl ClaudeSdkClient {
         let handle = ClientHandle {
             commands: command_tx,
             timeout: options.limits.control_timeout.as_duration(),
+            aborted: std::sync::Arc::default(),
+            closed: driver::Closed::default(),
         };
         let (process_id, driver) = driver::spawn(driver::SpawnOptions {
             options,
@@ -175,6 +179,7 @@ impl ClaudeSdkClient {
             process: &adapters.process,
             cli_path,
             inherited,
+            closed: handle.closed.clone(),
         })?;
         let mut runtime = ClientRuntime {
             handle,
@@ -223,6 +228,11 @@ impl ClaudeSdkClient {
 
     pub async fn finish_input(&self) -> Result<(), Error> {
         self.runtime.handle.finish_input().await
+    }
+
+    /// Stops the CLI process immediately; the run then ends with `Error::Aborted` (TypeScript `AbortError`).
+    pub async fn abort(&self) -> Result<(), Error> {
+        self.runtime.handle.abort().await
     }
 
     pub async fn stream_input<S>(&self, mut stream: S) -> Result<(), Error>
@@ -497,6 +507,11 @@ impl ClientHandle {
         self.finish_with(Completion::Run).await
     }
 
+    pub async fn abort(&self) -> Result<(), Error> {
+        self.aborted.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.enqueue(Command::Abort).await
+    }
+
     async fn finish_with(&self, completion: Completion) -> Result<(), Error> {
         let (response, receiver) = oneshot::channel();
         self.enqueue(Command::FinishInput { completion, response }).await?;
@@ -518,7 +533,14 @@ impl ClientHandle {
         timeout(self.timeout, self.commands.send(command))
             .await
             .map_err(|_| Error::CommandQueueTimeout)?
-            .map_err(|_| Error::DriverStopped)
+            .map_err(|_| {
+                // TypeScript: a write after the abort signal fired throws `AbortError("Operation aborted")`.
+                if self.aborted.load(std::sync::atomic::Ordering::SeqCst) {
+                    crate::AbortError::OPERATION.into()
+                } else {
+                    self.closed.write_error().unwrap_or(Error::DriverStopped)
+                }
+            })
     }
 }
 
