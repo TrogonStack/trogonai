@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::secret_store::{StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError};
 use crate::source::datadog::DatadogWebhookToken;
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
@@ -32,6 +31,9 @@ use crate::source::telegram::config::{
 use crate::source::twitter::config::TwitterConsumerSecret;
 use crate::source::zoom::config::ZoomConfig as ZoomSourceConfig;
 use crate::source::zoom::zoom_secret_token::ZoomSecretToken;
+use crate::static_config_secret_store::{
+    StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError,
+};
 use axum::http::HeaderName;
 use confique::Config;
 use trogon_config_value::{ConfigValue, ConfigValueError};

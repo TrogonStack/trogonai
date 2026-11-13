@@ -10,6 +10,7 @@ use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_secret_store::{SecretStoreError, SecretStoreGet};
 use trogon_semconv::span::INCIDENTIO_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
@@ -23,7 +24,6 @@ use super::constants::{
 use super::signature;
 
 use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{SecretStoreError, SecretStoreGet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RejectReason {

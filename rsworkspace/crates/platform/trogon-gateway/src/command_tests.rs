@@ -647,8 +647,8 @@ fn openbao_store_rejects_a_plaintext_address_by_default() {
     let error = openbao_secret_store_from_env(&env, "management").unwrap_err();
 
     assert!(matches!(
-        error.downcast_ref::<secret_store::openbao_secret_store::OpenBaoSecretStoreConfigError>(),
-        Some(secret_store::openbao_secret_store::OpenBaoSecretStoreConfigError::PlaintextAddress)
+        error.downcast_ref::<trogon_secret_store::OpenBaoSecretStoreConfigError>(),
+        Some(trogon_secret_store::OpenBaoSecretStoreConfigError::PlaintextAddress)
     ));
 }
 

@@ -1,8 +1,8 @@
 use trogon_credential_domain::{CredentialOwnerId, SourceIntegrationId, SourceKind};
+use trogon_secret_store::SecretVerifier;
 use trogon_std::env::{InMemoryEnv, ReadEnv};
 
 use super::*;
-use crate::secret_store::SecretVerifier;
 
 #[test]
 fn resolves_literal_to_static_reference() {
@@ -20,7 +20,7 @@ fn resolves_literal_to_static_reference() {
     .unwrap();
 
     assert_eq!(
-        secret.credential().as_str(),
+        secret.credential.as_str(),
         "static-config:github/primary:webhook_secret"
     );
     assert_eq!(secret.into_plaintext().unwrap().as_str(), "gh-secret");

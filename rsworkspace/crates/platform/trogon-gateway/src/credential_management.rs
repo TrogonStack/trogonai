@@ -20,6 +20,10 @@ use trogon_credential_domain::{
     CredentialStatus, CredentialVersion, SourceIntegrationId, SourceKind,
 };
 use trogon_decider_runtime::{CommandError, SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead};
+use trogon_secret_store::{
+    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate,
+};
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1};
 
@@ -47,10 +51,6 @@ use crate::credential_lifecycle::recovery_worker::{
 };
 #[cfg(test)]
 use crate::credential_runtime_projection::RuntimeCredentialRegistry;
-use crate::secret_store::{
-    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
-    SecretStoreRotate,
-};
 
 type HmacSha256 = Hmac<Sha256>;
 

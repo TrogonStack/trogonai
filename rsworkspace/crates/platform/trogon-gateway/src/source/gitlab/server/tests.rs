@@ -2,7 +2,6 @@ use super::*;
 use std::time::Duration;
 
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 use crate::source::gitlab::constants::{HEADER_WEBHOOK_ID, HEADER_WEBHOOK_SIGNATURE, HEADER_WEBHOOK_TIMESTAMP};
 use crate::source::standard_webhooks::sign_for_test;
 use axum::body::Body;
@@ -18,6 +17,7 @@ use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
 const TEST_SIGNING_TOKEN: &str = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=";
 const RUNTIME_SIGNING_TOKEN: &str = "whsec_YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=";

@@ -10,11 +10,11 @@ use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_secret_store::{SecretStoreError, SecretStoreGet};
 use trogon_semconv::span::NOTION_WEBHOOK;
 use trogon_std::{EmptySecretError, NonZeroDuration};
 
 use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{SecretStoreError, SecretStoreGet};
 
 use super::NotionEventType;
 use super::NotionVerificationToken;

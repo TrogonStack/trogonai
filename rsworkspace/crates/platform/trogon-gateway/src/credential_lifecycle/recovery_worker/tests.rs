@@ -32,13 +32,12 @@ use crate::credential_lifecycle::handler::{
     RotateCredential,
 };
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
-use crate::secret_store::SecretDestroyReason;
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreError, SecretStoreMetadata};
 use trogon_credential_domain::{
     CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialIdentity, CredentialKey,
     CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus,
     CredentialVersion, SourceIntegrationId, SourceKind,
 };
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreError, SecretStoreMetadata};
 use trogonai_proto::gateway::credentials::CredentialStateSnapshotCase;
 
 #[derive(Debug, thiserror::Error)]

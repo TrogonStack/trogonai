@@ -14,6 +14,10 @@ use trogon_decider_runtime::{
     CommandError, CommandExecution, EventDecodeOutcome, ReadFrom, ReadStreamRequest, SnapshotRead, SnapshotWrite,
     StreamAppend, StreamPosition, StreamRead, TokioSnapshotTaskScheduler,
 };
+use trogon_secret_store::{
+    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate,
+};
 use trogon_semconv::{attribute, metric};
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialEventPayloadError, CredentialStateSnapshotCase, state_v1, v1};
@@ -31,10 +35,6 @@ use crate::credential::{
     RevokeCredential, evolve_stream, initial_state,
 };
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
-use crate::secret_store::{
-    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
-    SecretStoreRotate,
-};
 
 type ExecutionError<SnapshotReadError, ReadError, AppendError> = CommandError<
     CredentialDecideError,

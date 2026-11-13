@@ -9,10 +9,10 @@ mod credential_lifecycle;
 mod credential_management;
 mod credential_runtime_projection;
 mod http;
-mod secret_store;
 mod source;
 mod source_plugin;
 mod source_status;
+mod static_config_secret_store;
 mod streams;
 mod supervision;
 
@@ -30,7 +30,6 @@ use crate::constants::{
     ENABLE_RUNTIME_TWITTER_CREDENTIALS, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR,
     OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
 };
-use crate::secret_store::openbao_secret_store::OpenBaoTransport;
 use anyhow::Context;
 use futures_util::FutureExt;
 use tokio::task::JoinSet;
@@ -43,6 +42,7 @@ use trogon_nats::jetstream::{
     JetStreamPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, ObjectStorePut, StreamMaxAge,
 };
 use trogon_nats::{connect, wait_for_server_info};
+use trogon_secret_store::OpenBaoTransport;
 use trogon_std::SecretString;
 use trogon_std::args::{CliArgs, ParseArgs};
 use trogon_std::env::{ReadEnv, SystemEnv};
@@ -342,7 +342,7 @@ async fn run_telegram_webhook_registration_worker<G>(
     interval: std::time::Duration,
 ) -> std::convert::Infallible
 where
-    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError>,
+    G: trogon_secret_store::SecretStoreGet<Error = trogon_secret_store::SecretStoreError>,
 {
     let mut interval = tokio::time::interval(interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -368,7 +368,7 @@ async fn register_telegram_webhooks<C, E, Register, G>(
     register: Register,
 ) where
     E: std::error::Error,
-    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError>,
+    G: trogon_secret_store::SecretStoreGet<Error = trogon_secret_store::SecretStoreError>,
     Register: for<'a> std::ops::AsyncFn(
             &'a source::telegram::TelegramSourceConfig,
             &'a C,
@@ -500,7 +500,7 @@ fn spawn_discord_gateway_with_runtime_credentials<P, S, G, Shutdown, Run, Runnin
 ) where
     P: JetStreamPublisher + Clone,
     S: ObjectStorePut + Clone,
-    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError> + Send + Sync + 'static,
+    G: trogon_secret_store::SecretStoreGet<Error = trogon_secret_store::SecretStoreError> + Send + Sync + 'static,
     Shutdown: std::future::Future<Output = ()> + Send + 'static,
     Run: Fn(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running
         + Send
@@ -540,7 +540,7 @@ async fn supervise_discord_runtime_gateway<P, S, G, Run, Running>(
 where
     P: JetStreamPublisher + Clone,
     S: ObjectStorePut + Clone,
-    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError>,
+    G: trogon_secret_store::SecretStoreGet<Error = trogon_secret_store::SecretStoreError>,
     Run: Fn(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running,
     Running: std::future::Future<Output = ()>,
 {
@@ -844,9 +844,7 @@ fn log_projection_refresh(report: &credential_runtime_projection::RuntimeProject
 fn source_runtime_credentials_from_env(
     env: &impl ReadEnv,
     runtime_credentials: &credential_runtime_projection::RuntimeCredentialRegistry,
-) -> anyhow::Result<
-    Option<source_plugin::RuntimeCredentialMounts<secret_store::openbao_secret_store::OpenBaoSecretStore>>,
-> {
+) -> anyhow::Result<Option<source_plugin::RuntimeCredentialMounts<trogon_secret_store::OpenBaoSecretStore>>> {
     let github_enabled = env_flag_enabled(env, ENABLE_RUNTIME_GITHUB_CREDENTIALS);
     let gitlab_enabled = env_flag_enabled(env, ENABLE_RUNTIME_GITLAB_CREDENTIALS);
     let incidentio_enabled = env_flag_enabled(env, ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS);
@@ -978,11 +976,7 @@ fn discord_runtime_credentials_from_env(
     env: &impl ReadEnv,
     runtime_credentials: &credential_runtime_projection::RuntimeCredentialRegistry,
 ) -> anyhow::Result<
-    Option<
-        credential_runtime_projection::RuntimeCredentialResolver<
-            secret_store::openbao_secret_store::OpenBaoSecretStore,
-        >,
-    >,
+    Option<credential_runtime_projection::RuntimeCredentialResolver<trogon_secret_store::OpenBaoSecretStore>>,
 > {
     if !env_flag_enabled(env, ENABLE_RUNTIME_DISCORD_CREDENTIALS) {
         return Ok(None);
@@ -1006,7 +1000,7 @@ fn credential_management_admin_token_from_env(env: &impl ReadEnv) -> anyhow::Res
 fn openbao_secret_store_from_env(
     env: &impl ReadEnv,
     enabled_by: &str,
-) -> anyhow::Result<secret_store::openbao_secret_store::OpenBaoSecretStore> {
+) -> anyhow::Result<trogon_secret_store::OpenBaoSecretStore> {
     let address = env
         .var(OPENBAO_ADDR)
         .with_context(|| format!("{OPENBAO_ADDR} must be set when {enabled_by} is enabled"))?;
@@ -1014,7 +1008,7 @@ fn openbao_secret_store_from_env(
         .var(OPENBAO_TOKEN)
         .with_context(|| format!("{OPENBAO_TOKEN} must be set when {enabled_by} is enabled"))?;
     let transport = openbao_transport_from_env(env)?;
-    secret_store::openbao_secret_store::OpenBaoSecretStore::new(address, token, transport)
+    trogon_secret_store::OpenBaoSecretStore::new(address, token, transport)
         .context("OpenBao secret store configuration")
 }
 

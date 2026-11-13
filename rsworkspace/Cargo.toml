@@ -69,6 +69,7 @@ trogon-policy-cel = { path = "crates/policy/trogon-policy-cel" }
 trogon-channel = { path = "crates/channel/trogon-channel" }
 channel-bridge-telegram = { path = "crates/channel/channel-bridge-telegram" }
 trogon-credential-domain = { path = "crates/credential/trogon-credential-domain" }
+trogon-secret-store = { path = "crates/credential/trogon-secret-store" }
 
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }
@@ -169,6 +170,7 @@ tonic = { version = "=0.14.9", default-features = false, features = ["transport"
 moka = { version = "=0.12.16", features = ["future"] }
 
 # Misc
+chrono = "=0.4.45"
 chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
 toml = "=1.1.8"

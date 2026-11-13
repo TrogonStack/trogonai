@@ -1,6 +1,5 @@
 use super::*;
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretMaterial, SecretStorePut};
 use crate::source::plaid::constants::KEY_ID_LEN_MAX;
 use crate::source::plaid::test_support::{
     FakeFailure, FakeKeyFetcher, TestKeyPair, claims_segment, hs256_token, unsigned_token,
@@ -17,6 +16,7 @@ use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretMaterial, SecretStorePut};
 use trogon_std::time::FixedEpochClock;
 
 const TEST_NOW: u64 = 1_700_000_000;

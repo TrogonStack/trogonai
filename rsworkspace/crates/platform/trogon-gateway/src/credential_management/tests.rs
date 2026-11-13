@@ -24,8 +24,8 @@ use crate::credential_lifecycle::recovery_worker::{
     CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError,
 };
 use crate::credential_runtime_projection::{RuntimeCredentialError, RuntimeIntegrationKey};
-use crate::secret_store::MockOpenBaoSecretStore;
 use trogon_credential_domain::{CredentialDestroyReason, CredentialFailureReason};
+use trogon_secret_store::MockOpenBaoSecretStore;
 use trogonai_proto::gateway::credentials::v1;
 
 #[derive(Clone, Default)]

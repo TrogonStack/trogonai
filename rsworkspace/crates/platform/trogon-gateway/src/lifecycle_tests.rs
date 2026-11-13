@@ -10,11 +10,11 @@ use trogon_credential_domain::{
 };
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucketBinding, MockJetStreamPublisher, MockObjectStore};
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut, SecretStoreRotate};
 
 use crate::credential_runtime_projection::{
     RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
 };
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut, SecretStoreRotate};
 use crate::source::google_pubsub::credentials::GoogleCredentialsError;
 
 use super::*;
@@ -983,7 +983,7 @@ fn runtime_credential_env(flags: &[&str]) -> trogon_std::env::InMemoryEnv {
     env
 }
 
-type OpenBaoMounts = source_plugin::RuntimeCredentialMounts<secret_store::openbao_secret_store::OpenBaoSecretStore>;
+type OpenBaoMounts = source_plugin::RuntimeCredentialMounts<trogon_secret_store::OpenBaoSecretStore>;
 
 fn mounted_sources(mounts: &OpenBaoMounts) -> [bool; 11] {
     [

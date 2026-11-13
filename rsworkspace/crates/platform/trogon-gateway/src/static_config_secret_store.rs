@@ -2,10 +2,9 @@ use std::env::VarError;
 use std::fmt;
 
 use trogon_credential_domain::{CredentialKind, CredentialScope, PublicCredentialId};
+use trogon_secret_store::SecretMaterial;
 use trogon_std::env::ReadEnv;
 use trogon_std::{EmptySecretError, SecretString};
-
-use super::SecretMaterial;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StaticConfigSecretInput {
@@ -26,10 +25,6 @@ pub struct StaticConfigSecret {
 impl StaticConfigSecret {
     fn new(credential: PublicCredentialId, material: SecretMaterial) -> Self {
         Self { credential, material }
-    }
-
-    pub fn credential(&self) -> &PublicCredentialId {
-        &self.credential
     }
 
     pub fn into_plaintext(self) -> Result<SecretString, StaticConfigSecretStoreError> {

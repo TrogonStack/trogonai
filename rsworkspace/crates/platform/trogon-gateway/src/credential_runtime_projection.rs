@@ -22,6 +22,7 @@ use trogon_decider_runtime::{
     StreamRead,
 };
 use trogon_nats::jetstream::{JetStreamGetRawMessage, JetStreamGetStreamInfo};
+use trogon_secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
 use trogon_semconv::{attribute, metric};
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{
@@ -38,7 +39,6 @@ use crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX;
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::stream::credential_event_subject;
 use crate::credential::{CredentialEvolveError, evolve_stream, initial_state};
-use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
 
 #[derive(Debug)]
 struct RuntimeProjectionMetrics {

@@ -44,10 +44,10 @@ use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, ProvisionedStreamField, PublishOutcome,
 };
 use trogon_nats::{DottedNatsToken, SubjectTokenViolationError};
+use trogon_secret_store::{SecretStoreError, SecretStoreGet};
 use trogon_semconv::span::SLACK_WEBHOOK;
 
 use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{SecretStoreError, SecretStoreGet};
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
     if outcome.is_ok() {

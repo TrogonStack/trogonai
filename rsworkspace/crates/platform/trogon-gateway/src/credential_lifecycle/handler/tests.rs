@@ -21,11 +21,12 @@ use crate::credential::commands::proto::{
 use crate::credential_runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialRegistry, RuntimeIntegrationKey, RuntimeIntegrationProjection,
 };
-use crate::secret_store::openbao_secret_store::{OpenBaoSecretStore, OpenBaoTransport};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreError, SecretStoreGet};
 use trogon_credential_domain::{
     CredentialFingerprint, CredentialIdentityVersion, CredentialKind, CredentialMetadata, CredentialOwnerId,
     CredentialScope, CredentialStatus, SourceIntegrationId,
+};
+use trogon_secret_store::{
+    MockOpenBaoSecretStore, OpenBaoSecretStore, OpenBaoTransport, SecretStoreError, SecretStoreGet,
 };
 use trogonai_proto::gateway::credentials::CredentialEventCase;
 

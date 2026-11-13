@@ -11,13 +11,13 @@ use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
-use trogon_std::NonZeroDuration;
-
-use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{
+use trogon_secret_store::{
     MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStorePut, SecretStoreRevoke,
     SecretStoreRotate,
 };
+use trogon_std::NonZeroDuration;
+
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 
 const TEST_SECRET: &str = "test-secret";
 

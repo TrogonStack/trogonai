@@ -1,6 +1,5 @@
 use super::*;
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
 use tower::ServiceExt;
@@ -14,6 +13,7 @@ use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
 const TEST_CLIENT_STATE: &str = "secret-client-state";
 const RUNTIME_CLIENT_STATE: &str = "runtime-client-state";

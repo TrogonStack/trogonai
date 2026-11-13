@@ -26,6 +26,7 @@ pub enum SecretStoreError {
 }
 
 impl SecretStoreError {
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) fn invalid_generated(error: impl Into<GeneratedValueError>) -> Self {
         Self::InvalidGenerated { source: error.into() }
     }

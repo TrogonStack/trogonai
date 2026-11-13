@@ -18,11 +18,11 @@ use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_secret_store::{SecretStoreError, SecretStoreGet};
 use trogon_semconv::span::TELEGRAM_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{SecretStoreError, SecretStoreGet};
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
     if outcome.is_ok() {

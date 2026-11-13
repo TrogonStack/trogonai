@@ -8,8 +8,8 @@ use super::*;
 use crate::credential::commands::proto::{activated_to_proto, write_requested_to_proto};
 use crate::credential::{evolve_stream, initial_state};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut};
 use trogon_credential_domain::{CredentialIdentity, CredentialOwnerId, CredentialScope};
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut};
 use trogonai_proto::gateway::credentials::v1;
 
 fn owner_id() -> CredentialOwnerId {

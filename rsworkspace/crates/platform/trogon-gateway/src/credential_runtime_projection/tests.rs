@@ -8,10 +8,6 @@ use crate::credential::commands::proto::{
     write_requested_to_proto,
 };
 use crate::credential::stream::credential_event_subject;
-use crate::secret_store::{
-    MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut,
-    SecretStoreRevoke, SecretStoreRotate, SecretVerifier,
-};
 use chrono::Utc;
 use trogon_credential_domain::{
     AllowedHosts, AllowedRuntimeServices, CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint,
@@ -24,6 +20,10 @@ use trogon_decider_runtime::{
     ReadStreamResponse, StreamEvent, StreamPosition, StreamRead,
 };
 use trogon_nats::jetstream::MockJetStreamPublishMessage;
+use trogon_secret_store::{
+    MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut,
+    SecretStoreRevoke, SecretStoreRotate, SecretVerifier,
+};
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 use uuid::Uuid;
 

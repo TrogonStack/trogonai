@@ -3,7 +3,6 @@ use crate::config::load;
 use crate::credential_runtime_projection::{
     RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
 };
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 use crate::source::datadog::constants as datadog_constants;
 use crate::source::github::constants::{HEADER_DELIVERY, HEADER_EVENT, HEADER_SIGNATURE};
 use crate::source::gitlab::GitLabSigningToken;
@@ -30,6 +29,7 @@ use trogon_credential_domain::{
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore};
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
 type HmacSha256 = hmac::Hmac<sha2::Sha256>;
 
