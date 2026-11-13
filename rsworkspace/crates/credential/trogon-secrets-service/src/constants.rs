@@ -44,3 +44,11 @@ pub const THROTTLED_RETRY_AFTER: Duration = RELEASE_DEADLINE;
 /// How many releases one member of the queue group works on at once when the
 /// operator sets no limit.
 pub(crate) const DEFAULT_ADMISSION_LIMIT: NonZeroUsize = NonZeroUsize::MIN.saturating_add(63);
+
+/// The characters the contract's `egress_host.host_is_exact` rule keeps out
+/// of a host, so a destination is never a pattern or a path.
+pub(crate) const NOT_EXACT_HOST_CHARACTERS: [char; 3] = ['*', '/', ' '];
+
+/// The length of a NATS curve public key: the `X` prefix and 55 base32
+/// characters.
+pub(crate) const CURVE_KEY_LEN: usize = 56;
