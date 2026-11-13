@@ -190,7 +190,9 @@ With the default TypeScript style, in-process servers stay out of
 `--mcp-config` and are named in the `initialize` request. With
 `ArgvStyle::Python` they appear in `--mcp-config` as `sdk` entries, and
 `ClaudeAgentOptions.mcp_config` carries Python's file path or JSON text form
-verbatim. An in-process server replaces an external config of the same name.
+verbatim as an `McpConfig`. Debug output redacts it, and the `extra` keys of
+every server config. An in-process server replaces an external config of the
+same name.
 
 `set_mcp_servers` is not serialized, as in TypeScript. It swaps in-process
 servers before the request is sent and keeps the session of a server that stays

@@ -21,7 +21,7 @@ use trogon_claude_agent_sdk::{
     AgentDefinition, AgentExecution, AgentMcpServerSpec, AgentName, BuiltinToolName, CallbackError, CancellationToken,
     ClaudeAgentOptions, ControlRequestId, DialogKind, EffortLevel, ElicitationResponse, HookContinuation, HookEvent,
     HookFailureMode, HookOutput, HookOutputVisibility, HookPermissionDecision, HookRegistration, HookSpecificOutput,
-    InputBlock, InterruptReceipt, JsonObject, LocalMcpServer, LocalMcpServerOptions, McpRemoteServerOptions,
+    InputBlock, InterruptReceipt, JsonObject, LocalMcpServer, LocalMcpServerOptions, McpConfig, McpRemoteServerOptions,
     McpSdkServerOptions, McpServerDialect, McpServerError, McpServerName, McpServerOptions, McpServerToolPolicy,
     McpStdioServerOptions, McpToolInputSchema, McpToolName, McpToolOrgMaxPermission, McpToolOutput,
     McpToolPermissionPolicy, McpToolRequest, McpUrl, McpUrlError, MessageId, MessageOrigin, OutputSchema,
@@ -384,6 +384,65 @@ fn mcp_transport_options_preserve_wire_values_but_redact_sensitive_debug_values(
         "McpUrl { .. }"
     );
     Ok(())
+}
+
+#[test]
+fn mcp_extra_fields_and_raw_config_stay_out_of_debug_output() -> TestResult {
+    let extra = JsonObject::from_iter([("oauth".into(), json!({"clientSecret": "fixture-private-extra"}))]);
+    let mut remote = McpRemoteServerOptions::new("https://example.com/mcp");
+    remote.extra = extra.clone();
+    let servers = [
+        McpServerOptions::Stdio(McpStdioServerOptions {
+            command: PathBuf::from("server"),
+            extra: extra.clone(),
+            ..McpStdioServerOptions::default()
+        }),
+        McpServerOptions::Http(remote),
+        McpServerOptions::Sdk(McpSdkServerOptions {
+            name: "fixture".into(),
+            extra,
+            ..McpSdkServerOptions::default()
+        }),
+    ];
+    for server in servers {
+        assert_eq!(server.to_wire_json()?["oauth"]["clientSecret"], "fixture-private-extra");
+        let debug = format!("{server:?}");
+        assert!(!debug.contains("fixture-private-extra"), "{debug}");
+        assert!(debug.contains("extra: <redacted>"), "{debug}");
+    }
+    let raw = r#"{"mcpServers":{"remote":{"headers":{"Authorization":"Bearer fixture-private-token"}}}}"#;
+    let configs = [
+        McpConfig::from(raw),
+        McpConfig::from(raw.to_owned()),
+        McpConfig::from(std::ffi::OsString::from(raw)),
+        McpConfig::from(PathBuf::from(raw)),
+    ];
+    for config in &configs {
+        assert_eq!(config.as_os_str(), raw);
+        assert_eq!(config, &configs[0]);
+    }
+    let options = ClaudeAgentOptions {
+        mcp_config: Some(configs[0].clone()),
+        ..ClaudeAgentOptions::default()
+    };
+    let debug = format!("{options:?}");
+    assert!(!debug.contains("fixture-private-token"));
+    assert!(debug.contains("mcp_config: Some(<redacted>)"), "{debug}");
+    Ok(())
+}
+
+/// Both SDKs take a stdio command as a string, so a path that is not UTF-8 fails instead of becoming a
+/// different command.
+#[cfg(unix)]
+#[test]
+fn mcp_stdio_command_that_is_not_utf8_is_rejected() {
+    use std::os::unix::ffi::OsStrExt;
+    let server = McpServerOptions::Stdio(McpStdioServerOptions {
+        command: PathBuf::from(std::ffi::OsStr::from_bytes(b"/srv/fixture-\xff")),
+        ..McpStdioServerOptions::default()
+    });
+    let error = server.to_wire_json().err().map(|error| error.to_string());
+    assert_eq!(error.as_deref(), Some("MCP server command is not valid UTF-8"));
 }
 
 /// Neither upstream SDK checks MCP URLs, so `McpUrl::from` keeps any text and the checked constructor
