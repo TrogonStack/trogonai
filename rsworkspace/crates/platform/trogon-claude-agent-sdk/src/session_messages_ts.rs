@@ -7,6 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::constants::{TS_DENIAL_KINDS, TS_REPLY_PREFIXES};
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
@@ -35,28 +36,6 @@ pub struct MessageOptions {
 }
 
 type Entries = IndexMap<String, JsonObject>;
-
-const REPLY_PREFIXES: [&str; 10] = [
-    "[Request interrupted by user]",
-    "[Request interrupted: the session ended before this agent finished. Nobody asked it to stop.]",
-    "[Agent call interrupted: the process running this conversation stopped before this agent finished, so it returned no result. Nobody asked it to stop.]",
-    "[Request interrupted by user for tool use]",
-    "[Tool call did not complete: the turn was ended to deliver the message that follows. Nothing refused it; re-run it if still needed.]",
-    "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]",
-    "[Tool call result not in this copy: this session was copied from another session before that session recorded this call's result. The call may have finished there, may still be running there, or may never have run. Check whether it took effect before relying on it or running it again.]",
-    "The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed.",
-    "[Tool call skipped: the turn was stopped before this call ran, by the check whose denial is on another call in this batch. Nothing refused this call and it had no effects; re-run it if still needed.]",
-    "[Tool call skipped: the turn ended to deliver the message that follows before this call ran. Nothing refused it; re-run it if still needed.]",
-];
-const DENIAL_KINDS: [&str; 7] = [
-    "user-rejected",
-    "permission-rule",
-    "automode-blocked",
-    "automode-unavailable",
-    "automode-parsing-error",
-    "interrupted",
-    "cancelled",
-];
 
 fn str_field<'a>(entry: &'a JsonObject, key: &str) -> Option<&'a str> {
     entry.get(key).and_then(Value::as_str)
@@ -128,12 +107,17 @@ fn normalized_origin(origin: &Value) -> Value {
     Value::Object(out)
 }
 
+/// A JSON object from ordered pairs.
+fn object<const N: usize>(pairs: [(&str, Value); N]) -> Value {
+    Value::Object(pairs.into_iter().map(|(key, value)| (key.to_owned(), value)).collect())
+}
+
 /// `FU`: the origin of a queued command, adding the run id of a task notification.
 fn command_origin(origin: Option<&Value>, mode: Option<&str>, run_id: Option<&Value>) -> Option<Value> {
     let normalized = origin
         .map(normalized_origin)
         .filter(|origin| !origin.is_null())
-        .or_else(|| (mode == Some("task-notification")).then(|| serde_json::json!({"kind": "task-notification"})));
+        .or_else(|| (mode == Some("task-notification")).then(|| object([("kind", Value::from("task-notification"))])));
     let run = valid_run_id(run_id);
     match (normalized, run) {
         (Some(Value::Object(mut object)), Some(run))
@@ -174,7 +158,7 @@ fn fold_voice_call(entry: JsonObject) -> JsonObject {
         rest.insert("type".to_owned(), Value::from("user"));
         rest.insert(
             "message".to_owned(),
-            serde_json::json!({"role": "user", "content": body}),
+            object([("role", Value::from("user")), ("content", body)]),
         );
         return rest;
     };
@@ -873,7 +857,7 @@ fn is_interruption(entry: &JsonObject) -> bool {
     if kind_of(entry) != Some("user") {
         return false;
     }
-    let starts = |text: &str| REPLY_PREFIXES.iter().any(|prefix| text.starts_with(prefix));
+    let starts = |text: &str| TS_REPLY_PREFIXES.iter().any(|prefix| text.starts_with(prefix));
     match entry
         .get("message")
         .and_then(Value::as_object)
@@ -1011,7 +995,10 @@ fn queued_to_user(entry: &JsonObject, wanted: bool, keep_meta: bool, uuids: &mut
     }
     out.insert(
         "message".to_owned(),
-        serde_json::json!({"role": "user", "content": prompt.cloned().unwrap_or(Value::Null)}),
+        object([
+            ("role", Value::from("user")),
+            ("content", prompt.cloned().unwrap_or(Value::Null)),
+        ]),
     );
     out.insert("isMeta".to_owned(), Value::Bool(truthy(attachment.get("isMeta"))));
     if let Some(origin) = command_origin(origin, mode, attachment.get("runId")) {
@@ -1085,12 +1072,14 @@ fn to_message(entry: &JsonObject, parent_tool_use_id: Option<&str>, parent_agent
     let denial = entry
         .get("toolDenialKind")
         .and_then(Value::as_str)
-        .filter(|kind| DENIAL_KINDS.contains(kind));
+        .filter(|kind| TS_DENIAL_KINDS.contains(kind));
     let tool_result_meta = match (denial, blocks.as_slice()) {
-        (Some(kind), [block]) => block
-            .get("tool_use_id")
-            .and_then(Value::as_str)
-            .map(|id| serde_json::json!([{"id": id, "non_execution_kind": kind}])),
+        (Some(kind), [block]) => block.get("tool_use_id").and_then(Value::as_str).map(|id| {
+            Value::Array(vec![object([
+                ("id", Value::from(id)),
+                ("non_execution_kind", Value::from(kind)),
+            ])])
+        }),
         _ => None,
     };
     SessionMessage {
@@ -1221,43 +1210,5 @@ pub(crate) fn subagent_messages(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::cmp::Ordering::{Greater, Less};
-
-    use super::locale_compare;
-
-    #[test]
-    fn collation_differs_from_code_point_order_for_case() {
-        assert_eq!(locale_compare("a", "B"), Less);
-        assert_eq!("a".cmp("B"), Greater);
-        assert_eq!(locale_compare("a", "A"), Less);
-        assert_eq!("a".cmp("A"), Greater);
-    }
-
-    #[test]
-    fn collation_ranks_accents_after_the_base_letters() {
-        assert_eq!(locale_compare("\u{e9}", "f"), Less);
-        assert_eq!("\u{e9}".cmp("f"), Greater);
-        assert_eq!(locale_compare("resume", "r\u{e9}sum\u{e9}"), Less);
-        assert_eq!(locale_compare("r\u{e9}sum\u{e9}", "resumf"), Less);
-    }
-
-    #[test]
-    fn collation_puts_punctuation_before_digits_before_letters() {
-        assert_eq!(locale_compare("_", "-"), Less);
-        assert_eq!(locale_compare("-", "1"), Less);
-        assert_eq!(locale_compare("1", "a"), Less);
-        assert_eq!(locale_compare("10", "9"), Less);
-        assert_eq!(locale_compare("Z", "a"), Greater);
-        assert_eq!("Z".cmp("a"), Less);
-    }
-
-    #[test]
-    fn iso_timestamps_still_sort_chronologically() {
-        assert_eq!(
-            locale_compare("2024-01-01T00:00:00.000Z", "2024-01-01T00:00:01.000Z"),
-            Less
-        );
-        assert_eq!(locale_compare("", "2024"), Less);
-    }
-}
+#[path = "session_messages_ts_tests.rs"]
+mod tests;

@@ -5,24 +5,21 @@
 //! surviving one is appended at the end. The scan is chunk-driven exactly like upstream, including how lines that
 //! straddle a chunk boundary are classified.
 
-use std::{fs::File, io::Read, path::Path};
+use std::{ffi::OsStr, fs::File, io::Read, path::Path};
 
 use serde_json::Value;
 
-const CHUNK: usize = 1_048_576;
-/// Files larger than this take the pre-compact skip (`p0`).
-pub(crate) const SKIP_THRESHOLD: u64 = 5_242_880;
-const NEEDLE: &[u8] = b"\"compact_boundary\"";
-const SNAPSHOT: &[u8] = b"{\"type\":\"attribution-snapshot\"";
-const SYSTEM: &[u8] = b"{\"type\":\"system\"";
-const NEAR: usize = 256;
-const NEWLINE: u8 = 10;
+use crate::adapters::EnvironmentVariable;
+use crate::constants::{
+    PRECOMPACT_CHUNK, PRECOMPACT_NEAR, PRECOMPACT_NEEDLE, PRECOMPACT_NEWLINE, PRECOMPACT_SNAPSHOT, PRECOMPACT_SYSTEM,
+};
 
 /// Whether `CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP` is set to a truthy value (`1`, `true`, `yes` or `on`).
-pub(crate) fn skip_disabled() -> bool {
-    std::env::var("CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP")
-        .map(|value| matches!(value.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(false)
+pub(crate) fn skip_disabled<E: EnvironmentVariable>(environment: &E) -> bool {
+    environment
+        .var_os(OsStr::new("CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP"))
+        .and_then(|value| value.into_string().ok())
+        .is_some_and(|value| matches!(value.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
 }
 
 /// `f0`: a compact boundary line that preserves nothing, so everything before it can be dropped.
@@ -54,7 +51,7 @@ fn find_newline(buffer: &[u8], from: usize) -> Option<usize> {
     buffer
         .get(from..)?
         .iter()
-        .position(|byte| *byte == NEWLINE)
+        .position(|byte| *byte == PRECOMPACT_NEWLINE)
         .map(|index| index + from)
 }
 
@@ -76,19 +73,19 @@ impl Scan {
         if self.carry_len == 0 {
             return 0;
         }
-        let Some(newline) = chunk.iter().position(|byte| *byte == NEWLINE) else {
+        let Some(newline) = chunk.iter().position(|byte| *byte == PRECOMPACT_NEWLINE) else {
             return 0;
         };
         let end = newline + 1;
         let carry = &self.carry[..self.carry_len];
-        if carry.starts_with(SNAPSHOT) {
+        if carry.starts_with(PRECOMPACT_SNAPSHOT) {
             self.straddle_snapshot_carry = self.carry_len;
             self.straddle_snapshot_tail = end;
             self.last_snapshot = None;
-        } else if self.carry_len < SNAPSHOT.len() {
+        } else if self.carry_len < PRECOMPACT_SNAPSHOT.len() {
             return 0;
         } else {
-            if carry.starts_with(SYSTEM) {
+            if carry.starts_with(PRECOMPACT_SYSTEM) {
                 let line = format!(
                     "{}{}",
                     String::from_utf8_lossy(carry),
@@ -109,20 +106,22 @@ impl Scan {
     /// `ZU`: copies the complete lines of `buffer`, honoring snapshots and history-dropping boundaries. Returns the
     /// position of the last snapshot line and where the unfinished tail starts.
     fn copy_lines(&mut self, buffer: &[u8]) -> (Option<(usize, usize)>, usize) {
-        let mut needle = find(buffer, NEEDLE, 0);
+        let mut needle = find(buffer, PRECOMPACT_NEEDLE, 0);
         let (mut emit_from, mut line_start) = (0, 0);
         let mut snapshot = None;
         let mut newline = find_newline(buffer, 0);
         while let Some(line_end) = newline {
             let next = line_end + 1;
             if needle.is_some_and(|at| at < line_start) {
-                needle = find(buffer, NEEDLE, line_start);
+                needle = find(buffer, PRECOMPACT_NEEDLE, line_start);
             }
-            if next - line_start >= SNAPSHOT.len() && buffer[line_start..].starts_with(SNAPSHOT) {
+            if next - line_start >= PRECOMPACT_SNAPSHOT.len() && buffer[line_start..].starts_with(PRECOMPACT_SNAPSHOT) {
                 self.out.extend_from_slice(&buffer[emit_from..line_start]);
                 snapshot = Some((line_start, next));
                 emit_from = next;
-            } else if let Some(at) = needle.filter(|at| *at >= line_start && *at < (line_start + NEAR).min(next)) {
+            } else if let Some(at) =
+                needle.filter(|at| *at >= line_start && *at < (line_start + PRECOMPACT_NEAR).min(next))
+            {
                 if drops_history(&String::from_utf8_lossy(&buffer[line_start..line_end])) {
                     self.out.clear();
                     self.last_snapshot = None;
@@ -130,7 +129,7 @@ impl Scan {
                     self.straddle_snapshot_carry = 0;
                     emit_from = line_start;
                 }
-                needle = find(buffer, NEEDLE, at + NEEDLE.len());
+                needle = find(buffer, PRECOMPACT_NEEDLE, at + PRECOMPACT_NEEDLE.len());
             }
             line_start = next;
             newline = find_newline(buffer, line_start);
@@ -180,15 +179,15 @@ impl Scan {
     fn finish(mut self) -> Vec<u8> {
         if self.carry_len > 0 {
             let carry = self.carry[..self.carry_len].to_vec();
-            if carry.starts_with(SNAPSHOT) {
+            if carry.starts_with(PRECOMPACT_SNAPSHOT) {
                 self.last_snapshot = Some(carry);
             } else {
                 self.out.extend_from_slice(&carry);
             }
         }
         if let Some(snapshot) = self.last_snapshot.take() {
-            if self.out.last().is_some_and(|byte| *byte != NEWLINE) {
-                self.out.push(NEWLINE);
+            if self.out.last().is_some_and(|byte| *byte != PRECOMPACT_NEWLINE) {
+                self.out.push(PRECOMPACT_NEWLINE);
             }
             self.out.extend_from_slice(&snapshot);
         }
@@ -200,10 +199,10 @@ impl Scan {
 pub(crate) fn read_after_last_boundary(path: &Path, size: u64) -> Option<Vec<u8>> {
     let mut file = File::open(path).ok()?;
     let mut scan = Scan::default();
-    let mut buffer = vec![0_u8; CHUNK];
+    let mut buffer = vec![0_u8; PRECOMPACT_CHUNK];
     let mut read: u64 = 0;
     while read < size {
-        let want = usize::try_from(size - read).map_or(CHUNK, |left| left.min(CHUNK));
+        let want = usize::try_from(size - read).map_or(PRECOMPACT_CHUNK, |left| left.min(PRECOMPACT_CHUNK));
         let mut filled = 0;
         while filled < want {
             let count = file.read(&mut buffer[filled..want]).ok()?;
@@ -222,122 +221,5 @@ pub(crate) fn read_after_last_boundary(path: &Path, size: u64) -> Option<Vec<u8>
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn run(chunks: &[&[u8]]) -> Vec<u8> {
-        let mut scan = Scan::default();
-        for chunk in chunks {
-            scan.feed(chunk);
-        }
-        scan.finish()
-    }
-
-    const BOUNDARY: &str = r#"{"type":"system","subtype":"compact_boundary","uuid":"b"}"#;
-    const KEPT: &str = r#"{"type":"system","subtype":"compact_boundary","uuid":"k","compactMetadata":{"preservedSegment":{"headUuid":"h"}}}"#;
-
-    #[test]
-    fn lines_before_the_last_boundary_are_dropped() {
-        let text = format!("{{\"a\":1}}\n{BOUNDARY}\n{{\"b\":2}}\n");
-        assert_eq!(
-            run(&[text.as_bytes()]),
-            format!("{BOUNDARY}\n{{\"b\":2}}\n").into_bytes()
-        );
-    }
-
-    #[test]
-    fn a_boundary_that_preserves_messages_keeps_the_history() {
-        let text = format!("{{\"a\":1}}\n{KEPT}\n{{\"b\":2}}\n");
-        assert_eq!(run(&[text.as_bytes()]), text.into_bytes());
-    }
-
-    #[test]
-    fn snapshots_move_to_the_end_and_only_the_last_one_survives() {
-        let text = "{\"type\":\"attribution-snapshot\",\"n\":1}\n{\"a\":1}\n{\"type\":\"attribution-snapshot\",\"n\":2}\n{\"b\":2}\n";
-        assert_eq!(
-            String::from_utf8_lossy(&run(&[text.as_bytes()])),
-            "{\"a\":1}\n{\"b\":2}\n{\"type\":\"attribution-snapshot\",\"n\":2}\n"
-        );
-    }
-
-    #[test]
-    fn a_boundary_drops_earlier_snapshots_too() {
-        let text = format!("{{\"type\":\"attribution-snapshot\",\"n\":1}}\n{BOUNDARY}\n{{\"b\":2}}");
-        assert_eq!(
-            String::from_utf8_lossy(&run(&[text.as_bytes()])),
-            format!("{BOUNDARY}\n{{\"b\":2}}")
-        );
-    }
-
-    #[test]
-    fn a_line_split_across_chunks_is_still_classified() {
-        let text = format!("{{\"a\":1}}\n{BOUNDARY}\n{{\"b\":2}}\n");
-        let bytes = text.as_bytes();
-        let split = 10 + 20;
-        assert_eq!(
-            run(&[&bytes[..split], &bytes[split..]]),
-            format!("{BOUNDARY}\n{{\"b\":2}}\n").into_bytes()
-        );
-    }
-
-    fn filler(count: usize) -> String {
-        let line = format!("{{\"a\":\"{}\"}}\n", "x".repeat(1000));
-        line.repeat(count)
-    }
-
-    fn pad_to(target: usize, current: usize) -> String {
-        // One line of exactly `target - current` bytes (at least 9: the framing plus the newline).
-        let width = target - current - 9;
-        format!("{{\"a\":\"{}\"}}\n", "y".repeat(width))
-    }
-
-    fn write_fixture(text: &str) -> Result<(tempfile::TempDir, std::path::PathBuf), std::io::Error> {
-        let dir = tempfile::tempdir()?;
-        let path = dir.path().join("session.jsonl");
-        std::fs::write(&path, text)?;
-        Ok((dir, path))
-    }
-
-    #[test]
-    fn a_boundary_line_crossing_the_one_mebibyte_read_boundary_is_found_on_a_real_file() -> Result<(), std::io::Error> {
-        let head = filler(1000);
-        let pad = pad_to(CHUNK - 30, head.len());
-        let mut text = format!("{head}{pad}");
-        assert_eq!(text.len(), CHUNK - 30);
-        text.push_str(BOUNDARY);
-        text.push('\n');
-        assert!(text.len() > CHUNK, "the boundary line must cross the first read");
-        let kept = format!("{BOUNDARY}\n{{\"b\":2}}\n{}", filler(5000));
-        text.push_str(&kept[BOUNDARY.len() + 1..]);
-        assert!(text.len() as u64 > SKIP_THRESHOLD);
-        let (_dir, path) = write_fixture(&text)?;
-        let size = std::fs::metadata(&path)?.len();
-        let read = read_after_last_boundary(&path, size).ok_or(std::io::ErrorKind::NotFound)?;
-        assert_eq!(read, kept.into_bytes());
-        Ok(())
-    }
-
-    #[test]
-    fn a_boundary_inside_a_later_chunk_and_a_snapshot_before_the_next_one_survive_on_a_real_file()
-    -> Result<(), std::io::Error> {
-        let snapshot = "{\"type\":\"attribution-snapshot\",\"n\":9}\n";
-        let tail = format!("{{\"b\":2}}\n{}", filler(3000));
-        let head = format!("{}{BOUNDARY}\n{snapshot}{tail}", filler(4000));
-        assert!(head.len() as u64 > SKIP_THRESHOLD);
-        let (_dir, path) = write_fixture(&head)?;
-        let size = std::fs::metadata(&path)?.len();
-        let read = read_after_last_boundary(&path, size).ok_or(std::io::ErrorKind::NotFound)?;
-        assert_eq!(read, format!("{BOUNDARY}\n{tail}{snapshot}").into_bytes());
-        Ok(())
-    }
-
-    #[test]
-    fn a_snapshot_split_across_chunks_is_moved_to_the_end() {
-        let text = "{\"type\":\"attribution-snapshot\",\"n\":1}\n{\"a\":1}\n";
-        let bytes = text.as_bytes();
-        assert_eq!(
-            String::from_utf8_lossy(&run(&[&bytes[..40], &bytes[40..]])),
-            "{\"a\":1}\n{\"type\":\"attribution-snapshot\",\"n\":1}\n"
-        );
-    }
-}
+#[path = "session_precompact_tests.rs"]
+mod tests;

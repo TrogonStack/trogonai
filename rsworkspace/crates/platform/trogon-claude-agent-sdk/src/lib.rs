@@ -155,9 +155,7 @@ pub use sdk_tools::{SdkTools, SdkToolsError};
 pub use sensitive_string::SensitiveString;
 pub use session_entry::{SessionEntry, SessionEntryError};
 pub use session_error::SessionError;
-pub use session_files::{
-    ListSessionsOptions, SessionFiles, get_session_messages, get_subagent_messages, list_subagents,
-};
+pub use session_files::{ListSessionsOptions, SessionFiles};
 pub use session_id::SessionId;
 pub use session_info::SdkSessionInfo;
 pub use session_key::{SessionKey, SessionKeyError};
@@ -168,7 +166,9 @@ pub use session_mutations::{
 pub use session_project_key::{
     SessionProjectKey, SessionProjectKeyError, project_key_for_directory, project_key_for_directory_in,
 };
-pub use session_reader::{get_session_info, list_sessions};
+pub use session_reader::{
+    get_session_info, get_session_messages, get_subagent_messages, list_sessions, list_subagents,
+};
 pub use session_resume::{MaterializedSession, SessionPreparationOptions, SessionRuntime, StoreResume};
 pub use session_store::{
     InMemorySessionStore, MirrorSizeEstimate, SessionListEntry, SessionStore, SessionStoreError, SessionStoreFlush,
