@@ -1733,9 +1733,65 @@
         "SdkToolsError",
         "McpServerError",
         "McpToolRequest",
-        "McpToolOutput"
+        "McpToolOutput",
+        "McpWireIds",
+        "McpWireScan",
+        "RawJsonId",
+        "RawJsonIdError"
       ],
       "tests": [
+        {
+          "path": "src/raw_json_id_tests.rs",
+          "name": "every_recorded_token_is_written_back_as_python_wrote_it"
+        },
+        {
+          "path": "src/raw_json_id_tests.rs",
+          "name": "integers_beyond_64_bits_keep_every_digit_and_negative_zero_is_zero"
+        },
+        {
+          "path": "src/raw_json_id_tests.rs",
+          "name": "text_python_refuses_is_refused"
+        },
+        {
+          "path": "src/raw_json_id_tests.rs",
+          "name": "an_integer_past_the_python_digit_limit_is_refused"
+        },
+        {
+          "path": "src/raw_json_id_tests.rs",
+          "name": "a_repeated_key_keeps_its_first_position_and_its_last_value"
+        },
+        {
+          "path": "src/raw_json_id_tests.rs",
+          "name": "escaped_lone_surrogates_are_written_as_python_keeps_them"
+        },
+        {
+          "path": "src/mcp_wire_ids_tests.rs",
+          "name": "a_server_that_is_not_found_echoes_every_recorded_id_as_python_wrote_it"
+        },
+        {
+          "path": "src/mcp_wire_ids_tests.rs",
+          "name": "the_python_dialect_answers_a_request_with_the_id_python_echoed"
+        },
+        {
+          "path": "src/mcp_wire_ids_tests.rs",
+          "name": "a_cancellation_names_a_big_id_by_the_integer_it_holds"
+        },
+        {
+          "path": "src/mcp_wire_ids_tests.rs",
+          "name": "only_the_two_ids_of_an_mcp_message_are_read_and_the_last_duplicate_wins"
+        },
+        {
+          "path": "src/mcp_wire_ids_tests.rs",
+          "name": "an_earlier_duplicate_id_that_serde_json_refuses_does_not_fail_the_line"
+        },
+        {
+          "path": "src/mcp_wire_ids_tests.rs",
+          "name": "lines_that_are_not_an_mcp_message_are_left_alone"
+        },
+        {
+          "path": "src/mcp_wire_ids_tests.rs",
+          "name": "a_marker_is_spelled_out_where_the_line_is_written_and_nowhere_else"
+        },
         {
           "path": "tests/runtime_features.rs",
           "name": "embedded_mcp_server_keeps_its_session_across_rpc_calls"
@@ -1882,7 +1938,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "LocalMcpServer answers the JSON-RPC surface of the server each SDK helper builds: initialize with protocol negotiation, ping, tools/list, tools/call and request cancellation, with the same envelopes and error shapes. McpServerDialect::TypeScript, the default, follows createSdkMcpServer: unreadable messages are dropped, parameter errors are -32603 zod issue lists, schemas are listed with their draft-07 $schema, and instructions, alwaysLoad and searchHint are answered. McpServerDialect::Python follows create_sdk_mcp_server over the mcp package: unreadable messages surface as McpServerError::Protocol, requests before initialize are refused, a cancelled call is answered with -32800, annotations keep the standard hints and SdkTools::with_duplicates keeps repeated names. Both helpers register only tools, so resources, prompts and server-initiated client requests belong to custom SdkMcpServer implementations. Argument checks reproduce the upstream messages for type, required, enum, const, items and string or number bounds; other schema keywords report the Rust validator's message."
+      "rationale": "LocalMcpServer answers the JSON-RPC surface of the server each SDK helper builds: initialize with protocol negotiation, ping, tools/list, tools/call and request cancellation, with the same envelopes and error shapes. McpServerDialect::TypeScript, the default, follows createSdkMcpServer: unreadable messages are dropped, parameter errors are -32603 zod issue lists, schemas are listed with their draft-07 $schema, and instructions, alwaysLoad and searchHint are answered. McpServerDialect::Python follows create_sdk_mcp_server over the mcp package: unreadable messages surface as McpServerError::Protocol, requests before initialize are refused, a cancelled call is answered with -32800, annotations keep the standard hints and SdkTools::with_duplicates keeps repeated names. In the Python dialect a JSON-RPC id round-trips as json.loads and json.dumps keep it: integers of any size and -0 are echoed exactly, strings are echoed, and floats, booleans, null and nested values are not request ids, so a found server acknowledges them without an id while a missing server echoes json.dumps(json.loads(id)). Both helpers register only tools, so resources, prompts and server-initiated client requests belong to custom SdkMcpServer implementations. Argument checks reproduce the upstream messages for type, required, enum, const, items and string or number bounds; other schema keywords report the Rust validator's message."
     },
     {
       "id": "external-mcp",

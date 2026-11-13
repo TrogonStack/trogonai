@@ -50,6 +50,7 @@ mod mcp_tool_input_schema;
 mod mcp_tool_name;
 mod mcp_tool_name_warning;
 mod mcp_url;
+mod mcp_wire_ids;
 mod message;
 mod message_decode;
 mod message_id;
@@ -76,6 +77,7 @@ mod prompt;
 mod python_json;
 mod python_json_value;
 mod queue_capacity;
+mod raw_json_id;
 #[cfg(unix)]
 mod run_as;
 mod runtime_options;
@@ -216,6 +218,7 @@ pub use mcp_server_tool_policy::{McpServerToolPolicy, McpToolOrgMaxPermission, M
 pub use mcp_tool_input_schema::{McpToolInputSchema, McpToolInputSchemaError};
 pub use mcp_tool_name::McpToolName;
 pub use mcp_url::{McpUrl, McpUrlError};
+pub use mcp_wire_ids::{McpWireIds, McpWireScan};
 pub use message::{
     AssistantMessage, Content, ContentBlock, ConversationResetMessage, DeferredToolUse, HookEventMessage, Message,
     MessageDecoding, MirrorErrorMessage, RateLimitEvent, RateLimitInfo, ResultMessage, ResultStatus, StreamEvent,
@@ -252,6 +255,7 @@ pub use python_json_value::{
     python_json_loads,
 };
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
+pub use raw_json_id::{RawJsonId, RawJsonIdError};
 pub use runtime_options::{
     DangerousPermissionSkip, DebugOutput, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget, ThinkingConfig,
     ThinkingDisplay,

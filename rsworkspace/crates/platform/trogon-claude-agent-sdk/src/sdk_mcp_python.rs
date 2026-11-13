@@ -67,7 +67,7 @@ pub(crate) async fn request(
     let Some(_in_flight) = session.track_new(&id, token.clone()) else {
         return Err(McpServerError::Protocol(format!(
             "Request id {} is already in flight",
-            py_repr(&id.value)
+            crate::mcp_wire_ids::marker_text(&id.value).unwrap_or_else(|| py_repr(&id.value))
         )));
     };
     let answer = tokio::select! {

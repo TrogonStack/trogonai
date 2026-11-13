@@ -111,6 +111,7 @@ impl DriverFixture {
             mirror_flush: None,
             deferred_messages: VecDeque::new(),
             next_id: 0,
+            wire_ids: None,
             state: State::Idle,
             run_state: RunState::default(),
             argv_style: crate::ArgvStyle::TypeScript,
