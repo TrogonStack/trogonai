@@ -1,0 +1,9 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "serverManagedSettings": {"managedSourcesBehavior":"merge","permissions":{},"disableAllHooks":true,"disableClaudeAiConnectors":true,"sandbox":{"enabled":true,"enabledPlatforms":["linux","macos"]}}
+  }
+}

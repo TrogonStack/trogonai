@@ -259,15 +259,14 @@ fn mirror_failure_messages_preserve_context_and_bound_suppressed_failures() -> T
         };
         assert_eq!(message.subtype, "mirror_error");
         if let Some(key) = expected_key {
-            assert!(message.data["key"].get("subpath").is_some());
+            assert_eq!(message.data["key"].get("subpath").is_some(), key.subpath().is_some());
             assert_eq!(message.data["key"]["project_key"], key.project_key().as_str());
             assert_eq!(message.data["key"]["session_id"], key.session_id().as_str());
-            assert_eq!(
-                message.data["key"]["subpath"],
-                key.subpath()
-                    .map(|path| Value::String(path.as_str().to_owned()))
-                    .unwrap_or(Value::Null)
-            );
+            if let Some(path) = key.subpath() {
+                assert_eq!(message.data["key"]["subpath"], path.as_str());
+            }
+            assert!(message.data["error"].as_str().is_some_and(|text| !text.is_empty()));
+            assert_eq!(message.data["uuid"].as_str().map(str::len), Some(36));
             assert_eq!(message.session_id, Some(key.session_id().clone()));
         } else {
             assert_eq!(message.data["suppressed_count"], 3);

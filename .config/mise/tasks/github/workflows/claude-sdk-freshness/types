@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Verify the generated Claude SDK types match the pinned upstream declarations"
+set -euo pipefail
+
+root="${MISE_PROJECT_ROOT:?Run this task through mise}"
+exec mise -C "$root/rsworkspace/crates/platform/trogon-claude-agent-sdk" run --skip-tools claude-sdk:types-check -- "$@"
