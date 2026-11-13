@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use super::read_document;
+use super::{read_document, sanitize_policy_document};
 use crate::{constants::SETTINGS_SCHEMA_JSON, settings_dialect::SettingsDialect, settings_json::js_stringify};
 
 /// Compares like JavaScript output: key order matters, and a number must be the same kind (integer or float) with
@@ -123,4 +123,21 @@ fn the_python_dialect_keeps_large_integers_exact() {
         serialized(document(r#"{"n":9007199254740993,"m":-0}"#).as_ref()),
         r#"{"n":9007199254740993,"m":0}"#
     );
+}
+
+#[test]
+fn every_recorded_policy_document_is_sanitized_like_the_pinned_resolver() {
+    let description: Value = serde_json::from_str(SETTINGS_SCHEMA_JSON).expect("description");
+    let documents = description["read"]["policySanitized"].as_array().expect("documents");
+    assert!(documents.len() > 250);
+    let mut mismatches = Vec::new();
+    for probe in documents {
+        let input = probe["input"].as_str().expect("input");
+        let expected = &probe["output"];
+        let actual = sanitize_policy_document(input).map_or(Value::Null, Value::Object);
+        if !same(&actual, expected) {
+            mismatches.push(format!("{input}\n  rust:     {actual}\n  upstream: {expected}"));
+        }
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
 }

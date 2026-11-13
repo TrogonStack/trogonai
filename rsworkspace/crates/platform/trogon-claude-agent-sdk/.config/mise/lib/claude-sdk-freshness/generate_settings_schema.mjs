@@ -15,7 +15,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { NUMBER_DOCUMENTS } from './settings_number_battery.mjs';
 import { MERGE_PAIRS } from './settings_merge_battery.mjs';
-import { KEYED, TEXTS } from './settings_read_battery.mjs';
+import { KEYED, POLICY_KEYED, TEXTS } from './settings_read_battery.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => {
@@ -103,7 +103,7 @@ async function main() {
 
 // Pretty prints the document but keeps each recorded probe list and battery on one line.
 const INLINE_KEYS = new Set(['probes', 'string', 'object', 'value', 'rule']);
-const LINE_PER_ITEM_KEYS = new Set(['documents', 'numbers', 'merges']);
+const LINE_PER_ITEM_KEYS = new Set(['documents', 'numbers', 'merges', 'policySanitized']);
 function render(document) {
   const inline = [];
   const text = JSON.stringify(
@@ -255,6 +255,12 @@ function readSection(read, roots) {
     const { settings } = read.lE(input, 'f', false);
     return { input, output: settings === null ? null : JSON.parse(JSON.stringify(settings)) };
   });
+  const policyProbes = [...KEYED, ...POLICY_KEYED].map((document) => {
+    const input = JSON.stringify(document);
+    const parsed = structuredClone(JSON.parse(input));
+    read.cm(parsed, 'f', { skipMcpServerEntryFilter: true, policySource: true });
+    return { input, output: JSON.parse(JSON.stringify(parsed)) };
+  });
   return {
     roots,
     managedOnlyKeys: [...read.K7e],
@@ -280,6 +286,7 @@ function readSection(read, roots) {
       const { settings } = read.lE(input, 'f', false);
       return { input, output: JSON.stringify(settings) };
     }),
+    policySanitized: policyProbes,
   };
 }
 
