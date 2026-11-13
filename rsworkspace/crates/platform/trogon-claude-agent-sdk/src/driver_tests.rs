@@ -76,6 +76,7 @@ impl DriverFixture {
                 incoming,
                 ready: true,
             },
+            abort_signal: None,
             input_ended: false,
             commands: command_rx,
             messages: message_tx,

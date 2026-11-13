@@ -296,6 +296,10 @@ pub struct ClaudeAgentOptions {
     pub hooks: Vec<HookRegistration>,
     pub agents: BTreeMap<AgentName, AgentDefinition>,
     pub agent: Option<AgentName>,
+    /// TypeScript `abortController`: cancelling the token stops the CLI process like [`crate::ClientHandle::abort`],
+    /// including when it is already cancelled at connect. Python has no such option; a caller that never sets it
+    /// gets its behavior.
+    pub abort_signal: Option<crate::CancellationToken>,
     /// Servers the CLI connects to itself, sent in insertion order like a TypeScript object.
     pub mcp_servers: McpServers,
     /// In-process servers. A name also present in `mcp_servers` resolves to the in-process server, the

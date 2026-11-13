@@ -4,7 +4,7 @@ use std::{error::Error as StdError, path::PathBuf, time::Duration};
 
 use tokio::time::timeout;
 use trogon_claude_agent_sdk::{
-    ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, Error, Message, MessageDecoding, Prompt, Timeout,
+    ArgvStyle, CancellationToken, ClaudeAgentOptions, ClaudeSdkClient, Error, Message, MessageDecoding, Prompt, Timeout,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -323,6 +323,54 @@ async fn abort_stops_the_process_and_ends_the_run_with_an_abort_error() -> TestR
     };
     assert_eq!(aborted.message(), "Claude Code process aborted by user");
     let _ = client.disconnect().await;
+    Ok(())
+}
+
+/// TypeScript `abortController`: aborting the caller's controller closes the process, the run ends with the
+/// process abort error and a later write is the operation abort error.
+#[tokio::test]
+async fn cancelling_the_abort_signal_ends_the_run_like_abort() -> TestResult {
+    for style in [ArgvStyle::TypeScript, ArgvStyle::Python] {
+        let signal = CancellationToken::new();
+        let mut configured = options("blocked-stdin", style)?;
+        configured.abort_signal = Some(signal.clone());
+        let mut client = ClaudeSdkClient::connect(configured).await?;
+        let handle = client.handle();
+        signal.cancel();
+        let error = timeout(Duration::from_secs(10), async {
+            loop {
+                match client.next_message().await {
+                    Ok(Some(_)) => {}
+                    Ok(None) => return None,
+                    Err(error) => return Some(error),
+                }
+            }
+        })
+        .await?;
+        let Some(Error::Aborted(aborted)) = error else {
+            return Err(std::io::Error::other(format!("{style:?}: expected an abort error, got {error:?}")).into());
+        };
+        assert_eq!(aborted.message(), "Claude Code process aborted by user");
+        let Err(Error::Aborted(write)) = handle.send_prompt(Prompt::from("late")).await else {
+            return Err(std::io::Error::other(format!("{style:?}: expected the write to be refused")).into());
+        };
+        assert_eq!(write.message(), "Operation aborted");
+        let _ = client.disconnect().await;
+    }
+    Ok(())
+}
+
+/// TypeScript closes the process as soon as it spawns when the controller was aborted beforehand.
+#[tokio::test]
+async fn an_abort_signal_cancelled_before_connect_fails_the_connection() -> TestResult {
+    let signal = CancellationToken::new();
+    signal.cancel();
+    let mut configured = options("blocked-stdin", ArgvStyle::TypeScript)?;
+    configured.abort_signal = Some(signal);
+    let Err(Error::Aborted(aborted)) = ClaudeSdkClient::connect(configured).await else {
+        return Err(std::io::Error::other("expected the connection to be aborted").into());
+    };
+    assert_eq!(aborted.message(), "Claude Code process aborted by user");
     Ok(())
 }
 
