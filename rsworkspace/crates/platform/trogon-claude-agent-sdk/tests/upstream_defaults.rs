@@ -8,7 +8,9 @@ use std::{
 use tokio::time::timeout;
 use trogon_claude_agent_sdk::{
     ClaudeAgentOptions, ClaudeSdkClient, DuplicateControlRequests, Error, InitializeTimeout, InputAfterFinish, Limits,
-    MessageBuffer, Prompt, QueueCapacity, RequestIdExhaustion, Shutdown, Timeout,
+    MessageBuffer, MirrorFailureError, Prompt, QueueCapacity, RequestIdExhaustion, SessionEntry, SessionKey,
+    SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreLimits, SessionStoreOptions, Shutdown, Timeout,
+    TranscriptMirror,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -134,5 +136,94 @@ async fn r07_the_default_shutdown_stops_a_stuck_cli_without_an_error() -> TestRe
     assert!(outcome.is_ok(), "{outcome:?}");
     assert!(started.elapsed() >= Duration::from_secs(2));
     assert!(started.elapsed() < Duration::from_secs(5));
+    Ok(())
+}
+
+#[test]
+fn the_default_store_limits_bound_only_what_upstream_bounds() {
+    let limits = SessionStoreLimits::default();
+    assert_eq!(limits.max_retained_failures, None);
+    assert_eq!(limits.flush_timeout, None);
+    assert_eq!(limits.append_timeout.as_duration(), Duration::from_secs(60));
+    assert_eq!(limits.load_timeout.as_duration(), Duration::from_secs(60));
+    assert_eq!(limits.max_pending_entries.get(), 500);
+    assert_eq!(limits.max_pending_bytes.get(), 1024 * 1024);
+}
+
+const MIRROR_PROJECTS: &str = "/memory-config/projects";
+
+fn mirror_entry() -> Result<SessionEntry, Box<dyn StdError>> {
+    Ok(SessionEntry::try_from(serde_json::from_str::<serde_json::Value>(
+        r#"{"type":"user","uuid":"entry"}"#,
+    )?)?)
+}
+
+fn mirror_path(session: &str) -> std::path::PathBuf {
+    std::path::Path::new(MIRROR_PROJECTS)
+        .join("project")
+        .join(format!("{session}.jsonl"))
+}
+
+/// Fails every append, like an unreachable backend.
+struct RejectingStore;
+
+impl SessionStore for RejectingStore {
+    fn append<'a>(&'a self, _: &'a SessionKey, _: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
+        Box::pin(async { Err(SessionStoreError::backend(std::io::Error::other("fixture failure"))) })
+    }
+    fn load<'a>(&'a self, _: &'a SessionKey) -> SessionStoreFuture<'a, Option<Vec<SessionEntry>>> {
+        Box::pin(async { Ok(None) })
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_mirror_reports_every_failed_append_by_default() -> TestResult {
+    let options = SessionStoreOptions::from(std::sync::Arc::new(RejectingStore));
+    let mirror = TranscriptMirror::new(&options, MIRROR_PROJECTS.into());
+    let sessions = [
+        "123e4567-e89b-42d3-a456-426614174000",
+        "123e4567-e89b-42d3-a456-426614174001",
+        "123e4567-e89b-42d3-a456-426614174002",
+    ];
+    for session in sessions {
+        mirror.enqueue(&mirror_path(session), vec![mirror_entry()?])?;
+    }
+    let failures = mirror.flush().await?;
+    assert_eq!(failures.len(), sessions.len());
+    assert!(
+        failures
+            .iter()
+            .all(|failure| matches!(failure, MirrorFailureError::Append { .. }))
+    );
+    Ok(())
+}
+
+/// Accepts every append after a delay longer than any flush deadline Rust used to impose.
+struct SlowStore;
+
+impl SessionStore for SlowStore {
+    fn append<'a>(&'a self, _: &'a SessionKey, _: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
+        Box::pin(async {
+            tokio::time::sleep(Duration::from_secs(600)).await;
+            Ok(())
+        })
+    }
+    fn load<'a>(&'a self, _: &'a SessionKey) -> SessionStoreFuture<'a, Option<Vec<SessionEntry>>> {
+        Box::pin(async { Ok(None) })
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_mirror_flush_waits_for_slow_appends_without_a_deadline_by_default() -> TestResult {
+    let mut options = SessionStoreOptions::from(std::sync::Arc::new(SlowStore));
+    options.limits.append_timeout = Timeout::new(Duration::from_secs(3600));
+    let mirror = TranscriptMirror::new(&options, MIRROR_PROJECTS.into());
+    mirror.enqueue(
+        &mirror_path("123e4567-e89b-42d3-a456-426614174000"),
+        vec![mirror_entry()?],
+    )?;
+    let started = tokio::time::Instant::now();
+    assert!(mirror.flush().await?.is_empty());
+    assert!(started.elapsed() >= Duration::from_secs(600));
     Ok(())
 }

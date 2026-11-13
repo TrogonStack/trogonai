@@ -19,7 +19,7 @@ use crate::{
         TS_FLOW_VERSION, TS_FORK_CLEARED_KEYS, TS_FORK_MESSAGE_KEYS, TS_FORK_SEGMENT_KEYS, TS_FORK_TITLE_FALLBACK,
         TS_INNER_CALL_LIMIT, TS_MAX_IDENTIFIER_UNITS, TS_SAFE_INTEGER, TS_TRANSCRIPT_KINDS,
     },
-    session_json_order::js_key_order,
+    js_object_order::js_key_order,
     session_messages_ts::{
         MessagesError, command_string, flag, kind_of, link, parent_uuid, queued_command, str_field, uuid_of,
     },
