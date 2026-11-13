@@ -334,7 +334,7 @@ impl SessionFiles {
         entries.filter_map(Result::ok).find_map(|entry| read(&entry.path()))
     }
 
-    fn resolve_session_file_path(&self, session_id: &str, directory: Option<&Path>) -> Option<PathBuf> {
+    pub(crate) fn resolve_session_file_path(&self, session_id: &str, directory: Option<&Path>) -> Option<PathBuf> {
         let file_name = format!("{session_id}.jsonl");
         let non_empty = |dir: &Path| {
             let candidate = dir.join(&file_name);
@@ -384,7 +384,7 @@ fn deduplicate(sessions: Vec<SdkSessionInfo>) -> Vec<SdkSessionInfo> {
     by_id.into_values().collect()
 }
 
-fn sort_page(mut sessions: Vec<SdkSessionInfo>, limit: Option<usize>, offset: usize) -> Vec<SdkSessionInfo> {
+pub(crate) fn sort_page(mut sessions: Vec<SdkSessionInfo>, limit: Option<usize>, offset: usize) -> Vec<SdkSessionInfo> {
     sessions.sort_by(|a, b| {
         b.last_modified
             .cmp(&a.last_modified)
@@ -412,11 +412,11 @@ fn read_sessions_from_dir(dir: &Path, project_path: Option<&str>) -> Vec<SdkSess
         .collect()
 }
 
-struct LiteSessionFile {
-    mtime: u64,
-    size: u64,
-    head: String,
-    tail: String,
+pub(crate) struct LiteSessionFile {
+    pub(crate) mtime: u64,
+    pub(crate) size: u64,
+    pub(crate) head: String,
+    pub(crate) tail: String,
 }
 
 /// Stats a session file and reads its first and last 64 KiB, or `None` when it is empty or unreadable.
@@ -529,7 +529,7 @@ fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|text| !text.is_empty())
 }
 
-fn parse_session_info_from_lite(
+pub(crate) fn parse_session_info_from_lite(
     session_id: &str,
     lite: &LiteSessionFile,
     project_path: Option<&str>,
@@ -633,7 +633,7 @@ pub(crate) fn agent_metadata_sidecar_path(transcript: &Path) -> PathBuf {
 }
 
 /// Reads the sidecar, treating a missing, unreadable, invalid or non-object file as absent.
-fn read_agent_metadata_sidecar(transcript: &Path) -> Option<JsonObject> {
+pub(crate) fn read_agent_metadata_sidecar(transcript: &Path) -> Option<JsonObject> {
     let text = std::fs::read_to_string(agent_metadata_sidecar_path(transcript)).ok()?;
     match serde_json::from_str::<Value>(&text).ok()? {
         Value::Object(meta) => Some(meta),
