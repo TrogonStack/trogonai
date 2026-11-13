@@ -33,7 +33,7 @@ impl UsdBudget {
             value if value.is_nan() => "NaN".to_owned(),
             f64::INFINITY => "Infinity".to_owned(),
             f64::NEG_INFINITY => "-Infinity".to_owned(),
-            value => crate::session_fork_ts::js_float(value),
+            value => crate::settings_json::js_float(value),
         }
     }
 

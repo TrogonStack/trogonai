@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 //! Runs the pinned TypeScript `resolveSettings` and the Rust port against the same fixture trees and compares
-//! the JSON they produce byte for byte.
+//! the JSON they produce byte for byte, the Rust side printed through `js_stringify` as `JSON.stringify` prints it.
 //!
 //! Opt in with `mise run claude-sdk:resolve-diff`, which fetches the pinned package and points
 //! `CLAUDE_SDK_TS_PACKAGE_DIR` at it. Without that variable the test only checks that the fixtures are
@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
     ResolveSettingsOptions, ResolverState,
     adapters::{EnvironmentVariable, ExecuteFile, ExecuteFileRequest, NativeHost, OperatingSystem},
-    filter_escalating_default_mode, resolve_settings_with_state,
+    filter_escalating_default_mode, js_stringify, resolve_settings_with_state,
 };
 
 #[path = "support/remap_settings_host.rs"]
@@ -173,14 +173,11 @@ fn rust_results(name: &str, spec: &Value, root: &Path) -> Vec<String> {
         } else {
             name.to_owned()
         };
-        printed.push(
-            json!({
-                "name": label,
-                "result": serde_json::to_value(&resolved).expect("encode"),
-                "filtered": serde_json::to_value(filtered).expect("encode"),
-            })
-            .to_string(),
-        );
+        printed.push(js_stringify(&json!({
+            "name": label,
+            "result": serde_json::to_value(&resolved).expect("encode"),
+            "filtered": serde_json::to_value(filtered).expect("encode"),
+        })));
     }
     printed
 }

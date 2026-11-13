@@ -389,6 +389,21 @@ command output. `filter_escalating_default_mode` ports `filterEscalatingDefaultM
 byte for byte. Integers above 2^53 read like `JSON.parse` by default; `resolve_settings_in_dialect`
 and `resolve_settings_in_dialect_with` take `SettingsDialect::Python` to keep them exact. Gaps: schema value normalization, and cloud and org mode.
 
+To print resolved settings exactly as the TypeScript SDK would, serialize them with `js_stringify`
+instead of `serde_json::to_string`. It writes what `JSON.stringify` writes: the shortest digits of
+each double in fixed notation from 1e-6 up to 1e21 and exponent form outside it (`serde_json`
+switches to exponent form for whole numbers from 2^64 up and for fractions below 1e-5), negative
+zero as `0`, array-index keys first, and the same string escapes:
+
+```rust,no_run
+use trogon_claude_agent_sdk::{ResolveSettingsOptions, js_stringify, resolve_settings};
+
+async fn effective_text(options: &ResolveSettingsOptions) -> Result<String, Box<dyn std::error::Error>> {
+    let resolved = resolve_settings(options).await?;
+    Ok(js_stringify(&serde_json::to_value(&resolved.effective)?))
+}
+```
+
 ## External session stores
 
 Set `session_store` to a `SessionStoreOptions`. Implement `SessionStore` for a
