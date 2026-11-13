@@ -2588,7 +2588,7 @@
         }
       ],
       "status": "partial",
-      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 19 fixture trees (mise run claude-sdk:resolve-diff). Partial until the listed gaps close: schema value normalization (invalid rule drops, catch defaults) and nested key order, pre-parse key aliases, managedSourcesBehavior merge mode, cloud and org mode, the git-ignored cwd check and the MDM re-read throttle. Python has no equivalent."
+      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 41 fixture trees (mise run claude-sdk:resolve-diff), including the read path of normal settings files (pre-parse sanitizers, managed-only key removal, document key order). Partial until the listed gaps close: the policy-tolerant schema for managed settings (catch substitutions and entry salvage), managedSourcesBehavior merge mode, cloud and org mode, the git-ignored cwd check, the MDM re-read throttle, and the JavaScript rendering of integers above 2^53. Python has no equivalent."
     }
   ]
 }

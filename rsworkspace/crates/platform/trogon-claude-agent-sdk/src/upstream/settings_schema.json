@@ -199,6 +199,524 @@
     "defaultView"
   ],
   "active": [],
+  "read": {
+    "roots": {
+      "marketplaceEntry": {
+        "ref": "n27"
+      },
+      "modelPickerRow": {
+        "ref": "n7"
+      },
+      "pricingMultiplier": {
+        "ref": "n8"
+      },
+      "pricingRates": {
+        "ref": "n9"
+      },
+      "hookMatcher": {
+        "ref": "n22"
+      },
+      "hookEntry": {
+        "ref": "n23"
+      },
+      "allowedMcpServer": {
+        "ref": "n18"
+      },
+      "deniedMcpServer": {
+        "ref": "n20"
+      }
+    },
+    "managedOnlyKeys": [
+      "managedMcpServers",
+      "isolation",
+      "attributionProjectPolicy",
+      "deniedModels",
+      "availableModelsMatch"
+    ],
+    "aliases": [
+      {
+        "alias": "additionalMarketplaces",
+        "canonical": "extraKnownMarketplaces"
+      },
+      {
+        "alias": "allowedMarketplaces",
+        "canonical": "strictKnownMarketplaces"
+      }
+    ],
+    "nullClearedKeys": [
+      "strictKnownMarketplaces",
+      "blockedMarketplaces",
+      "strictPluginOnlyCustomization",
+      "allowManagedPermissionRulesOnly",
+      "allowManagedHooksOnly",
+      "allowManagedMcpServersOnly",
+      "enforceAvailableModels",
+      "disableClaudeAiConnectors",
+      "disableCommandPluginSources",
+      "disableSideloadFlags",
+      "disableSkillShellExecution",
+      "disableWindowsBashCommandSplit",
+      "disableRemoteControl",
+      "disableAgentView",
+      "disableWorkflows",
+      "disableArtifact",
+      "disableBundledSkills",
+      "fastModePerSessionOptIn",
+      "isolatePeerMachines",
+      "disableAutoMode",
+      "disableDeepLinkRegistration",
+      "enableArtifact",
+      "enableWorkflows",
+      "syncClaudeAiSkills",
+      "syncClaudeAiPlugins",
+      "useAutoModeDuringPlan",
+      "skipDangerousModePermissionPrompt",
+      "skipAutoPermissionPrompt",
+      "enableAllProjectMcpServers",
+      "channelsEnabled",
+      "skipWebFetchPreflight",
+      "skipWorkflowUsageWarning",
+      "autoUploadSessions",
+      "remoteControlAtStartup",
+      "autoContinueAtUsageLimit",
+      "responseComparisonEnabled",
+      "feedbackDrafts",
+      "availableModelsMatch"
+    ],
+    "serverListKeys": [
+      "enabledMcpjsonServers",
+      "disabledMcpjsonServers"
+    ],
+    "serverListPattern": {
+      "regex": "^[A-Za-z0-9_-]+$",
+      "flags": ""
+    },
+    "hookEvents": [
+      "PreToolUse",
+      "PostToolUse",
+      "PostToolUseFailure",
+      "PostToolBatch",
+      "Notification",
+      "UserPromptSubmit",
+      "UserPromptExpansion",
+      "SessionStart",
+      "SessionEnd",
+      "Stop",
+      "StopFailure",
+      "SubagentStart",
+      "SubagentStop",
+      "PreCompact",
+      "PostCompact",
+      "PreModelSwitch",
+      "PostModelSwitch",
+      "PermissionRequest",
+      "PermissionDenied",
+      "Setup",
+      "TeammateIdle",
+      "TaskCreated",
+      "TaskCompleted",
+      "Elicitation",
+      "ElicitationResult",
+      "ConfigChange",
+      "WorktreeCreate",
+      "WorktreeRemove",
+      "InstructionsLoaded",
+      "CwdChanged",
+      "FileChanged",
+      "DirectoryAdded",
+      "MessageDisplay"
+    ],
+    "guardEvents": [
+      "PreToolUse",
+      "PermissionRequest"
+    ],
+    "unscannedKeys": [
+      "mcpServers",
+      "managedMcpServers",
+      "lspServers",
+      "pluginConfigs",
+      "enabledPlugins",
+      "extraKnownMarketplaces",
+      "env",
+      "skillOverrides",
+      "modelSettings"
+    ],
+    "hookTypes": [
+      "command",
+      "prompt",
+      "agent",
+      "http",
+      "mcp_tool"
+    ],
+    "crossSessionInbound": [
+      "accept",
+      "hold",
+      "refuse"
+    ],
+    "shareHostProfile": [
+      "off",
+      "basic",
+      "full"
+    ],
+    "permissionBlocks": [
+      {
+        "name": "permissions",
+        "restrictions": [
+          "deny",
+          "ask"
+        ],
+        "grants": [
+          "allow",
+          "additionalDirectories",
+          "defaultMode"
+        ]
+      },
+      {
+        "name": "autoMode",
+        "restrictions": [
+          "soft_deny",
+          "hard_deny",
+          "deny"
+        ],
+        "grants": [
+          "allow",
+          "environment"
+        ],
+        "withholdOnEntryDrop": true
+      },
+      {
+        "name": "sandbox.network",
+        "restrictions": [
+          "deniedDomains"
+        ],
+        "grants": [
+          "allowedDomains"
+        ],
+        "withholdOnEntryDrop": true
+      },
+      {
+        "name": "sandbox.filesystem",
+        "restrictions": [
+          "denyWrite",
+          "denyRead"
+        ],
+        "grants": [
+          "allowWrite",
+          "allowRead"
+        ],
+        "withholdOnEntryDrop": true
+      }
+    ],
+    "knownMarketplaceSources": [
+      "url",
+      "github",
+      "git",
+      "npm",
+      "file",
+      "directory",
+      "skills-dir",
+      "hostPattern",
+      "pathPattern",
+      "settings"
+    ],
+    "knownPluginSources": [
+      "npm",
+      "url",
+      "github",
+      "git-subdir",
+      "archive",
+      "command",
+      "unsupported"
+    ],
+    "mcpLists": [
+      {
+        "key": "allowedMcpServers",
+        "root": "allowedMcpServer"
+      },
+      {
+        "key": "deniedMcpServers",
+        "root": "deniedMcpServer"
+      }
+    ],
+    "documents": [
+    {"input":"{}","output":{}},
+    {"input":"{\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"zzz\":1,\"model\":\"m\",\"aaa\":{\"y\":1,\"x\":2},\"permissions\":{\"allow\":[\"Read\"]}}","output":{"permissions":{"allow":["Read"]},"model":"m","zzz":1,"aaa":{"y":1,"x":2}}},
+    {"input":"{\"permissions\":{\"allow\":[\"Read\"]},\"model\":\"m\",\"env\":{\"Z\":\"1\",\"A\":\"2\"}}","output":{"env":{"Z":"1","A":"2"},"permissions":{"allow":["Read"]},"model":"m"}},
+    {"input":"{\"env\":{\"B\":\"1\",\"A\":\"2\"},\"model\":\"m\",\"permissions\":{\"deny\":[\"Bash\"]},\"unknownKey\":[3,2,1]}","output":{"env":{"B":"1","A":"2"},"permissions":{"deny":["Bash"]},"model":"m","unknownKey":[3,2,1]}},
+    {"input":"{\"unknownLast\":1,\"hooks\":{},\"model\":\"m\"}","output":{"model":"m","hooks":{},"unknownLast":1}},
+    {"input":"{\"1\":\"one\",\"2\":\"two\",\"model\":\"m\",\"b\":1,\"a\":2}","output":{"1":"one","2":"two","model":"m","b":1,"a":2}},
+    {"input":"{\"env\":{\"2\":\"d\",\"9\":\"b\",\"10\":\"a\",\"X\":\"c\"}}","output":{"env":{"2":"d","9":"b","10":"a","X":"c"}}},
+    {"input":"{\"spinnerVerbs\":{\"mode\":\"append\",\"verbs\":[\"a\"]},\"model\":\"m\"}","output":{"model":"m","spinnerVerbs":{"mode":"append","verbs":["a"]}}},
+    {"input":"{\"model\":5}","output":null},
+    {"input":"{\"permissions\":\"x\"}","output":null},
+    {"input":"{\"feedbackSurveyRate\":1.5}","output":null},
+    {"input":"{\"managedMcpServers\":{\"a\":{\"command\":\"x\"}},\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"isolation\":\"worktree\",\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"attributionProjectPolicy\":{},\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"deniedModels\":[\"a\"],\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"availableModelsMatch\":[\"a\"],\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"managedMcpServers\":5,\"isolation\":null,\"deniedModels\":\"x\"}","output":{}},
+    {"input":"{\"additionalMarketplaces\":{\"m\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}},\"model\":\"m\"}","output":{"model":"m","extraKnownMarketplaces":{"m":{"source":{"source":"github","repo":"o/r"}}}}},
+    {"input":"{\"additionalMarketplaces\":null,\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}},\"additionalMarketplaces\":{\"b\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}}}","output":{"extraKnownMarketplaces":{"a":{"source":{"source":"github","repo":"o/r"}}}}},
+    {"input":"{\"extraKnownMarketplaces\":null,\"additionalMarketplaces\":{\"b\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}}}","output":{"extraKnownMarketplaces":{"b":{"source":{"source":"github","repo":"o/r"}}}}},
+    {"input":"{\"additionalMarketplaces\":{\"b\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}},\"extraKnownMarketplaces\":null,\"model\":\"m\"}","output":{"model":"m","extraKnownMarketplaces":{"b":{"source":{"source":"github","repo":"o/r"}}}}},
+    {"input":"{\"allowedMarketplaces\":[{\"source\":\"github\",\"repo\":\"o/r\"}],\"model\":\"m\"}","output":{"model":"m","strictKnownMarketplaces":[{"source":"github","repo":"o/r"}]}},
+    {"input":"{\"allowedMarketplaces\":null}","output":{}},
+    {"input":"{\"strictKnownMarketplaces\":[],\"allowedMarketplaces\":[{\"source\":\"github\",\"repo\":\"o/r\"}]}","output":{"strictKnownMarketplaces":[]}},
+    {"input":"{\"model\":\"m\",\"additionalMarketplaces\":5}","output":{"model":"m"}},
+    {"input":"{\"strictKnownMarketplaces\":null,\"blockedMarketplaces\":null,\"strictPluginOnlyCustomization\":null,\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"allowManagedHooksOnly\":null,\"allowManagedMcpServersOnly\":null,\"allowManagedPermissionRulesOnly\":null,\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"model\":null}","output":null},
+    {"input":"{\"env\":null}","output":null},
+    {"input":"{\"allowManagedHooksOnly\":5,\"model\":\"m\"}","output":null},
+    {"input":"{\"enabledMcpjsonServers\":\"one\",\"disabledMcpjsonServers\":\"two\"}","output":{"enabledMcpjsonServers":["one"],"disabledMcpjsonServers":["two"]}},
+    {"input":"{\"enabledMcpjsonServers\":\"has space\",\"disabledMcpjsonServers\":\"a-b_c\"}","output":null},
+    {"input":"{\"enabledMcpjsonServers\":[\"a\"],\"disabledMcpjsonServers\":\"\"}","output":null},
+    {"input":"{\"enabledMcpjsonServers\":\"a\\n\"}","output":null},
+    {"input":"{\"enabledMcpjsonServers\":\"café\",\"disabledMcpjsonServers\":5}","output":null},
+    {"input":"{\"permissions\":{\"allow\":[\"Bash\",5,\"\",\"bash\",\"Read(\",\"mcp__srv\",\"mcp__srv(x)\",\"WebFetch(domain:a.com)\"],\"deny\":[\"Bash(:*)\",\"x\",null],\"ask\":[\"Read(*.ts)\",\"Read(a:*)\"]}}","output":{"permissions":{"allow":["Bash","mcp__srv","WebFetch(domain:a.com)"],"deny":[],"ask":["Read(*.ts)"]}}},
+    {"input":"{\"permissions\":{\"allow\":[\"*\",\"Bash(*)\",\"mcp__*\"],\"deny\":[\"*\",\"mcp__*\"],\"ask\":\"Bash\"}}","output":null},
+    {"input":"{\"permissions\":{\"allow\":[],\"deny\":[],\"ask\":[]}}","output":{"permissions":{"allow":[],"deny":[],"ask":[]}}},
+    {"input":"{\"permissions\":{\"allow\":\"Bash\",\"deny\":{\"a\":1}}}","output":null},
+    {"input":"{\"permissions\":{\"allow\":[\"bad rule\"],\"defaultMode\":\"plan\",\"additionalDirectories\":[\"/a\"]}}","output":{"permissions":{"allow":[],"defaultMode":"plan","additionalDirectories":["/a"]}}},
+    {"input":"{\"permissions\":{\"deny\":[\"(bad\"],\"allow\":[\"Read\"],\"defaultMode\":\"acceptEdits\"}}","output":{"permissions":{"allow":["Read"],"deny":[],"defaultMode":"acceptEdits"}}},
+    {"input":"{\"permissions\":{\"ask\":[5],\"allow\":[\"Read\"],\"defaultMode\":\"manual\"}}","output":{"permissions":{"allow":["Read"],"ask":[],"defaultMode":"default"}}},
+    {"input":"{\"permissions\":{\"allow\":[\"Read\"],\"defaultMode\":\"bogus\",\"deny\":[\"bad(\"]}}","output":null},
+    {"input":"{\"permissions\":[],\"model\":\"m\"}","output":null},
+    {"input":"{\"permissions\":null,\"model\":\"m\"}","output":null},
+    {"input":"{\"permissions\":{\"allow\":[\"Read\"],\"extra\":1,\"deny\":[\"Edit\"]}}","output":{"permissions":{"allow":["Read"],"deny":["Edit"],"extra":1}}},
+    {"input":"{\"hooks\":null}","output":{}},
+    {"input":"{\"hooks\":5}","output":{}},
+    {"input":"{\"hooks\":\"x\"}","output":{}},
+    {"input":"{\"hooks\":[]}","output":{}},
+    {"input":"{\"hooks\":[{}]}","output":null},
+    {"input":"{\"hooks\":[5]}","output":{}},
+    {"input":"{\"hooks\":[{\"matcher\":\"x\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}","output":null},
+    {"input":"{\"hooks\":[{\"PreToolUse\":[]}]}","output":null},
+    {"input":"{\"hooks\":[{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}]}","output":null},
+    {"input":"{\"hooks\":{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}}","output":null},
+    {"input":"{\"hooks\":{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]},\"model\":\"m\"}","output":null},
+    {"input":"{\"hooks\":{\"hooks\":{\"type\":\"command\"}},\"model\":\"m\"}","output":null},
+    {"input":"{\"hooks\":{\"hooks\":[]}}","output":{}},
+    {"input":"{\"hooks\":{\"Bogus\":[]},\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"hooks\":{\"Bogus\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}","output":{}},
+    {"input":"{\"hooks\":{\"Bogus\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}}","output":null},
+    {"input":"{\"hooks\":{\"Bogus\":5,\"Stop\":[]}}","output":{"hooks":{"Stop":[]}}},
+    {"input":"{\"hooks\":{\"Bogus\":{\"a\":{\"b\":{\"c\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}}}}}","output":null},
+    {"input":"{\"hooks\":{\"Stop\":5,\"PostToolUse\":[]}}","output":{"hooks":{"PostToolUse":[]}}},
+    {"input":"{\"hooks\":{\"Stop\":null}}","output":{}},
+    {"input":"{\"hooks\":{\"Stop\":{}}}","output":{}},
+    {"input":"{\"hooks\":{\"Stop\":{\"matcher\":\"x\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}}}","output":{}},
+    {"input":"{\"hooks\":{\"Stop\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}}","output":null},
+    {"input":"{\"hooks\":{\"Stop\":{\"a\":{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}}}}","output":{}},
+    {"input":"{\"hooks\":{\"PreToolUse\":5}}","output":null},
+    {"input":"{\"hooks\":{\"PreToolUse\":null}}","output":{}},
+    {"input":"{\"hooks\":{\"PreToolUse\":{}}}","output":null},
+    {"input":"{\"hooks\":{\"PermissionRequest\":\"x\",\"Stop\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}","output":null},
+    {"input":"{\"hooks\":{\"Bogus\":5}}","output":{}},
+    {"input":"{\"hooks\":{\"Stop\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]},5,null,[],\"x\"]}}","output":{"hooks":{"Stop":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo ok"}]}]}}},
+    {"input":"{\"hooks\":{\"Stop\":[{\"matcher\":\"a\"},{\"matcher\":\"b\",\"hooks\":\"x\"},{\"hooks\":{}},{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}","output":{"hooks":{"Stop":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo ok"}]}]}}},
+    {"input":"{\"hooks\":{\"Stop\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"},5,null,[],{\"type\":\"nope\"},{\"type\":5},{},{\"type\":\"command\"},{\"type\":\"prompt\",\"prompt\":\"p\"}]}]}}","output":{"hooks":{"Stop":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo ok"},{"type":"prompt","prompt":"p"}]}]}}},
+    {"input":"{\"hooks\":{\"Stop\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"x\",\"timeout\":0},{\"type\":\"http\",\"url\":\"\"},{\"type\":\"mcp_tool\",\"server\":\"s\",\"tool\":\"t\"},{\"type\":\"agent\",\"prompt\":\"a\"},{\"type\":\"prompt\",\"prompt\":\"p\",\"model\":5}]}]}}","output":{"hooks":{"Stop":[{"matcher":"Bash","hooks":[{"type":"mcp_tool","server":"s","tool":"t"},{"type":"agent","prompt":"a"}]}]}}},
+    {"input":"{\"hooks\":{\"Stop\":[{\"matcher\":5,\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]},{\"matcher\":\"ok\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}","output":{"hooks":{"Stop":[{"matcher":"ok","hooks":[{"type":"command","command":"echo ok"}]}]}}},
+    {"input":"{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}],\"extra\":true}]}}","output":{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok"}]}]}}},
+    {"input":"{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"x\",\"cloud\":\"bogus\"}]}]}}","output":{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"x","cloud":"skip"}]}]}}},
+    {"input":"{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"x\",\"unknownField\":1}]}]}}","output":{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"x"}]}]}}},
+    {"input":"{\"hooks\":{\"SessionStart\":[{\"hooks\":[]}]}}","output":{"hooks":{"SessionStart":[{"hooks":[]}]}}},
+    {"input":"{\"hooks\":{\"Stop\":[]},\"other\":1}","output":{"hooks":{"Stop":[]},"other":1}},
+    {"input":"{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]},{\"hooks\":[5]}]}}","output":{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok"}]},{"hooks":[]}]}}},
+    {"input":"{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"x\"},{\"type\":\"bad\"}]},{\"hooks\":4}]}}","output":{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"x"}]}]}}},
+    {"input":"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}","output":{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo ok"}]}]}}},
+    {"input":"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[]}]}}","output":{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[]}]}}},
+    {"input":"{\"hooks\":{\"PreToolUse\":[]}}","output":{"hooks":{"PreToolUse":[]}}},
+    {"input":"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"},5]}]}}","output":null},
+    {"input":"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"nope\"}]}]}}","output":null},
+    {"input":"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\"}]}]}}","output":null},
+    {"input":"{\"hooks\":{\"PreToolUse\":[5]}}","output":null},
+    {"input":"{\"hooks\":{\"PreToolUse\":[{\"hooks\":5}]}}","output":null},
+    {"input":"{\"hooks\":{\"PreToolUse\":[{\"matcher\":7,\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}","output":null},
+    {"input":"{\"hooks\":{\"PermissionRequest\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]},5],\"Stop\":[]}}","output":null},
+    {"input":"{\"hooks\":{\"PermissionRequest\":[{\"matcher\":\"x\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}","output":{"hooks":{"PermissionRequest":[{"matcher":"x","hooks":[{"type":"command","command":"echo ok"}]}]}}},
+    {"input":"{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"x\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}],\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}]}}","output":null},
+    {"input":"{\"hooks\":{\"Stop\":[{\"matcher\":\"x\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}],\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}]}}","output":null},
+    {"input":"{\"hooks\":{\"Stop\":[{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}]}}","output":null},
+    {"input":"{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}],\"nested\":{\"PermissionRequest\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}]}}","output":null},
+    {"input":"{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"x\",\"PreToolUse\":[1]}]}]}}","output":null},
+    {"input":"{\"hooks\":{\"PreToolUse\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}],\"note\":\"x\"},{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"},{\"type\":\"command\",\"command\":5}]}]}}","output":null},
+    {"input":"{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}],\"model\":\"m\"}","output":null},
+    {"input":"{\"PermissionRequest\":[{}],\"model\":\"m\"}","output":null},
+    {"input":"{\"PreToolUse\":[],\"model\":\"m\"}","output":{"model":"m","PreToolUse":[]}},
+    {"input":"{\"PreToolUse\":null,\"model\":\"m\"}","output":{"model":"m","PreToolUse":null}},
+    {"input":"{\"PreToolUse\":{},\"model\":\"m\"}","output":null},
+    {"input":"{\"PreToolUse\":0}","output":null},
+    {"input":"{\"other\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]},\"model\":\"m\"}","output":null},
+    {"input":"{\"other\":{\"deeper\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}},\"model\":\"m\"}","output":null},
+    {"input":"{\"other\":{\"a\":{\"b\":{\"c\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}}},\"model\":\"m\"}","output":null},
+    {"input":"{\"other\":[{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}],\"model\":\"m\"}","output":null},
+    {"input":"{\"other\":{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]},\"model\":\"m\"}","output":null},
+    {"input":"{\"other\":{\"matcher\":\"x\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]},\"model\":\"m\"}","output":null},
+    {"input":"{\"other\":{\"matcher\":\"x\",\"hooks\":{\"type\":\"command\"}},\"model\":\"m\"}","output":null},
+    {"input":"{\"other\":[{\"matcher\":\"x\",\"hooks\":[]}],\"model\":\"m\"}","output":{"model":"m","other":[{"matcher":"x","hooks":[]}]}},
+    {"input":"{\"other\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]},\"model\":\"m\"}","output":{"model":"m","other":{"Stop":[{"hooks":[{"type":"command","command":"echo ok"}]}]}}},
+    {"input":"{\"other\":{\"Stop\":{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}},\"model\":\"m\"}","output":{"model":"m","other":{"Stop":{"hooks":[{"type":"command","command":"echo ok"}]}}}},
+    {"input":"{\"other\":{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}],\"Stop\":[]},\"model\":\"m\"}","output":{"model":"m","other":{"hooks":[{"type":"command","command":"echo ok"}],"Stop":[]}}},
+    {"input":"{\"other\":{\"hooks\":{\"type\":\"command\"}},\"model\":\"m\"}","output":null},
+    {"input":"{\"other\":{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}},\"model\":\"m\"}","output":null},
+    {"input":"{\"other\":{\"hooks\":[{\"type\":\"command\",\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}]},\"model\":\"m\"}","output":null},
+    {"input":"{\"mcpServers\":{\"a\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}},\"model\":\"m\"}","output":{"model":"m","mcpServers":{"a":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo ok"}]}]}}}},
+    {"input":"{\"env\":{\"PreToolUse\":\"x\"},\"model\":\"m\"}","output":{"env":{"PreToolUse":"x"},"model":"m"}},
+    {"input":"{\"enabledPlugins\":{\"PreToolUse\":true},\"model\":\"m\"}","output":{"model":"m","enabledPlugins":{"PreToolUse":true}}},
+    {"input":"{\"skillOverrides\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]},\"model\":\"m\"}","output":null},
+    {"input":"{\"modelSettings\":{\"PermissionRequest\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]},\"model\":\"m\"}","output":{"model":"m","modelSettings":{}}},
+    {"input":"{\"lspServers\":{\"x\":{\"PreToolUse\":[1]}},\"model\":\"m\"}","output":{"model":"m","lspServers":{"x":{"PreToolUse":[1]}}}},
+    {"input":"{\"pluginConfigs\":{\"x\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}},\"model\":\"m\"}","output":{"model":"m","pluginConfigs":{"x":{}}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]},\"model\":\"m\"}","output":{"model":"m","extraKnownMarketplaces":{}}},
+    {"input":"{\"experimental\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]},\"model\":\"m\"}","output":null},
+    {"input":"{\"metadata\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]},\"model\":\"m\"}","output":null},
+    {"input":"{\"nested\":{\"Stop\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}}}","output":null},
+    {"input":"{\"nested\":[[[{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}]]]}","output":null},
+    {"input":"{\"nested\":[[[[{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"}]}]}]]]]}","output":{"nested":[[[[{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo ok"}]}]}]]]]}},
+    {"input":"{\"extraKnownMarketplaces\":null,\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"extraKnownMarketplaces\":5}","output":{}},
+    {"input":"{\"extraKnownMarketplaces\":\"x\"}","output":{}},
+    {"input":"{\"extraKnownMarketplaces\":[]}","output":{}},
+    {"input":"{\"extraKnownMarketplaces\":[{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}]}","output":{}},
+    {"input":"{\"extraKnownMarketplaces\":{}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}},\"b\":5,\"c\":null,\"d\":\"x\",\"e\":[],\"f\":{}}}","output":{"extraKnownMarketplaces":{"a":{"source":{"source":"github","repo":"o/r"}}}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":{\"source\":\"bogus\",\"x\":1}},\"b\":{\"source\":{\"source\":\"github\"}}}}","output":null},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":{\"source\":\"bogus\"}}}}","output":null},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":{\"source\":5}}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":{\"source\":\"url\"}}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":5}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":null}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":[]}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":{}}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":[{\"source\":{\"source\":\"bogus\"}}]}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"},\"autoUpdate\":\"yes\"}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"},\"autoUpdate\":true,\"installLocation\":\"/x\"},\"b\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}}}","output":{"extraKnownMarketplaces":{"a":{"source":{"source":"github","repo":"o/r"},"installLocation":"/x","autoUpdate":true},"b":{"source":{"source":"github","repo":"o/r"}}}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"a\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"},\"pluginDigests\":{\"p\":[\"x\"]}}}}","output":{"extraKnownMarketplaces":{"a":{"source":{"source":"github","repo":"o/r"},"pluginDigests":{"p":["x"]}}}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[]}}}}","output":{"extraKnownMarketplaces":{"m":{"source":{"source":"settings","name":"m","plugins":[]}}}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"other\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[]}}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[{\"name\":\"p\",\"source\":\"./p\"}]}},\"x\":{\"source\":{\"source\":\"settings\",\"name\":\"y\",\"plugins\":[]}},\"z\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}}}","output":{"extraKnownMarketplaces":{"z":{"source":{"source":"github","repo":"o/r"}}}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[{\"name\":\"p\",\"source\":{\"source\":\"unsupported\"}}]}}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[{\"name\":\"p\",\"source\":{\"source\":\"future-kind\",\"x\":1}}]}}}}","output":null},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[{\"name\":\"p\",\"source\":{\"source\":\"future-kind\"}},{\"name\":\"q\",\"source\":{\"source\":\"npm\",\"package\":\"x\"}}]}}}}","output":null},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[{\"name\":\"p\",\"source\":{\"source\":\"npm\",\"package\":\"x\"}},{\"source\":{\"source\":\"other-kind\"}}]}}}}","output":null},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[{\"name\":\"p\"},5,{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}]}}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[{\"name\":\"p\",\"source\":{\"source\":\"unsupported\"}},{\"name\":\"q\",\"source\":{\"source\":\"other-kind\"}}]}}}}","output":null},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":\"x\"}}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[null]}}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[{\"source\":{\"source\":\"x\"}}]}}}}","output":null},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[{\"source\":[]}]}}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"m\":{\"source\":{\"source\":\"settings\",\"name\":\"m\",\"plugins\":[{\"source\":{\"source\":5}}]}}}}","output":{"extraKnownMarketplaces":{}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"key with space\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}},\"ok\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}}}","output":{"extraKnownMarketplaces":{"key with space":{"source":{"source":"github","repo":"o/r"}},"ok":{"source":{"source":"github","repo":"o/r"}}}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"claude-plugins-official\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}},\"anthropic-marketplace\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}}}","output":{"extraKnownMarketplaces":{"claude-plugins-official":{"source":{"source":"github","repo":"o/r"}},"anthropic-marketplace":{"source":{"source":"github","repo":"o/r"}}}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"official-claude\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}},\"claude-official\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}}}","output":{"extraKnownMarketplaces":{"official-claude":{"source":{"source":"github","repo":"o/r"}},"claude-official":{"source":{"source":"github","repo":"o/r"}}}}},
+    {"input":"{\"extraKnownMarketplaces\":{\"__proto__x\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}},\"constructor\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}}}","output":{"extraKnownMarketplaces":{"__proto__x":{"source":{"source":"github","repo":"o/r"}},"constructor":{"source":{"source":"github","repo":"o/r"}}}}},
+    {"input":"{\"modelPicker\":null,\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"modelPicker\":5}","output":{}},
+    {"input":"{\"modelPicker\":\"x\"}","output":{}},
+    {"input":"{\"modelPicker\":[]}","output":{}},
+    {"input":"{\"modelPicker\":{}}","output":{}},
+    {"input":"{\"modelPicker\":{\"options\":5}}","output":{}},
+    {"input":"{\"modelPicker\":{\"options\":{}}}","output":{}},
+    {"input":"{\"modelPicker\":{\"options\":[]}}","output":{"modelPicker":{"options":[]}}},
+    {"input":"{\"modelPicker\":{\"options\":[{\"model\":\"a\"},{\"model\":5},\"x\",null,{\"label\":\"l\"},{\"model\":\"b\",\"label\":\"B\",\"description\":\"d\",\"behavesAs\":\"c\"}]}}","output":{"modelPicker":{"options":[{"model":"a"},{"model":"b","label":"B","description":"d","behavesAs":"c"}]}}},
+    {"input":"{\"modelPicker\":{\"options\":[{\"model\":\"a\",\"extra\":1}],\"replaceBuiltInOptions\":true}}","output":{"modelPicker":{"options":[{"model":"a"}],"replaceBuiltInOptions":true}}},
+    {"input":"{\"modelPicker\":{\"options\":[{\"model\":\"a\"}],\"replaceBuiltInOptions\":\"yes\"}}","output":{"modelPicker":{"options":[{"model":"a"}]}}},
+    {"input":"{\"modelPicker\":{\"options\":[{\"model\":\"a\"}],\"replaceBuiltInOptions\":null}}","output":{"modelPicker":{"options":[{"model":"a"}]}}},
+    {"input":"{\"modelPicker\":{\"options\":[{\"model\":\"a\"}],\"replaceBuiltInOptions\":false,\"other\":1}}","output":{"modelPicker":{"options":[{"model":"a"}],"replaceBuiltInOptions":false}}},
+    {"input":"{\"modelPicker\":{\"options\":[{\"model\":\"a\"},{\"model\":\"b\"}]}}","output":{"modelPicker":{"options":[{"model":"a"},{"model":"b"}]}}},
+    {"input":"{\"modelPicker\":{\"options\":[5],\"replaceBuiltInOptions\":\"no\"}}","output":{"modelPicker":{"options":[]}}},
+    {"input":"{\"modelPricing\":null,\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"modelPricing\":5}","output":{}},
+    {"input":"{\"modelPricing\":[]}","output":{}},
+    {"input":"{\"modelPricing\":\"x\"}","output":{}},
+    {"input":"{\"modelPricing\":{}}","output":{"modelPricing":{}}},
+    {"input":"{\"modelPricing\":{\"multiplier\":2}}","output":{"modelPricing":{"multiplier":2}}},
+    {"input":"{\"modelPricing\":{\"multiplier\":0}}","output":{"modelPricing":{}}},
+    {"input":"{\"modelPricing\":{\"multiplier\":10}}","output":{"modelPricing":{"multiplier":10}}},
+    {"input":"{\"modelPricing\":{\"multiplier\":10.5}}","output":{"modelPricing":{}}},
+    {"input":"{\"modelPricing\":{\"multiplier\":\"x\"}}","output":{"modelPricing":{}}},
+    {"input":"{\"modelPricing\":{\"multiplier\":null}}","output":{"modelPricing":{}}},
+    {"input":"{\"modelPricing\":{\"multiplier\":-1,\"overrides\":{}}}","output":{"modelPricing":{"overrides":{}}}},
+    {"input":"{\"modelPricing\":{\"overrides\":5}}","output":{"modelPricing":{}}},
+    {"input":"{\"modelPricing\":{\"overrides\":null}}","output":{"modelPricing":{}}},
+    {"input":"{\"modelPricing\":{\"overrides\":[]}}","output":{"modelPricing":{}}},
+    {"input":"{\"modelPricing\":{\"overrides\":\"x\",\"multiplier\":3}}","output":{"modelPricing":{"multiplier":3}}},
+    {"input":"{\"modelPricing\":{\"overrides\":{\"a\":{\"input\":1,\"output\":2,\"cacheRead\":3,\"cacheWrite\":4}}}}","output":{"modelPricing":{"overrides":{"a":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4}}}}},
+    {"input":"{\"modelPricing\":{\"overrides\":{\"a\":{\"input\":1,\"output\":2,\"cacheRead\":3,\"cacheWrite\":4},\"b\":{\"input\":1},\"c\":5,\"d\":null,\"e\":{\"input\":-1,\"output\":2,\"cacheRead\":3,\"cacheWrite\":4}}}}","output":{"modelPricing":{"overrides":{"a":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4}}}}},
+    {"input":"{\"modelPricing\":{\"overrides\":{\"a\":{\"input\":10001,\"output\":2,\"cacheRead\":3,\"cacheWrite\":4},\"b\":{\"input\":10000,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"extra\":1}}}}","output":{"modelPricing":{"overrides":{"b":{"input":10000,"output":0,"cacheRead":0,"cacheWrite":0}}}}},
+    {"input":"{\"modelPricing\":{\"overrides\":{\"constructor\":{\"input\":1,\"output\":2,\"cacheRead\":3,\"cacheWrite\":4},\"ok\":{\"input\":1,\"output\":2,\"cacheRead\":3,\"cacheWrite\":4}}}}","output":{"modelPricing":{"overrides":{"ok":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4}}}}},
+    {"input":"{\"modelPricing\":{\"overrides\":{\"__proto__\":{\"input\":1,\"output\":2,\"cacheRead\":3,\"cacheWrite\":4},\"ok\":{\"input\":1,\"output\":2,\"cacheRead\":3,\"cacheWrite\":4}}}}","output":{"modelPricing":{"overrides":{"ok":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4}}}}},
+    {"input":"{\"modelPricing\":{\"multiplier\":2,\"overrides\":{\"a\":[]},\"extra\":true}}","output":{"modelPricing":{"multiplier":2,"overrides":{}}}},
+    {"input":"{\"crossSessionInbound\":\"accept\"}","output":{"crossSessionInbound":"accept"}},
+    {"input":"{\"crossSessionInbound\":\"hold\"}","output":{"crossSessionInbound":"hold"}},
+    {"input":"{\"crossSessionInbound\":\"refuse\"}","output":{"crossSessionInbound":"refuse"}},
+    {"input":"{\"crossSessionInbound\":\"bogus\",\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"crossSessionInbound\":5,\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"crossSessionInbound\":null,\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"crossSessionInbound\":[\"accept\"],\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"remoteControl\":{\"shareHostProfile\":\"off\"}}","output":{"remoteControl":{"shareHostProfile":"off"}}},
+    {"input":"{\"remoteControl\":{\"shareHostProfile\":\"basic\"}}","output":{"remoteControl":{"shareHostProfile":"basic"}}},
+    {"input":"{\"remoteControl\":{\"shareHostProfile\":\"full\"}}","output":{"remoteControl":{"shareHostProfile":"full"}}},
+    {"input":"{\"remoteControl\":{\"shareHostProfile\":\"bogus\"},\"model\":\"m\"}","output":{"model":"m","remoteControl":{}}},
+    {"input":"{\"remoteControl\":{\"shareHostProfile\":5}}","output":{"remoteControl":{}}},
+    {"input":"{\"remoteControl\":{\"shareHostProfile\":null}}","output":{"remoteControl":{}}},
+    {"input":"{\"remoteControl\":{\"other\":1}}","output":{"remoteControl":{}}},
+    {"input":"{\"remoteControl\":{\"shareHostProfile\":\"full\",\"other\":1}}","output":{"remoteControl":{"shareHostProfile":"full"}}},
+    {"input":"{\"remoteControl\":{\"other\":1,\"shareHostProfile\":\"bogus\"}}","output":{"remoteControl":{}}},
+    {"input":"{\"remoteControl\":{}}","output":{"remoteControl":{}}},
+    {"input":"{\"remoteControl\":null,\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"remoteControl\":5}","output":{}},
+    {"input":"{\"remoteControl\":\"on\"}","output":{}},
+    {"input":"{\"remoteControl\":[]}","output":{}},
+    {"input":"{\"allowedMcpServers\":[{\"serverName\":\"a\"},{\"serverCommand\":[\"x\",\"y\"]},{\"serverUrl\":\"https://*.example.com/*\"}]}","output":{"allowedMcpServers":[{"serverName":"a"},{"serverCommand":["x","y"]},{"serverUrl":"https://*.example.com/*"}]}},
+    {"input":"{\"allowedMcpServers\":[{\"serverName\":\"bad name\"},{\"serverName\":\"ok\"},5,null,\"x\",{},{\"serverCommand\":[]},{\"serverName\":\"a\",\"serverCommand\":[\"x\"]}]}","output":{"allowedMcpServers":[{"serverName":"ok"}]}},
+    {"input":"{\"allowedMcpServers\":5}","output":{}},
+    {"input":"{\"allowedMcpServers\":null}","output":{}},
+    {"input":"{\"allowedMcpServers\":{}}","output":{}},
+    {"input":"{\"allowedMcpServers\":\"x\",\"deniedMcpServers\":5}","output":{}},
+    {"input":"{\"allowedMcpServers\":[],\"deniedMcpServers\":[]}","output":{"allowedMcpServers":[],"deniedMcpServers":[]}},
+    {"input":"{\"deniedMcpServers\":[{\"serverName\":\"a\"},{\"serverName\":\" a\"},{\"serverName\":\"\"},{\"serverName\":\"x \"},{\"serverUrl\":\"u\"},{\"serverCommand\":[\"c\"]},{\"serverName\":\"a\",\"serverUrl\":\"u\"}]}","output":{"deniedMcpServers":[{"serverName":"a"},{"serverUrl":"u"},{"serverCommand":["c"]}]}},
+    {"input":"{\"deniedMcpServers\":[{\"serverName\":\"ok\"},3,{\"serverName\":\"x\",\"unknown\":1}]}","output":{"deniedMcpServers":[{"serverName":"ok"},{"serverName":"x"}]}},
+    {"input":"{\"deniedMcpServers\":{\"a\":1}}","output":{}},
+    {"input":"{\"deniedMcpServers\":null,\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"additionalMarketplaces\":{\"a\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}},\"b\":5},\"hooks\":{\"Bogus\":[],\"Stop\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo ok\"},5]}]},\"permissions\":{\"allow\":[\"Bash\",5]},\"modelPicker\":{\"options\":[{\"model\":\"a\"},5]},\"crossSessionInbound\":\"x\",\"remoteControl\":{\"shareHostProfile\":\"x\"},\"allowedMcpServers\":[5,{\"serverName\":\"a\"}],\"model\":\"m\"}","output":{"permissions":{"allow":["Bash"]},"model":"m","modelPicker":{"options":[{"model":"a"}]},"allowedMcpServers":[{"serverName":"a"}],"hooks":{"Stop":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo ok"}]}]},"extraKnownMarketplaces":{"a":{"source":{"source":"github","repo":"o/r"}}},"remoteControl":{}}},
+    {"input":"{\"managedMcpServers\":{},\"additionalMarketplaces\":{\"a\":{\"source\":{\"source\":\"github\",\"repo\":\"o/r\"}}},\"extraKnownMarketplaces\":{\"b\":5},\"model\":\"m\"}","output":{"model":"m","extraKnownMarketplaces":{}}},
+    {"input":"{\"enabledMcpjsonServers\":\"x\",\"model\":\"m\",\"PreToolUse\":[1]}","output":null},
+    {"input":"{\"modelPricing\":{\"multiplier\":1},\"modelPicker\":{\"options\":[]},\"allowedMcpServers\":[],\"deniedMcpServers\":[],\"remoteControl\":{},\"model\":\"m\"}","output":{"model":"m","modelPicker":{"options":[]},"modelPricing":{"multiplier":1},"allowedMcpServers":[],"deniedMcpServers":[],"remoteControl":{}}},
+    {"input":"{\"b\":1,\"2\":3,\"a\":2,\"1\":4}","output":{"1":4,"2":3,"b":1,"a":2}},
+    {"input":"{\"model\":\"m\",\"10\":1,\"9\":2,\"x\":{\"b\":1,\"7\":2,\"3\":3}}","output":{"9":2,"10":1,"model":"m","x":{"3":3,"7":2,"b":1}}},
+    {"input":"","output":{}},
+    {"input":"   ","output":{}},
+    {"input":"\n","output":{}},
+    {"input":"null","output":null},
+    {"input":"[]","output":null},
+    {"input":"5","output":null},
+    {"input":"\"x\"","output":null},
+    {"input":"true","output":null},
+    {"input":"{","output":null},
+    {"input":"{\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"model\":\"m\"} x","output":null},
+    {"input":"﻿{\"model\":\"m\"}","output":{"model":"m"}},
+    {"input":"{\"model\":\"m\",\"model\":\"n\"}","output":{"model":"n"}},
+    {"input":"{\"permissions\":{\"allow\":[\"Read\"]},\"model\":\"a\",\"model\":\"b\"}","output":{"permissions":{"allow":["Read"]},"model":"b"}},
+    {"input":"{\"model\":\"m\",}","output":null},
+    {"input":"{/*c*/\"model\":\"m\"}","output":null},
+    {"input":"// c\n{\"model\":\"m\"}","output":null},
+    {"input":"{\"model\":\"m\"} // c","output":null},
+    {"input":"{'model':'m'}","output":null},
+    {"input":"{\"model\":\"m\"}\n\n","output":{"model":"m"}},
+    {"input":"{\"x\":1.0,\"y\":1e2,\"z\":-0,\"w\":0.1}","output":{"x":1,"y":100,"z":0,"w":0.1}},
+    {"input":"{\"x\":12345678901234567890}","output":{"x":12345678901234567000}},
+    {"input":"{\"model\":\"\\u00e9\\ud83d\\ude00\"}","output":{"model":"é😀"}},
+    {"input":"{\"a\":[1,2,],\"model\":\"m\"}","output":null},
+    {"input":"\n  {\"model\":\"m\"}  \n","output":{"model":"m"}}
+  ]
+  },
   "batteries": {
     "value": [null,1,"x",true,false,[],["a",null,1],{},{"path":null},{"path":null,"script":null,"defaultSettings":null},{"a":1},["skills","bogus"],["Bash"],["/a/"],9999999999,0,5,6,300000,300001,65536,2147483647,2147483648,-1,1.5,"/abs/x","rel","",{"mode":"deny"},{"mode":"deny","extract":1,"onExtractNoMatch":"x","decode":"x","maskClaims":[1],"maskDuplicates":"y","injectHosts":[1]},{"mode":"deny","extract":"a","onExtractNoMatch":"warn","decode":"jwt","maskClaims":["a"],"maskDuplicates":true,"injectHosts":["h"]},{"mode":"deny","onExtractNoMatch":"deny"},{"mode":"deny","onExtractNoMatch":"error","maskClaims":[],"injectHosts":"h"},{"mode":"allow","extract":1},{"mode":1},{"extract":1},{"constructor":1,"a":1},{"toString":1,"valueOf":2,"hasOwnProperty":3,"x":4},{"__proto__x":1,"isPrototypeOf":1,"propertyIsEnumerable":1,"toLocaleString":1},{"timeout":1,"request_timeout_ms":400000,"x":1},{"request_timeout_ms":400000},{"request_timeout_ms":5},{"request_timeout_ms":5,"timeout":9},{"request_timeout_ms":"x"},{"request_timeout_ms":null},{"timeout":null,"request_timeout_ms":7},{"path":null,"script":null},{"path":null,"script":null,"defaultSettings":null,"extra":1},{"path":"/a","script":null},{"path":null,"script":"s","defaultSettings":null},{"script":null},{"defaultSettings":null},["anthropic","bedrock","bogus",3,null],["customEndpoint","vertex","foundry","anthropicAws","mantle","gateway"],["Anthropic"],["skills","agents","hooks","mcp","other",1],["a",{},[],1,null,{"b":1}],{"engines":{"vscode":"1"}}],
     "string": [""," ","x","a b"," padded ","a/b","a\\b","..",".","a/../b","a//b","/abs/path","C:\\win\\path","\\\\server\\share","rel/path","./rel","a\u0000b","café","https://example.com/x","http://example.com/x","https://localhost/x","https://127.0.0.1/x","ftp://example.com","git+ssh://host/repo","file:///a/../b","github:owner/repo","constructor","prototype","__proto__","Name_1-x","with.dot","$VAR","a*b","prefix*","*","Bash(ls)","ALLCAPS","tool.exe",{"repeat":["x",70000]},{"repeat":["a",501]},"00:00","9:30","/","//","/a","/a/","/a//b","/a/./b","/a/../b","/a/b/","/a b/c","/net/host","/net","/net/host/x","/Network/Servers","/network/servers/x","/NETWORK/SERVERS","/.vol","/.vol/x","/.VOL","/.file/x","/.nofollow","/.resolve/id","/x/.vol","/proc","/proc/1/exe","/dev/fd/3","/dev/stdin","/dev/null","/usr/bin/tool","/opt/helper.ps1","/opt/helper.exe","/a\u0007b","/a​b","/a b","/a­b","/a b","/café","/tmp/😀","C:\\","C:\\x","C:\\x\\","C:\\x\\y.exe","C:\\x\\y.ps1","C:\\x\\y.EXE","C:\\x\\y.PS1","C:/x/y.exe","c:\\x\\..\\y.exe","C:\\x\\.\\y.exe","C:\\x\\\\y.exe","C:\\x\\y.exe.","C:\\x\\y.exe ","C:\\x\\y:z.exe","C:\\x:y\\z.exe","C:x\\y.exe","C:","C:y","\\x\\y.exe","\\\\?\\C:\\x.exe","\\\\.\\C:\\x.exe","//?/C:/x.exe","\\\\server\\share\\x.exe","\\\\server\\share","\\\\\\x.exe","//server/share/x.exe","C:\\x\\[y].ps1","C:\\x\\y*.ps1","C:\\x\\y?.ps1","C:\\x\\y`.ps1","C:\\x\\y[.exe","C:\\x\\a b\\y.exe","\\\\","\\\\s","\\","D:\\","Z:\\a\\b.exe",{"repeat":["x",1024]},{"repeat":["x",1025]},"/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","a    b","a   b","","",""," ","‎","‪","⁦","⁩","﻿","­","​","؜","᠎","anthropic-marketplace","claude-code-plugins","claude-plugins-official","healthcare","claude-community","anthropic-plugin-directory","claude-plugin-directory","Claude-Plugins-Official","official-claude-plugins","anthropic official","claude_official","claude-marketplace","anthropic-plugins-x","claudeofficial","official anthropic","anthropic-plugins","anthropic.official","my-marketplace","inline","builtin","skills-dir","synced","claude-plugin-test","INLINE","Builtin","toString","hasOwnProperty","valueOf","isPrototypeOf","propertyIsEnumerable","__defineGetter__","__lookupSetter__","toLocaleString","@scope/pkg","@Scope/pkg","@scope/","@/pkg","pkg","Pkg","pkg..x","pkg//x","@scope/pkg/x","-pkg",".pkg","pkg-._x","@a-b/c.d","server","my server","my.server","claude.ai Gmail","claude.ai  x ","a__b","mcp__x","_","__","-","a-b_c","x y","${HOME}","${A:-b}","${1A}","a${B}","https://","https:///x","https://a","http://a","https://exa mple.com","https://example.com","https://EXAMPLE.com./x","https://user@example.com","https://localhost","https://LOCALHOST","https://localhost.","https://a.localhost","https://metadata.google.internal","https://metadata.goog","https://metadata","https://instance-data","https://instance-data.ec2.internal","https://ip6-localhost","https://localhost.localdomain","https://localhost4","https://localhost6.localdomain6","https://instance-data.us-east-1.compute.internal","https://instance-data.x.y","https://127.0.0.1","https://127.1","https://0.0.0.0","https://0","https://0x7f.1","https://2130706433","https://10.0.0.1","https://172.16.0.1","https://192.168.1.1","https://169.254.169.254","https://169.254.0.1","https://100.100.100.200","https://168.63.129.16","https://192.0.0.192","https://8.8.8.8","https://1.2.3.4","https://255.255.255.255","https://0.1.2.3","https://127.255.255.255","https://[::1]","https://[::]","https://[0:0:0:0:0:0:0:1]","https://[::2]","https://[fe80::1]","https://[fe80::]","https://[febf::1]","https://[fec0::1]","https://[fd00:ec2::254]","https://[fd00:ec2::253]","https://[::ffff:127.0.0.1]","https://[::ffff:7f00:1]","https://[::ffff:8.8.8.8]","https://[::ffff:a9fe:a9fe]","https://[::127.0.0.1]","https://[::8.8.8.8]","https://[64:ff9b::7f00:1]","https://[64:ff9b::8.8.8.8]","https://[64:ff9b:1::7f00:1]","https://[64:ff9b:1::1]","https://[2002:7f00:1::]","https://[2002:808:808::]","https://[2001:db8::1]","https://[2606:4700::1111]","https://[::ffff:100.100.100.200]","https://[fe80::1%25eth0]","https://[2001:0:0:0:0:5efe:7f00:1]","https://[2001:0:0:0:0:5efe:808:808]","https://[2001:db8::5efe:7f00:1]","https://[2001:db8:0:0:0:200:5efe:7f00:1]","https://[1:2:3:4:5:6:7:8]","https://[1::2:3:4:5:6:7]","https://[::1.2.3.4]","https://[::ffff:0:0]","https://[::ffff:0.0.0.0]","https://[0:0:0:0:0:0:0:0]","http://127.0.0.1:8080","http://[::1]:80","ws://example.com","HTTPS://example.com","https:example.com","https:/example.com","https:\\\\example.com","https://\\x","http:///x","http://\\x","file://x","javascript:alert(1)","mailto:a@b","data:text/plain,x","https://example.com:99999","https://éxample.com","https://xn--n3h.example","https://a.b.c.d.example.com/path?q=1#f","git://x/y","git+http://x","git+https://x","ssh://x","gitlab:o/r","bitbucket:o/r","FILE:///x","GitHub:o/r","git+ftp://x","./x","../x","x/../y","a.mcpb","a.dxt","./a.mcpb","./a.json","./a.md",".mcpb","https://x/a.mcpb"],
@@ -1829,31 +2347,7 @@
           "options": {
             "type": "array",
             "element": {
-              "type": "object",
-              "mode": "strip",
-              "shape": {
-                "model": {
-                  "type": "string"
-                },
-                "label": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "string"
-                  }
-                },
-                "description": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "string"
-                  }
-                },
-                "behavesAs": {
-                  "type": "optional",
-                  "inner": {
-                    "type": "string"
-                  }
-                }
-              }
+              "ref": "n7"
             }
           },
           "replaceBuiltInOptions": {
@@ -1872,22 +2366,7 @@
         "mode": "strip",
         "shape": {
           "multiplier": {
-            "type": "optional",
-            "inner": {
-              "type": "number",
-              "checks": [
-                {
-                  "check": "greater_than",
-                  "value": 0,
-                  "inclusive": false
-                },
-                {
-                  "check": "less_than",
-                  "value": 10,
-                  "inclusive": true
-                }
-              ]
-            }
+            "ref": "n8"
           },
           "overrides": {
             "type": "optional",
@@ -1897,70 +2376,7 @@
                 "type": "string"
               },
               "value": {
-                "type": "object",
-                "mode": "strip",
-                "shape": {
-                  "input": {
-                    "type": "number",
-                    "checks": [
-                      {
-                        "check": "greater_than",
-                        "value": 0,
-                        "inclusive": true
-                      },
-                      {
-                        "check": "less_than",
-                        "value": 10000,
-                        "inclusive": true
-                      }
-                    ]
-                  },
-                  "output": {
-                    "type": "number",
-                    "checks": [
-                      {
-                        "check": "greater_than",
-                        "value": 0,
-                        "inclusive": true
-                      },
-                      {
-                        "check": "less_than",
-                        "value": 10000,
-                        "inclusive": true
-                      }
-                    ]
-                  },
-                  "cacheRead": {
-                    "type": "number",
-                    "checks": [
-                      {
-                        "check": "greater_than",
-                        "value": 0,
-                        "inclusive": true
-                      },
-                      {
-                        "check": "less_than",
-                        "value": 10000,
-                        "inclusive": true
-                      }
-                    ]
-                  },
-                  "cacheWrite": {
-                    "type": "number",
-                    "checks": [
-                      {
-                        "check": "greater_than",
-                        "value": 0,
-                        "inclusive": true
-                      },
-                      {
-                        "check": "less_than",
-                        "value": 10000,
-                        "inclusive": true
-                      }
-                    ]
-                  }
-                }
+                "ref": "n9"
               }
             }
           }
@@ -2022,16 +2438,16 @@
       }
     },
     "managedMcpServers": {
-      "ref": "n7"
+      "ref": "n10"
     },
     "allowedMcpServers": {
-      "ref": "n14"
+      "ref": "n17"
     },
     "deniedMcpServers": {
-      "ref": "n15"
+      "ref": "n19"
     },
     "hooks": {
-      "ref": "n16"
+      "ref": "n21"
     },
     "worktree": {
       "type": "optional",
@@ -2535,19 +2951,19 @@
       }
     },
     "extraKnownMarketplaces": {
-      "ref": "n19"
+      "ref": "n26"
     },
     "additionalMarketplaces": {
-      "ref": "n33"
+      "ref": "n40"
     },
     "strictKnownMarketplaces": {
-      "ref": "n34"
+      "ref": "n41"
     },
     "allowedMarketplaces": {
-      "ref": "n36"
+      "ref": "n43"
     },
     "blockedMarketplaces": {
-      "ref": "n37"
+      "ref": "n44"
     },
     "disableCommandPluginSources": {
       "type": "optional",
@@ -2739,7 +3155,7 @@
       }
     },
     "sandbox": {
-      "ref": "n38"
+      "ref": "n45"
     },
     "feedbackSurveyRate": {
       "type": "optional",
@@ -4473,6 +4889,117 @@
       ]
     },
     "n7": {
+      "type": "object",
+      "mode": "strip",
+      "shape": {
+        "model": {
+          "type": "string"
+        },
+        "label": {
+          "type": "optional",
+          "inner": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "optional",
+          "inner": {
+            "type": "string"
+          }
+        },
+        "behavesAs": {
+          "type": "optional",
+          "inner": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "n8": {
+      "type": "optional",
+      "inner": {
+        "type": "number",
+        "checks": [
+          {
+            "check": "greater_than",
+            "value": 0,
+            "inclusive": false
+          },
+          {
+            "check": "less_than",
+            "value": 10,
+            "inclusive": true
+          }
+        ]
+      }
+    },
+    "n9": {
+      "type": "object",
+      "mode": "strip",
+      "shape": {
+        "input": {
+          "type": "number",
+          "checks": [
+            {
+              "check": "greater_than",
+              "value": 0,
+              "inclusive": true
+            },
+            {
+              "check": "less_than",
+              "value": 10000,
+              "inclusive": true
+            }
+          ]
+        },
+        "output": {
+          "type": "number",
+          "checks": [
+            {
+              "check": "greater_than",
+              "value": 0,
+              "inclusive": true
+            },
+            {
+              "check": "less_than",
+              "value": 10000,
+              "inclusive": true
+            }
+          ]
+        },
+        "cacheRead": {
+          "type": "number",
+          "checks": [
+            {
+              "check": "greater_than",
+              "value": 0,
+              "inclusive": true
+            },
+            {
+              "check": "less_than",
+              "value": 10000,
+              "inclusive": true
+            }
+          ]
+        },
+        "cacheWrite": {
+          "type": "number",
+          "checks": [
+            {
+              "check": "greater_than",
+              "value": 0,
+              "inclusive": true
+            },
+            {
+              "check": "less_than",
+              "value": 10000,
+              "inclusive": true
+            }
+          ]
+        }
+      }
+    },
+    "n10": {
       "type": "lazy",
       "inner": {
         "type": "record",
@@ -4571,24 +5098,24 @@
                     "oauth": {
                       "type": "optional",
                       "inner": {
-                        "ref": "n8"
+                        "ref": "n11"
                       }
                     },
                     "timeout": {
                       "type": "optional",
                       "inner": {
-                        "ref": "n9"
+                        "ref": "n12"
                       }
                     },
                     "request_timeout_ms": {
-                      "ref": "n10"
+                      "ref": "n13"
                     },
                     "tools": {
                       "type": "optional",
                       "inner": {
                         "type": "array",
                         "element": {
-                          "ref": "n11"
+                          "ref": "n14"
                         }
                       }
                     },
@@ -4623,7 +5150,7 @@
                       }
                     },
                     "role": {
-                      "ref": "n12"
+                      "ref": "n15"
                     },
                     "toolPermissions": {
                       "type": "optional",
@@ -4633,7 +5160,7 @@
                           "type": "string"
                         },
                         "value": {
-                          "ref": "n13"
+                          "ref": "n16"
                         }
                       }
                     }
@@ -4693,24 +5220,24 @@
                     "oauth": {
                       "type": "optional",
                       "inner": {
-                        "ref": "n8"
+                        "ref": "n11"
                       }
                     },
                     "timeout": {
                       "type": "optional",
                       "inner": {
-                        "ref": "n9"
+                        "ref": "n12"
                       }
                     },
                     "request_timeout_ms": {
-                      "ref": "n10"
+                      "ref": "n13"
                     },
                     "tools": {
                       "type": "optional",
                       "inner": {
                         "type": "array",
                         "element": {
-                          "ref": "n11"
+                          "ref": "n14"
                         }
                       }
                     },
@@ -4745,7 +5272,7 @@
                       }
                     },
                     "role": {
-                      "ref": "n12"
+                      "ref": "n15"
                     },
                     "toolPermissions": {
                       "type": "optional",
@@ -4755,7 +5282,7 @@
                           "type": "string"
                         },
                         "value": {
-                          "ref": "n13"
+                          "ref": "n16"
                         }
                       }
                     }
@@ -4773,7 +5300,7 @@
         }
       }
     },
-    "n8": {
+    "n11": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -4852,7 +5379,7 @@
         }
       }
     },
-    "n9": {
+    "n12": {
       "type": "number",
       "checks": [
         {
@@ -4867,7 +5394,7 @@
         }
       ]
     },
-    "n10": {
+    "n13": {
       "type": "catch",
       "inner": {
         "type": "optional",
@@ -4891,7 +5418,7 @@
         "absent": true
       }
     },
-    "n11": {
+    "n14": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -4911,7 +5438,7 @@
         }
       }
     },
-    "n12": {
+    "n15": {
       "type": "catch",
       "inner": {
         "type": "optional",
@@ -4926,7 +5453,7 @@
         "absent": true
       }
     },
-    "n13": {
+    "n16": {
       "type": "enum",
       "values": [
         "allow",
@@ -4934,141 +5461,147 @@
         "blocked"
       ]
     },
-    "n14": {
+    "n17": {
       "type": "lazy",
       "inner": {
         "type": "array",
         "element": {
-          "type": "object",
-          "mode": "strip",
-          "shape": {
-            "serverName": {
-              "type": "optional",
-              "inner": {
-                "type": "string",
-                "checks": [
-                  {
-                    "check": "string_format",
-                    "format": "regex",
-                    "pattern": {
-                      "regex": "^[a-zA-Z0-9_-]+$",
-                      "flags": ""
-                    }
-                  }
-                ]
-              }
-            },
-            "serverCommand": {
-              "type": "optional",
-              "inner": {
-                "type": "array",
-                "element": {
-                  "type": "string"
-                },
-                "checks": [
-                  {
-                    "check": "min_length",
-                    "minimum": 1
-                  }
-                ]
-              }
-            },
-            "serverUrl": {
-              "type": "optional",
-              "inner": {
-                "type": "string"
-              }
-            }
-          },
-          "checks": [
-            {
-              "check": "custom",
-              "type": "custom",
-              "fn": {
-                "source": "(e)=>yl([e.serverName!==void 0,e.serverCommand!==void 0,e.serverUrl!==void 0],Boolean)===1",
-                "battery": "object",
-                "probes": ["error: Cannot read properties of null (reading 'serverName')","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","true","true","true","false","false","true","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false"]
-              }
-            }
-          ]
+          "ref": "n18"
         }
       }
     },
-    "n15": {
+    "n18": {
+      "type": "object",
+      "mode": "strip",
+      "shape": {
+        "serverName": {
+          "type": "optional",
+          "inner": {
+            "type": "string",
+            "checks": [
+              {
+                "check": "string_format",
+                "format": "regex",
+                "pattern": {
+                  "regex": "^[a-zA-Z0-9_-]+$",
+                  "flags": ""
+                }
+              }
+            ]
+          }
+        },
+        "serverCommand": {
+          "type": "optional",
+          "inner": {
+            "type": "array",
+            "element": {
+              "type": "string"
+            },
+            "checks": [
+              {
+                "check": "min_length",
+                "minimum": 1
+              }
+            ]
+          }
+        },
+        "serverUrl": {
+          "type": "optional",
+          "inner": {
+            "type": "string"
+          }
+        }
+      },
+      "checks": [
+        {
+          "check": "custom",
+          "type": "custom",
+          "fn": {
+            "source": "(e)=>yl([e.serverName!==void 0,e.serverCommand!==void 0,e.serverUrl!==void 0],Boolean)===1",
+            "battery": "object",
+            "probes": ["error: Cannot read properties of null (reading 'serverName')","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","true","true","true","false","false","true","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false"]
+          }
+        }
+      ]
+    },
+    "n19": {
       "type": "lazy",
       "inner": {
         "type": "array",
         "element": {
-          "type": "object",
-          "mode": "strip",
-          "shape": {
-            "serverName": {
-              "type": "optional",
-              "inner": {
-                "type": "string",
-                "checks": [
-                  {
-                    "check": "min_length",
-                    "minimum": 1
-                  },
-                  {
-                    "check": "custom",
-                    "type": "custom",
-                    "fn": {
-                      "source": "(e)=>e.trim().length>0",
-                      "battery": "string",
-                      "probes": ["false","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true"]
-                    }
-                  },
-                  {
-                    "check": "custom",
-                    "type": "custom",
-                    "fn": {
-                      "source": "(e)=>e===e.trim()",
-                      "battery": "string",
-                      "probes": ["true","false","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true"]
-                    }
-                  }
-                ]
-              }
-            },
-            "serverCommand": {
-              "type": "optional",
-              "inner": {
-                "type": "array",
-                "element": {
-                  "type": "string"
-                },
-                "checks": [
-                  {
-                    "check": "min_length",
-                    "minimum": 1
-                  }
-                ]
-              }
-            },
-            "serverUrl": {
-              "type": "optional",
-              "inner": {
-                "type": "string"
-              }
-            }
-          },
-          "checks": [
-            {
-              "check": "custom",
-              "type": "custom",
-              "fn": {
-                "source": "(e)=>yl([e.serverName!==void 0,e.serverCommand!==void 0,e.serverUrl!==void 0],Boolean)===1",
-                "battery": "object",
-                "probes": ["error: Cannot read properties of null (reading 'serverName')","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","true","true","true","false","false","true","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false"]
-              }
-            }
-          ]
+          "ref": "n20"
         }
       }
     },
-    "n16": {
+    "n20": {
+      "type": "object",
+      "mode": "strip",
+      "shape": {
+        "serverName": {
+          "type": "optional",
+          "inner": {
+            "type": "string",
+            "checks": [
+              {
+                "check": "min_length",
+                "minimum": 1
+              },
+              {
+                "check": "custom",
+                "type": "custom",
+                "fn": {
+                  "source": "(e)=>e.trim().length>0",
+                  "battery": "string",
+                  "probes": ["false","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true"]
+                }
+              },
+              {
+                "check": "custom",
+                "type": "custom",
+                "fn": {
+                  "source": "(e)=>e===e.trim()",
+                  "battery": "string",
+                  "probes": ["true","false","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","false","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true"]
+                }
+              }
+            ]
+          }
+        },
+        "serverCommand": {
+          "type": "optional",
+          "inner": {
+            "type": "array",
+            "element": {
+              "type": "string"
+            },
+            "checks": [
+              {
+                "check": "min_length",
+                "minimum": 1
+              }
+            ]
+          }
+        },
+        "serverUrl": {
+          "type": "optional",
+          "inner": {
+            "type": "string"
+          }
+        }
+      },
+      "checks": [
+        {
+          "check": "custom",
+          "type": "custom",
+          "fn": {
+            "source": "(e)=>yl([e.serverName!==void 0,e.serverCommand!==void 0,e.serverUrl!==void 0],Boolean)===1",
+            "battery": "object",
+            "probes": ["error: Cannot read properties of null (reading 'serverName')","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","true","true","true","false","false","true","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false","false"]
+          }
+        }
+      ]
+    },
+    "n21": {
       "type": "lazy",
       "inner": {
         "type": "record",
@@ -5113,404 +5646,410 @@
         "value": {
           "type": "array",
           "element": {
-            "type": "object",
-            "mode": "strip",
-            "shape": {
-              "matcher": {
-                "type": "optional",
-                "inner": {
-                  "type": "string"
-                }
-              },
-              "hooks": {
-                "type": "array",
-                "element": {
-                  "type": "union",
-                  "options": [
-                    {
-                      "type": "object",
-                      "mode": "strip",
-                      "shape": {
-                        "type": {
-                          "type": "literal",
-                          "values": [
-                            "command"
-                          ]
-                        },
-                        "command": {
-                          "type": "string"
-                        },
-                        "args": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "array",
-                            "element": {
-                              "type": "string"
-                            }
-                          }
-                        },
-                        "if": {
-                          "ref": "n17"
-                        },
-                        "shell": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "enum",
-                            "values": [
-                              "bash",
-                              "powershell"
-                            ]
-                          }
-                        },
-                        "timeout": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "number",
-                            "checks": [
-                              {
-                                "check": "greater_than",
-                                "value": 0,
-                                "inclusive": false
-                              }
-                            ]
-                          }
-                        },
-                        "onFailure": {
-                          "ref": "n18"
-                        },
-                        "statusMessage": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "string"
-                          }
-                        },
-                        "once": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "boolean"
-                          }
-                        },
-                        "async": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "boolean"
-                          }
-                        },
-                        "asyncRewake": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "boolean"
-                          }
-                        },
-                        "rewakeMessage": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "string",
-                            "checks": [
-                              {
-                                "check": "min_length",
-                                "minimum": 1
-                              }
-                            ]
-                          }
-                        },
-                        "rewakeSummary": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "string",
-                            "checks": [
-                              {
-                                "check": "min_length",
-                                "minimum": 1
-                              }
-                            ]
-                          }
-                        },
-                        "cloud": {
-                          "type": "catch",
-                          "inner": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "enum",
-                              "values": [
-                                "device",
-                                "skip"
-                              ]
-                            }
-                          },
-                          "value": {
-                            "value": "skip"
-                          }
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "mode": "strip",
-                      "shape": {
-                        "type": {
-                          "type": "literal",
-                          "values": [
-                            "prompt"
-                          ]
-                        },
-                        "prompt": {
-                          "type": "string"
-                        },
-                        "if": {
-                          "ref": "n17"
-                        },
-                        "timeout": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "number",
-                            "checks": [
-                              {
-                                "check": "greater_than",
-                                "value": 0,
-                                "inclusive": false
-                              }
-                            ]
-                          }
-                        },
-                        "model": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "string"
-                          }
-                        },
-                        "continueOnBlock": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "boolean"
-                          }
-                        },
-                        "statusMessage": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "string"
-                          }
-                        },
-                        "once": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "boolean"
-                          }
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "mode": "strip",
-                      "shape": {
-                        "type": {
-                          "type": "literal",
-                          "values": [
-                            "agent"
-                          ]
-                        },
-                        "prompt": {
-                          "type": "string"
-                        },
-                        "if": {
-                          "ref": "n17"
-                        },
-                        "timeout": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "number",
-                            "checks": [
-                              {
-                                "check": "greater_than",
-                                "value": 0,
-                                "inclusive": false
-                              }
-                            ]
-                          }
-                        },
-                        "model": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "string"
-                          }
-                        },
-                        "statusMessage": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "string"
-                          }
-                        },
-                        "once": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "boolean"
-                          }
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "mode": "strip",
-                      "shape": {
-                        "type": {
-                          "type": "literal",
-                          "values": [
-                            "http"
-                          ]
-                        },
-                        "url": {
-                          "type": "string",
-                          "checks": [
-                            {
-                              "check": "string_format",
-                              "type": "string",
-                              "format": "url"
-                            }
-                          ]
-                        },
-                        "if": {
-                          "ref": "n17"
-                        },
-                        "timeout": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "number",
-                            "checks": [
-                              {
-                                "check": "greater_than",
-                                "value": 0,
-                                "inclusive": false
-                              }
-                            ]
-                          }
-                        },
-                        "onFailure": {
-                          "ref": "n18"
-                        },
-                        "headers": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "record",
-                            "key": {
-                              "type": "string"
-                            },
-                            "value": {
-                              "type": "string"
-                            }
-                          }
-                        },
-                        "allowedEnvVars": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "array",
-                            "element": {
-                              "type": "string"
-                            }
-                          }
-                        },
-                        "statusMessage": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "string"
-                          }
-                        },
-                        "once": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "boolean"
-                          }
-                        },
-                        "cloud": {
-                          "type": "catch",
-                          "inner": {
-                            "type": "optional",
-                            "inner": {
-                              "type": "enum",
-                              "values": [
-                                "device",
-                                "skip"
-                              ]
-                            }
-                          },
-                          "value": {
-                            "value": "skip"
-                          }
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "mode": "strip",
-                      "shape": {
-                        "type": {
-                          "type": "literal",
-                          "values": [
-                            "mcp_tool"
-                          ]
-                        },
-                        "server": {
-                          "type": "string"
-                        },
-                        "tool": {
-                          "type": "string"
-                        },
-                        "input": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "record",
-                            "key": {
-                              "type": "string"
-                            },
-                            "value": {
-                              "type": "unknown"
-                            }
-                          }
-                        },
-                        "if": {
-                          "ref": "n17"
-                        },
-                        "timeout": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "number",
-                            "checks": [
-                              {
-                                "check": "greater_than",
-                                "value": 0,
-                                "inclusive": false
-                              }
-                            ]
-                          }
-                        },
-                        "statusMessage": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "string"
-                          }
-                        },
-                        "once": {
-                          "type": "optional",
-                          "inner": {
-                            "type": "boolean"
-                          }
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
+            "ref": "n22"
           }
         }
       }
     },
-    "n17": {
+    "n22": {
+      "type": "object",
+      "mode": "strip",
+      "shape": {
+        "matcher": {
+          "type": "optional",
+          "inner": {
+            "type": "string"
+          }
+        },
+        "hooks": {
+          "type": "array",
+          "element": {
+            "ref": "n23"
+          }
+        }
+      }
+    },
+    "n23": {
+      "type": "union",
+      "options": [
+        {
+          "type": "object",
+          "mode": "strip",
+          "shape": {
+            "type": {
+              "type": "literal",
+              "values": [
+                "command"
+              ]
+            },
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "optional",
+              "inner": {
+                "type": "array",
+                "element": {
+                  "type": "string"
+                }
+              }
+            },
+            "if": {
+              "ref": "n24"
+            },
+            "shell": {
+              "type": "optional",
+              "inner": {
+                "type": "enum",
+                "values": [
+                  "bash",
+                  "powershell"
+                ]
+              }
+            },
+            "timeout": {
+              "type": "optional",
+              "inner": {
+                "type": "number",
+                "checks": [
+                  {
+                    "check": "greater_than",
+                    "value": 0,
+                    "inclusive": false
+                  }
+                ]
+              }
+            },
+            "onFailure": {
+              "ref": "n25"
+            },
+            "statusMessage": {
+              "type": "optional",
+              "inner": {
+                "type": "string"
+              }
+            },
+            "once": {
+              "type": "optional",
+              "inner": {
+                "type": "boolean"
+              }
+            },
+            "async": {
+              "type": "optional",
+              "inner": {
+                "type": "boolean"
+              }
+            },
+            "asyncRewake": {
+              "type": "optional",
+              "inner": {
+                "type": "boolean"
+              }
+            },
+            "rewakeMessage": {
+              "type": "optional",
+              "inner": {
+                "type": "string",
+                "checks": [
+                  {
+                    "check": "min_length",
+                    "minimum": 1
+                  }
+                ]
+              }
+            },
+            "rewakeSummary": {
+              "type": "optional",
+              "inner": {
+                "type": "string",
+                "checks": [
+                  {
+                    "check": "min_length",
+                    "minimum": 1
+                  }
+                ]
+              }
+            },
+            "cloud": {
+              "type": "catch",
+              "inner": {
+                "type": "optional",
+                "inner": {
+                  "type": "enum",
+                  "values": [
+                    "device",
+                    "skip"
+                  ]
+                }
+              },
+              "value": {
+                "value": "skip"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "mode": "strip",
+          "shape": {
+            "type": {
+              "type": "literal",
+              "values": [
+                "prompt"
+              ]
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "if": {
+              "ref": "n24"
+            },
+            "timeout": {
+              "type": "optional",
+              "inner": {
+                "type": "number",
+                "checks": [
+                  {
+                    "check": "greater_than",
+                    "value": 0,
+                    "inclusive": false
+                  }
+                ]
+              }
+            },
+            "model": {
+              "type": "optional",
+              "inner": {
+                "type": "string"
+              }
+            },
+            "continueOnBlock": {
+              "type": "optional",
+              "inner": {
+                "type": "boolean"
+              }
+            },
+            "statusMessage": {
+              "type": "optional",
+              "inner": {
+                "type": "string"
+              }
+            },
+            "once": {
+              "type": "optional",
+              "inner": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "mode": "strip",
+          "shape": {
+            "type": {
+              "type": "literal",
+              "values": [
+                "agent"
+              ]
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "if": {
+              "ref": "n24"
+            },
+            "timeout": {
+              "type": "optional",
+              "inner": {
+                "type": "number",
+                "checks": [
+                  {
+                    "check": "greater_than",
+                    "value": 0,
+                    "inclusive": false
+                  }
+                ]
+              }
+            },
+            "model": {
+              "type": "optional",
+              "inner": {
+                "type": "string"
+              }
+            },
+            "statusMessage": {
+              "type": "optional",
+              "inner": {
+                "type": "string"
+              }
+            },
+            "once": {
+              "type": "optional",
+              "inner": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "mode": "strip",
+          "shape": {
+            "type": {
+              "type": "literal",
+              "values": [
+                "http"
+              ]
+            },
+            "url": {
+              "type": "string",
+              "checks": [
+                {
+                  "check": "string_format",
+                  "type": "string",
+                  "format": "url"
+                }
+              ]
+            },
+            "if": {
+              "ref": "n24"
+            },
+            "timeout": {
+              "type": "optional",
+              "inner": {
+                "type": "number",
+                "checks": [
+                  {
+                    "check": "greater_than",
+                    "value": 0,
+                    "inclusive": false
+                  }
+                ]
+              }
+            },
+            "onFailure": {
+              "ref": "n25"
+            },
+            "headers": {
+              "type": "optional",
+              "inner": {
+                "type": "record",
+                "key": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              }
+            },
+            "allowedEnvVars": {
+              "type": "optional",
+              "inner": {
+                "type": "array",
+                "element": {
+                  "type": "string"
+                }
+              }
+            },
+            "statusMessage": {
+              "type": "optional",
+              "inner": {
+                "type": "string"
+              }
+            },
+            "once": {
+              "type": "optional",
+              "inner": {
+                "type": "boolean"
+              }
+            },
+            "cloud": {
+              "type": "catch",
+              "inner": {
+                "type": "optional",
+                "inner": {
+                  "type": "enum",
+                  "values": [
+                    "device",
+                    "skip"
+                  ]
+                }
+              },
+              "value": {
+                "value": "skip"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "mode": "strip",
+          "shape": {
+            "type": {
+              "type": "literal",
+              "values": [
+                "mcp_tool"
+              ]
+            },
+            "server": {
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "input": {
+              "type": "optional",
+              "inner": {
+                "type": "record",
+                "key": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "unknown"
+                }
+              }
+            },
+            "if": {
+              "ref": "n24"
+            },
+            "timeout": {
+              "type": "optional",
+              "inner": {
+                "type": "number",
+                "checks": [
+                  {
+                    "check": "greater_than",
+                    "value": 0,
+                    "inclusive": false
+                  }
+                ]
+              }
+            },
+            "statusMessage": {
+              "type": "optional",
+              "inner": {
+                "type": "string"
+              }
+            },
+            "once": {
+              "type": "optional",
+              "inner": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "n24": {
       "type": "optional",
       "inner": {
         "type": "string"
       }
     },
-    "n18": {
+    "n25": {
       "type": "optional",
       "inner": {
         "type": "enum",
@@ -5520,7 +6059,7 @@
         ]
       }
     },
-    "n19": {
+    "n26": {
       "type": "lazy",
       "inner": {
         "type": "record",
@@ -5528,7 +6067,7 @@
           "type": "string"
         },
         "value": {
-          "ref": "n20"
+          "ref": "n27"
         },
         "checks": [
           {
@@ -5542,31 +6081,13 @@
         ]
       }
     },
-    "n20": {
+    "n27": {
       "type": "object",
       "mode": "strip",
       "shape": {
         "source": {
           "type": "union",
           "options": [
-            {
-              "ref": "n21"
-            },
-            {
-              "ref": "n22"
-            },
-            {
-              "ref": "n23"
-            },
-            {
-              "ref": "n24"
-            },
-            {
-              "ref": "n26"
-            },
-            {
-              "ref": "n27"
-            },
             {
               "ref": "n28"
             },
@@ -5578,6 +6099,24 @@
             },
             {
               "ref": "n31"
+            },
+            {
+              "ref": "n33"
+            },
+            {
+              "ref": "n34"
+            },
+            {
+              "ref": "n35"
+            },
+            {
+              "ref": "n36"
+            },
+            {
+              "ref": "n37"
+            },
+            {
+              "ref": "n38"
             }
           ]
         },
@@ -5622,7 +6161,7 @@
         }
       }
     },
-    "n21": {
+    "n28": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -5677,7 +6216,7 @@
         }
       }
     },
-    "n22": {
+    "n29": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -5719,7 +6258,7 @@
         }
       }
     },
-    "n23": {
+    "n30": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -5761,7 +6300,7 @@
         }
       }
     },
-    "n24": {
+    "n31": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -5775,7 +6314,7 @@
           "type": "union",
           "options": [
             {
-              "ref": "n25"
+              "ref": "n32"
             },
             {
               "type": "string",
@@ -5822,7 +6361,7 @@
         }
       }
     },
-    "n25": {
+    "n32": {
       "type": "string",
       "checks": [
         {
@@ -5845,7 +6384,7 @@
         }
       ]
     },
-    "n26": {
+    "n33": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -5860,7 +6399,7 @@
         }
       }
     },
-    "n27": {
+    "n34": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -5875,7 +6414,7 @@
         }
       }
     },
-    "n28": {
+    "n35": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -5887,7 +6426,7 @@
         }
       }
     },
-    "n29": {
+    "n36": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -5902,7 +6441,7 @@
         }
       }
     },
-    "n30": {
+    "n37": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -5917,7 +6456,7 @@
         }
       }
     },
-    "n31": {
+    "n38": {
       "type": "object",
       "mode": "strip",
       "shape": {
@@ -6062,7 +6601,7 @@
                         "type": "union",
                         "options": [
                           {
-                            "ref": "n25"
+                            "ref": "n32"
                           },
                           {
                             "type": "string",
@@ -6132,7 +6671,7 @@
                       "sha": {
                         "type": "optional",
                         "inner": {
-                          "ref": "n32"
+                          "ref": "n39"
                         }
                       }
                     }
@@ -6159,7 +6698,7 @@
                       "sha": {
                         "type": "optional",
                         "inner": {
-                          "ref": "n32"
+                          "ref": "n39"
                         }
                       }
                     }
@@ -6195,7 +6734,7 @@
                       "sha": {
                         "type": "optional",
                         "inner": {
-                          "ref": "n32"
+                          "ref": "n39"
                         }
                       }
                     }
@@ -6464,7 +7003,7 @@
         }
       }
     },
-    "n32": {
+    "n39": {
       "type": "string",
       "checks": [
         {
@@ -6481,7 +7020,7 @@
         }
       ]
     },
-    "n33": {
+    "n40": {
       "type": "lazy",
       "inner": {
         "type": "record",
@@ -6489,7 +7028,7 @@
           "type": "string"
         },
         "value": {
-          "ref": "n20"
+          "ref": "n27"
         },
         "checks": [
           {
@@ -6503,36 +7042,18 @@
         ]
       }
     },
-    "n34": {
+    "n41": {
       "type": "lazy",
       "inner": {
         "type": "array",
         "element": {
-          "ref": "n35"
+          "ref": "n42"
         }
       }
     },
-    "n35": {
+    "n42": {
       "type": "union",
       "options": [
-        {
-          "ref": "n21"
-        },
-        {
-          "ref": "n22"
-        },
-        {
-          "ref": "n23"
-        },
-        {
-          "ref": "n24"
-        },
-        {
-          "ref": "n26"
-        },
-        {
-          "ref": "n27"
-        },
         {
           "ref": "n28"
         },
@@ -6544,28 +7065,46 @@
         },
         {
           "ref": "n31"
+        },
+        {
+          "ref": "n33"
+        },
+        {
+          "ref": "n34"
+        },
+        {
+          "ref": "n35"
+        },
+        {
+          "ref": "n36"
+        },
+        {
+          "ref": "n37"
+        },
+        {
+          "ref": "n38"
         }
       ]
     },
-    "n36": {
+    "n43": {
       "type": "lazy",
       "inner": {
         "type": "array",
         "element": {
-          "ref": "n35"
+          "ref": "n42"
         }
       }
     },
-    "n37": {
+    "n44": {
       "type": "lazy",
       "inner": {
         "type": "array",
         "element": {
-          "ref": "n35"
+          "ref": "n42"
         }
       }
     },
-    "n38": {
+    "n45": {
       "type": "lazy",
       "inner": {
         "type": "object",
@@ -7054,19 +7593,19 @@
                       "streaming": {
                         "type": "optional",
                         "inner": {
-                          "ref": "n39"
+                          "ref": "n46"
                         }
                       },
                       "presigned": {
                         "type": "optional",
                         "inner": {
-                          "ref": "n39"
+                          "ref": "n46"
                         }
                       },
                       "sigv4a": {
                         "type": "optional",
                         "inner": {
-                          "ref": "n39"
+                          "ref": "n46"
                         }
                       }
                     }
@@ -7199,7 +7738,7 @@
         }
       }
     },
-    "n39": {
+    "n46": {
       "type": "enum",
       "values": [
         "deny",
