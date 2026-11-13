@@ -192,7 +192,10 @@ fn plist_policy_is_read_with_plutil_on_macos() {
     let result = resolve(&host, json!({"settingSources": []}));
     assert_eq!(result["effective"], json!({"model": "plist-model"}));
     assert_eq!(result["provenance"]["model"]["policyOrigin"], "plist");
-    assert_eq!(host.ran()[0], format!("/usr/bin/plutil -convert json -o - -- {plist}"));
+    assert!(
+        host.ran()
+            .contains(&format!("/usr/bin/plutil -convert json -o - -- {plist}"))
+    );
 }
 
 #[test]

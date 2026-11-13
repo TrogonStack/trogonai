@@ -7,7 +7,7 @@ use std::{
 use crate::{
     adapters::SettingsHost,
     constants::CONNECTOR_CACHE_LIMIT,
-    settings_resolve_reread::{PolicyState, Reading},
+    settings_resolve_reread::{PolicyRereads, PolicyState, Reading},
 };
 
 /// What upstream keeps in module state between `resolveSettings` calls of one process.
@@ -18,6 +18,7 @@ use crate::{
 pub struct ResolverState {
     connector_folders: Mutex<HashMap<PathBuf, bool>>,
     policy: Mutex<PolicyState>,
+    rereads: PolicyRereads,
 }
 
 impl ResolverState {
@@ -25,11 +26,19 @@ impl ResolverState {
         Self::default()
     }
 
+    /// A state whose machine policy re-reads run where `rereads` says.
+    pub fn with_rereads(rereads: PolicyRereads) -> Self {
+        Self {
+            rereads,
+            ..Self::default()
+        }
+    }
+
     /// The machine policy reading this call goes on with, re-reading the host when upstream would.
     pub(crate) fn policy_reading<H: SettingsHost>(&self, host: &H) -> Reading {
         match self.policy.lock() {
-            Ok(mut policy) => policy.current(host),
-            Err(_) => PolicyState::default().current(host),
+            Ok(mut policy) => policy.current(host, self.rereads),
+            Err(_) => PolicyState::default().current(host, self.rereads),
         }
     }
 
