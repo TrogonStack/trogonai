@@ -47,9 +47,11 @@ pub struct LocalMcpServerOptions {
     pub version: Option<String>,
     /// `None` registers no tool handlers, like omitting `tools` in TypeScript.
     pub tools: Option<SdkTools>,
-    /// The TypeScript `instructions`, answered from `initialize` when not empty.
+    /// The TypeScript `instructions`, answered from `initialize` when not empty. The Python dialect ignores it:
+    /// `create_sdk_mcp_server(name, version, tools)` in the Python SDK takes no instructions.
     pub instructions: Option<String>,
-    /// The TypeScript `alwaysLoad`: every listed tool carries `_meta["anthropic/alwaysLoad"]`.
+    /// The TypeScript `alwaysLoad`: every listed tool carries `_meta["anthropic/alwaysLoad"]`. The Python dialect
+    /// ignores it: `create_sdk_mcp_server(name, version, tools)` in the Python SDK takes no such option.
     pub always_load: bool,
     pub dialect: McpServerDialect,
 }
@@ -197,11 +199,13 @@ impl From<LocalMcpServerOptions> for LocalMcpServer {
         } = options;
         let mut python_schemas = HashMap::new();
         for tool in tools.iter().flat_map(|tools| tools.values()) {
-            if !is_valid_tool_name(tool.name().as_str()) {
-                // One line on purpose: with the `log` feature of `tracing` enabled by another workspace
-                // member, the macro repeats each field expression for the log fallback, and the
-                // fallback copy on a line of its own is never executed, which reads as uncovered.
-                tracing::warn!(server = %name.as_str(), tool = %tool.name(), "MCP tool names should be 1 to 128 ASCII letters, digits, underscores, hyphens or periods; tool registration will proceed, but this may cause compatibility issues");
+            if dialect == McpServerDialect::TypeScript {
+                for line in crate::mcp_tool_name_warning::tool_name_warning_lines(tool.name().as_str()) {
+                    // One line on purpose: with the `log` feature of `tracing` enabled by another workspace
+                    // member, the macro repeats each field expression for the log fallback, and the
+                    // fallback copy on a line of its own is never executed, which reads as uncovered.
+                    tracing::warn!(server = %name.as_str(), "{line}");
+                }
             }
             if dialect == McpServerDialect::Python {
                 let schema = python::input_schema(tool.input_schema().as_json());
@@ -260,15 +264,6 @@ impl std::fmt::Debug for LocalMcpServer {
             .field("dialect", &self.state.dialect)
             .finish_non_exhaustive()
     }
-}
-
-/// MCP tool names are one to 128 ASCII letters, digits, underscores, hyphens or periods.
-fn is_valid_tool_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 128
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
 #[cfg(test)]

@@ -9,7 +9,6 @@
 use super::*;
 use crate::{McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, SdkTool, SdkToolOptions};
 use serde_json::json;
-use std::sync::atomic::{AtomicUsize, Ordering};
 #[tokio::test]
 async fn server_retains_initialize_and_runs_typed_tool() -> Result<(), Box<dyn std::error::Error>> {
     let schema_json = json!({"type":"object","required":["value"],"properties":{"value":{"type":"string"}}});
@@ -95,43 +94,60 @@ async fn server_retains_initialize_and_runs_typed_tool() -> Result<(), Box<dyn s
 
 #[tokio::test]
 async fn tool_listing_keeps_names_the_mcp_protocol_discourages() -> Result<(), Box<dyn std::error::Error>> {
-    let warnings = Arc::new(AtomicUsize::new(0));
-    let _guard = tracing::subscriber::set_default(CountingSubscriber(warnings.clone()));
-    for name in [
+    let names = [
         "".to_owned(),
         "two words".to_owned(),
         "tool/name".to_owned(),
+        "-lead".to_owned(),
         "x".repeat(129),
-    ] {
-        let tool = SdkTool::from(SdkToolOptions {
-            name: McpToolName::from(name.clone()),
-            description: "Echo".into(),
-            input_schema: McpToolInputSchema::new(serde_json::from_value(json!({"type":"object"}))?),
-            handler: Arc::new(|_: McpToolRequest| async move { Ok(McpToolOutput::text("")) }),
-            annotations: None,
-            search_hint: None,
-            always_load: false,
-        });
-        let registry = LocalMcpServer::from(LocalMcpServerOptions {
-            name: McpServerName::from("local"),
-            version: Some("1".into()),
-            tools: Some(tool.into()),
-            instructions: None,
-            always_load: false,
-            dialect: McpServerDialect::TypeScript,
-        });
-        let server = registry.open_session();
-        let request = serde_json::from_value::<JsonObject>;
-        let listed = server
-            .request(
-                request(json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}))?,
-                CancellationToken::new(),
-            )
-            .await?
-            .ok_or("missing response")?;
-        assert_eq!(listed["result"]["tools"][0]["name"], name.as_str());
+    ];
+    for dialect in [McpServerDialect::TypeScript, McpServerDialect::Python] {
+        let warnings = Arc::new(Mutex::new(Vec::new()));
+        let _guard = tracing::subscriber::set_default(RecordingSubscriber(warnings.clone()));
+        let mut expected = Vec::new();
+        for name in &names {
+            if dialect == McpServerDialect::TypeScript {
+                expected.extend(crate::mcp_tool_name_warning::tool_name_warning_lines(name));
+            }
+            let tool = SdkTool::from(SdkToolOptions {
+                name: McpToolName::from(name.clone()),
+                description: "Echo".into(),
+                input_schema: McpToolInputSchema::new(serde_json::from_value(json!({"type":"object"}))?),
+                handler: Arc::new(|_: McpToolRequest| async move { Ok(McpToolOutput::text("")) }),
+                annotations: None,
+                search_hint: None,
+                always_load: false,
+            });
+            let registry = LocalMcpServer::from(LocalMcpServerOptions {
+                name: McpServerName::from("local"),
+                version: Some("1".into()),
+                tools: Some(tool.into()),
+                instructions: None,
+                always_load: false,
+                dialect,
+            });
+            let server = registry.open_session();
+            let request = serde_json::from_value::<JsonObject>;
+            if dialect == McpServerDialect::Python {
+                let initialized = json!({"jsonrpc":"2.0","method":"notifications/initialized"});
+                server.request(request(initialized)?, CancellationToken::new()).await?;
+            }
+            let listed = server
+                .request(
+                    request(json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}))?,
+                    CancellationToken::new(),
+                )
+                .await?
+                .ok_or("missing response")?;
+            assert_eq!(listed["result"]["tools"][0]["name"], name.as_str());
+        }
+        let recorded = warnings.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        assert_eq!(recorded, expected, "{dialect:?}");
+        if dialect == McpServerDialect::TypeScript {
+            assert_eq!(recorded[0], "Tool name validation warning for \"\":");
+            assert_eq!(recorded.len(), 5 + 7 + 6 + 5 + 5);
+        }
     }
-    assert_eq!(warnings.load(Ordering::SeqCst), 4);
     Ok(())
 }
 
@@ -183,10 +199,20 @@ async fn a_schema_that_does_not_compile_is_listed_as_declared_and_fails_each_cal
     Ok(())
 }
 
-/// Enables every callsite so the warning's fields are evaluated, and counts the events.
-struct CountingSubscriber(Arc<AtomicUsize>);
+/// Enables every callsite so the warning's fields are evaluated, and records each warning's message.
+struct RecordingSubscriber(Arc<Mutex<Vec<String>>>);
 
-impl tracing::Subscriber for CountingSubscriber {
+struct MessageVisitor(Option<String>);
+
+impl tracing::field::Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.0 = Some(format!("{value:?}"));
+        }
+    }
+}
+
+impl tracing::Subscriber for RecordingSubscriber {
     fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
         true
     }
@@ -195,8 +221,15 @@ impl tracing::Subscriber for CountingSubscriber {
     }
     fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
     fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-    fn event(&self, _: &tracing::Event<'_>) {
-        self.0.fetch_add(1, Ordering::SeqCst);
+    fn event(&self, event: &tracing::Event<'_>) {
+        if *event.metadata().level() != tracing::Level::WARN {
+            return;
+        }
+        let mut visitor = MessageVisitor(None);
+        event.record(&mut visitor);
+        if let Some(message) = visitor.0 {
+            self.0.lock().unwrap_or_else(PoisonError::into_inner).push(message);
+        }
     }
     fn enter(&self, _: &tracing::span::Id) {}
     fn exit(&self, _: &tracing::span::Id) {}

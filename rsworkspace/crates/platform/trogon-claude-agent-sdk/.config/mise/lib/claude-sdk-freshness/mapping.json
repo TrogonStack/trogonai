@@ -1765,6 +1765,14 @@
           "name": "python_dialect_validates_icons_and_elicitation_like_the_pydantic_models"
         },
         {
+          "path": "src/sdk_mcp_server_tests.rs",
+          "name": "tool_listing_keeps_names_the_mcp_protocol_discourages"
+        },
+        {
+          "path": "src/mcp_tool_name_warning_tests.rs",
+          "name": "tool_name_warning_lines_match_the_typescript_console_output"
+        },
+        {
           "path": "tests/mcp_tool_values.rs",
           "name": "mcp_tool_name_accepts_ascii_boundaries"
         },
