@@ -96,5 +96,37 @@ pub(super) fn keep_best<T>(best: &mut Option<(usize, T)>, candidate: Option<(usi
     }
 }
 
+/// Whether `value` holds one of the listed strings under `key`.
+pub(super) fn tag_str(value: &serde_json::Value, key: &str, allowed: &[&str]) -> bool {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|text| allowed.contains(&text))
+}
+
+/// Whether `value` holds one of the listed booleans under `key`.
+pub(super) fn tag_bool(value: &serde_json::Value, key: &str, allowed: &[bool]) -> bool {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .is_some_and(|flag| allowed.contains(&flag))
+}
+
+/// Keeps the candidate that pins the most tags, then the one with the fewest unknown keys; the
+/// earliest declared wins ties.
+pub(super) fn keep_most_specific<T>(
+    best: &mut Option<(usize, usize, T)>,
+    specificity: usize,
+    candidate: Option<(usize, T)>,
+) {
+    if let Some((score, value)) = candidate
+        && best
+            .as_ref()
+            .is_none_or(|(pinned, current, _)| specificity > *pinned || (specificity == *pinned && score < *current))
+    {
+        *best = Some((specificity, score, value));
+    }
+}
+
 #[cfg(test)]
 mod tests;
