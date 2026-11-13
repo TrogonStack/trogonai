@@ -4,7 +4,7 @@ use crate::PeerMcpErrorCode;
 pub enum PeerMcpError {
     #[error("Peer request was cancelled; remote outcome is uncertain. Retry with the same identifiers.")]
     RequestCancelled,
-    #[error("Peer detach was not confirmed; lease expiry remains the fallback.")]
+    #[error("Peer enrollment is unconfirmed; lease expiry remains the fallback.")]
     EnrollmentUncertain,
     #[error("Peer connector is detached; start a new connector runtime.")]
     Detached,

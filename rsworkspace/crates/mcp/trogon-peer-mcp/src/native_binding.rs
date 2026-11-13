@@ -64,7 +64,6 @@ impl NativeBinding {
         response: &v1::EnrollResponse,
         config: &ConnectorConfig,
     ) -> Result<AttachmentRef, PeerMcpError> {
-        self.enrollment = EnrollmentState::Replied;
         let peer_id = response.peer_id.as_deref().ok_or(PeerMcpError::InvalidEnrollment)?;
         let peer_id = PeerId::parse(peer_id).map_err(PeerMcpError::InvalidEnrollmentIdentity)?;
         let lease = response.attachment.as_option().ok_or(PeerMcpError::InvalidEnrollment)?;
@@ -99,10 +98,14 @@ impl NativeBinding {
         let generation = raw.generation.ok_or(PeerMcpError::InvalidEnrollment)?;
         let attachment =
             AttachmentRef::new(peer_id, connector_id, generation).map_err(PeerMcpError::InvalidEnrollmentIdentity)?;
-        if self.last_attachment().as_ref().is_some_and(|prior| {
-            prior.peer_id() != attachment.peer_id() || prior.generation() > attachment.generation()
-        }) {
-            return Err(PeerMcpError::InvalidEnrollment);
+        if let Some(prior) = self.last_attachment() {
+            if prior.peer_id() != attachment.peer_id() {
+                return Err(PeerMcpError::InvalidEnrollment);
+            }
+            if prior.generation() > attachment.generation() {
+                self.enrollment = EnrollmentState::Replied;
+                return Err(PeerMcpError::InvalidEnrollment);
+            }
         }
         match &self.attachment {
             Some(current) => {
@@ -110,6 +113,7 @@ impl NativeBinding {
             }
             None => self.attachment = Some(watch::channel(attachment.clone()).0),
         }
+        self.enrollment = EnrollmentState::Replied;
         Ok(attachment)
     }
 }
