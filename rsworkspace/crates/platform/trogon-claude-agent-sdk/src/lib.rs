@@ -48,6 +48,7 @@ mod plugin;
 mod process_options;
 mod process_transport;
 mod prompt;
+mod python_json;
 mod queue_capacity;
 #[cfg(unix)]
 mod run_as;

@@ -192,6 +192,8 @@
         "kind": "upstream"
       },
       "contracts": [
+        "golden_initialize::hooks_applied_false_only_matters_for_blocking_hooks",
+        "golden_initialize::hooks_that_were_not_applied_are_refused",
         "runtime_features::s06_continue_hooks_tolerate_a_session_that_did_not_apply_them"
       ],
       "rust": [
@@ -1174,7 +1176,9 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "golden_initialize::blocking_hooks_need_on_failure_support"
+      ],
       "rust": [
         "src/driver.rs"
       ]
@@ -2222,13 +2226,16 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "The TypeScript type declares matcher as an optional string, so null is outside the declared shape. Omitting the key sends only values the type allows."
+        "reason": "TypeScript is the default dialect and declares matcher as an optional string, so the key is omitted; ArgvStyle::Python sends null."
       },
       "contracts": [
+        "golden_initialize::python_initialize_matches_claude_agent_sdk_bytes",
+        "golden_initialize::typescript_initialize_matches_sdk_mjs_bytes",
         "value_contracts::callback_configuration_debug_reports_structure_without_callback_or_input_details"
       ],
       "rust": [
-        "src/hooks.rs"
+        "src/hooks.rs",
+        "src/driver.rs"
       ]
     },
     {
@@ -2258,7 +2265,7 @@
         "reason": "An answer from this client would pre-empt another client that can show the dialog, and an error would end the dialog for the user. The session continues without a response."
       },
       "contracts": [
-        "runtime_failure_contracts::a_declared_dialog_without_a_handler_does_not_emit_a_response"
+        "runtime_failure_contracts::a_dialog_without_a_handler_does_not_emit_a_response"
       ],
       "rust": [
         "src/driver.rs"
@@ -2383,6 +2390,175 @@
       ],
       "rust": [
         "src/bundled_cli.rs"
+      ]
+    },
+    {
+      "id": "c01-control-request-id",
+      "concept": "Outbound control request id and envelope",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 747,
+        "line_end": 762,
+        "sha256": "7b02cd99c9821a3741be6008b03d0b477e9a69fb23aecb51c27705531085e76a"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Math.random().toString(36).substring(2,15)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 110,
+        "sha256": "2c2f70cfcf0d75924c28128f165c53fbf3cd9b11697eb0235efa6cab9a27057f"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript sends Math.random().toString(36).substring(2,15) with no counter, in a compact envelope that starts with request_id. Python sends req_{counter}_{8 hex digits} in an envelope that starts with type, written by json.dumps with spaced separators and ASCII escapes."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; ArgvStyle::Python selects the Python id, envelope order and json.dumps spelling."
+      },
+      "contracts": [
+        "golden_initialize::typescript_initialize_matches_sdk_mjs_bytes",
+        "golden_initialize::python_initialize_matches_claude_agent_sdk_bytes"
+      ],
+      "rust": [
+        "src/control_request_id.rs",
+        "src/python_json.rs",
+        "src/wire.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c02-initialize-request-shape",
+      "concept": "Initialize request fields and hook matcher entries",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 323,
+        "line_end": 366,
+        "sha256": "1c36c551c0c9e5af6bce39f1a81b87977fba2a297cbe857a4cf1bfc28198e403"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "return{subtype:\"initialize\",hooks:this.initHooksPayload",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 260,
+        "sha256": "5e1983e7fc99426c5ff8ed331262241f62ce7e61197afb37cdf09e660e973e0c"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript omits hooks when none are configured, omits an unset matcher, and sends jsonSchema, systemPrompt, appendSystemPrompt and supportedDialogKinds in the request. Python sends hooks null when none are configured, matcher null when unset, and none of those prompt or schema fields. Both skip events with no matchers and keep matchers with no callbacks."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; ArgvStyle::Python sends the Python request."
+      },
+      "contracts": [
+        "golden_initialize::typescript_initialize_matches_sdk_mjs_bytes",
+        "golden_initialize::typescript_default_initialize_matches_sdk_mjs_bytes",
+        "golden_initialize::python_initialize_matches_claude_agent_sdk_bytes",
+        "golden_initialize::python_default_initialize_sends_null_hooks"
+      ],
+      "rust": [
+        "src/runtime_payload.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c03-initialize-response-shape",
+      "concept": "Initialize response that is not the documented object",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 775,
+        "line_end": 776,
+        "sha256": "d4047a01b9417c32f423a868962aee98be1962429a8424894bf1d21bdc9454e7"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "let o=(await n).response;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 40,
+        "sha256": "5d9207ade7d9edb5297d958c59e3c93a0fd9ec75d620ce60f87a99f138c6d3bb"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Neither SDK validates the initialize response. TypeScript keeps any value as the initialization result; Python replaces anything but an object with an empty object."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; ArgvStyle::Python reads a non-object as an empty object. Typed fields of an unexpected type read as absent and the response stays available unchanged."
+      },
+      "contracts": [
+        "golden_initialize::a_non_object_initialize_response_is_kept_in_typescript_and_empty_in_python",
+        "subprocess::malformed_initialization_is_accepted_like_upstream"
+      ],
+      "rust": [
+        "src/control.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c04-dialog-kinds-without-handler",
+      "concept": "supportedDialogKinds without onUserDialog",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no user dialog support."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "supportedDialogKinds requires an onUserDialog",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 190,
+        "sha256": "0898e963617c279f4e698a9b87b4bb55f648717877528d674105dafc57153db7"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript refuses non-empty dialog kinds without a handler before the session starts."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_initialize::dialog_kinds_without_a_handler_are_refused_before_initialize"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "c05-managed-settings-and-plugins-confirmation",
+      "concept": "Initialize response for managed settings and plugins sent in initialize",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not send managed settings or plugins in initialize."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "managedSettingsDelivery 'initialize', so the session",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 560,
+        "sha256": "dd689a81664a9ef77652475577ec0b913cee9fefc7cfc642577ca9d577ba9f67"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript ends the session when managed settings were sent and managed_settings_applied is not true, and logs a warning when plugins were sent and plugins_applied is not true."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/driver.rs",
+        "src/error.rs"
       ]
     }
   ]

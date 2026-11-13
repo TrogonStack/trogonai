@@ -86,16 +86,10 @@ impl DriverFixture {
             hook_callbacks: HashMap::new(),
             sdk_mcp_servers: BTreeMap::new(),
             pending_mcp: None,
-            initialize_request: RequestPayload::Initialize {
-                hooks: None,
-                agents: None,
-                supported_dialog_kinds: None,
-                system_prompt: None,
-                append_system_prompt: None,
-                plugins: None,
-            }
-            .to_value()?,
-            blocking_hooks: false,
+            initialize_request: crate::wire::runtime_payload::InitializeRequest::default()
+                .into_payload(crate::ArgvStyle::TypeScript)
+                .to_value()?,
+            initialize_expectations: InitializeExpectations::default(),
             version_check: None,
             elicitation_handler: None,
             user_dialog_handler: None,

@@ -83,7 +83,14 @@ Pattern matching exposes the same fields through the box.
 `connection_info()` borrows the cached `ConnectionInfo` from that handshake,
 including support flags and additional metadata. Reading it is non-fallible and
 sends no protocol messages; `ConnectionInfo::as_json()` retains the original
-response, including omitted or explicitly null fields.
+response, including omitted or explicitly null fields. Like both upstream SDKs,
+the response is not validated: a known field of an unexpected type reads as
+absent, and under `ArgvStyle::Python` a response that is not an object reads as
+`{}`. The initialize checks follow `sdk.mjs` in its order: blocking hooks need
+`hook_on_failure_supported`, then `hooks_applied` must not be `false`, then sent
+managed settings need `managed_settings_applied`; plugins that were not
+confirmed only log a warning. Non-empty `supported_dialog_kinds` without a
+`user_dialog_handler` is refused before the CLI starts.
 The handle provides interrupt receipts, model and permission changes, rewind,
 MCP status/reconnect/toggle/replacement, context usage and task controls. Legacy
 interrupt replies remain distinct from reported empty queues. Newer controls
@@ -171,8 +178,16 @@ order when building CLI arguments.
 
 ### Process launch
 
-The launch contract is pinned by `tests/golden_argv_env.rs` (argv, environment and
-the stdin `initialize` bytes).
+The launch contract is pinned by `tests/golden_argv_env.rs` (argv and environment)
+and `tests/golden_initialize.rs` (the stdin `initialize` bytes, captured from both
+upstream SDKs).
+
+- Control requests follow the dialect. `ArgvStyle::TypeScript` sends
+  `{"request_id":...,"type":"control_request","request":...}` with the id
+  `Math.random().toString(36).substring(2,15)` produces. `ArgvStyle::Python`
+  sends `{"type": "control_request", "request_id": "req_N_xxxxxxxx", ...}` and
+  writes every stdin line the way `json.dumps` does (spaced separators, `\uXXXX`
+  escapes for non-ASCII, Python float spelling).
 
 - `ArgvStyle::TypeScript` (default) emits TypeScript `0.3.323` argv: `--flag=value`
   spelling, upstream flag order, and the system prompt inside the `initialize`

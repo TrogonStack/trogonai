@@ -51,7 +51,7 @@ pub(crate) enum IncomingControl {
 }
 
 pub(crate) enum ControlResponse {
-    Success(JsonObject),
+    Success(Value),
     Error(String),
 }
 
@@ -274,7 +274,7 @@ enum ControlResponseWire {
     Success {
         request_id: String,
         #[serde(default)]
-        response: JsonObject,
+        response: Value,
     },
     #[serde(rename = "error")]
     Error { request_id: String, error: String },
@@ -542,11 +542,22 @@ fn frame_from_envelope(envelope: EnvelopeWire) -> Result<Frame, ProtocolError> {
     })
 }
 
-pub(crate) fn control_request(id: &ControlRequestId, request: Value) -> Result<Value, ProtocolError> {
-    serde_json::to_value(runtime_payload::OutboundFrame::Request {
-        request_id: id.as_str(),
-        request,
-    })
+pub(crate) fn control_request(
+    id: &ControlRequestId,
+    request: Value,
+    style: crate::ArgvStyle,
+) -> Result<Value, ProtocolError> {
+    match style {
+        crate::ArgvStyle::TypeScript => serde_json::to_value(runtime_payload::TypeScriptControlRequest {
+            request_id: id.as_str(),
+            kind: "control_request",
+            request,
+        }),
+        crate::ArgvStyle::Python => serde_json::to_value(runtime_payload::OutboundFrame::Request {
+            request_id: id.as_str(),
+            request,
+        }),
+    }
     .map_err(ProtocolError::from)
 }
 

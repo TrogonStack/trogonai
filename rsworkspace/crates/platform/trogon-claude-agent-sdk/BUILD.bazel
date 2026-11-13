@@ -67,6 +67,11 @@ workspace_crate(
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
+        "golden_initialize": {
+            "compile_data": glob(["tests/support/*.rs"]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "in_memory_session_store": {},
         "json_object": {},
         "max_turns": {},

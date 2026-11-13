@@ -16,7 +16,9 @@ use crate::{
     PermissionDecision, ProtocolError, StderrTail, SystemPrompt, ToolPermissionHandler, Transport,
     wire::{
         self, ControlResponse, Frame, IncomingControl,
-        runtime_payload::{EmbeddedMcpPayload, HookMatcherPayload, McpResponsePayload, RequestPayload},
+        runtime_payload::{
+            EmbeddedMcpPayload, HookMatcherPayload, HooksPayload, InitializeRequest, McpResponsePayload, RequestPayload,
+        },
     },
 };
 
@@ -240,7 +242,7 @@ where
     sdk_mcp_servers: McpSessions,
     pending_mcp: Option<(ControlRequestId, McpSessions)>,
     initialize_request: serde_json::Value,
-    blocking_hooks: bool,
+    initialize_expectations: InitializeExpectations,
     elicitation_handler: Option<Arc<dyn crate::ElicitationHandler>>,
     user_dialog_handler: Option<Arc<dyn crate::UserDialogHandler>>,
     dialog_kinds: HashSet<String>,
@@ -274,9 +276,46 @@ pub(crate) fn plugins_via_initialize(options: &ClaudeAgentOptions) -> bool {
         && !options.plugins.is_empty()
 }
 
+/// What the initialize response must confirm, from what the request carried.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct InitializeExpectations {
+    /// A hook matcher sets `onFailure` to anything but `continue`.
+    pub blocking_hooks: bool,
+    /// The request carried `managedSettings`.
+    pub managed_settings: bool,
+    /// How many plugins the request listed.
+    pub plugins: usize,
+}
+
+/// Both SDKs: a whole number of seconds is sent as an integer (`30`, not `30.0`).
+fn hook_timeout_seconds(timeout: Duration) -> Option<serde_json::Number> {
+    if timeout.subsec_nanos() == 0 {
+        Some(timeout.as_secs().into())
+    } else {
+        serde_json::Number::from_f64(timeout.as_secs_f64())
+    }
+}
+
+/// The object a control response carries, with an absent or null `response` read as an empty one.
+fn control_object(response: serde_json::Value) -> Result<JsonObject, Error> {
+    match response {
+        serde_json::Value::Null => Ok(JsonObject::new()),
+        other => serde_json::from_value(other).map_err(|error| ProtocolError::from(error).into()),
+    }
+}
+
+/// JavaScript `String(value)` of an optional boolean.
+fn javascript_string(support: crate::FeatureSupport) -> &'static str {
+    match support {
+        crate::FeatureSupport::Supported => "true",
+        crate::FeatureSupport::Unsupported => "false",
+        crate::FeatureSupport::NotReported => "undefined",
+    }
+}
+
 fn initialize_config(
     options: &ClaudeAgentOptions,
-) -> Result<(serde_json::Value, HashMap<String, HookCallback>, bool), Error> {
+) -> Result<(serde_json::Value, HashMap<String, HookCallback>, InitializeExpectations), Error> {
     if options
         .mcp_servers
         .keys()
@@ -284,13 +323,14 @@ fn initialize_config(
     {
         return Err(Error::DuplicateMcpServer);
     }
-    let mut hooks: BTreeMap<String, Vec<HookMatcherPayload<'_>>> = BTreeMap::new();
+    if !options.supported_dialog_kinds.is_empty() && options.user_dialog_handler.is_none() {
+        return Err(Error::DialogKindsWithoutHandler);
+    }
+    let typescript = options.argv_style == crate::ArgvStyle::TypeScript;
+    let mut hooks = HooksPayload::new();
     let mut callbacks = HashMap::new();
-    let mut blocking = false;
+    let mut expectations = InitializeExpectations::default();
     for registration in &options.hooks {
-        if registration.callbacks.is_empty() {
-            continue;
-        }
         let mut ids = Vec::new();
         for handler in &registration.callbacks {
             let id = format!("hook_{}", callbacks.len());
@@ -306,16 +346,25 @@ fn initialize_config(
                 },
             );
         }
+        let matcher = match (&registration.matcher, typescript) {
+            (Some(matcher), _) => Some(Some(matcher.as_str())),
+            (None, true) => None,
+            (None, false) => Some(None),
+        };
         hooks
-            .entry(registration.event.as_str().to_owned())
+            .entry(registration.event.as_str())
             .or_default()
             .push(HookMatcherPayload {
-                matcher: registration.matcher.as_deref(),
+                matcher,
                 callback_ids: ids,
+                timeout: registration
+                    .timeout
+                    .and_then(|timeout| hook_timeout_seconds(timeout.as_duration())),
                 on_failure: registration.on_failure.map(crate::HookFailureMode::as_str),
-                timeout: registration.timeout.map(|timeout| timeout.as_duration().as_secs_f64()),
             });
-        blocking |= registration.on_failure == Some(crate::HookFailureMode::Block);
+        expectations.blocking_hooks |= registration
+            .on_failure
+            .is_some_and(|mode| mode != crate::HookFailureMode::Continue);
     }
     let agents = if options.agents.is_empty() {
         None
@@ -329,37 +378,35 @@ fn initialize_config(
                 .map_err(ProtocolError::from)?,
         )
     };
-    let supported_dialog_kinds = if options.user_dialog_handler.is_some() && !options.supported_dialog_kinds.is_empty()
-    {
-        Some(
-            options
-                .supported_dialog_kinds
-                .iter()
-                .map(crate::DialogKind::as_str)
-                .collect(),
-        )
-    } else {
-        None
-    };
+    let supported_dialog_kinds = (!options.supported_dialog_kinds.is_empty()).then(|| {
+        options
+            .supported_dialog_kinds
+            .iter()
+            .map(crate::DialogKind::as_str)
+            .collect()
+    });
     // TypeScript delivers the system prompt in the initialize request, Python on the command line.
-    let (system_prompt, append_system_prompt) = match (options.argv_style, &options.system_prompt) {
-        (crate::ArgvStyle::Python, _) => (None, None),
-        (_, SystemPrompt::Empty) => (Some(vec![""]), None),
-        (_, SystemPrompt::Custom(prompt)) => (Some(vec![prompt.as_str()]), None),
-        (_, SystemPrompt::ClaudeCode) => (None, None),
-        (_, SystemPrompt::ClaudeCodeWithAppend(append)) => (None, Some(append.as_str())),
+    let (system_prompt, append_system_prompt) = match &options.system_prompt {
+        SystemPrompt::Empty => (Some(vec![""]), None),
+        SystemPrompt::Custom(prompt) => (Some(vec![prompt.as_str()]), None),
+        SystemPrompt::ClaudeCode => (None, None),
+        SystemPrompt::ClaudeCodeWithAppend(append) => (None, Some(append.as_str())),
     };
-    let request = RequestPayload::Initialize {
-        hooks: (!hooks.is_empty()).then_some(hooks),
-        agents,
-        supported_dialog_kinds,
+    let request = InitializeRequest {
+        hooks: (!options.hooks.is_empty()).then_some(hooks),
+        json_schema: options.output_schema.as_ref().map(crate::OutputSchema::as_json),
         system_prompt,
         append_system_prompt,
+        agents,
+        supported_dialog_kinds,
         plugins: plugins_via_initialize(options)
             .then(|| options.plugins.iter().map(crate::plugin::PluginPayload::from).collect()),
-    }
-    .to_value()?;
-    Ok((request, callbacks, blocking))
+        ..InitializeRequest::default()
+    };
+    expectations.managed_settings = request.managed_settings.is_some();
+    expectations.plugins = request.plugins.as_ref().map_or(0, Vec::len);
+    let request = request.into_payload(options.argv_style).to_value()?;
+    Ok((request, callbacks, expectations))
 }
 
 pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
@@ -380,16 +427,16 @@ pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
 pub(crate) struct Initialization {
     request: serde_json::Value,
     hook_callbacks: HashMap<String, HookCallback>,
-    blocking_hooks: bool,
+    expectations: InitializeExpectations,
 }
 
 impl Initialization {
     pub(crate) fn new(options: &ClaudeAgentOptions) -> Result<Self, Error> {
-        let (request, hook_callbacks, blocking_hooks) = initialize_config(options)?;
+        let (request, hook_callbacks, expectations) = initialize_config(options)?;
         Ok(Self {
             request,
             hook_callbacks,
-            blocking_hooks,
+            expectations,
         })
     }
 }
@@ -430,7 +477,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
             .collect(),
         pending_mcp: None,
         initialize_request: initialization.request,
-        blocking_hooks: initialization.blocking_hooks,
+        initialize_expectations: initialization.expectations,
         elicitation_handler: options.elicitation_handler,
         user_dialog_handler: options.user_dialog_handler,
         dialog_kinds: options
@@ -688,9 +735,12 @@ where
                         .unwrap_or_else(|| registry.open_session());
                     sessions.insert(name, session);
                 }
-                self.next_id = self.next_id.checked_add(1).ok_or(Error::RequestIdExhausted)?;
-                let id = ControlRequestId::from(format!("request-{}", self.next_id));
-                let frame = wire::control_request(&id, RequestPayload::McpSetServers { servers }.to_value()?)?;
+                let id = self.next_request_id()?;
+                let frame = wire::control_request(
+                    &id,
+                    RequestPayload::McpSetServers { servers }.to_value()?,
+                    self.argv_style,
+                )?;
                 self.pending_mcp = Some((id.clone(), sessions));
                 self.write(frame).await?;
                 self.pending.insert(
@@ -749,6 +799,58 @@ where
         Ok(())
     }
 
+    /// Applies the initialize checks of `sdk.mjs` `Query.initialize`, in its order.
+    fn finish_initialize(
+        &mut self,
+        sender: oneshot::Sender<Result<crate::ConnectionInfo, Error>>,
+        response: serde_json::Value,
+    ) -> Result<(), Error> {
+        // Python reads anything but an object as `{}`; TypeScript keeps the value as sent.
+        let response = match (self.argv_style, response) {
+            (crate::ArgvStyle::Python, serde_json::Value::Object(object)) => serde_json::Value::Object(object),
+            (crate::ArgvStyle::Python, _) => serde_json::Value::Object(JsonObject::new()),
+            (crate::ArgvStyle::TypeScript, response) => response,
+        };
+        let connection_info = crate::ConnectionInfo::from_json(response);
+        let expectations = self.initialize_expectations;
+        let refusal: Option<fn() -> Error> = if expectations.blocking_hooks
+            && connection_info.hook_on_failure_supported != crate::FeatureSupport::Supported
+        {
+            Some(|| Error::BlockingHooksUnsupported)
+        } else if expectations.blocking_hooks && connection_info.hooks_applied == crate::FeatureSupport::Unsupported {
+            Some(|| Error::HooksNotApplied)
+        } else if expectations.managed_settings
+            && connection_info.managed_settings_applied != crate::FeatureSupport::Supported
+        {
+            Some(|| Error::ManagedSettingsNotApplied)
+        } else {
+            None
+        };
+        if let Some(error) = refusal {
+            let _ = sender.send(Err(error()));
+            return Err(error());
+        }
+        if expectations.plugins > 0 && connection_info.plugins_applied != crate::FeatureSupport::Supported {
+            tracing::warn!(
+                "[Query.initialize] Claude Code reported plugins_applied={} for {} plugins sent with pluginDelivery 'initialize'; the process is running with the plugins it was launched with.",
+                javascript_string(connection_info.plugins_applied),
+                expectations.plugins
+            );
+        }
+        self.state = State::Idle;
+        let _ = sender.send(Ok(connection_info));
+        Ok(())
+    }
+
+    /// TypeScript sends a random id per request, Python `req_{counter}_{random}`.
+    fn next_request_id(&mut self) -> Result<ControlRequestId, Error> {
+        self.next_id = self.next_id.checked_add(1).ok_or(Error::RequestIdExhausted)?;
+        Ok(match self.argv_style {
+            crate::ArgvStyle::TypeScript => ControlRequestId::typescript(),
+            crate::ArgvStyle::Python => ControlRequestId::python(self.next_id),
+        })
+    }
+
     async fn start_control(&mut self, response: ControlResponder, request: serde_json::Value) -> Result<(), Error> {
         if !self.input_open() {
             response.send_error(Error::NotReadyForWriting);
@@ -758,9 +860,9 @@ where
             response.send_error(Error::TooManyControls);
             return Ok(());
         }
-        self.next_id = self.next_id.checked_add(1).ok_or(Error::RequestIdExhausted)?;
-        let id = ControlRequestId::from(format!("request-{}", self.next_id));
-        self.write(wire::control_request(&id, request)?).await?;
+        let id = self.next_request_id()?;
+        self.write(wire::control_request(&id, request, self.argv_style)?)
+            .await?;
         self.pending.insert(
             id,
             PendingControl {
@@ -823,7 +925,7 @@ where
                 }
             }
             Frame::ControlResponse { id, response } => {
-                let Some(pending) = self.pending.remove(&id) else {
+                let Some(mut pending) = self.pending.remove(&id) else {
                     // One line on purpose: with the `log` feature of `tracing` enabled by another workspace
                     // member, the macro repeats each field expression for the log fallback, and the
                     // fallback copy on a line of its own is never executed, which reads as uncovered.
@@ -834,6 +936,13 @@ where
                 let operation = pending.response.operation();
                 match response {
                     ControlResponse::Success(response) => {
+                        let response = match pending.response {
+                            ControlResponder::Initialize(sender) => return self.finish_initialize(sender, response),
+                            responder => {
+                                pending.response = responder;
+                                control_object(response)?
+                            }
+                        };
                         if operation == ControlOperation::Interrupt
                             && let crate::InterruptReceipt::Reported {
                                 cancelled: Some(cancelled),
@@ -858,37 +967,7 @@ where
                             self.sdk_mcp_servers = sessions;
                         }
                         match pending.response {
-                            ControlResponder::Initialize(sender) => {
-                                let connection_info =
-                                    crate::ConnectionInfo::from_json(response).map_err(ProtocolError::from)?;
-                                if self.blocking_hooks
-                                    && connection_info.hook_on_failure_supported != crate::FeatureSupport::Supported
-                                {
-                                    let _ = sender.send(Err(Error::BlockingHooksUnsupported));
-                                    return Err(Error::BlockingHooksUnsupported);
-                                }
-                                if self.blocking_hooks
-                                    && connection_info.hooks_applied == crate::FeatureSupport::Unsupported
-                                {
-                                    let _ = sender.send(Err(Error::HooksNotApplied));
-                                    return Err(Error::HooksNotApplied);
-                                }
-                                let sent = self
-                                    .initialize_request
-                                    .get("plugins")
-                                    .and_then(serde_json::Value::as_array)
-                                    .map_or(0, Vec::len);
-                                let applied = connection_info.additional_fields.get("plugins_applied");
-                                if sent > 0 && applied != Some(&serde_json::Value::Bool(true)) {
-                                    tracing::warn!(
-                                        plugins_sent = sent,
-                                        plugins_applied = ?applied,
-                                        "the CLI did not confirm the plugins sent with plugin delivery by initialize; the process runs with the plugins it was launched with"
-                                    );
-                                }
-                                self.state = State::Idle;
-                                let _ = sender.send(Ok(connection_info));
-                            }
+                            ControlResponder::Initialize(_) => {}
                             ControlResponder::Control { response: sender, .. } => {
                                 let _ = sender.send(Ok(response));
                             }
@@ -1245,7 +1324,12 @@ where
     }
 
     async fn write(&mut self, frame: serde_json::Value) -> Result<(), Error> {
-        let mut text = serde_json::to_string(&frame).map_err(ProtocolError::from)?;
+        // Each SDK writes its own JSON spelling: TypeScript `JSON.stringify`, Python `json.dumps`.
+        let mut text = match self.argv_style {
+            crate::ArgvStyle::TypeScript => serde_json::to_string(&frame),
+            crate::ArgvStyle::Python => crate::python_json::to_string(&frame),
+        }
+        .map_err(ProtocolError::from)?;
         text.push('\n');
         if !self.input_open() {
             return Err(Error::NotReadyForWriting);
