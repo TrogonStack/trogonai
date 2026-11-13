@@ -219,7 +219,11 @@ same name.
 `mcp_message` control requests are routed the way the selected style's SDK
 routes them. TypeScript fails the request for an unknown server or a message
 that is not an object, waits for the server's response to a request with an
-id, and acknowledges anything else with an id 0 result. Python fails the
+id, and acknowledges anything else with an id 0 result. The error for a
+message that is not an object is the `TypeError` the JavaScript engine raises,
+so `ClaudeAgentOptions.js_runtime` picks its words: `JsRuntime::Node` (the
+default) names the value as V8 does, and `JsRuntime::Bun` gives the fixed
+JavaScriptCore text. Python fails the
 request when the server name or message is missing, and answers an unknown
 server or an undeliverable message with a JSON-RPC error under the message's
 id.

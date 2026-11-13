@@ -85,6 +85,7 @@ impl DriverFixture {
             limits: Limits::default(),
             handler,
             message_decoding: crate::MessageDecoding::TypeScript,
+            js_runtime: crate::JsRuntime::Node,
             pending: HashMap::new(),
             callbacks: JoinSet::new(),
             callback_handles: HashMap::new(),

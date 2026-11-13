@@ -36,6 +36,7 @@ mod framing;
 mod hooks;
 mod js_json;
 mod js_object_order;
+mod js_runtime;
 mod json_scan;
 mod managed_settings_delivery;
 mod mcp_config;
@@ -204,6 +205,7 @@ pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
     HookOutputVisibility, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, SyncHookOutput,
 };
+pub use js_runtime::JsRuntime;
 pub use managed_settings_delivery::ManagedSettingsDelivery;
 pub use mcp_config::McpConfig;
 pub use mcp_read_resource_response::McpReadResourceResponse;

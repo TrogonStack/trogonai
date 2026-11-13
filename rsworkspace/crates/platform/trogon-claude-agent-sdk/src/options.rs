@@ -333,6 +333,9 @@ pub struct ClaudeAgentOptions {
     /// How the messages the CLI writes are decoded: `TypeScript` (the default) yields every message, `Python`
     /// rejects the ones `parse_message` rejects and skips the ones it skips.
     pub message_decoding: crate::MessageDecoding,
+    /// The JavaScript runtime whose engine error texts the TypeScript dialect reproduces: `Node` (the default)
+    /// or `Bun`. Ignored with `ArgvStyle::Python`.
+    pub js_runtime: crate::JsRuntime,
     pub environment_mode: EnvironmentMode,
     pub claude_code_marker: ClaudeCodeMarker,
     /// `CLAUDE_CODE_ENTRYPOINT`; `None` selects `sdk-trogon-rs`.

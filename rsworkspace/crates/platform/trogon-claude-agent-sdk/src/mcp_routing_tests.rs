@@ -79,15 +79,33 @@ fn js_string_matches_the_javascript_string_conversion() {
 #[test]
 fn typescript_not_an_object_names_the_value_like_v8() {
     assert_eq!(
-        typescript_not_an_object(None),
+        typescript_not_an_object(None, JsRuntime::Node),
         "Cannot use 'in' operator to search for 'method' in undefined"
     );
     assert_eq!(
-        typescript_not_an_object(Some(&json!("text"))),
+        typescript_not_an_object(Some(&json!("text")), JsRuntime::Node),
         "Cannot use 'in' operator to search for 'method' in text"
     );
     assert_eq!(
-        typescript_not_an_object(Some(&json!(7))),
+        typescript_not_an_object(Some(&json!(7)), JsRuntime::Node),
         "Cannot use 'in' operator to search for 'method' in 7"
     );
+}
+
+/// Recorded by loading the pinned `sdk.mjs` as a module under Bun 1.4.4 and calling its `L8` on each value.
+#[test]
+fn typescript_not_an_object_names_the_bundled_parameter_like_javascriptcore() {
+    for value in [
+        None,
+        Some(json!(null)),
+        Some(json!("x")),
+        Some(json!(7)),
+        Some(json!(true)),
+    ] {
+        assert_eq!(
+            typescript_not_an_object(value.as_ref(), JsRuntime::Bun),
+            "e is not an Object. (evaluating '\"method\" in e')"
+        );
+    }
+    assert_eq!(JsRuntime::default(), JsRuntime::Node);
 }

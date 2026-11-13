@@ -286,6 +286,7 @@ where
     run_state: RunState,
     argv_style: crate::ArgvStyle,
     message_decoding: crate::MessageDecoding,
+    js_runtime: crate::JsRuntime,
     /// The last `is_error` result, kept while nothing else has arrived since, to turn the exit error into a
     /// result error the way both upstream SDKs do.
     last_error_result: Option<JsonObject>,
@@ -680,6 +681,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         run_state: RunState::default(),
         argv_style: options.argv_style,
         message_decoding: options.message_decoding,
+        js_runtime: options.js_runtime,
         last_error_result: None,
         version_check,
         latest_commands,
@@ -1632,7 +1634,7 @@ where
             // An array is an object to `in`, so it is handed over like a notification.
             Some(serde_json::Value::Array(_)) => None,
             other => {
-                let text = crate::mcp_routing::typescript_not_an_object(other.as_ref());
+                let text = crate::mcp_routing::typescript_not_an_object(other.as_ref(), self.js_runtime);
                 return self.write_response(wire::callback_error_response(&id, &text)).await;
             }
         };
