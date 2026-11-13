@@ -1,2 +1,3 @@
 .config/mise/lib/claude-sdk-freshness/baseline.json linguist-generated=true
 src/upstream/tool_inputs.rs linguist-generated=true
+tests/fixtures/upstream_tool_inputs.json linguist-generated=true

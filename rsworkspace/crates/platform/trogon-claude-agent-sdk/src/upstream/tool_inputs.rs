@@ -3,6 +3,175 @@
 
 use serde::{Deserialize, Serialize};
 
+/// JSON Schema definitions for Claude CLI tool inputs
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ToolInputSchemas {
+    AgentInput(AgentInput),
+    BashInput(BashInput),
+    ExitPlanModeInput(ExitPlanModeInput),
+    FileEditInput(FileEditInput),
+    FileReadInput(FileReadInput),
+    FileWriteInput(FileWriteInput),
+    GlobInput(GlobInput),
+    GrepInput(GrepInput),
+    TaskStopInput(TaskStopInput),
+    ListMcpResourcesInput(ListMcpResourcesInput),
+    RefreshMcpToolsInput(RefreshMcpToolsInput),
+    McpInput(McpInput),
+    NotebookEditInput(NotebookEditInput),
+    ReadMcpResourceDirInput(ReadMcpResourceDirInput),
+    ReadMcpResourceInput(ReadMcpResourceInput),
+    ReportFindingsInput(ReportFindingsInput),
+    TodoWriteInput(TodoWriteInput),
+    WebFetchInput(WebFetchInput),
+    WebSearchInput(WebSearchInput),
+    AskUserQuestionInput(AskUserQuestionInput),
+    SendFeedbackInput(SendFeedbackInput),
+    ClaudeDesignInput(ClaudeDesignInput),
+    ProjectsInput(ProjectsInput),
+    EnterPlanModeInput(EnterPlanModeInput),
+    TaskCreateInput(TaskCreateInput),
+    TaskGetInput(TaskGetInput),
+    TaskUpdateInput(TaskUpdateInput),
+    TaskListInput(TaskListInput),
+    WorkflowInput(WorkflowInput),
+    CronCreateInput(CronCreateInput),
+    CronDeleteInput(CronDeleteInput),
+    CronListInput(CronListInput),
+    ScheduleWakeupInput(ScheduleWakeupInput),
+    RemoteTriggerInput(RemoteTriggerInput),
+    ShowOnboardingRolePickerInput(ShowOnboardingRolePickerInput),
+    OfferChromeSetupInput(OfferChromeSetupInput),
+    ReadNotificationsInput(ReadNotificationsInput),
+    MonitorInput(MonitorInput),
+    ProposeSkillsInput(ProposeSkillsInput),
+    ProposeGoalInput(ProposeGoalInput),
+    ArtifactInput(ArtifactInput),
+    PushNotificationInput(PushNotificationInput),
+    EnterWorktreeInput(EnterWorktreeInput),
+    ExitWorktreeInput(ExitWorktreeInput),
+    ToolOutputSchemas(ToolOutputSchemas),
+    /// A value matching none of the pinned upstream shapes exactly; it round-trips unchanged.
+    Unknown(serde_json::Value),
+}
+
+impl Serialize for ToolInputSchemas {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::AgentInput(inner) => inner.serialize(serializer),
+            Self::BashInput(inner) => inner.serialize(serializer),
+            Self::ExitPlanModeInput(inner) => inner.serialize(serializer),
+            Self::FileEditInput(inner) => inner.serialize(serializer),
+            Self::FileReadInput(inner) => inner.serialize(serializer),
+            Self::FileWriteInput(inner) => inner.serialize(serializer),
+            Self::GlobInput(inner) => inner.serialize(serializer),
+            Self::GrepInput(inner) => inner.serialize(serializer),
+            Self::TaskStopInput(inner) => inner.serialize(serializer),
+            Self::ListMcpResourcesInput(inner) => inner.serialize(serializer),
+            Self::RefreshMcpToolsInput(inner) => inner.serialize(serializer),
+            Self::McpInput(inner) => inner.serialize(serializer),
+            Self::NotebookEditInput(inner) => inner.serialize(serializer),
+            Self::ReadMcpResourceDirInput(inner) => inner.serialize(serializer),
+            Self::ReadMcpResourceInput(inner) => inner.serialize(serializer),
+            Self::ReportFindingsInput(inner) => inner.serialize(serializer),
+            Self::TodoWriteInput(inner) => inner.serialize(serializer),
+            Self::WebFetchInput(inner) => inner.serialize(serializer),
+            Self::WebSearchInput(inner) => inner.serialize(serializer),
+            Self::AskUserQuestionInput(inner) => inner.serialize(serializer),
+            Self::SendFeedbackInput(inner) => inner.serialize(serializer),
+            Self::ClaudeDesignInput(inner) => inner.serialize(serializer),
+            Self::ProjectsInput(inner) => inner.serialize(serializer),
+            Self::EnterPlanModeInput(inner) => inner.serialize(serializer),
+            Self::TaskCreateInput(inner) => inner.serialize(serializer),
+            Self::TaskGetInput(inner) => inner.serialize(serializer),
+            Self::TaskUpdateInput(inner) => inner.serialize(serializer),
+            Self::TaskListInput(inner) => inner.serialize(serializer),
+            Self::WorkflowInput(inner) => inner.serialize(serializer),
+            Self::CronCreateInput(inner) => inner.serialize(serializer),
+            Self::CronDeleteInput(inner) => inner.serialize(serializer),
+            Self::CronListInput(inner) => inner.serialize(serializer),
+            Self::ScheduleWakeupInput(inner) => inner.serialize(serializer),
+            Self::RemoteTriggerInput(inner) => inner.serialize(serializer),
+            Self::ShowOnboardingRolePickerInput(inner) => inner.serialize(serializer),
+            Self::OfferChromeSetupInput(inner) => inner.serialize(serializer),
+            Self::ReadNotificationsInput(inner) => inner.serialize(serializer),
+            Self::MonitorInput(inner) => inner.serialize(serializer),
+            Self::ProposeSkillsInput(inner) => inner.serialize(serializer),
+            Self::ProposeGoalInput(inner) => inner.serialize(serializer),
+            Self::ArtifactInput(inner) => inner.serialize(serializer),
+            Self::PushNotificationInput(inner) => inner.serialize(serializer),
+            Self::EnterWorktreeInput(inner) => inner.serialize(serializer),
+            Self::ExitWorktreeInput(inner) => inner.serialize(serializer),
+            Self::ToolOutputSchemas(inner) => inner.serialize(serializer),
+            Self::Unknown(inner) => inner.serialize(serializer),
+        }
+    }
+}
+
+impl ToolInputSchemas {
+    /// Decodes `value` into the declared member that reproduces it exactly with the fewest
+    /// undeclared keys, earliest declared on ties, or `None` when no member matches.
+    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
+        let mut best: Option<(usize, Self)> = None;
+        super::support::keep_best(&mut best, super::support::exact::<AgentInput>(value).map(|inner| (super::support::unknown_keys(value, AgentInput::KNOWN_KEYS), Self::AgentInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<BashInput>(value).map(|inner| (super::support::unknown_keys(value, BashInput::KNOWN_KEYS), Self::BashInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ExitPlanModeInput>(value).map(|inner| (super::support::unknown_keys(value, ExitPlanModeInput::KNOWN_KEYS), Self::ExitPlanModeInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileEditInput>(value).map(|inner| (super::support::unknown_keys(value, FileEditInput::KNOWN_KEYS), Self::FileEditInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileReadInput>(value).map(|inner| (super::support::unknown_keys(value, FileReadInput::KNOWN_KEYS), Self::FileReadInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileWriteInput>(value).map(|inner| (super::support::unknown_keys(value, FileWriteInput::KNOWN_KEYS), Self::FileWriteInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<GlobInput>(value).map(|inner| (super::support::unknown_keys(value, GlobInput::KNOWN_KEYS), Self::GlobInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<GrepInput>(value).map(|inner| (super::support::unknown_keys(value, GrepInput::KNOWN_KEYS), Self::GrepInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskStopInput>(value).map(|inner| (super::support::unknown_keys(value, TaskStopInput::KNOWN_KEYS), Self::TaskStopInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ListMcpResourcesInput>(value).map(|inner| (super::support::unknown_keys(value, ListMcpResourcesInput::KNOWN_KEYS), Self::ListMcpResourcesInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<RefreshMcpToolsInput>(value).map(|inner| (super::support::unknown_keys(value, RefreshMcpToolsInput::KNOWN_KEYS), Self::RefreshMcpToolsInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<McpInput>(value).map(|inner| (super::support::unknown_keys(value, &[]), Self::McpInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<NotebookEditInput>(value).map(|inner| (super::support::unknown_keys(value, NotebookEditInput::KNOWN_KEYS), Self::NotebookEditInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReadMcpResourceDirInput>(value).map(|inner| (super::support::unknown_keys(value, ReadMcpResourceDirInput::KNOWN_KEYS), Self::ReadMcpResourceDirInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReadMcpResourceInput>(value).map(|inner| (super::support::unknown_keys(value, ReadMcpResourceInput::KNOWN_KEYS), Self::ReadMcpResourceInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReportFindingsInput>(value).map(|inner| (super::support::unknown_keys(value, ReportFindingsInput::KNOWN_KEYS), Self::ReportFindingsInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TodoWriteInput>(value).map(|inner| (super::support::unknown_keys(value, TodoWriteInput::KNOWN_KEYS), Self::TodoWriteInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<WebFetchInput>(value).map(|inner| (super::support::unknown_keys(value, WebFetchInput::KNOWN_KEYS), Self::WebFetchInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<WebSearchInput>(value).map(|inner| (super::support::unknown_keys(value, WebSearchInput::KNOWN_KEYS), Self::WebSearchInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<AskUserQuestionInput>(value).map(|inner| (super::support::unknown_keys(value, AskUserQuestionInput::KNOWN_KEYS), Self::AskUserQuestionInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SendFeedbackInput>(value).map(|inner| (super::support::unknown_keys(value, SendFeedbackInput::KNOWN_KEYS), Self::SendFeedbackInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ClaudeDesignInput>(value).map(|inner| (super::support::unknown_keys(value, ClaudeDesignInput::KNOWN_KEYS), Self::ClaudeDesignInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsInput>(value).map(|inner| (super::support::unknown_keys(value, ProjectsInput::KNOWN_KEYS), Self::ProjectsInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<EnterPlanModeInput>(value).map(|inner| (super::support::unknown_keys(value, EnterPlanModeInput::KNOWN_KEYS), Self::EnterPlanModeInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskCreateInput>(value).map(|inner| (super::support::unknown_keys(value, TaskCreateInput::KNOWN_KEYS), Self::TaskCreateInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskGetInput>(value).map(|inner| (super::support::unknown_keys(value, TaskGetInput::KNOWN_KEYS), Self::TaskGetInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskUpdateInput>(value).map(|inner| (super::support::unknown_keys(value, TaskUpdateInput::KNOWN_KEYS), Self::TaskUpdateInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskListInput>(value).map(|inner| (super::support::unknown_keys(value, TaskListInput::KNOWN_KEYS), Self::TaskListInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<WorkflowInput>(value).map(|inner| (super::support::unknown_keys(value, WorkflowInput::KNOWN_KEYS), Self::WorkflowInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<CronCreateInput>(value).map(|inner| (super::support::unknown_keys(value, CronCreateInput::KNOWN_KEYS), Self::CronCreateInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<CronDeleteInput>(value).map(|inner| (super::support::unknown_keys(value, CronDeleteInput::KNOWN_KEYS), Self::CronDeleteInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<CronListInput>(value).map(|inner| (super::support::unknown_keys(value, CronListInput::KNOWN_KEYS), Self::CronListInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ScheduleWakeupInput>(value).map(|inner| (super::support::unknown_keys(value, ScheduleWakeupInput::KNOWN_KEYS), Self::ScheduleWakeupInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<RemoteTriggerInput>(value).map(|inner| (super::support::unknown_keys(value, RemoteTriggerInput::KNOWN_KEYS), Self::RemoteTriggerInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ShowOnboardingRolePickerInput>(value).map(|inner| (super::support::unknown_keys(value, ShowOnboardingRolePickerInput::KNOWN_KEYS), Self::ShowOnboardingRolePickerInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<OfferChromeSetupInput>(value).map(|inner| (super::support::unknown_keys(value, OfferChromeSetupInput::KNOWN_KEYS), Self::OfferChromeSetupInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReadNotificationsInput>(value).map(|inner| (super::support::unknown_keys(value, ReadNotificationsInput::KNOWN_KEYS), Self::ReadNotificationsInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<MonitorInput>(value).map(|inner| (super::support::unknown_keys(value, MonitorInput::KNOWN_KEYS), Self::MonitorInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProposeSkillsInput>(value).map(|inner| (super::support::unknown_keys(value, ProposeSkillsInput::KNOWN_KEYS), Self::ProposeSkillsInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProposeGoalInput>(value).map(|inner| (super::support::unknown_keys(value, ProposeGoalInput::KNOWN_KEYS), Self::ProposeGoalInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactInput>(value).map(|inner| (super::support::unknown_keys(value, ArtifactInput::KNOWN_KEYS), Self::ArtifactInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<PushNotificationInput>(value).map(|inner| (super::support::unknown_keys(value, PushNotificationInput::KNOWN_KEYS), Self::PushNotificationInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<EnterWorktreeInput>(value).map(|inner| (super::support::unknown_keys(value, EnterWorktreeInput::KNOWN_KEYS), Self::EnterWorktreeInput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ExitWorktreeInput>(value).map(|inner| (super::support::unknown_keys(value, ExitWorktreeInput::KNOWN_KEYS), Self::ExitWorktreeInput(inner))));
+        super::support::keep_best(&mut best, ToolOutputSchemas::best_match(value).map(|(score, inner)| (score, Self::ToolOutputSchemas(inner))));
+        best
+    }
+}
+
+impl<'de> Deserialize<'de> for ToolInputSchemas {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match Self::best_match(&value) {
+            Some((_, matched)) => matched,
+            None => Self::Unknown(value),
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AgentInputModel {
     /// `sonnet`
@@ -263,6 +432,1326 @@ impl<'de> Deserialize<'de> for AgentInput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BashInput {
+    /// The command to execute
+    pub command: String,
+    /// Optional timeout in milliseconds (max 600000 for a foreground command)
+    pub timeout: Option<serde_json::Number>,
+    /// Clear, concise description of what this command does in active voice. Never use words like "complex" or "risk" in the description - just describe what it does.
+    ///
+    /// Say what the command does in plain words: do not echo the command's text, its flags, or file paths - the user reads this description, often without seeing the command.
+    ///
+    /// For simple commands (git, npm, standard CLI tools), keep it brief (5-10 words):
+    /// - ls → "List files in current directory"
+    /// - git status → "Show working tree status"
+    /// - npm install → "Install package dependencies"
+    ///
+    /// For commands that are harder to parse at a glance (piped commands, obscure flags, etc.), add enough context to clarify what it does:
+    /// - find . -name "*.tmp" -exec rm {} \\; → "Find and delete all .tmp files recursively"
+    /// - git reset --hard origin/main → "Discard all local changes and match remote main"
+    /// - curl -s url | jq '.data\[\]' → "Fetch JSON from URL and extract data array elements"
+    pub description: Option<String>,
+    /// Set to true to run this command in the background. With it, `timeout` limits how long the command may run in the background before it is stopped (default 1800000 ms, max 7200000 ms).
+    pub run_in_background: Option<bool>,
+    /// Set this to true to dangerously override sandbox mode and run commands without sandboxing.
+    pub dangerously_disable_sandbox: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "BashInput")]
+struct BashInputWire {
+    pub command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_in_background: Option<bool>,
+    #[serde(rename = "dangerouslyDisableSandbox", default, skip_serializing_if = "Option::is_none")]
+    pub dangerously_disable_sandbox: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl BashInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["command", "timeout", "description", "run_in_background", "dangerouslyDisableSandbox"];
+}
+
+impl Serialize for BashInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(BashInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BashInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = BashInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ExitPlanModeInputAllowedPromptsItemTool {
+    /// `Bash`
+    Bash,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ExitPlanModeInputAllowedPromptsItemTool {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Bash => "Bash",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ExitPlanModeInputAllowedPromptsItemTool {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ExitPlanModeInputAllowedPromptsItemTool {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "Bash" => Self::Bash,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExitPlanModeInputAllowedPromptsItem {
+    /// The tool this prompt applies to
+    pub tool: ExitPlanModeInputAllowedPromptsItemTool,
+    /// Semantic description of the action, e.g. "run tests", "install dependencies"
+    pub prompt: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ExitPlanModeInputAllowedPromptsItem")]
+struct ExitPlanModeInputAllowedPromptsItemWire {
+    pub tool: ExitPlanModeInputAllowedPromptsItemTool,
+    pub prompt: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ExitPlanModeInputAllowedPromptsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["tool", "prompt"];
+}
+
+impl Serialize for ExitPlanModeInputAllowedPromptsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ExitPlanModeInputAllowedPromptsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ExitPlanModeInputAllowedPromptsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ExitPlanModeInputAllowedPromptsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExitPlanModeInput {
+    /// Deprecated: no longer used.
+    pub allowed_prompts: Option<Vec<ExitPlanModeInputAllowedPromptsItem>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ExitPlanModeInput")]
+struct ExitPlanModeInputWire {
+    #[serde(rename = "allowedPrompts", default, skip_serializing_if = "Option::is_none")]
+    pub allowed_prompts: Option<Vec<ExitPlanModeInputAllowedPromptsItem>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ExitPlanModeInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["allowedPrompts"];
+}
+
+impl Serialize for ExitPlanModeInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ExitPlanModeInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ExitPlanModeInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ExitPlanModeInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileEditInput {
+    /// The absolute path to the file to modify
+    pub file_path: String,
+    /// The text to replace
+    pub old_string: String,
+    /// The text to replace it with (must be different from old_string)
+    pub new_string: String,
+    /// Replace all occurrences of old_string (default false)
+    pub replace_all: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileEditInput")]
+struct FileEditInputWire {
+    pub file_path: String,
+    pub old_string: String,
+    pub new_string: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replace_all: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileEditInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["file_path", "old_string", "new_string", "replace_all"];
+}
+
+impl Serialize for FileEditInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileEditInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileEditInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileEditInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadInput {
+    /// The absolute path to the file to read
+    pub file_path: String,
+    /// The line number to start reading from. Only provide if the file is too large to read at once
+    pub offset: Option<serde_json::Number>,
+    /// The number of lines to read. Only provide if the file is too large to read at once.
+    pub limit: Option<serde_json::Number>,
+    /// Page range for PDF files (e.g., "1-5", "3", "10-20"). Only applicable to PDF files. Maximum 20 pages per request.
+    pub pages: Option<String>,
+    /// Set to true to read a text file, or a line range of one, that is over the usual size limits, up to what still fits in your context. Only use this when you genuinely need all of it or the user asked for the whole file; otherwise read it in parts with offset and limit, or search it.
+    pub allow_large: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadInput")]
+struct FileReadInputWire {
+    pub file_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pages: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_large: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["file_path", "offset", "limit", "pages", "allow_large"];
+}
+
+impl Serialize for FileReadInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileWriteInput {
+    /// The absolute path to the file to write (must be absolute, not relative)
+    pub file_path: String,
+    /// The content to write to the file
+    pub content: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileWriteInput")]
+struct FileWriteInputWire {
+    pub file_path: String,
+    pub content: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileWriteInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["file_path", "content"];
+}
+
+impl Serialize for FileWriteInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileWriteInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileWriteInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileWriteInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlobInput {
+    /// The glob pattern to match files against
+    pub pattern: String,
+    /// The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter "undefined" or "null" - simply omit it for the default behavior. Must be a valid directory path if provided.
+    pub path: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "GlobInput")]
+struct GlobInputWire {
+    pub pattern: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl GlobInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["pattern", "path"];
+}
+
+impl Serialize for GlobInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(GlobInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for GlobInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = GlobInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum GrepInputOutputMode {
+    /// `content`
+    Content,
+    /// `files_with_matches`
+    FilesWithMatches,
+    /// `count`
+    Count,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl GrepInputOutputMode {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Content => "content",
+            Self::FilesWithMatches => "files_with_matches",
+            Self::Count => "count",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for GrepInputOutputMode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for GrepInputOutputMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "content" => Self::Content,
+            "files_with_matches" => Self::FilesWithMatches,
+            "count" => Self::Count,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GrepInput {
+    /// The regular expression pattern to search for in file contents
+    pub pattern: String,
+    /// File or directory to search in (rg PATH). Defaults to current working directory.
+    pub path: Option<String>,
+    /// Glob pattern to filter files (e.g. "*.js", "*.{ts,tsx}") - maps to rg --glob
+    pub glob: Option<String>,
+    /// Output mode: "content" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), "files_with_matches" shows file paths (supports head_limit), "count" shows match counts (supports head_limit). Defaults to "files_with_matches".
+    pub output_mode: Option<GrepInputOutputMode>,
+    /// Number of lines to show before each match (rg -B). Requires output_mode: "content", ignored otherwise.
+    pub dash_b: Option<serde_json::Number>,
+    /// Number of lines to show after each match (rg -A). Requires output_mode: "content", ignored otherwise.
+    pub dash_a: Option<serde_json::Number>,
+    /// Alias for context.
+    pub dash_c: Option<serde_json::Number>,
+    /// Number of lines to show before and after each match (rg -C). Requires output_mode: "content", ignored otherwise.
+    pub context: Option<serde_json::Number>,
+    /// Show line numbers in output (rg -n). Requires output_mode: "content", ignored otherwise. Defaults to true.
+    pub dash_n: Option<bool>,
+    /// Case insensitive search (rg -i)
+    pub dash_i: Option<bool>,
+    /// Print only the matched (non-empty) parts of each matching line, one match per output line (rg -o / --only-matching). Requires output_mode: "content", ignored otherwise. Defaults to false.
+    pub dash_o: Option<bool>,
+    /// File type to search (rg --type). Common types: js, py, rust, go, java, etc. More efficient than include for standard file types.
+    pub r#type: Option<String>,
+    /// Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). Defaults to 250 when unspecified. Pass 0 for unlimited (use sparingly - large result sets waste context).
+    pub head_limit: Option<serde_json::Number>,
+    /// Skip first N lines/entries before applying head_limit, equivalent to "| tail -n +N | head -N". Works across all output modes. Defaults to 0.
+    pub offset: Option<serde_json::Number>,
+    /// Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall). Default: false.
+    pub multiline: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "GrepInput")]
+struct GrepInputWire {
+    pub pattern: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glob: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_mode: Option<GrepInputOutputMode>,
+    #[serde(rename = "-B", default, skip_serializing_if = "Option::is_none")]
+    pub dash_b: Option<serde_json::Number>,
+    #[serde(rename = "-A", default, skip_serializing_if = "Option::is_none")]
+    pub dash_a: Option<serde_json::Number>,
+    #[serde(rename = "-C", default, skip_serializing_if = "Option::is_none")]
+    pub dash_c: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<serde_json::Number>,
+    #[serde(rename = "-n", default, skip_serializing_if = "Option::is_none")]
+    pub dash_n: Option<bool>,
+    #[serde(rename = "-i", default, skip_serializing_if = "Option::is_none")]
+    pub dash_i: Option<bool>,
+    #[serde(rename = "-o", default, skip_serializing_if = "Option::is_none")]
+    pub dash_o: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_limit: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multiline: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl GrepInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["pattern", "path", "glob", "output_mode", "-B", "-A", "-C", "context", "-n", "-i", "-o", "type", "head_limit", "offset", "multiline"];
+}
+
+impl Serialize for GrepInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(GrepInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for GrepInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = GrepInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskStopInput {
+    /// The ID of the background task to stop. Agent-team teammates and named background agents are also accepted by agent ID or name.
+    pub task_id: Option<String>,
+    /// Deprecated: use task_id instead
+    pub shell_id: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskStopInput")]
+struct TaskStopInputWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_id: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskStopInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["task_id", "shell_id"];
+}
+
+impl Serialize for TaskStopInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskStopInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskStopInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskStopInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListMcpResourcesInput {
+    /// Optional server name to filter resources by
+    pub server: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ListMcpResourcesInput")]
+struct ListMcpResourcesInputWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ListMcpResourcesInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["server"];
+}
+
+impl Serialize for ListMcpResourcesInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ListMcpResourcesInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ListMcpResourcesInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ListMcpResourcesInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefreshMcpToolsInput {
+    /// Optional server name: refresh only this server. Omit to refresh all connected servers.
+    pub server: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "RefreshMcpToolsInput")]
+struct RefreshMcpToolsInputWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl RefreshMcpToolsInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["server"];
+}
+
+impl Serialize for RefreshMcpToolsInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(RefreshMcpToolsInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RefreshMcpToolsInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = RefreshMcpToolsInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+pub type McpInput = serde_json::Map<String, serde_json::Value>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum NotebookEditInputCellType {
+    /// `code`
+    Code,
+    /// `markdown`
+    Markdown,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl NotebookEditInputCellType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Code => "code",
+            Self::Markdown => "markdown",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for NotebookEditInputCellType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for NotebookEditInputCellType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "code" => Self::Code,
+            "markdown" => Self::Markdown,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum NotebookEditInputEditMode {
+    /// `replace`
+    Replace,
+    /// `insert`
+    Insert,
+    /// `delete`
+    Delete,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl NotebookEditInputEditMode {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Replace => "replace",
+            Self::Insert => "insert",
+            Self::Delete => "delete",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for NotebookEditInputEditMode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for NotebookEditInputEditMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "replace" => Self::Replace,
+            "insert" => Self::Insert,
+            "delete" => Self::Delete,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotebookEditInput {
+    /// The absolute path to the Jupyter notebook file to edit (must be absolute, not relative)
+    pub notebook_path: String,
+    /// The ID of the cell to edit. When inserting a new cell, the new cell will be inserted after the cell with this ID, or at the beginning if not specified.
+    pub cell_id: Option<String>,
+    /// The new source for the cell
+    pub new_source: String,
+    /// The type of the cell (code or markdown). If not specified, it defaults to the current cell type. If using edit_mode=insert, this is required.
+    pub cell_type: Option<NotebookEditInputCellType>,
+    /// The type of edit to make (replace, insert, delete). Defaults to replace.
+    pub edit_mode: Option<NotebookEditInputEditMode>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "NotebookEditInput")]
+struct NotebookEditInputWire {
+    pub notebook_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_id: Option<String>,
+    pub new_source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_type: Option<NotebookEditInputCellType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_mode: Option<NotebookEditInputEditMode>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl NotebookEditInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["notebook_path", "cell_id", "new_source", "cell_type", "edit_mode"];
+}
+
+impl Serialize for NotebookEditInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(NotebookEditInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for NotebookEditInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = NotebookEditInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadMcpResourceDirInput {
+    /// The MCP server name
+    pub server: String,
+    /// The directory resource URI to list
+    pub uri: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReadMcpResourceDirInput")]
+struct ReadMcpResourceDirInputWire {
+    pub server: String,
+    pub uri: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReadMcpResourceDirInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["server", "uri"];
+}
+
+impl Serialize for ReadMcpResourceDirInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReadMcpResourceDirInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReadMcpResourceDirInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReadMcpResourceDirInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadMcpResourceInput {
+    /// The MCP server name
+    pub server: String,
+    /// The resource URI to read
+    pub uri: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReadMcpResourceInput")]
+struct ReadMcpResourceInputWire {
+    pub server: String,
+    pub uri: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReadMcpResourceInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["server", "uri"];
+}
+
+impl Serialize for ReadMcpResourceInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReadMcpResourceInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReadMcpResourceInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReadMcpResourceInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ReportFindingsInputLevel {
+    /// `low`
+    Low,
+    /// `medium`
+    Medium,
+    /// `high`
+    High,
+    /// `xhigh`
+    Xhigh,
+    /// `max`
+    Max,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ReportFindingsInputLevel {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ReportFindingsInputLevel {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportFindingsInputLevel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "xhigh" => Self::Xhigh,
+            "max" => Self::Max,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ReportFindingsInputFindingsItemVerdict {
+    /// `CONFIRMED`
+    Confirmed,
+    /// `PLAUSIBLE`
+    Plausible,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ReportFindingsInputFindingsItemVerdict {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Confirmed => "CONFIRMED",
+            Self::Plausible => "PLAUSIBLE",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ReportFindingsInputFindingsItemVerdict {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportFindingsInputFindingsItemVerdict {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "CONFIRMED" => Self::Confirmed,
+            "PLAUSIBLE" => Self::Plausible,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ReportFindingsInputFindingsItemOutcome {
+    /// `fixed`
+    Fixed,
+    /// `skipped`
+    Skipped,
+    /// `no_change_needed`
+    NoChangeNeeded,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ReportFindingsInputFindingsItemOutcome {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Fixed => "fixed",
+            Self::Skipped => "skipped",
+            Self::NoChangeNeeded => "no_change_needed",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ReportFindingsInputFindingsItemOutcome {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportFindingsInputFindingsItemOutcome {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "fixed" => Self::Fixed,
+            "skipped" => Self::Skipped,
+            "no_change_needed" => Self::NoChangeNeeded,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReportFindingsInputFindingsItem {
+    /// Repo-relative path of the file the finding is in
+    pub file: String,
+    /// 1-indexed line the finding anchors to
+    pub line: Option<serde_json::Number>,
+    /// One-sentence statement of the defect
+    pub summary: String,
+    /// Compressed label for compact UI (≤60 chars): the claim alone, no rationale or consequence clause
+    pub short_summary: Option<String>,
+    /// Concrete inputs/state → wrong output/crash
+    pub failure_scenario: String,
+    /// Short kebab-case slug of the finding type, e.g. "correctness", "simplification", "efficiency", "test-coverage"
+    pub category: Option<String>,
+    /// Set when a verify pass ran; absent on inline-only reviews
+    pub verdict: Option<ReportFindingsInputFindingsItemVerdict>,
+    /// Set ONLY when re-reporting after applying fixes: what happened to this finding
+    pub outcome: Option<ReportFindingsInputFindingsItemOutcome>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReportFindingsInputFindingsItem")]
+struct ReportFindingsInputFindingsItemWire {
+    pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<serde_json::Number>,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short_summary: Option<String>,
+    pub failure_scenario: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<ReportFindingsInputFindingsItemVerdict>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<ReportFindingsInputFindingsItemOutcome>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReportFindingsInputFindingsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["file", "line", "summary", "short_summary", "failure_scenario", "category", "verdict", "outcome"];
+}
+
+impl Serialize for ReportFindingsInputFindingsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReportFindingsInputFindingsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportFindingsInputFindingsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReportFindingsInputFindingsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReportFindingsInput {
+    /// Effort level the review ran at
+    pub level: Option<ReportFindingsInputLevel>,
+    /// Verified findings, most-severe first; empty if none survived
+    pub findings: Vec<ReportFindingsInputFindingsItem>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReportFindingsInput")]
+struct ReportFindingsInputWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<ReportFindingsInputLevel>,
+    pub findings: Vec<ReportFindingsInputFindingsItem>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReportFindingsInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["level", "findings"];
+}
+
+impl Serialize for ReportFindingsInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReportFindingsInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportFindingsInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReportFindingsInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum TodoWriteInputTodosItemStatus {
+    /// `pending`
+    Pending,
+    /// `in_progress`
+    InProgress,
+    /// `completed`
+    Completed,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl TodoWriteInputTodosItemStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for TodoWriteInputTodosItemStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for TodoWriteInputTodosItemStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "pending" => Self::Pending,
+            "in_progress" => Self::InProgress,
+            "completed" => Self::Completed,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TodoWriteInputTodosItem {
+    pub content: String,
+    pub status: TodoWriteInputTodosItemStatus,
+    pub active_form: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TodoWriteInputTodosItem")]
+struct TodoWriteInputTodosItemWire {
+    pub content: String,
+    pub status: TodoWriteInputTodosItemStatus,
+    #[serde(rename = "activeForm")]
+    pub active_form: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TodoWriteInputTodosItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["content", "status", "activeForm"];
+}
+
+impl Serialize for TodoWriteInputTodosItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TodoWriteInputTodosItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TodoWriteInputTodosItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TodoWriteInputTodosItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TodoWriteInput {
+    /// The updated todo list
+    pub todos: Vec<TodoWriteInputTodosItem>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TodoWriteInput")]
+struct TodoWriteInputWire {
+    pub todos: Vec<TodoWriteInputTodosItem>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TodoWriteInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["todos"];
+}
+
+impl Serialize for TodoWriteInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TodoWriteInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TodoWriteInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TodoWriteInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebFetchInput {
+    /// The URL to fetch content from
+    pub url: String,
+    /// The prompt to run on the fetched content
+    pub prompt: String,
+    /// Character position in the page text to start reading from. Use it to read on through a page too long for one call, with the value the previous result gave.
+    pub offset: Option<serde_json::Number>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "WebFetchInput")]
+struct WebFetchInputWire {
+    pub url: String,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<serde_json::Number>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl WebFetchInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "prompt", "offset"];
+}
+
+impl Serialize for WebFetchInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(WebFetchInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for WebFetchInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = WebFetchInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebSearchInput {
+    /// The search query to use
+    pub query: String,
+    /// Only include search results from these domains
+    pub allowed_domains: Option<Vec<String>>,
+    /// Never include search results from these domains
+    pub blocked_domains: Option<Vec<String>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "WebSearchInput")]
+struct WebSearchInputWire {
+    pub query: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_domains: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_domains: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl WebSearchInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["query", "allowed_domains", "blocked_domains"];
+}
+
+impl Serialize for WebSearchInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(WebSearchInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for WebSearchInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = WebSearchInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AskUserQuestionInputQuestionsItemOptionsItem {
     /// The display text for this option that the user will see and select. Should be concise (1-5 words) and clearly describe the choice.
     pub label: String,
@@ -497,6 +1986,422 @@ impl<'de> Deserialize<'de> for AskUserQuestionInput {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SendFeedbackInputType {
+    /// `bug`
+    Bug,
+    /// `idea`
+    Idea,
+    /// `missing_capability`
+    MissingCapability,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl SendFeedbackInputType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Bug => "bug",
+            Self::Idea => "idea",
+            Self::MissingCapability => "missing_capability",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for SendFeedbackInputType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SendFeedbackInputType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "bug" => Self::Bug,
+            "idea" => Self::Idea,
+            "missing_capability" => Self::MissingCapability,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SendFeedbackInputFailureMode {
+    /// `instruction_following`
+    InstructionFollowing,
+    /// `destructive_actions`
+    DestructiveActions,
+    /// `code_quality`
+    CodeQuality,
+    /// `repetition_and_looping`
+    RepetitionAndLooping,
+    /// `model_regression`
+    ModelRegression,
+    /// `overconfidence_and_hallucination`
+    OverconfidenceAndHallucination,
+    /// `context_and_memory`
+    ContextAndMemory,
+    /// `overeager`
+    Overeager,
+    /// `over_correction`
+    OverCorrection,
+    /// `stopping_short`
+    StoppingShort,
+    /// `dispute_or_decline`
+    DisputeOrDecline,
+    /// `subagent_overspawn`
+    SubagentOverspawn,
+    /// `tone_or_preachiness`
+    ToneOrPreachiness,
+    /// `excessive_questions`
+    ExcessiveQuestions,
+    /// `unwanted_scope`
+    UnwantedScope,
+    /// `other`
+    Other,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl SendFeedbackInputFailureMode {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::InstructionFollowing => "instruction_following",
+            Self::DestructiveActions => "destructive_actions",
+            Self::CodeQuality => "code_quality",
+            Self::RepetitionAndLooping => "repetition_and_looping",
+            Self::ModelRegression => "model_regression",
+            Self::OverconfidenceAndHallucination => "overconfidence_and_hallucination",
+            Self::ContextAndMemory => "context_and_memory",
+            Self::Overeager => "overeager",
+            Self::OverCorrection => "over_correction",
+            Self::StoppingShort => "stopping_short",
+            Self::DisputeOrDecline => "dispute_or_decline",
+            Self::SubagentOverspawn => "subagent_overspawn",
+            Self::ToneOrPreachiness => "tone_or_preachiness",
+            Self::ExcessiveQuestions => "excessive_questions",
+            Self::UnwantedScope => "unwanted_scope",
+            Self::Other => "other",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for SendFeedbackInputFailureMode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SendFeedbackInputFailureMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "instruction_following" => Self::InstructionFollowing,
+            "destructive_actions" => Self::DestructiveActions,
+            "code_quality" => Self::CodeQuality,
+            "repetition_and_looping" => Self::RepetitionAndLooping,
+            "model_regression" => Self::ModelRegression,
+            "overconfidence_and_hallucination" => Self::OverconfidenceAndHallucination,
+            "context_and_memory" => Self::ContextAndMemory,
+            "overeager" => Self::Overeager,
+            "over_correction" => Self::OverCorrection,
+            "stopping_short" => Self::StoppingShort,
+            "dispute_or_decline" => Self::DisputeOrDecline,
+            "subagent_overspawn" => Self::SubagentOverspawn,
+            "tone_or_preachiness" => Self::ToneOrPreachiness,
+            "excessive_questions" => Self::ExcessiveQuestions,
+            "unwanted_scope" => Self::UnwantedScope,
+            "other" => Self::Other,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SendFeedbackInputTaskCategory {
+    /// `code_edit`
+    CodeEdit,
+    /// `debug`
+    Debug,
+    /// `explain`
+    Explain,
+    /// `plan`
+    Plan,
+    /// `shell`
+    Shell,
+    /// `search`
+    Search,
+    /// `review`
+    Review,
+    /// `other`
+    Other,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl SendFeedbackInputTaskCategory {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::CodeEdit => "code_edit",
+            Self::Debug => "debug",
+            Self::Explain => "explain",
+            Self::Plan => "plan",
+            Self::Shell => "shell",
+            Self::Search => "search",
+            Self::Review => "review",
+            Self::Other => "other",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for SendFeedbackInputTaskCategory {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SendFeedbackInputTaskCategory {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "code_edit" => Self::CodeEdit,
+            "debug" => Self::Debug,
+            "explain" => Self::Explain,
+            "plan" => Self::Plan,
+            "shell" => Self::Shell,
+            "search" => Self::Search,
+            "review" => Self::Review,
+            "other" => Self::Other,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SendFeedbackInput {
+    /// What kind of feedback this is.
+    pub r#type: SendFeedbackInputType,
+    /// Short, specific one-line summary of the issue.
+    pub title: String,
+    /// Labeled bullets, in order: **What happened:** (observed vs. expected, exact error text if short); **What the user said:** (quoted, or "User didn't comment; observed by the model."); **Repro:** (minimal steps); **Evidence:** (request IDs, timestamps, paths, versions; omit if none); optionally a final **Cause:** only if verified in-session. One to three lines per bullet. No narrative paragraphs, no speculation, no secrets.
+    pub details: String,
+    /// Optional short tag naming the part of Claude Code this is about (e.g. "hooks config", "/help", "file editing"). Leave blank if unclear.
+    pub area: Option<String>,
+    /// When the report is about MODEL BEHAVIOR (not a product bug), the closest failure mode, or `other` when it is a model-behavior issue that fits no listed value. Omit only when the report is a product/tool bug with no model-behavior component.
+    pub failure_mode: Option<SendFeedbackInputFailureMode>,
+    /// What kind of task the session was doing when the issue occurred, or `other` when it is a clear task that fits no listed value. Omit only if genuinely unclear.
+    pub task_category: Option<SendFeedbackInputTaskCategory>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "SendFeedbackInput")]
+struct SendFeedbackInputWire {
+    pub r#type: SendFeedbackInputType,
+    pub title: String,
+    pub details: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_mode: Option<SendFeedbackInputFailureMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_category: Option<SendFeedbackInputTaskCategory>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl SendFeedbackInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type", "title", "details", "area", "failure_mode", "task_category"];
+}
+
+impl Serialize for SendFeedbackInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(SendFeedbackInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SendFeedbackInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = SendFeedbackInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaudeDesignInput {
+    /// Claude Design action to perform. Call with "list" first to discover the available operations and their argument schemas.
+    pub operation: String,
+    /// Action input object (server-validated). Pass {} for operations that take no input.
+    pub arguments: serde_json::Map<String, serde_json::Value>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ClaudeDesignInput")]
+struct ClaudeDesignInputWire {
+    pub operation: String,
+    pub arguments: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ClaudeDesignInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["operation", "arguments"];
+}
+
+impl Serialize for ClaudeDesignInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ClaudeDesignInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ClaudeDesignInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ClaudeDesignInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectsInputMethod {
+    /// `project_info`
+    ProjectInfo,
+    /// `project_read`
+    ProjectRead,
+    /// `project_search`
+    ProjectSearch,
+    /// `project_write`
+    ProjectWrite,
+    /// `project_delete`
+    ProjectDelete,
+    /// `project_memory_list`
+    ProjectMemoryList,
+    /// `project_memory_read`
+    ProjectMemoryRead,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ProjectsInputMethod {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ProjectInfo => "project_info",
+            Self::ProjectRead => "project_read",
+            Self::ProjectSearch => "project_search",
+            Self::ProjectWrite => "project_write",
+            Self::ProjectDelete => "project_delete",
+            Self::ProjectMemoryList => "project_memory_list",
+            Self::ProjectMemoryRead => "project_memory_read",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ProjectsInputMethod {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsInputMethod {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "project_info" => Self::ProjectInfo,
+            "project_read" => Self::ProjectRead,
+            "project_search" => Self::ProjectSearch,
+            "project_write" => Self::ProjectWrite,
+            "project_delete" => Self::ProjectDelete,
+            "project_memory_list" => Self::ProjectMemoryList,
+            "project_memory_read" => Self::ProjectMemoryRead,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsInput {
+    pub method: ProjectsInputMethod,
+    /// project_read/project_write/project_delete: doc path. project_write: an existing path is replaced in place; a new bare filename (no "/") is namespaced to "claude/\<name\>". project_memory_read: memory file path as listed by project_memory_list.
+    pub path: Option<String>,
+    /// project_write: inline doc text. Mutually exclusive with local_path. Use local_path for anything you have on disk.
+    pub content: Option<String>,
+    /// project_write: a file inside the working directory to upload. The tool reads, encodes, and uploads directly - contents never enter your context. Mutually exclusive with content.
+    pub local_path: Option<String>,
+    /// project_write: true marks this doc as the file the user needs to see - the deliverable they asked for or must act on. Defaults to false; leave it unset for routine saves, notes, and bulk writes.
+    pub present_to_user: Option<bool>,
+    /// project_search: knowledge-base query
+    pub query: Option<String>,
+    /// project_search: number of hits (default 5)
+    pub n: Option<serde_json::Number>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsInput")]
+struct ProjectsInputWire {
+    pub method: ProjectsInputMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub present_to_user: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n: Option<serde_json::Number>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["method", "path", "content", "local_path", "present_to_user", "query", "n"];
+}
+
+impl Serialize for ProjectsInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EnterPlanModeInput {
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
@@ -534,8 +2439,4266 @@ impl<'de> Deserialize<'de> for EnterPlanModeInput {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskCreateInput {
+    /// A brief title for the task
+    pub subject: String,
+    /// What needs to be done
+    pub description: String,
+    /// Present continuous form shown in spinner when in_progress (e.g., "Running tests")
+    pub active_form: Option<String>,
+    /// Arbitrary metadata to attach to the task
+    pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskCreateInput")]
+struct TaskCreateInputWire {
+    pub subject: String,
+    pub description: String,
+    #[serde(rename = "activeForm", default, skip_serializing_if = "Option::is_none")]
+    pub active_form: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskCreateInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["subject", "description", "activeForm", "metadata"];
+}
+
+impl Serialize for TaskCreateInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskCreateInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskCreateInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskCreateInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskGetInput {
+    /// The ID of the task to retrieve
+    pub task_id: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskGetInput")]
+struct TaskGetInputWire {
+    #[serde(rename = "taskId")]
+    pub task_id: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskGetInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["taskId"];
+}
+
+impl Serialize for TaskGetInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskGetInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskGetInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskGetInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum GrepInputOutputMode {
+pub enum TaskUpdateInputStatus {
+    /// `pending`
+    Pending,
+    /// `in_progress`
+    InProgress,
+    /// `completed`
+    Completed,
+    /// `deleted`
+    Deleted,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl TaskUpdateInputStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Deleted => "deleted",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for TaskUpdateInputStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskUpdateInputStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "pending" => Self::Pending,
+            "in_progress" => Self::InProgress,
+            "completed" => Self::Completed,
+            "deleted" => Self::Deleted,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskUpdateInput {
+    /// The ID of the task to update
+    pub task_id: String,
+    /// New subject for the task
+    pub subject: Option<String>,
+    /// New description for the task
+    pub description: Option<String>,
+    /// Present continuous form shown in spinner when in_progress (e.g., "Running tests")
+    pub active_form: Option<String>,
+    /// New status for the task
+    pub status: Option<TaskUpdateInputStatus>,
+    /// Task IDs that this task blocks
+    pub add_blocks: Option<Vec<String>>,
+    /// Task IDs that block this task
+    pub add_blocked_by: Option<Vec<String>>,
+    /// New owner for the task
+    pub owner: Option<String>,
+    /// Metadata keys to merge into the task. Set a key to null to delete it.
+    pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskUpdateInput")]
+struct TaskUpdateInputWire {
+    #[serde(rename = "taskId")]
+    pub task_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(rename = "activeForm", default, skip_serializing_if = "Option::is_none")]
+    pub active_form: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<TaskUpdateInputStatus>,
+    #[serde(rename = "addBlocks", default, skip_serializing_if = "Option::is_none")]
+    pub add_blocks: Option<Vec<String>>,
+    #[serde(rename = "addBlockedBy", default, skip_serializing_if = "Option::is_none")]
+    pub add_blocked_by: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskUpdateInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["taskId", "subject", "description", "activeForm", "status", "addBlocks", "addBlockedBy", "owner", "metadata"];
+}
+
+impl Serialize for TaskUpdateInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskUpdateInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskUpdateInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskUpdateInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskListInput {
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskListInput")]
+struct TaskListInputWire {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskListInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &[];
+}
+
+impl Serialize for TaskListInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskListInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskListInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskListInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkflowInput {
+    /// Self-contained workflow script. Must begin with `export const meta = { name, description, phases }` (pure literal, no computed values) followed by the script body using agent()/parallel()/pipeline()/phase().
+    pub script: Option<String>,
+    /// Name of a predefined workflow (built-in or from .claude/workflows/). Resolves to a self-contained script.
+    pub name: Option<String>,
+    /// Ignored - set the workflow description in the script's `meta` block.
+    pub description: Option<String>,
+    /// Ignored - set the workflow title in the script's `meta` block.
+    pub title: Option<String>,
+    /// Optional input value exposed to the script as the global `args`, verbatim. Pass arrays/objects as actual JSON values, NOT as a JSON-encoded string - a stringified list breaks `args.filter`/`args.map` in the script. Use for parameterized named workflows (e.g. a research question).
+    pub args: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Path to a workflow script file on disk. Every Workflow invocation persists its script under the session directory and returns the path in the tool result. To iterate, edit that file with Write/Edit and re-invoke Workflow with the same `scriptPath` instead of re-sending the full script. Takes precedence over `script` and `name`.
+    pub script_path: Option<String>,
+    /// Run ID of a prior Workflow invocation to resume from. Completed agent() calls with unchanged (prompt, opts) return their cached results instantly; only edited or new calls re-run. Same-session only. Stop the prior run first (TaskStop) before resuming.
+    pub resume_from_run_id: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "WorkflowInput")]
+struct WorkflowInputWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(rename = "scriptPath", default, skip_serializing_if = "Option::is_none")]
+    pub script_path: Option<String>,
+    #[serde(rename = "resumeFromRunId", default, skip_serializing_if = "Option::is_none")]
+    pub resume_from_run_id: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl WorkflowInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["script", "name", "description", "title", "args", "scriptPath", "resumeFromRunId"];
+}
+
+impl Serialize for WorkflowInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(WorkflowInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkflowInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = WorkflowInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CronCreateInput {
+    /// Standard 5-field cron expression in local time: "M H DoM Mon DoW" (e.g. "* /5 * * * *" = every 5 minutes, "30 14 28 2 *" = Feb 28 at 2:30pm local once).
+    pub cron: String,
+    /// The prompt to enqueue at each fire time.
+    pub prompt: String,
+    /// true (default) = fire on every cron match until deleted or auto-expired after 7 days. false = fire once at the next match, then auto-delete. Use false for "remind me at X" one-shot requests with pinned minute/hour/dom/month.
+    pub recurring: Option<bool>,
+    /// true = persist to .claude/scheduled_tasks.json and survive restarts. false (default) = in-memory only, dies when this Claude session ends. Use true only when the user asks the task to survive across sessions.
+    pub durable: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "CronCreateInput")]
+struct CronCreateInputWire {
+    pub cron: String,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurring: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl CronCreateInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["cron", "prompt", "recurring", "durable"];
+}
+
+impl Serialize for CronCreateInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(CronCreateInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CronCreateInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = CronCreateInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CronDeleteInput {
+    /// Job ID returned by CronCreate.
+    pub id: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "CronDeleteInput")]
+struct CronDeleteInputWire {
+    pub id: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl CronDeleteInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["id"];
+}
+
+impl Serialize for CronDeleteInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(CronDeleteInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CronDeleteInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = CronDeleteInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CronListInput {
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "CronListInput")]
+struct CronListInputWire {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl CronListInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &[];
+}
+
+impl Serialize for CronListInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(CronListInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CronListInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = CronListInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScheduleWakeupInput {
+    /// Seconds from now to wake up. Clamped to \[60, 3600\] by the runtime. Required unless `stop` is true.
+    pub delay_seconds: Option<serde_json::Number>,
+    /// One short sentence explaining the chosen delay. Goes to telemetry and is shown to the user. Be specific. Required unless `stop` is true.
+    pub reason: Option<String>,
+    /// The /loop input to fire on wake-up. Pass the same /loop input verbatim each turn so the next firing re-enters the skill and continues the loop. For autonomous /loop (no user prompt), pass the literal sentinel `\<\<autonomous-loop-dynamic\>\>` instead (the dynamic-pacing variant, not the CronCreate-mode `\<\<autonomous-loop\>\>`). Required unless `stop` is true.
+    pub prompt: Option<String>,
+    /// Set to true to end the dynamic loop immediately instead of scheduling another wakeup. When true, all other fields are ignored and no further wakeups fire.
+    pub stop: Option<bool>,
+    /// true = nothing changed (you checked and there is nothing to report). false = something happened worth keeping (edited a file, posted a message, advanced state, surfaced a finding). Consecutive noop:true ticks are collapsed in the user's terminal view and tracked as a streak. Required unless `stop` is true.
+    pub noop: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ScheduleWakeupInput")]
+struct ScheduleWakeupInputWire {
+    #[serde(rename = "delaySeconds", default, skip_serializing_if = "Option::is_none")]
+    pub delay_seconds: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noop: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ScheduleWakeupInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["delaySeconds", "reason", "prompt", "stop", "noop"];
+}
+
+impl Serialize for ScheduleWakeupInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ScheduleWakeupInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ScheduleWakeupInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ScheduleWakeupInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum RemoteTriggerInputAction {
+    /// `list`
+    List,
+    /// `get`
+    Get,
+    /// `create`
+    Create,
+    /// `update`
+    Update,
+    /// `run`
+    Run,
+    /// `create_webhook_trigger`
+    CreateWebhookTrigger,
+    /// `list_runs`
+    ListRuns,
+    /// `get_run_log`
+    GetRunLog,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl RemoteTriggerInputAction {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::List => "list",
+            Self::Get => "get",
+            Self::Create => "create",
+            Self::Update => "update",
+            Self::Run => "run",
+            Self::CreateWebhookTrigger => "create_webhook_trigger",
+            Self::ListRuns => "list_runs",
+            Self::GetRunLog => "get_run_log",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for RemoteTriggerInputAction {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RemoteTriggerInputAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "list" => Self::List,
+            "get" => Self::Get,
+            "create" => Self::Create,
+            "update" => Self::Update,
+            "run" => Self::Run,
+            "create_webhook_trigger" => Self::CreateWebhookTrigger,
+            "list_runs" => Self::ListRuns,
+            "get_run_log" => Self::GetRunLog,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteTriggerInput {
+    pub action: RemoteTriggerInputAction,
+    /// Required for get, update, run, and list_runs
+    pub trigger_id: Option<String>,
+    /// Required for get_run_log: a run session id (cse_… or session_…, from list_runs)
+    pub session_id: Option<String>,
+    /// The next_cursor from the previous page of the same listing (list_runs with the same trigger_id, or get_run_log with the same session_id), passed back unchanged. Not an offset, a count or an event number.
+    pub cursor: Option<String>,
+    /// Required for create and update; optional for run
+    pub body: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "RemoteTriggerInput")]
+struct RemoteTriggerInputWire {
+    pub action: RemoteTriggerInputAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl RemoteTriggerInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["action", "trigger_id", "session_id", "cursor", "body"];
+}
+
+impl Serialize for RemoteTriggerInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(RemoteTriggerInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RemoteTriggerInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = RemoteTriggerInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShowOnboardingRolePickerInput {
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ShowOnboardingRolePickerInput")]
+struct ShowOnboardingRolePickerInputWire {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ShowOnboardingRolePickerInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &[];
+}
+
+impl Serialize for ShowOnboardingRolePickerInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ShowOnboardingRolePickerInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ShowOnboardingRolePickerInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ShowOnboardingRolePickerInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OfferChromeSetupInput {
+    /// A short phrase naming what the task needs the user's own browser for.
+    pub reason: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "OfferChromeSetupInput")]
+struct OfferChromeSetupInputWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl OfferChromeSetupInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["reason"];
+}
+
+impl Serialize for OfferChromeSetupInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(OfferChromeSetupInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for OfferChromeSetupInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = OfferChromeSetupInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadNotificationsInput {
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReadNotificationsInput")]
+struct ReadNotificationsInputWire {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReadNotificationsInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &[];
+}
+
+impl Serialize for ReadNotificationsInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReadNotificationsInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReadNotificationsInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReadNotificationsInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MonitorInputWs {
+    pub url: String,
+    pub protocols: Option<Vec<String>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "MonitorInputWs")]
+struct MonitorInputWsWire {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocols: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl MonitorInputWs {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "protocols"];
+}
+
+impl Serialize for MonitorInputWs {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(MonitorInputWsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for MonitorInputWs {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = MonitorInputWsWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MonitorInput {
+    /// Short human-readable description of what you are monitoring (shown in notifications).
+    pub description: String,
+    /// Kill the monitor after this deadline. Default 300000ms. Deadlines above 1800000ms are capped to 1800000ms. You are notified at expiry and can re-arm.
+    pub timeout_ms: serde_json::Number,
+    /// Shell command or script. Each stdout line is an event; exit ends the watch.
+    pub command: Option<String>,
+    /// WebSocket to open. Each text frame is an event; binary frames are reported as a placeholder line. Socket close ends the watch. Cannot be combined with command.
+    pub ws: Option<MonitorInputWs>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "MonitorInput")]
+struct MonitorInputWire {
+    pub description: String,
+    pub timeout_ms: serde_json::Number,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ws: Option<MonitorInputWs>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl MonitorInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["description", "timeout_ms", "command", "ws"];
+}
+
+impl Serialize for MonitorInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(MonitorInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for MonitorInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = MonitorInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ProposeSkillsInputProposalsItemKind {
+    /// `new`
+    New,
+    /// `improvement`
+    Improvement,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ProposeSkillsInputProposalsItemKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::New => "new",
+            Self::Improvement => "improvement",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ProposeSkillsInputProposalsItemKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ProposeSkillsInputProposalsItemKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "new" => Self::New,
+            "improvement" => Self::Improvement,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProposeSkillsInputProposalsItem {
+    /// kebab-case skill slug; must not contain "claude" or "anthropic"; at most 64 characters for a new skill
+    pub name: String,
+    pub kind: ProposeSkillsInputProposalsItemKind,
+    /// Name of the existing skill to update. Required when kind is 'improvement'; omit for 'new'.
+    pub target: Option<String>,
+    /// One short sentence saying when to use this skill: aim for under 200 characters, never more than 1024, and no angle brackets. Shown on the review card and saved as the skill's description, which is what decides when the skill is used. For an improvement, reuse the existing skill's description unless the change alters when the skill applies.
+    pub description: String,
+    /// memory file paths where this procedure was observed
+    pub evidence: Option<Vec<String>>,
+    /// The complete SKILL.md exactly as it should be saved: frontmatter plus the full body. When the user saves, the body below the frontmatter becomes the skill's entire instructions and the name and description come from the fields above; other frontmatter keys are not kept. For an improvement this replaces the existing skill's SKILL.md entirely, so read that skill's current SKILL.md first and include everything worth keeping, not only the changes.
+    pub skill_md: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProposeSkillsInputProposalsItem")]
+struct ProposeSkillsInputProposalsItemWire {
+    pub name: String,
+    pub kind: ProposeSkillsInputProposalsItemKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<Vec<String>>,
+    #[serde(rename = "skillMd")]
+    pub skill_md: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProposeSkillsInputProposalsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["name", "kind", "target", "description", "evidence", "skillMd"];
+}
+
+impl Serialize for ProposeSkillsInputProposalsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProposeSkillsInputProposalsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProposeSkillsInputProposalsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProposeSkillsInputProposalsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProposeSkillsInput {
+    pub proposals: Vec<ProposeSkillsInputProposalsItem>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProposeSkillsInput")]
+struct ProposeSkillsInputWire {
+    pub proposals: Vec<ProposeSkillsInputProposalsItem>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProposeSkillsInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["proposals"];
+}
+
+impl Serialize for ProposeSkillsInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProposeSkillsInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProposeSkillsInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProposeSkillsInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProposeGoalInput {
+    /// The completion condition to propose, written so a separate evaluator can verify it from the conversation (e.g. "all tests in test/auth pass (bun test exits 0)"). At most 500 characters - the user must be able to read the whole condition in the approval dialog.
+    pub condition: String,
+    /// Whether to ask the user for approval before the goal is set. Defaults to true - an approval dialog is shown. Set false ONLY when the user's own words in this conversation stated this outcome as what they want; the goal is then set directly, with a visible notice in the transcript, and the user can clear it with /goal clear.
+    pub ask_user: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProposeGoalInput")]
+struct ProposeGoalInputWire {
+    pub condition: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask_user: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProposeGoalInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["condition", "ask_user"];
+}
+
+impl Serialize for ProposeGoalInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProposeGoalInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProposeGoalInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProposeGoalInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ArtifactInputAction {
+    /// `publish`
+    Publish,
+    /// `list`
+    List,
+    /// `read`
+    Read,
+    /// `list_types`
+    ListTypes,
+    /// `watch`
+    Watch,
+    /// `unwatch`
+    Unwatch,
+    /// `status`
+    Status,
+    /// `upload_asset`
+    UploadAsset,
+    /// `list_assets`
+    ListAssets,
+    /// `read_asset`
+    ReadAsset,
+    /// `delete_asset`
+    DeleteAsset,
+    /// `pin`
+    Pin,
+    /// `unpin`
+    Unpin,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ArtifactInputAction {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Publish => "publish",
+            Self::List => "list",
+            Self::Read => "read",
+            Self::ListTypes => "list_types",
+            Self::Watch => "watch",
+            Self::Unwatch => "unwatch",
+            Self::Status => "status",
+            Self::UploadAsset => "upload_asset",
+            Self::ListAssets => "list_assets",
+            Self::ReadAsset => "read_asset",
+            Self::DeleteAsset => "delete_asset",
+            Self::Pin => "pin",
+            Self::Unpin => "unpin",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ArtifactInputAction {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactInputAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "publish" => Self::Publish,
+            "list" => Self::List,
+            "read" => Self::Read,
+            "list_types" => Self::ListTypes,
+            "watch" => Self::Watch,
+            "unwatch" => Self::Unwatch,
+            "status" => Self::Status,
+            "upload_asset" => Self::UploadAsset,
+            "list_assets" => Self::ListAssets,
+            "read_asset" => Self::ReadAsset,
+            "delete_asset" => Self::DeleteAsset,
+            "pin" => Self::Pin,
+            "unpin" => Self::Unpin,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ArtifactInputScope {
+    /// `mine`
+    Mine,
+    /// `shared`
+    Shared,
+    /// `all`
+    All,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ArtifactInputScope {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Mine => "mine",
+            Self::Shared => "shared",
+            Self::All => "all",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ArtifactInputScope {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactInputScope {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "mine" => Self::Mine,
+            "shared" => Self::Shared,
+            "all" => Self::All,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactInput {
+    /// Omit (or 'publish') to publish file_path. 'list' enumerates artifacts - the user's own by default, see `scope`; only `limit`, `scope` and `page_token` may accompany it. 'read' returns the content of the published artifact at `url` (raw HTML for the user's own; an isolated summary, steered by the optional `prompt`, for one someone else owns, though a page published in this session's own Slack channel can come back in full as untrusted content) - see **Calls**. 'watch', 'unwatch', and 'status' manage live-update subscriptions through which a session keeps track of new versions of an artifact published elsewhere, and those aren't available in this session: 'watch' only reports that - this session does not keep track of new versions - and 'status' lists this session's artifact watches (pass `url` to check one). 'upload_asset' adds one local media, PDF, font, or text file to an existing artifact - pass `url` and `file_path` (or `file_paths` for several in one call). 'list_assets' lists the files in an artifact's asset store (pass `url`; `after` continues a listing), 'read_asset' saves one of them to a local file named by its id (pass `url` and `asset_id`, optionally `out_dir`), and 'delete_asset' permanently removes one (pass `url` and `asset_id`). See **Artifact assets** above. 'pin' adds the artifact at `url` to the user's pinned list in their claude.ai sidebar and 'unpin' removes it (nothing else may accompany either) - private to the user, reversible, and no change to who can see the artifact.
+    pub action: Option<ArtifactInputAction>,
+    /// Path to the .html file to render. Required to publish (the default action). Use a short, distinctive basename - it is the last-resort title when the HTML has no \<title\> and no `title` parameter is given. For 'upload_asset', the local image, video, PDF, font, stylesheet (CSS), script (JS), or text (CSV, Markdown, JSON, plain text) file to upload.
+    pub file_path: Option<String>,
+    /// Deprecated; omit it. Use `icon`.
+    pub favicon: Option<String>,
+    /// One short generic word for the artifact's browser-tab icon, such as chart, calendar, recipe, code or map - a plain signifier, not a product or brand name. Include it on every page's first publish; omit when republishing to keep the current icon, and pass a new one only when the user asks.
+    pub icon: Option<String>,
+    /// list only: maximum artifacts to return (default 25).
+    pub limit: Option<serde_json::Number>,
+    /// list only: the `next_page_token` a listing of the same scope gave, to list the artifacts after it.
+    pub page_token: Option<String>,
+    /// list only: 'mine' (default) lists artifacts the user owns; 'shared' lists artifacts other people shared with the user; 'all' lists both. Rows are labeled (mine)/(shared) whenever scope is not 'mine'.
+    pub scope: Option<ArtifactInputScope>,
+    /// Title for the artifact - the name shown in the browser tab and gallery. A short, distinctive noun-phrase name - not a generic label, a summary, or a name with an appended explainer. Prefer a \<title\> tag at the top of the HTML itself; this parameter fills in only when the file lacks one in the first 8KB of the file, and never overrides the tag. HTML publishes only - Markdown pages keep their filename identity. Content always comes from file_path - there is no inline content parameter.
+    pub title: Option<String>,
+    /// One-sentence subtitle shown on the gallery card. Say what the page is or does.
+    pub description: Option<String>,
+    /// A short name for this publish, max 60 chars (e.g. "Draft to legal"). Optional - a few words, not a description.
+    pub label: Option<String>,
+    /// An existing artifact's claude.ai link (claude.ai/artifact/{id} or claude.ai/code/artifact/{uuid}; a chat, project or session link is not one) to update in place. Pass whenever the user wants to update an artifact this conversation did not publish - "update my artifact", "keep the same link", a pasted artifact URL - and find the URL with action: "list" or ask the user for the link if you don't have it; without this, the publish creates a separate artifact instead of updating the existing one. Omit for new artifacts and same-conversation redeploys. Must be an artifact the user owns or was given edit access to (a read of it says "writer"). Before publishing to an artifact this conversation has neither read nor published, read it (action: "read") and build on what comes back; a publish sent without that read is refused. A refusal that hands you the live version counts as that read: merge your edits into that version and publish that; never resend the refused content unchanged. For 'read' and the other url-addressed actions: the artifact to act on.
+    pub url: Option<String>,
+    /// read only: what to extract from an artifact shared with the user - its content reaches you as an isolated summary answering this. Ignored for artifacts the user owns and for a page published in this session's own Slack channel (raw content is returned); optional.
+    pub prompt: Option<String>,
+    /// Last-resort overwrite that DISCARDS the newer published version's page - another session's publish, or someone's save from a page that can publish new versions of itself. On a conflict the fix is to merge your changes onto the newer content (handed to you in the rejection, or re-read) and publish again - not force. Pass force:true only when the user has explicitly said to discard that specific version; never to get past a conflict on your own judgment. The tracked baseVersion is still sent; with force:true the server treats it as informational and overwrites, unless it refuses force over a version saved from inside the page. Omit (or false) so a concurrent write conflicts instead of being silently clobbered.
+    pub force: Option<bool>,
+    /// publish only: true also pins the published artifact to the user's claude.ai sidebar once it is published - pass it only when the user asked for that; a pin that fails never fails the publish (the result says so).
+    pub pin: Option<bool>,
+    /// read_asset: directory to save into - default: this artifact’s folder in your scratchpad directory, where saving needs no approval and which you can Read from. read_asset names the file by the asset id plus the extension for its type; saving to any directory other than the default is an ordinary file save the user may be asked to approve.
+    pub out_dir: Option<String>,
+    /// upload_asset: several local image, video, PDF, font, stylesheet or script files in place of `file_path`, up to 25 in one call, all into the artifact that `url` names; one approval covers the call, and the result lists each file's id and url, or why it was not uploaded. A CSV, Markdown, JSON or plain-text file, a symbolic or hard link, and a file outside the working directory each go in a call of their own with `file_path`.
+    pub file_paths: Option<Vec<String>>,
+    /// read_asset and delete_asset: the asset's id (32 hex characters), from a list_assets or upload_asset result.
+    pub asset_id: Option<String>,
+    /// list_assets only: the `next` value from a previous list_assets result, to continue that listing.
+    pub after: Option<String>,
+    /// Runtime capabilities this page declares, as {name: config}. The control plane is the authority on valid names and config shapes. An empty object clears any previously stored declaration; omit the field on a redeploy to carry the stored declaration forward unchanged. Before declaring any capability, load the `artifact-capabilities` skill for the current contract and per-capability guidance.
+    pub capabilities: Option<serde_json::Map<String, serde_json::Value>>,
+    /// The artifact's runtime version. Omit to keep its current version (the default); 'latest' to upgrade; a specific version to pin or roll back. Changing it changes how the published page behaves - pass only when the author explicitly intends the change, never as a side effect of editing.
+    pub contract: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactInput")]
+struct ArtifactInputWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<ArtifactInputAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favicon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ArtifactInputScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_paths: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["action", "file_path", "favicon", "icon", "limit", "page_token", "scope", "title", "description", "label", "url", "prompt", "force", "pin", "out_dir", "file_paths", "asset_id", "after", "capabilities", "contract"];
+}
+
+impl Serialize for ArtifactInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum PushNotificationInputStatus {
+    /// `proactive`
+    Proactive,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl PushNotificationInputStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Proactive => "proactive",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for PushNotificationInputStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for PushNotificationInputStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "proactive" => Self::Proactive,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PushNotificationInput {
+    /// The notification body. Keep it under 200 characters; mobile OSes truncate.
+    pub message: String,
+    pub status: Option<PushNotificationInputStatus>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "PushNotificationInput")]
+struct PushNotificationInputWire {
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<PushNotificationInputStatus>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl PushNotificationInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["message", "status"];
+}
+
+impl Serialize for PushNotificationInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(PushNotificationInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PushNotificationInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = PushNotificationInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnterWorktreeInput {
+    /// Optional name for a new worktree. Each "/"-separated segment may contain only letters, digits, dots, underscores, and dashes; max 64 chars total. A random name is generated if not provided. Mutually exclusive with `path`.
+    pub name: Option<String>,
+    /// Path to an existing worktree to switch into instead of creating a new one. Must appear in `git worktree list` for the current repo - or, on first entry from the launch directory, for a repo nested inside it (multi-repo workspace). Mutually exclusive with `name`.
+    pub path: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "EnterWorktreeInput")]
+struct EnterWorktreeInputWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl EnterWorktreeInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["name", "path"];
+}
+
+impl Serialize for EnterWorktreeInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(EnterWorktreeInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for EnterWorktreeInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = EnterWorktreeInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ExitWorktreeInputAction {
+    /// `keep`
+    Keep,
+    /// `remove`
+    Remove,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ExitWorktreeInputAction {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Keep => "keep",
+            Self::Remove => "remove",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ExitWorktreeInputAction {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ExitWorktreeInputAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "keep" => Self::Keep,
+            "remove" => Self::Remove,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExitWorktreeInput {
+    /// "keep" leaves the worktree and branch on disk; "remove" deletes both.
+    pub action: ExitWorktreeInputAction,
+    /// Required true when action is "remove" and the worktree has uncommitted files or unmerged commits. The tool will refuse and list them otherwise.
+    pub discard_changes: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ExitWorktreeInput")]
+struct ExitWorktreeInputWire {
+    pub action: ExitWorktreeInputAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discard_changes: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ExitWorktreeInput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["action", "discard_changes"];
+}
+
+impl Serialize for ExitWorktreeInput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ExitWorktreeInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ExitWorktreeInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ExitWorktreeInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ToolOutputSchemas {
+    AgentOutput(AgentOutput),
+    BashOutput(BashOutput),
+    ExitPlanModeOutput(ExitPlanModeOutput),
+    FileEditOutput(FileEditOutput),
+    FileReadOutput(FileReadOutput),
+    FileWriteOutput(FileWriteOutput),
+    GlobOutput(GlobOutput),
+    GrepOutput(GrepOutput),
+    TaskStopOutput(TaskStopOutput),
+    ListMcpResourcesOutput(ListMcpResourcesOutput),
+    RefreshMcpToolsOutput(RefreshMcpToolsOutput),
+    McpOutput(McpOutput),
+    NotebookEditOutput(NotebookEditOutput),
+    ReadMcpResourceDirOutput(ReadMcpResourceDirOutput),
+    ReadMcpResourceOutput(ReadMcpResourceOutput),
+    ReportFindingsOutput(ReportFindingsOutput),
+    TodoWriteOutput(TodoWriteOutput),
+    WebFetchOutput(WebFetchOutput),
+    WebSearchOutput(WebSearchOutput),
+    AskUserQuestionOutput(AskUserQuestionOutput),
+    SendFeedbackOutput(SendFeedbackOutput),
+    EnterWorktreeOutput(EnterWorktreeOutput),
+    ExitWorktreeOutput(ExitWorktreeOutput),
+    TaskCreateOutput(TaskCreateOutput),
+    TaskGetOutput(TaskGetOutput),
+    TaskUpdateOutput(TaskUpdateOutput),
+    TaskListOutput(TaskListOutput),
+    ArtifactOutput(ArtifactOutput),
+    RemoteTriggerOutput(RemoteTriggerOutput),
+    ShowOnboardingRolePickerOutput(ShowOnboardingRolePickerOutput),
+    OfferChromeSetupOutput(OfferChromeSetupOutput),
+    ReadNotificationsOutput(ReadNotificationsOutput),
+    ScheduleWakeupOutput(ScheduleWakeupOutput),
+    MonitorOutput(MonitorOutput),
+    ProposeSkillsOutput(ProposeSkillsOutput),
+    ProposeGoalOutput(ProposeGoalOutput),
+    EnterPlanModeOutput(EnterPlanModeOutput),
+    WorkflowOutput(WorkflowOutput),
+    CronCreateOutput(CronCreateOutput),
+    CronDeleteOutput(CronDeleteOutput),
+    CronListOutput(CronListOutput),
+    PushNotificationOutput(PushNotificationOutput),
+    ClaudeDesignOutput(ClaudeDesignOutput),
+    ProjectsOutput(ProjectsOutput),
+    /// A value matching none of the pinned upstream shapes exactly; it round-trips unchanged.
+    Unknown(serde_json::Value),
+}
+
+impl Serialize for ToolOutputSchemas {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::AgentOutput(inner) => inner.serialize(serializer),
+            Self::BashOutput(inner) => inner.serialize(serializer),
+            Self::ExitPlanModeOutput(inner) => inner.serialize(serializer),
+            Self::FileEditOutput(inner) => inner.serialize(serializer),
+            Self::FileReadOutput(inner) => inner.serialize(serializer),
+            Self::FileWriteOutput(inner) => inner.serialize(serializer),
+            Self::GlobOutput(inner) => inner.serialize(serializer),
+            Self::GrepOutput(inner) => inner.serialize(serializer),
+            Self::TaskStopOutput(inner) => inner.serialize(serializer),
+            Self::ListMcpResourcesOutput(inner) => inner.serialize(serializer),
+            Self::RefreshMcpToolsOutput(inner) => inner.serialize(serializer),
+            Self::McpOutput(inner) => inner.serialize(serializer),
+            Self::NotebookEditOutput(inner) => inner.serialize(serializer),
+            Self::ReadMcpResourceDirOutput(inner) => inner.serialize(serializer),
+            Self::ReadMcpResourceOutput(inner) => inner.serialize(serializer),
+            Self::ReportFindingsOutput(inner) => inner.serialize(serializer),
+            Self::TodoWriteOutput(inner) => inner.serialize(serializer),
+            Self::WebFetchOutput(inner) => inner.serialize(serializer),
+            Self::WebSearchOutput(inner) => inner.serialize(serializer),
+            Self::AskUserQuestionOutput(inner) => inner.serialize(serializer),
+            Self::SendFeedbackOutput(inner) => inner.serialize(serializer),
+            Self::EnterWorktreeOutput(inner) => inner.serialize(serializer),
+            Self::ExitWorktreeOutput(inner) => inner.serialize(serializer),
+            Self::TaskCreateOutput(inner) => inner.serialize(serializer),
+            Self::TaskGetOutput(inner) => inner.serialize(serializer),
+            Self::TaskUpdateOutput(inner) => inner.serialize(serializer),
+            Self::TaskListOutput(inner) => inner.serialize(serializer),
+            Self::ArtifactOutput(inner) => inner.serialize(serializer),
+            Self::RemoteTriggerOutput(inner) => inner.serialize(serializer),
+            Self::ShowOnboardingRolePickerOutput(inner) => inner.serialize(serializer),
+            Self::OfferChromeSetupOutput(inner) => inner.serialize(serializer),
+            Self::ReadNotificationsOutput(inner) => inner.serialize(serializer),
+            Self::ScheduleWakeupOutput(inner) => inner.serialize(serializer),
+            Self::MonitorOutput(inner) => inner.serialize(serializer),
+            Self::ProposeSkillsOutput(inner) => inner.serialize(serializer),
+            Self::ProposeGoalOutput(inner) => inner.serialize(serializer),
+            Self::EnterPlanModeOutput(inner) => inner.serialize(serializer),
+            Self::WorkflowOutput(inner) => inner.serialize(serializer),
+            Self::CronCreateOutput(inner) => inner.serialize(serializer),
+            Self::CronDeleteOutput(inner) => inner.serialize(serializer),
+            Self::CronListOutput(inner) => inner.serialize(serializer),
+            Self::PushNotificationOutput(inner) => inner.serialize(serializer),
+            Self::ClaudeDesignOutput(inner) => inner.serialize(serializer),
+            Self::ProjectsOutput(inner) => inner.serialize(serializer),
+            Self::Unknown(inner) => inner.serialize(serializer),
+        }
+    }
+}
+
+impl ToolOutputSchemas {
+    /// Decodes `value` into the declared member that reproduces it exactly with the fewest
+    /// undeclared keys, earliest declared on ties, or `None` when no member matches.
+    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
+        let mut best: Option<(usize, Self)> = None;
+        super::support::keep_best(&mut best, AgentOutput::best_match(value).map(|(score, inner)| (score, Self::AgentOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<BashOutput>(value).map(|inner| (super::support::unknown_keys(value, BashOutput::KNOWN_KEYS), Self::BashOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ExitPlanModeOutput>(value).map(|inner| (super::support::unknown_keys(value, ExitPlanModeOutput::KNOWN_KEYS), Self::ExitPlanModeOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileEditOutput>(value).map(|inner| (super::support::unknown_keys(value, FileEditOutput::KNOWN_KEYS), Self::FileEditOutput(inner))));
+        super::support::keep_best(&mut best, FileReadOutput::best_match(value).map(|(score, inner)| (score, Self::FileReadOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileWriteOutput>(value).map(|inner| (super::support::unknown_keys(value, FileWriteOutput::KNOWN_KEYS), Self::FileWriteOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<GlobOutput>(value).map(|inner| (super::support::unknown_keys(value, GlobOutput::KNOWN_KEYS), Self::GlobOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<GrepOutput>(value).map(|inner| (super::support::unknown_keys(value, GrepOutput::KNOWN_KEYS), Self::GrepOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskStopOutput>(value).map(|inner| (super::support::unknown_keys(value, TaskStopOutput::KNOWN_KEYS), Self::TaskStopOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ListMcpResourcesOutput>(value).map(|inner| (0, Self::ListMcpResourcesOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<RefreshMcpToolsOutput>(value).map(|inner| (0, Self::RefreshMcpToolsOutput(inner))));
+        super::support::keep_best(&mut best, McpOutput::best_match(value).map(|(score, inner)| (score, Self::McpOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<NotebookEditOutput>(value).map(|inner| (super::support::unknown_keys(value, NotebookEditOutput::KNOWN_KEYS), Self::NotebookEditOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReadMcpResourceDirOutput>(value).map(|inner| (super::support::unknown_keys(value, ReadMcpResourceDirOutput::KNOWN_KEYS), Self::ReadMcpResourceDirOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReadMcpResourceOutput>(value).map(|inner| (super::support::unknown_keys(value, ReadMcpResourceOutput::KNOWN_KEYS), Self::ReadMcpResourceOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReportFindingsOutput>(value).map(|inner| (super::support::unknown_keys(value, ReportFindingsOutput::KNOWN_KEYS), Self::ReportFindingsOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TodoWriteOutput>(value).map(|inner| (super::support::unknown_keys(value, TodoWriteOutput::KNOWN_KEYS), Self::TodoWriteOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<WebFetchOutput>(value).map(|inner| (super::support::unknown_keys(value, WebFetchOutput::KNOWN_KEYS), Self::WebFetchOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<WebSearchOutput>(value).map(|inner| (super::support::unknown_keys(value, WebSearchOutput::KNOWN_KEYS), Self::WebSearchOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<AskUserQuestionOutput>(value).map(|inner| (super::support::unknown_keys(value, AskUserQuestionOutput::KNOWN_KEYS), Self::AskUserQuestionOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<SendFeedbackOutput>(value).map(|inner| (super::support::unknown_keys(value, SendFeedbackOutput::KNOWN_KEYS), Self::SendFeedbackOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<EnterWorktreeOutput>(value).map(|inner| (super::support::unknown_keys(value, EnterWorktreeOutput::KNOWN_KEYS), Self::EnterWorktreeOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ExitWorktreeOutput>(value).map(|inner| (super::support::unknown_keys(value, ExitWorktreeOutput::KNOWN_KEYS), Self::ExitWorktreeOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskCreateOutput>(value).map(|inner| (super::support::unknown_keys(value, TaskCreateOutput::KNOWN_KEYS), Self::TaskCreateOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskGetOutput>(value).map(|inner| (super::support::unknown_keys(value, TaskGetOutput::KNOWN_KEYS), Self::TaskGetOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskUpdateOutput>(value).map(|inner| (super::support::unknown_keys(value, TaskUpdateOutput::KNOWN_KEYS), Self::TaskUpdateOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<TaskListOutput>(value).map(|inner| (super::support::unknown_keys(value, TaskListOutput::KNOWN_KEYS), Self::TaskListOutput(inner))));
+        super::support::keep_best(&mut best, ArtifactOutput::best_match(value).map(|(score, inner)| (score, Self::ArtifactOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<RemoteTriggerOutput>(value).map(|inner| (super::support::unknown_keys(value, RemoteTriggerOutput::KNOWN_KEYS), Self::RemoteTriggerOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ShowOnboardingRolePickerOutput>(value).map(|inner| (super::support::unknown_keys(value, ShowOnboardingRolePickerOutput::KNOWN_KEYS), Self::ShowOnboardingRolePickerOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<OfferChromeSetupOutput>(value).map(|inner| (super::support::unknown_keys(value, OfferChromeSetupOutput::KNOWN_KEYS), Self::OfferChromeSetupOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ReadNotificationsOutput>(value).map(|inner| (super::support::unknown_keys(value, ReadNotificationsOutput::KNOWN_KEYS), Self::ReadNotificationsOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ScheduleWakeupOutput>(value).map(|inner| (super::support::unknown_keys(value, ScheduleWakeupOutput::KNOWN_KEYS), Self::ScheduleWakeupOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<MonitorOutput>(value).map(|inner| (super::support::unknown_keys(value, MonitorOutput::KNOWN_KEYS), Self::MonitorOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProposeSkillsOutput>(value).map(|inner| (super::support::unknown_keys(value, ProposeSkillsOutput::KNOWN_KEYS), Self::ProposeSkillsOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProposeGoalOutput>(value).map(|inner| (super::support::unknown_keys(value, ProposeGoalOutput::KNOWN_KEYS), Self::ProposeGoalOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<EnterPlanModeOutput>(value).map(|inner| (super::support::unknown_keys(value, EnterPlanModeOutput::KNOWN_KEYS), Self::EnterPlanModeOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<WorkflowOutput>(value).map(|inner| (super::support::unknown_keys(value, WorkflowOutput::KNOWN_KEYS), Self::WorkflowOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<CronCreateOutput>(value).map(|inner| (super::support::unknown_keys(value, CronCreateOutput::KNOWN_KEYS), Self::CronCreateOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<CronDeleteOutput>(value).map(|inner| (super::support::unknown_keys(value, CronDeleteOutput::KNOWN_KEYS), Self::CronDeleteOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<CronListOutput>(value).map(|inner| (super::support::unknown_keys(value, CronListOutput::KNOWN_KEYS), Self::CronListOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<PushNotificationOutput>(value).map(|inner| (super::support::unknown_keys(value, PushNotificationOutput::KNOWN_KEYS), Self::PushNotificationOutput(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ClaudeDesignOutput>(value).map(|inner| (super::support::unknown_keys(value, ClaudeDesignOutput::KNOWN_KEYS), Self::ClaudeDesignOutput(inner))));
+        super::support::keep_best(&mut best, ProjectsOutput::best_match(value).map(|(score, inner)| (score, Self::ProjectsOutput(inner))));
+        best
+    }
+}
+
+impl<'de> Deserialize<'de> for ToolOutputSchemas {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match Self::best_match(&value) {
+            Some((_, matched)) => matched,
+            None => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AgentOutputCompletedContentItemType {
+    /// `text`
+    Text,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl AgentOutputCompletedContentItemType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Text => "text",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for AgentOutputCompletedContentItemType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputCompletedContentItemType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "text" => Self::Text,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentOutputCompletedContentItem {
+    pub r#type: AgentOutputCompletedContentItemType,
+    pub text: String,
+    pub citations: Option<Option<Vec<serde_json::Value>>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AgentOutputCompletedContentItem")]
+struct AgentOutputCompletedContentItemWire {
+    pub r#type: AgentOutputCompletedContentItemType,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "super::support::double_option")]
+    pub citations: Option<Option<Vec<serde_json::Value>>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AgentOutputCompletedContentItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type", "text", "citations"];
+}
+
+impl Serialize for AgentOutputCompletedContentItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AgentOutputCompletedContentItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputCompletedContentItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AgentOutputCompletedContentItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentOutputCompletedUsageServerToolUse {
+    pub web_search_requests: serde_json::Number,
+    pub web_fetch_requests: serde_json::Number,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AgentOutputCompletedUsageServerToolUse")]
+struct AgentOutputCompletedUsageServerToolUseWire {
+    pub web_search_requests: serde_json::Number,
+    pub web_fetch_requests: serde_json::Number,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AgentOutputCompletedUsageServerToolUse {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["web_search_requests", "web_fetch_requests"];
+}
+
+impl Serialize for AgentOutputCompletedUsageServerToolUse {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AgentOutputCompletedUsageServerToolUseWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputCompletedUsageServerToolUse {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AgentOutputCompletedUsageServerToolUseWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentOutputCompletedUsageCacheCreation {
+    pub ephemeral_1h_input_tokens: serde_json::Number,
+    pub ephemeral_5m_input_tokens: serde_json::Number,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AgentOutputCompletedUsageCacheCreation")]
+struct AgentOutputCompletedUsageCacheCreationWire {
+    pub ephemeral_1h_input_tokens: serde_json::Number,
+    pub ephemeral_5m_input_tokens: serde_json::Number,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AgentOutputCompletedUsageCacheCreation {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["ephemeral_1h_input_tokens", "ephemeral_5m_input_tokens"];
+}
+
+impl Serialize for AgentOutputCompletedUsageCacheCreation {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AgentOutputCompletedUsageCacheCreationWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputCompletedUsageCacheCreation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AgentOutputCompletedUsageCacheCreationWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentOutputCompletedUsageOutputTokensDetails {
+    pub thinking_tokens: Option<Option<serde_json::Number>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AgentOutputCompletedUsageOutputTokensDetails")]
+struct AgentOutputCompletedUsageOutputTokensDetailsWire {
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "super::support::double_option")]
+    pub thinking_tokens: Option<Option<serde_json::Number>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AgentOutputCompletedUsageOutputTokensDetails {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["thinking_tokens"];
+}
+
+impl Serialize for AgentOutputCompletedUsageOutputTokensDetails {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AgentOutputCompletedUsageOutputTokensDetailsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputCompletedUsageOutputTokensDetails {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AgentOutputCompletedUsageOutputTokensDetailsWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentOutputCompletedUsage {
+    pub input_tokens: serde_json::Number,
+    pub output_tokens: serde_json::Number,
+    pub cache_creation_input_tokens: Option<serde_json::Number>,
+    pub cache_read_input_tokens: Option<serde_json::Number>,
+    pub server_tool_use: Option<AgentOutputCompletedUsageServerToolUse>,
+    pub service_tier: Option<String>,
+    pub cache_creation: Option<AgentOutputCompletedUsageCacheCreation>,
+    pub inference_geo: Option<Option<String>>,
+    pub speed: Option<Option<String>>,
+    pub iterations: Option<serde_json::Value>,
+    pub output_tokens_details: Option<Option<AgentOutputCompletedUsageOutputTokensDetails>>,
+    pub fallback_credit: Option<serde_json::Value>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AgentOutputCompletedUsage")]
+struct AgentOutputCompletedUsageWire {
+    pub input_tokens: serde_json::Number,
+    pub output_tokens: serde_json::Number,
+    #[serde(default)]
+    pub cache_creation_input_tokens: Option<serde_json::Number>,
+    #[serde(default)]
+    pub cache_read_input_tokens: Option<serde_json::Number>,
+    #[serde(default)]
+    pub server_tool_use: Option<AgentOutputCompletedUsageServerToolUse>,
+    #[serde(default)]
+    pub service_tier: Option<String>,
+    #[serde(default)]
+    pub cache_creation: Option<AgentOutputCompletedUsageCacheCreation>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "super::support::double_option")]
+    pub inference_geo: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "super::support::double_option")]
+    pub speed: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "super::support::optional_value")]
+    pub iterations: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "super::support::double_option")]
+    pub output_tokens_details: Option<Option<AgentOutputCompletedUsageOutputTokensDetails>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "super::support::optional_value")]
+    pub fallback_credit: Option<serde_json::Value>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AgentOutputCompletedUsage {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "server_tool_use", "service_tier", "cache_creation", "inference_geo", "speed", "iterations", "output_tokens_details", "fallback_credit"];
+}
+
+impl Serialize for AgentOutputCompletedUsage {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AgentOutputCompletedUsageWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputCompletedUsage {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AgentOutputCompletedUsageWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentOutputCompletedToolStats {
+    pub read_count: serde_json::Number,
+    pub search_count: serde_json::Number,
+    pub bash_count: serde_json::Number,
+    pub edit_file_count: serde_json::Number,
+    pub lines_added: serde_json::Number,
+    pub lines_removed: serde_json::Number,
+    pub other_tool_count: serde_json::Number,
+    pub frame_count: Option<serde_json::Number>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AgentOutputCompletedToolStats")]
+struct AgentOutputCompletedToolStatsWire {
+    #[serde(rename = "readCount")]
+    pub read_count: serde_json::Number,
+    #[serde(rename = "searchCount")]
+    pub search_count: serde_json::Number,
+    #[serde(rename = "bashCount")]
+    pub bash_count: serde_json::Number,
+    #[serde(rename = "editFileCount")]
+    pub edit_file_count: serde_json::Number,
+    #[serde(rename = "linesAdded")]
+    pub lines_added: serde_json::Number,
+    #[serde(rename = "linesRemoved")]
+    pub lines_removed: serde_json::Number,
+    #[serde(rename = "otherToolCount")]
+    pub other_tool_count: serde_json::Number,
+    #[serde(rename = "frameCount", default, skip_serializing_if = "Option::is_none")]
+    pub frame_count: Option<serde_json::Number>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AgentOutputCompletedToolStats {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["readCount", "searchCount", "bashCount", "editFileCount", "linesAdded", "linesRemoved", "otherToolCount", "frameCount"];
+}
+
+impl Serialize for AgentOutputCompletedToolStats {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AgentOutputCompletedToolStatsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputCompletedToolStats {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AgentOutputCompletedToolStatsWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AgentOutputCompletedStatus {
+    /// `completed`
+    Completed,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl AgentOutputCompletedStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Completed => "completed",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for AgentOutputCompletedStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputCompletedStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "completed" => Self::Completed,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentOutputCompleted {
+    pub agent_id: String,
+    pub agent_type: Option<String>,
+    pub content: Vec<AgentOutputCompletedContentItem>,
+    pub resolved_model: Option<String>,
+    pub models_used: Option<Vec<String>>,
+    pub total_tool_use_count: serde_json::Number,
+    pub total_duration_ms: serde_json::Number,
+    pub total_tokens: serde_json::Number,
+    pub usage: AgentOutputCompletedUsage,
+    pub tools_used: Option<Vec<String>>,
+    pub tool_stats: Option<AgentOutputCompletedToolStats>,
+    pub status: AgentOutputCompletedStatus,
+    pub prompt: String,
+    pub worktree_path: Option<String>,
+    pub worktree_branch: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AgentOutputCompleted")]
+struct AgentOutputCompletedWire {
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    #[serde(rename = "agentType", default, skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<String>,
+    pub content: Vec<AgentOutputCompletedContentItem>,
+    #[serde(rename = "resolvedModel", default, skip_serializing_if = "Option::is_none")]
+    pub resolved_model: Option<String>,
+    #[serde(rename = "modelsUsed", default, skip_serializing_if = "Option::is_none")]
+    pub models_used: Option<Vec<String>>,
+    #[serde(rename = "totalToolUseCount")]
+    pub total_tool_use_count: serde_json::Number,
+    #[serde(rename = "totalDurationMs")]
+    pub total_duration_ms: serde_json::Number,
+    #[serde(rename = "totalTokens")]
+    pub total_tokens: serde_json::Number,
+    pub usage: AgentOutputCompletedUsage,
+    #[serde(rename = "toolsUsed", default, skip_serializing_if = "Option::is_none")]
+    pub tools_used: Option<Vec<String>>,
+    #[serde(rename = "toolStats", default, skip_serializing_if = "Option::is_none")]
+    pub tool_stats: Option<AgentOutputCompletedToolStats>,
+    pub status: AgentOutputCompletedStatus,
+    pub prompt: String,
+    #[serde(rename = "worktreePath", default, skip_serializing_if = "Option::is_none")]
+    pub worktree_path: Option<String>,
+    #[serde(rename = "worktreeBranch", default, skip_serializing_if = "Option::is_none")]
+    pub worktree_branch: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AgentOutputCompleted {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["agentId", "agentType", "content", "resolvedModel", "modelsUsed", "totalToolUseCount", "totalDurationMs", "totalTokens", "usage", "toolsUsed", "toolStats", "status", "prompt", "worktreePath", "worktreeBranch"];
+}
+
+impl Serialize for AgentOutputCompleted {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AgentOutputCompletedWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputCompleted {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AgentOutputCompletedWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AgentOutputAsyncLaunchedStatus {
+    /// `async_launched`
+    AsyncLaunched,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl AgentOutputAsyncLaunchedStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::AsyncLaunched => "async_launched",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for AgentOutputAsyncLaunchedStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputAsyncLaunchedStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "async_launched" => Self::AsyncLaunched,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentOutputAsyncLaunched {
+    pub status: AgentOutputAsyncLaunchedStatus,
+    pub is_async: Option<bool>,
+    /// The ID of the async agent
+    pub agent_id: String,
+    /// The description of the task
+    pub description: String,
+    /// Model in use at the backgrounding transition (a pre-background swap is reflected here)
+    pub resolved_model: Option<String>,
+    /// Ordered distinct models used before backgrounding (length \> 1 means a mid-run swap)
+    pub models_used: Option<Vec<String>>,
+    /// The prompt for the agent
+    pub prompt: String,
+    /// Path to the output file for checking agent progress
+    pub output_file: String,
+    /// Whether the calling agent has Read/Bash tools to check progress
+    pub can_read_output_file: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AgentOutputAsyncLaunched")]
+struct AgentOutputAsyncLaunchedWire {
+    pub status: AgentOutputAsyncLaunchedStatus,
+    #[serde(rename = "isAsync", default, skip_serializing_if = "Option::is_none")]
+    pub is_async: Option<bool>,
+    #[serde(rename = "agentId")]
+    pub agent_id: String,
+    pub description: String,
+    #[serde(rename = "resolvedModel", default, skip_serializing_if = "Option::is_none")]
+    pub resolved_model: Option<String>,
+    #[serde(rename = "modelsUsed", default, skip_serializing_if = "Option::is_none")]
+    pub models_used: Option<Vec<String>>,
+    pub prompt: String,
+    #[serde(rename = "outputFile")]
+    pub output_file: String,
+    #[serde(rename = "canReadOutputFile", default, skip_serializing_if = "Option::is_none")]
+    pub can_read_output_file: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AgentOutputAsyncLaunched {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["status", "isAsync", "agentId", "description", "resolvedModel", "modelsUsed", "prompt", "outputFile", "canReadOutputFile"];
+}
+
+impl Serialize for AgentOutputAsyncLaunched {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AgentOutputAsyncLaunchedWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputAsyncLaunched {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AgentOutputAsyncLaunchedWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AgentOutputRemoteLaunchedStatus {
+    /// `remote_launched`
+    RemoteLaunched,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl AgentOutputRemoteLaunchedStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::RemoteLaunched => "remote_launched",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for AgentOutputRemoteLaunchedStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputRemoteLaunchedStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "remote_launched" => Self::RemoteLaunched,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentOutputRemoteLaunched {
+    pub status: AgentOutputRemoteLaunchedStatus,
+    /// The ID of the remote agent task
+    pub task_id: String,
+    /// The URL of the cloud session
+    pub session_url: String,
+    /// The description of the task
+    pub description: String,
+    /// The prompt for the agent
+    pub prompt: String,
+    /// Path to the output file for checking agent progress
+    pub output_file: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AgentOutputRemoteLaunched")]
+struct AgentOutputRemoteLaunchedWire {
+    pub status: AgentOutputRemoteLaunchedStatus,
+    #[serde(rename = "taskId")]
+    pub task_id: String,
+    #[serde(rename = "sessionUrl")]
+    pub session_url: String,
+    pub description: String,
+    pub prompt: String,
+    #[serde(rename = "outputFile")]
+    pub output_file: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AgentOutputRemoteLaunched {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["status", "taskId", "sessionUrl", "description", "prompt", "outputFile"];
+}
+
+impl Serialize for AgentOutputRemoteLaunched {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AgentOutputRemoteLaunchedWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutputRemoteLaunched {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AgentOutputRemoteLaunchedWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AgentOutput {
+    Completed(AgentOutputCompleted),
+    AsyncLaunched(AgentOutputAsyncLaunched),
+    RemoteLaunched(AgentOutputRemoteLaunched),
+    /// A value matching none of the pinned upstream shapes exactly; it round-trips unchanged.
+    Unknown(serde_json::Value),
+}
+
+impl Serialize for AgentOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Completed(inner) => inner.serialize(serializer),
+            Self::AsyncLaunched(inner) => inner.serialize(serializer),
+            Self::RemoteLaunched(inner) => inner.serialize(serializer),
+            Self::Unknown(inner) => inner.serialize(serializer),
+        }
+    }
+}
+
+impl AgentOutput {
+    /// Decodes `value` into the declared member that reproduces it exactly with the fewest
+    /// undeclared keys, earliest declared on ties, or `None` when no member matches.
+    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
+        let mut best: Option<(usize, Self)> = None;
+        super::support::keep_best(&mut best, super::support::exact::<AgentOutputCompleted>(value).map(|inner| (super::support::unknown_keys(value, AgentOutputCompleted::KNOWN_KEYS), Self::Completed(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<AgentOutputAsyncLaunched>(value).map(|inner| (super::support::unknown_keys(value, AgentOutputAsyncLaunched::KNOWN_KEYS), Self::AsyncLaunched(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<AgentOutputRemoteLaunched>(value).map(|inner| (super::support::unknown_keys(value, AgentOutputRemoteLaunched::KNOWN_KEYS), Self::RemoteLaunched(inner))));
+        best
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match Self::best_match(&value) {
+            Some((_, matched)) => matched,
+            None => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum BashOutputGitOperationCommitKind {
+    /// `committed`
+    Committed,
+    /// `amended`
+    Amended,
+    /// `cherry-picked`
+    CherryPicked,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl BashOutputGitOperationCommitKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Committed => "committed",
+            Self::Amended => "amended",
+            Self::CherryPicked => "cherry-picked",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for BashOutputGitOperationCommitKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for BashOutputGitOperationCommitKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "committed" => Self::Committed,
+            "amended" => Self::Amended,
+            "cherry-picked" => Self::CherryPicked,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BashOutputGitOperationCommit {
+    pub sha: String,
+    pub kind: BashOutputGitOperationCommitKind,
+    pub branch: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "BashOutputGitOperationCommit")]
+struct BashOutputGitOperationCommitWire {
+    pub sha: String,
+    pub kind: BashOutputGitOperationCommitKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl BashOutputGitOperationCommit {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["sha", "kind", "branch"];
+}
+
+impl Serialize for BashOutputGitOperationCommit {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(BashOutputGitOperationCommitWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BashOutputGitOperationCommit {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = BashOutputGitOperationCommitWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BashOutputGitOperationPush {
+    pub branch: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "BashOutputGitOperationPush")]
+struct BashOutputGitOperationPushWire {
+    pub branch: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl BashOutputGitOperationPush {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["branch"];
+}
+
+impl Serialize for BashOutputGitOperationPush {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(BashOutputGitOperationPushWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BashOutputGitOperationPush {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = BashOutputGitOperationPushWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum BashOutputGitOperationBranchAction {
+    /// `merged`
+    Merged,
+    /// `rebased`
+    Rebased,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl BashOutputGitOperationBranchAction {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Merged => "merged",
+            Self::Rebased => "rebased",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for BashOutputGitOperationBranchAction {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for BashOutputGitOperationBranchAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "merged" => Self::Merged,
+            "rebased" => Self::Rebased,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BashOutputGitOperationBranch {
+    pub r#ref: String,
+    pub action: BashOutputGitOperationBranchAction,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "BashOutputGitOperationBranch")]
+struct BashOutputGitOperationBranchWire {
+    pub r#ref: String,
+    pub action: BashOutputGitOperationBranchAction,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl BashOutputGitOperationBranch {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["ref", "action"];
+}
+
+impl Serialize for BashOutputGitOperationBranch {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(BashOutputGitOperationBranchWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BashOutputGitOperationBranch {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = BashOutputGitOperationBranchWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum BashOutputGitOperationPrAction {
+    /// `created`
+    Created,
+    /// `edited`
+    Edited,
+    /// `merged`
+    Merged,
+    /// `commented`
+    Commented,
+    /// `closed`
+    Closed,
+    /// `reopened`
+    Reopened,
+    /// `ready`
+    Ready,
+    /// `draft`
+    Draft,
+    /// `auto-merge-enabled`
+    AutoMergeEnabled,
+    /// `auto-merge-disabled`
+    AutoMergeDisabled,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl BashOutputGitOperationPrAction {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Created => "created",
+            Self::Edited => "edited",
+            Self::Merged => "merged",
+            Self::Commented => "commented",
+            Self::Closed => "closed",
+            Self::Reopened => "reopened",
+            Self::Ready => "ready",
+            Self::Draft => "draft",
+            Self::AutoMergeEnabled => "auto-merge-enabled",
+            Self::AutoMergeDisabled => "auto-merge-disabled",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for BashOutputGitOperationPrAction {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for BashOutputGitOperationPrAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "created" => Self::Created,
+            "edited" => Self::Edited,
+            "merged" => Self::Merged,
+            "commented" => Self::Commented,
+            "closed" => Self::Closed,
+            "reopened" => Self::Reopened,
+            "ready" => Self::Ready,
+            "draft" => Self::Draft,
+            "auto-merge-enabled" => Self::AutoMergeEnabled,
+            "auto-merge-disabled" => Self::AutoMergeDisabled,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BashOutputGitOperationPr {
+    pub number: serde_json::Number,
+    pub url: Option<String>,
+    pub action: BashOutputGitOperationPrAction,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "BashOutputGitOperationPr")]
+struct BashOutputGitOperationPrWire {
+    pub number: serde_json::Number,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    pub action: BashOutputGitOperationPrAction,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl BashOutputGitOperationPr {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["number", "url", "action"];
+}
+
+impl Serialize for BashOutputGitOperationPr {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(BashOutputGitOperationPrWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BashOutputGitOperationPr {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = BashOutputGitOperationPrWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BashOutputGitOperation {
+    pub commit: Option<BashOutputGitOperationCommit>,
+    pub push: Option<BashOutputGitOperationPush>,
+    pub branch: Option<BashOutputGitOperationBranch>,
+    pub pr: Option<BashOutputGitOperationPr>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "BashOutputGitOperation")]
+struct BashOutputGitOperationWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<BashOutputGitOperationCommit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push: Option<BashOutputGitOperationPush>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<BashOutputGitOperationBranch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<BashOutputGitOperationPr>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl BashOutputGitOperation {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["commit", "push", "branch", "pr"];
+}
+
+impl Serialize for BashOutputGitOperation {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(BashOutputGitOperationWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BashOutputGitOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = BashOutputGitOperationWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BashOutput {
+    /// The standard output of the command
+    pub stdout: String,
+    /// The standard error output of the command
+    pub stderr: String,
+    /// Path to raw output file for large MCP tool outputs
+    pub raw_output_path: Option<String>,
+    /// Whether the command was interrupted
+    pub interrupted: bool,
+    /// Flag to indicate if stdout contains image data
+    pub is_image: Option<bool>,
+    /// ID of the background task if command is running in background
+    pub background_task_id: Option<String>,
+    /// True if the user manually backgrounded the command with Ctrl+B
+    pub backgrounded_by_user: Option<bool>,
+    /// Set when the command hit its timeout and was auto-backgrounded; the timeout value in ms
+    pub timed_out_after_ms: Option<serde_json::Number>,
+    /// Model-facing note that the session cwd was not changed by a backgrounded command containing a directory-change builtin (cd/pushd/popd/chdir)
+    pub background_cwd_hint: Option<String>,
+    /// True when this backgrounded command is terminated at its caller's final response, so no completion notification can follow (a synchronous subagent's command, or a headless session that takes no further input and is not waiting for background commands); absent when the command survives
+    pub background_ends_with_final_response: Option<bool>,
+    /// True when the subagent that owns this backgrounded command parks for its end and is woken by it
+    pub background_wakes_owner: Option<bool>,
+    /// Flag to indicate if sandbox mode was overridden
+    pub dangerously_disable_sandbox: Option<bool>,
+    /// Semantic interpretation for non-error exit codes with special meaning
+    pub return_code_interpretation: Option<String>,
+    /// Whether the command is expected to produce no output on success
+    pub no_output_expected: Option<bool>,
+    /// Structured content blocks
+    pub structured_content: Option<Vec<serde_json::Value>>,
+    /// Path to the persisted full output in tool-results dir (set when output is too large for inline)
+    pub persisted_output_path: Option<String>,
+    /// Total size of the output in bytes (set when output is too large for inline)
+    pub persisted_output_size: Option<serde_json::Number>,
+    /// Model-facing note listing readFileState entries whose mtime bumped during this command (set when WRITE_COMMAND_MARKERS matches)
+    pub stale_read_file_state_hint: Option<String>,
+    /// Model-facing system-reminder appended when a gh command reports a GitHub API rate-limit error
+    pub gh_rate_limit_hint: Option<String>,
+    /// Structured classification of git/gh operations detected in this command (commit/push/merge/rebase/PR). Client-facing - lets clients render git activity without re-parsing stdout; not surfaced to the model.
+    pub git_operation: Option<BashOutputGitOperation>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "BashOutput")]
+struct BashOutputWire {
+    pub stdout: String,
+    pub stderr: String,
+    #[serde(rename = "rawOutputPath", default, skip_serializing_if = "Option::is_none")]
+    pub raw_output_path: Option<String>,
+    pub interrupted: bool,
+    #[serde(rename = "isImage", default, skip_serializing_if = "Option::is_none")]
+    pub is_image: Option<bool>,
+    #[serde(rename = "backgroundTaskId", default, skip_serializing_if = "Option::is_none")]
+    pub background_task_id: Option<String>,
+    #[serde(rename = "backgroundedByUser", default, skip_serializing_if = "Option::is_none")]
+    pub backgrounded_by_user: Option<bool>,
+    #[serde(rename = "timedOutAfterMs", default, skip_serializing_if = "Option::is_none")]
+    pub timed_out_after_ms: Option<serde_json::Number>,
+    #[serde(rename = "backgroundCwdHint", default, skip_serializing_if = "Option::is_none")]
+    pub background_cwd_hint: Option<String>,
+    #[serde(rename = "backgroundEndsWithFinalResponse", default, skip_serializing_if = "Option::is_none")]
+    pub background_ends_with_final_response: Option<bool>,
+    #[serde(rename = "backgroundWakesOwner", default, skip_serializing_if = "Option::is_none")]
+    pub background_wakes_owner: Option<bool>,
+    #[serde(rename = "dangerouslyDisableSandbox", default, skip_serializing_if = "Option::is_none")]
+    pub dangerously_disable_sandbox: Option<bool>,
+    #[serde(rename = "returnCodeInterpretation", default, skip_serializing_if = "Option::is_none")]
+    pub return_code_interpretation: Option<String>,
+    #[serde(rename = "noOutputExpected", default, skip_serializing_if = "Option::is_none")]
+    pub no_output_expected: Option<bool>,
+    #[serde(rename = "structuredContent", default, skip_serializing_if = "Option::is_none")]
+    pub structured_content: Option<Vec<serde_json::Value>>,
+    #[serde(rename = "persistedOutputPath", default, skip_serializing_if = "Option::is_none")]
+    pub persisted_output_path: Option<String>,
+    #[serde(rename = "persistedOutputSize", default, skip_serializing_if = "Option::is_none")]
+    pub persisted_output_size: Option<serde_json::Number>,
+    #[serde(rename = "staleReadFileStateHint", default, skip_serializing_if = "Option::is_none")]
+    pub stale_read_file_state_hint: Option<String>,
+    #[serde(rename = "ghRateLimitHint", default, skip_serializing_if = "Option::is_none")]
+    pub gh_rate_limit_hint: Option<String>,
+    #[serde(rename = "gitOperation", default, skip_serializing_if = "Option::is_none")]
+    pub git_operation: Option<BashOutputGitOperation>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl BashOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["stdout", "stderr", "rawOutputPath", "interrupted", "isImage", "backgroundTaskId", "backgroundedByUser", "timedOutAfterMs", "backgroundCwdHint", "backgroundEndsWithFinalResponse", "backgroundWakesOwner", "dangerouslyDisableSandbox", "returnCodeInterpretation", "noOutputExpected", "structuredContent", "persistedOutputPath", "persistedOutputSize", "staleReadFileStateHint", "ghRateLimitHint", "gitOperation"];
+}
+
+impl Serialize for BashOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(BashOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BashOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = BashOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExitPlanModeOutput {
+    /// The plan that was presented to the user
+    pub plan: Option<String>,
+    pub is_agent: bool,
+    /// The file path where the plan was saved
+    pub file_path: Option<String>,
+    /// Whether the Agent tool is available in the current context
+    pub has_task_tool: Option<bool>,
+    /// True when the user edited the plan (CCR web UI or Ctrl+G); determines whether the plan is echoed back in tool_result
+    pub plan_was_edited: Option<bool>,
+    /// When true, the teammate has sent a plan approval request to the team leader
+    pub awaiting_leader_approval: Option<bool>,
+    /// Unique identifier for the plan approval request
+    pub request_id: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ExitPlanModeOutput")]
+struct ExitPlanModeOutputWire {
+    #[serde(default)]
+    pub plan: Option<String>,
+    #[serde(rename = "isAgent")]
+    pub is_agent: bool,
+    #[serde(rename = "filePath", default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    #[serde(rename = "hasTaskTool", default, skip_serializing_if = "Option::is_none")]
+    pub has_task_tool: Option<bool>,
+    #[serde(rename = "planWasEdited", default, skip_serializing_if = "Option::is_none")]
+    pub plan_was_edited: Option<bool>,
+    #[serde(rename = "awaitingLeaderApproval", default, skip_serializing_if = "Option::is_none")]
+    pub awaiting_leader_approval: Option<bool>,
+    #[serde(rename = "requestId", default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ExitPlanModeOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["plan", "isAgent", "filePath", "hasTaskTool", "planWasEdited", "awaitingLeaderApproval", "requestId"];
+}
+
+impl Serialize for ExitPlanModeOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ExitPlanModeOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ExitPlanModeOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ExitPlanModeOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileEditOutputStructuredPatchItem {
+    pub old_start: serde_json::Number,
+    pub old_lines: serde_json::Number,
+    pub new_start: serde_json::Number,
+    pub new_lines: serde_json::Number,
+    pub lines: Vec<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileEditOutputStructuredPatchItem")]
+struct FileEditOutputStructuredPatchItemWire {
+    #[serde(rename = "oldStart")]
+    pub old_start: serde_json::Number,
+    #[serde(rename = "oldLines")]
+    pub old_lines: serde_json::Number,
+    #[serde(rename = "newStart")]
+    pub new_start: serde_json::Number,
+    #[serde(rename = "newLines")]
+    pub new_lines: serde_json::Number,
+    pub lines: Vec<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileEditOutputStructuredPatchItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["oldStart", "oldLines", "newStart", "newLines", "lines"];
+}
+
+impl Serialize for FileEditOutputStructuredPatchItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileEditOutputStructuredPatchItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileEditOutputStructuredPatchItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileEditOutputStructuredPatchItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FileEditOutputGitDiffStatus {
+    /// `modified`
+    Modified,
+    /// `added`
+    Added,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl FileEditOutputGitDiffStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Modified => "modified",
+            Self::Added => "added",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for FileEditOutputGitDiffStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FileEditOutputGitDiffStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "modified" => Self::Modified,
+            "added" => Self::Added,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileEditOutputGitDiff {
+    pub filename: String,
+    pub status: FileEditOutputGitDiffStatus,
+    pub additions: serde_json::Number,
+    pub deletions: serde_json::Number,
+    pub changes: serde_json::Number,
+    pub patch: String,
+    /// GitHub owner/repo when available
+    pub repository: Option<Option<String>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileEditOutputGitDiff")]
+struct FileEditOutputGitDiffWire {
+    pub filename: String,
+    pub status: FileEditOutputGitDiffStatus,
+    pub additions: serde_json::Number,
+    pub deletions: serde_json::Number,
+    pub changes: serde_json::Number,
+    pub patch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "super::support::double_option")]
+    pub repository: Option<Option<String>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileEditOutputGitDiff {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["filename", "status", "additions", "deletions", "changes", "patch", "repository"];
+}
+
+impl Serialize for FileEditOutputGitDiff {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileEditOutputGitDiffWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileEditOutputGitDiff {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileEditOutputGitDiffWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileEditOutput {
+    /// The file path that was edited
+    pub file_path: String,
+    /// The original string that was replaced
+    pub old_string: String,
+    /// The new string that replaced it
+    pub new_string: String,
+    /// The original file contents before editing
+    pub original_file: Option<String>,
+    /// Diff patch showing the changes
+    pub structured_patch: Vec<FileEditOutputStructuredPatchItem>,
+    /// Whether the user modified the proposed changes
+    pub user_modified: bool,
+    /// Whether all occurrences were replaced
+    pub replace_all: bool,
+    pub git_diff: Option<FileEditOutputGitDiff>,
+    /// True when the edit was held for the machine owner to review instead of written; the file is unchanged
+    pub staged: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileEditOutput")]
+struct FileEditOutputWire {
+    #[serde(rename = "filePath")]
+    pub file_path: String,
+    #[serde(rename = "oldString")]
+    pub old_string: String,
+    #[serde(rename = "newString")]
+    pub new_string: String,
+    #[serde(rename = "originalFile", default)]
+    pub original_file: Option<String>,
+    #[serde(rename = "structuredPatch")]
+    pub structured_patch: Vec<FileEditOutputStructuredPatchItem>,
+    #[serde(rename = "userModified")]
+    pub user_modified: bool,
+    #[serde(rename = "replaceAll")]
+    pub replace_all: bool,
+    #[serde(rename = "gitDiff", default, skip_serializing_if = "Option::is_none")]
+    pub git_diff: Option<FileEditOutputGitDiff>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staged: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileEditOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["filePath", "oldString", "newString", "originalFile", "structuredPatch", "userModified", "replaceAll", "gitDiff", "staged"];
+}
+
+impl Serialize for FileEditOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileEditOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileEditOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileEditOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FileReadOutputTextType {
+    /// `text`
+    Text,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl FileReadOutputTextType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Text => "text",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for FileReadOutputTextType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputTextType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "text" => Self::Text,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputTextFile {
+    /// The path to the file that was read
+    pub file_path: String,
+    /// The content of the file
+    pub content: String,
+    /// Number of lines in the returned content
+    pub num_lines: serde_json::Number,
+    /// The starting line number
+    pub start_line: serde_json::Number,
+    /// Total number of lines in the file
+    pub total_lines: serde_json::Number,
+    /// True when a whole-file read was auto-paginated because it exceeded the token cap (the content is a partial first page). A programmatic signal for internal consumers; survives output reconstruction (unlike the render-time banner).
+    pub truncated_by_token_cap: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputTextFile")]
+struct FileReadOutputTextFileWire {
+    #[serde(rename = "filePath")]
+    pub file_path: String,
+    pub content: String,
+    #[serde(rename = "numLines")]
+    pub num_lines: serde_json::Number,
+    #[serde(rename = "startLine")]
+    pub start_line: serde_json::Number,
+    #[serde(rename = "totalLines")]
+    pub total_lines: serde_json::Number,
+    #[serde(rename = "truncatedByTokenCap", default, skip_serializing_if = "Option::is_none")]
+    pub truncated_by_token_cap: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputTextFile {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["filePath", "content", "numLines", "startLine", "totalLines", "truncatedByTokenCap"];
+}
+
+impl Serialize for FileReadOutputTextFile {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputTextFileWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputTextFile {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputTextFileWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputTextArtifactRead {
+    pub slug: String,
+    pub ver: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputTextArtifactRead")]
+struct FileReadOutputTextArtifactReadWire {
+    pub slug: String,
+    pub ver: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputTextArtifactRead {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["slug", "ver"];
+}
+
+impl Serialize for FileReadOutputTextArtifactRead {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputTextArtifactReadWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputTextArtifactRead {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputTextArtifactReadWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputText {
+    pub r#type: FileReadOutputTextType,
+    pub file: FileReadOutputTextFile,
+    /// Set when this Read completed a saved Artifact source file: the Artifact and the version of it that now counts as viewed.
+    pub artifact_read: Option<FileReadOutputTextArtifactRead>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputText")]
+struct FileReadOutputTextWire {
+    pub r#type: FileReadOutputTextType,
+    pub file: FileReadOutputTextFile,
+    #[serde(rename = "artifactRead", default, skip_serializing_if = "Option::is_none")]
+    pub artifact_read: Option<FileReadOutputTextArtifactRead>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputText {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type", "file", "artifactRead"];
+}
+
+impl Serialize for FileReadOutputText {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputTextWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputText {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputTextWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FileReadOutputImageType {
+    /// `image`
+    Image,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl FileReadOutputImageType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Image => "image",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for FileReadOutputImageType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputImageType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "image" => Self::Image,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FileReadOutputImageFileType {
+    /// `image/jpeg`
+    ImageJpeg,
+    /// `image/png`
+    ImagePng,
+    /// `image/gif`
+    ImageGif,
+    /// `image/webp`
+    ImageWebp,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl FileReadOutputImageFileType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ImageJpeg => "image/jpeg",
+            Self::ImagePng => "image/png",
+            Self::ImageGif => "image/gif",
+            Self::ImageWebp => "image/webp",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for FileReadOutputImageFileType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputImageFileType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "image/jpeg" => Self::ImageJpeg,
+            "image/png" => Self::ImagePng,
+            "image/gif" => Self::ImageGif,
+            "image/webp" => Self::ImageWebp,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputImageFileDimensions {
+    /// Original image width in pixels
+    pub original_width: Option<serde_json::Number>,
+    /// Original image height in pixels
+    pub original_height: Option<serde_json::Number>,
+    /// Displayed image width in pixels (after resizing)
+    pub display_width: Option<serde_json::Number>,
+    /// Displayed image height in pixels (after resizing)
+    pub display_height: Option<serde_json::Number>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputImageFileDimensions")]
+struct FileReadOutputImageFileDimensionsWire {
+    #[serde(rename = "originalWidth", default, skip_serializing_if = "Option::is_none")]
+    pub original_width: Option<serde_json::Number>,
+    #[serde(rename = "originalHeight", default, skip_serializing_if = "Option::is_none")]
+    pub original_height: Option<serde_json::Number>,
+    #[serde(rename = "displayWidth", default, skip_serializing_if = "Option::is_none")]
+    pub display_width: Option<serde_json::Number>,
+    #[serde(rename = "displayHeight", default, skip_serializing_if = "Option::is_none")]
+    pub display_height: Option<serde_json::Number>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputImageFileDimensions {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["originalWidth", "originalHeight", "displayWidth", "displayHeight"];
+}
+
+impl Serialize for FileReadOutputImageFileDimensions {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputImageFileDimensionsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputImageFileDimensions {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputImageFileDimensionsWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputImageFile {
+    /// Base64-encoded image data
+    pub base64: String,
+    /// The MIME type of the image
+    pub r#type: FileReadOutputImageFileType,
+    /// Original file size in bytes
+    pub original_size: serde_json::Number,
+    /// Image dimension info for coordinate mapping
+    pub dimensions: Option<FileReadOutputImageFileDimensions>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputImageFile")]
+struct FileReadOutputImageFileWire {
+    pub base64: String,
+    pub r#type: FileReadOutputImageFileType,
+    #[serde(rename = "originalSize")]
+    pub original_size: serde_json::Number,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<FileReadOutputImageFileDimensions>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputImageFile {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["base64", "type", "originalSize", "dimensions"];
+}
+
+impl Serialize for FileReadOutputImageFile {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputImageFileWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputImageFile {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputImageFileWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputImage {
+    pub r#type: FileReadOutputImageType,
+    pub file: FileReadOutputImageFile,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputImage")]
+struct FileReadOutputImageWire {
+    pub r#type: FileReadOutputImageType,
+    pub file: FileReadOutputImageFile,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputImage {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type", "file"];
+}
+
+impl Serialize for FileReadOutputImage {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputImageWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputImage {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputImageWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FileReadOutputNotebookType {
+    /// `notebook`
+    Notebook,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl FileReadOutputNotebookType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Notebook => "notebook",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for FileReadOutputNotebookType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputNotebookType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "notebook" => Self::Notebook,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputNotebookFile {
+    /// The path to the notebook file
+    pub file_path: String,
+    /// Array of notebook cells
+    pub cells: Vec<serde_json::Value>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputNotebookFile")]
+struct FileReadOutputNotebookFileWire {
+    #[serde(rename = "filePath")]
+    pub file_path: String,
+    pub cells: Vec<serde_json::Value>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputNotebookFile {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["filePath", "cells"];
+}
+
+impl Serialize for FileReadOutputNotebookFile {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputNotebookFileWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputNotebookFile {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputNotebookFileWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputNotebook {
+    pub r#type: FileReadOutputNotebookType,
+    pub file: FileReadOutputNotebookFile,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputNotebook")]
+struct FileReadOutputNotebookWire {
+    pub r#type: FileReadOutputNotebookType,
+    pub file: FileReadOutputNotebookFile,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputNotebook {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type", "file"];
+}
+
+impl Serialize for FileReadOutputNotebook {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputNotebookWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputNotebook {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputNotebookWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FileReadOutputPdfType {
+    /// `pdf`
+    Pdf,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl FileReadOutputPdfType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pdf => "pdf",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for FileReadOutputPdfType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputPdfType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "pdf" => Self::Pdf,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputPdfFile {
+    /// The path to the PDF file
+    pub file_path: String,
+    /// Base64-encoded PDF data
+    pub base64: String,
+    /// Original file size in bytes
+    pub original_size: serde_json::Number,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputPdfFile")]
+struct FileReadOutputPdfFileWire {
+    #[serde(rename = "filePath")]
+    pub file_path: String,
+    pub base64: String,
+    #[serde(rename = "originalSize")]
+    pub original_size: serde_json::Number,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputPdfFile {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["filePath", "base64", "originalSize"];
+}
+
+impl Serialize for FileReadOutputPdfFile {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputPdfFileWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputPdfFile {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputPdfFileWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputPdf {
+    pub r#type: FileReadOutputPdfType,
+    pub file: FileReadOutputPdfFile,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputPdf")]
+struct FileReadOutputPdfWire {
+    pub r#type: FileReadOutputPdfType,
+    pub file: FileReadOutputPdfFile,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputPdf {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type", "file"];
+}
+
+impl Serialize for FileReadOutputPdf {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputPdfWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputPdf {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputPdfWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FileReadOutputPartsType {
+    /// `parts`
+    Parts,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl FileReadOutputPartsType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Parts => "parts",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for FileReadOutputPartsType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputPartsType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "parts" => Self::Parts,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputPartsFile {
+    /// The path to the PDF file
+    pub file_path: String,
+    /// Original file size in bytes
+    pub original_size: serde_json::Number,
+    /// Number of pages extracted
+    pub count: serde_json::Number,
+    /// Directory containing extracted page images
+    pub output_dir: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputPartsFile")]
+struct FileReadOutputPartsFileWire {
+    #[serde(rename = "filePath")]
+    pub file_path: String,
+    #[serde(rename = "originalSize")]
+    pub original_size: serde_json::Number,
+    pub count: serde_json::Number,
+    #[serde(rename = "outputDir")]
+    pub output_dir: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputPartsFile {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["filePath", "originalSize", "count", "outputDir"];
+}
+
+impl Serialize for FileReadOutputPartsFile {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputPartsFileWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputPartsFile {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputPartsFileWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FileReadOutputPartsPagesItemMediaType {
+    /// `image/jpeg`
+    ImageJpeg,
+    /// `image/png`
+    ImagePng,
+    /// `image/gif`
+    ImageGif,
+    /// `image/webp`
+    ImageWebp,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl FileReadOutputPartsPagesItemMediaType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ImageJpeg => "image/jpeg",
+            Self::ImagePng => "image/png",
+            Self::ImageGif => "image/gif",
+            Self::ImageWebp => "image/webp",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for FileReadOutputPartsPagesItemMediaType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputPartsPagesItemMediaType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "image/jpeg" => Self::ImageJpeg,
+            "image/png" => Self::ImagePng,
+            "image/gif" => Self::ImageGif,
+            "image/webp" => Self::ImageWebp,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputPartsPagesItem {
+    /// Base64-encoded page image; empty when the page could not be processed
+    pub base64: String,
+    /// The MIME type of the image
+    pub media_type: FileReadOutputPartsPagesItemMediaType,
+    /// Why the page could not be processed as an image; set only when base64 is empty
+    pub error: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputPartsPagesItem")]
+struct FileReadOutputPartsPagesItemWire {
+    pub base64: String,
+    #[serde(rename = "mediaType")]
+    pub media_type: FileReadOutputPartsPagesItemMediaType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputPartsPagesItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["base64", "mediaType", "error"];
+}
+
+impl Serialize for FileReadOutputPartsPagesItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputPartsPagesItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputPartsPagesItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputPartsPagesItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileReadOutputParts {
+    pub r#type: FileReadOutputPartsType,
+    pub file: FileReadOutputPartsFile,
+    /// Document page number of the first extracted page (1 when no range was requested); labels the page images in the model-facing tool_result
+    pub first_page: Option<serde_json::Number>,
+    /// Extracted page images, in page order. Present only transiently in-process: the page image bytes are delivered solely as image blocks in the model-facing tool_result content and are not retained on the tool_use_result, so this key is absent on the emitted/persisted result
+    pub pages: Option<Vec<FileReadOutputPartsPagesItem>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileReadOutputParts")]
+struct FileReadOutputPartsWire {
+    pub r#type: FileReadOutputPartsType,
+    pub file: FileReadOutputPartsFile,
+    #[serde(rename = "firstPage", default, skip_serializing_if = "Option::is_none")]
+    pub first_page: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pages: Option<Vec<FileReadOutputPartsPagesItem>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileReadOutputParts {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type", "file", "firstPage", "pages"];
+}
+
+impl Serialize for FileReadOutputParts {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileReadOutputPartsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutputParts {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileReadOutputPartsWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileReadOutput {
+    Text(FileReadOutputText),
+    Image(FileReadOutputImage),
+    Notebook(FileReadOutputNotebook),
+    Pdf(FileReadOutputPdf),
+    Parts(FileReadOutputParts),
+    /// A value matching none of the pinned upstream shapes exactly; it round-trips unchanged.
+    Unknown(serde_json::Value),
+}
+
+impl Serialize for FileReadOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Text(inner) => inner.serialize(serializer),
+            Self::Image(inner) => inner.serialize(serializer),
+            Self::Notebook(inner) => inner.serialize(serializer),
+            Self::Pdf(inner) => inner.serialize(serializer),
+            Self::Parts(inner) => inner.serialize(serializer),
+            Self::Unknown(inner) => inner.serialize(serializer),
+        }
+    }
+}
+
+impl FileReadOutput {
+    /// Decodes `value` into the declared member that reproduces it exactly with the fewest
+    /// undeclared keys, earliest declared on ties, or `None` when no member matches.
+    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
+        let mut best: Option<(usize, Self)> = None;
+        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputText>(value).map(|inner| (super::support::unknown_keys(value, FileReadOutputText::KNOWN_KEYS), Self::Text(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputImage>(value).map(|inner| (super::support::unknown_keys(value, FileReadOutputImage::KNOWN_KEYS), Self::Image(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputNotebook>(value).map(|inner| (super::support::unknown_keys(value, FileReadOutputNotebook::KNOWN_KEYS), Self::Notebook(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputPdf>(value).map(|inner| (super::support::unknown_keys(value, FileReadOutputPdf::KNOWN_KEYS), Self::Pdf(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<FileReadOutputParts>(value).map(|inner| (super::support::unknown_keys(value, FileReadOutputParts::KNOWN_KEYS), Self::Parts(inner))));
+        best
+    }
+}
+
+impl<'de> Deserialize<'de> for FileReadOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match Self::best_match(&value) {
+            Some((_, matched)) => matched,
+            None => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FileWriteOutputType {
+    /// `create`
+    Create,
+    /// `update`
+    Update,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl FileWriteOutputType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Create => "create",
+            Self::Update => "update",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for FileWriteOutputType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FileWriteOutputType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "create" => Self::Create,
+            "update" => Self::Update,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileWriteOutputStructuredPatchItem {
+    pub old_start: serde_json::Number,
+    pub old_lines: serde_json::Number,
+    pub new_start: serde_json::Number,
+    pub new_lines: serde_json::Number,
+    pub lines: Vec<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileWriteOutputStructuredPatchItem")]
+struct FileWriteOutputStructuredPatchItemWire {
+    #[serde(rename = "oldStart")]
+    pub old_start: serde_json::Number,
+    #[serde(rename = "oldLines")]
+    pub old_lines: serde_json::Number,
+    #[serde(rename = "newStart")]
+    pub new_start: serde_json::Number,
+    #[serde(rename = "newLines")]
+    pub new_lines: serde_json::Number,
+    pub lines: Vec<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileWriteOutputStructuredPatchItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["oldStart", "oldLines", "newStart", "newLines", "lines"];
+}
+
+impl Serialize for FileWriteOutputStructuredPatchItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileWriteOutputStructuredPatchItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileWriteOutputStructuredPatchItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileWriteOutputStructuredPatchItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FileWriteOutputGitDiffStatus {
+    /// `modified`
+    Modified,
+    /// `added`
+    Added,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl FileWriteOutputGitDiffStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Modified => "modified",
+            Self::Added => "added",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for FileWriteOutputGitDiffStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FileWriteOutputGitDiffStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "modified" => Self::Modified,
+            "added" => Self::Added,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileWriteOutputGitDiff {
+    pub filename: String,
+    pub status: FileWriteOutputGitDiffStatus,
+    pub additions: serde_json::Number,
+    pub deletions: serde_json::Number,
+    pub changes: serde_json::Number,
+    pub patch: String,
+    /// GitHub owner/repo when available
+    pub repository: Option<Option<String>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileWriteOutputGitDiff")]
+struct FileWriteOutputGitDiffWire {
+    pub filename: String,
+    pub status: FileWriteOutputGitDiffStatus,
+    pub additions: serde_json::Number,
+    pub deletions: serde_json::Number,
+    pub changes: serde_json::Number,
+    pub patch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "super::support::double_option")]
+    pub repository: Option<Option<String>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileWriteOutputGitDiff {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["filename", "status", "additions", "deletions", "changes", "patch", "repository"];
+}
+
+impl Serialize for FileWriteOutputGitDiff {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileWriteOutputGitDiffWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileWriteOutputGitDiff {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileWriteOutputGitDiffWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileWriteOutput {
+    /// Whether a new file was created or an existing file was updated
+    pub r#type: FileWriteOutputType,
+    /// The path to the file that was written
+    pub file_path: String,
+    /// The content that was written to the file
+    pub content: String,
+    /// Diff patch showing the changes (empty when nothing changed, the diff timed out, or - with originalFile null on an update - the previous content was too large to diff)
+    pub structured_patch: Vec<FileWriteOutputStructuredPatchItem>,
+    /// The original file content before the write (null for new files, or when the previous content was too large to include)
+    pub original_file: Option<String>,
+    pub git_diff: Option<FileWriteOutputGitDiff>,
+    /// True when the user edited the proposed content in the permission dialog before accepting
+    pub user_modified: Option<bool>,
+    /// True when the write was held for the machine owner to review instead of written; the file is unchanged
+    pub staged: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "FileWriteOutput")]
+struct FileWriteOutputWire {
+    pub r#type: FileWriteOutputType,
+    #[serde(rename = "filePath")]
+    pub file_path: String,
+    pub content: String,
+    #[serde(rename = "structuredPatch")]
+    pub structured_patch: Vec<FileWriteOutputStructuredPatchItem>,
+    #[serde(rename = "originalFile", default)]
+    pub original_file: Option<String>,
+    #[serde(rename = "gitDiff", default, skip_serializing_if = "Option::is_none")]
+    pub git_diff: Option<FileWriteOutputGitDiff>,
+    #[serde(rename = "userModified", default, skip_serializing_if = "Option::is_none")]
+    pub user_modified: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staged: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl FileWriteOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type", "filePath", "content", "structuredPatch", "originalFile", "gitDiff", "userModified", "staged"];
+}
+
+impl Serialize for FileWriteOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(FileWriteOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileWriteOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = FileWriteOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlobOutput {
+    /// Time taken to execute the search in milliseconds
+    pub duration_ms: serde_json::Number,
+    /// Number of file paths returned (after any truncation)
+    pub num_files: serde_json::Number,
+    /// Array of file paths that match the pattern
+    pub filenames: Vec<String>,
+    /// Whether results were truncated (limited to 100 files)
+    pub truncated: bool,
+    /// Total number of matching files before truncation. A lower bound when countIsComplete is false. Absent on results persisted by CLI versions predating this field.
+    pub total_matches: Option<serde_json::Number>,
+    /// Whether totalMatches is the exact total (true) or a floor because the underlying search truncated its own output (false). Absent on results persisted by CLI versions predating this field.
+    pub count_is_complete: Option<bool>,
+    /// True when the time limit stopped the search after these paths were read, so more matches may exist. Absent otherwise.
+    pub timed_out: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "GlobOutput")]
+struct GlobOutputWire {
+    #[serde(rename = "durationMs")]
+    pub duration_ms: serde_json::Number,
+    #[serde(rename = "numFiles")]
+    pub num_files: serde_json::Number,
+    pub filenames: Vec<String>,
+    pub truncated: bool,
+    #[serde(rename = "totalMatches", default, skip_serializing_if = "Option::is_none")]
+    pub total_matches: Option<serde_json::Number>,
+    #[serde(rename = "countIsComplete", default, skip_serializing_if = "Option::is_none")]
+    pub count_is_complete: Option<bool>,
+    #[serde(rename = "timedOut", default, skip_serializing_if = "Option::is_none")]
+    pub timed_out: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl GlobOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["durationMs", "numFiles", "filenames", "truncated", "totalMatches", "countIsComplete", "timedOut"];
+}
+
+impl Serialize for GlobOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(GlobOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for GlobOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = GlobOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum GrepOutputMode {
     /// `content`
     Content,
     /// `files_with_matches`
@@ -546,7 +6709,7 @@ pub enum GrepInputOutputMode {
     Unknown(String),
 }
 
-impl GrepInputOutputMode {
+impl GrepOutputMode {
     pub fn as_str(&self) -> &str {
         match self {
             Self::Content => "content",
@@ -557,13 +6720,13 @@ impl GrepInputOutputMode {
     }
 }
 
-impl Serialize for GrepInputOutputMode {
+impl Serialize for GrepOutputMode {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.as_str())
     }
 }
 
-impl<'de> Deserialize<'de> for GrepInputOutputMode {
+impl<'de> Deserialize<'de> for GrepOutputMode {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
@@ -576,37 +6739,18 @@ impl<'de> Deserialize<'de> for GrepInputOutputMode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GrepInput {
-    /// The regular expression pattern to search for in file contents
-    pub pattern: String,
-    /// File or directory to search in (rg PATH). Defaults to current working directory.
-    pub path: Option<String>,
-    /// Glob pattern to filter files (e.g. "*.js", "*.{ts,tsx}") - maps to rg --glob
-    pub glob: Option<String>,
-    /// Output mode: "content" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), "files_with_matches" shows file paths (supports head_limit), "count" shows match counts (supports head_limit). Defaults to "files_with_matches".
-    pub output_mode: Option<GrepInputOutputMode>,
-    /// Number of lines to show before each match (rg -B). Requires output_mode: "content", ignored otherwise.
-    pub dash_b: Option<serde_json::Number>,
-    /// Number of lines to show after each match (rg -A). Requires output_mode: "content", ignored otherwise.
-    pub dash_a: Option<serde_json::Number>,
-    /// Alias for context.
-    pub dash_c: Option<serde_json::Number>,
-    /// Number of lines to show before and after each match (rg -C). Requires output_mode: "content", ignored otherwise.
-    pub context: Option<serde_json::Number>,
-    /// Show line numbers in output (rg -n). Requires output_mode: "content", ignored otherwise. Defaults to true.
-    pub dash_n: Option<bool>,
-    /// Case insensitive search (rg -i)
-    pub dash_i: Option<bool>,
-    /// Print only the matched (non-empty) parts of each matching line, one match per output line (rg -o / --only-matching). Requires output_mode: "content", ignored otherwise. Defaults to false.
-    pub dash_o: Option<bool>,
-    /// File type to search (rg --type). Common types: js, py, rust, go, java, etc. More efficient than include for standard file types.
-    pub r#type: Option<String>,
-    /// Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). Defaults to 250 when unspecified. Pass 0 for unlimited (use sparingly - large result sets waste context).
-    pub head_limit: Option<serde_json::Number>,
-    /// Skip first N lines/entries before applying head_limit, equivalent to "| tail -n +N | head -N". Works across all output modes. Defaults to 0.
-    pub offset: Option<serde_json::Number>,
-    /// Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall). Default: false.
-    pub multiline: Option<bool>,
+pub struct GrepOutput {
+    pub mode: Option<GrepOutputMode>,
+    pub num_files: serde_json::Number,
+    pub filenames: Vec<String>,
+    pub content: Option<String>,
+    pub num_lines: Option<serde_json::Number>,
+    pub num_matches: Option<serde_json::Number>,
+    pub total_files: Option<serde_json::Number>,
+    pub total_lines: Option<serde_json::Number>,
+    pub applied_limit: Option<serde_json::Number>,
+    pub applied_offset: Option<serde_json::Number>,
+    pub timed_out: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
     pub extra: serde_json::Map<String, serde_json::Value>,
     /// The key order this value was decoded with; encoding reproduces it.
@@ -614,67 +6758,880 @@ pub struct GrepInput {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(remote = "GrepInput")]
-struct GrepInputWire {
-    pub pattern: String,
+#[serde(remote = "GrepOutput")]
+struct GrepOutputWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
+    pub mode: Option<GrepOutputMode>,
+    #[serde(rename = "numFiles")]
+    pub num_files: serde_json::Number,
+    pub filenames: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub glob: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_mode: Option<GrepInputOutputMode>,
-    #[serde(rename = "-B", default, skip_serializing_if = "Option::is_none")]
-    pub dash_b: Option<serde_json::Number>,
-    #[serde(rename = "-A", default, skip_serializing_if = "Option::is_none")]
-    pub dash_a: Option<serde_json::Number>,
-    #[serde(rename = "-C", default, skip_serializing_if = "Option::is_none")]
-    pub dash_c: Option<serde_json::Number>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context: Option<serde_json::Number>,
-    #[serde(rename = "-n", default, skip_serializing_if = "Option::is_none")]
-    pub dash_n: Option<bool>,
-    #[serde(rename = "-i", default, skip_serializing_if = "Option::is_none")]
-    pub dash_i: Option<bool>,
-    #[serde(rename = "-o", default, skip_serializing_if = "Option::is_none")]
-    pub dash_o: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub head_limit: Option<serde_json::Number>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub offset: Option<serde_json::Number>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub multiline: Option<bool>,
+    pub content: Option<String>,
+    #[serde(rename = "numLines", default, skip_serializing_if = "Option::is_none")]
+    pub num_lines: Option<serde_json::Number>,
+    #[serde(rename = "numMatches", default, skip_serializing_if = "Option::is_none")]
+    pub num_matches: Option<serde_json::Number>,
+    #[serde(rename = "totalFiles", default, skip_serializing_if = "Option::is_none")]
+    pub total_files: Option<serde_json::Number>,
+    #[serde(rename = "totalLines", default, skip_serializing_if = "Option::is_none")]
+    pub total_lines: Option<serde_json::Number>,
+    #[serde(rename = "appliedLimit", default, skip_serializing_if = "Option::is_none")]
+    pub applied_limit: Option<serde_json::Number>,
+    #[serde(rename = "appliedOffset", default, skip_serializing_if = "Option::is_none")]
+    pub applied_offset: Option<serde_json::Number>,
+    #[serde(rename = "timedOut", default, skip_serializing_if = "Option::is_none")]
+    pub timed_out: Option<bool>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
 
-impl GrepInput {
+impl GrepOutput {
     /// The keys the pinned upstream declarations list for this object.
-    pub const KNOWN_KEYS: &'static [&'static str] = &["pattern", "path", "glob", "output_mode", "-B", "-A", "-C", "context", "-n", "-i", "-o", "type", "head_limit", "offset", "multiline"];
+    pub const KNOWN_KEYS: &'static [&'static str] = &["mode", "numFiles", "filenames", "content", "numLines", "numMatches", "totalFiles", "totalLines", "appliedLimit", "appliedOffset", "timedOut"];
 }
 
-impl Serialize for GrepInput {
+impl Serialize for GrepOutput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(GrepInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(GrepOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for GrepInput {
+impl<'de> Deserialize<'de> for GrepOutput {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
-        let mut decoded = GrepInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        let mut decoded = GrepOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
         decoded.key_order = super::support::KeyOrder::of(&value);
         Ok(decoded)
     }
 }
 
-pub type McpInput = serde_json::Map<String, serde_json::Value>;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskStopOutput {
+    /// Status message about the operation
+    pub message: String,
+    /// The ID of the task that was stopped
+    pub task_id: String,
+    /// The type of the task that was stopped
+    pub task_type: String,
+    /// The command or description of the stopped task
+    pub command: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskStopOutput")]
+struct TaskStopOutputWire {
+    pub message: String,
+    pub task_id: String,
+    pub task_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskStopOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["message", "task_id", "task_type", "command"];
+}
+
+impl Serialize for TaskStopOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskStopOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskStopOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskStopOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListMcpResourcesOutputItem {
+    /// Resource URI
+    pub uri: String,
+    /// Resource name
+    pub name: String,
+    /// MIME type of the resource
+    pub mime_type: Option<String>,
+    /// Resource description
+    pub description: Option<String>,
+    /// Server that provides this resource
+    pub server: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ListMcpResourcesOutputItem")]
+struct ListMcpResourcesOutputItemWire {
+    pub uri: String,
+    pub name: String,
+    #[serde(rename = "mimeType", default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub server: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ListMcpResourcesOutputItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["uri", "name", "mimeType", "description", "server"];
+}
+
+impl Serialize for ListMcpResourcesOutputItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ListMcpResourcesOutputItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ListMcpResourcesOutputItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ListMcpResourcesOutputItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+pub type ListMcpResourcesOutput = Vec<ListMcpResourcesOutputItem>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum TodoWriteInputTodosItemStatus {
+pub enum RefreshMcpToolsOutputItemStatus {
+    /// `refreshed`
+    Refreshed,
+    /// `error`
+    Error,
+    /// `not_connected`
+    NotConnected,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl RefreshMcpToolsOutputItemStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Refreshed => "refreshed",
+            Self::Error => "error",
+            Self::NotConnected => "not_connected",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for RefreshMcpToolsOutputItemStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RefreshMcpToolsOutputItemStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "refreshed" => Self::Refreshed,
+            "error" => Self::Error,
+            "not_connected" => Self::NotConnected,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefreshMcpToolsOutputItem {
+    /// Server name
+    pub server: String,
+    /// refreshed: tool list re-queried and applied. error: the re-query failed and the previous tool set was kept. not_connected: the server has no live connection to query (this tool never dials).
+    pub status: RefreshMcpToolsOutputItemStatus,
+    /// Number of tools now available from this server
+    pub tool_count: Option<serde_json::Number>,
+    /// Tool names this refresh added
+    pub added: Option<Vec<String>>,
+    /// Tool names this refresh removed
+    pub removed: Option<Vec<String>>,
+    /// Why the refresh failed or the server was unavailable
+    pub error: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "RefreshMcpToolsOutputItem")]
+struct RefreshMcpToolsOutputItemWire {
+    pub server: String,
+    pub status: RefreshMcpToolsOutputItemStatus,
+    #[serde(rename = "toolCount", default, skip_serializing_if = "Option::is_none")]
+    pub tool_count: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removed: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl RefreshMcpToolsOutputItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["server", "status", "toolCount", "added", "removed", "error"];
+}
+
+impl Serialize for RefreshMcpToolsOutputItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(RefreshMcpToolsOutputItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RefreshMcpToolsOutputItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = RefreshMcpToolsOutputItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+pub type RefreshMcpToolsOutput = Vec<RefreshMcpToolsOutputItem>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpOutputListItem {
+    pub r#type: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "McpOutputListItem")]
+struct McpOutputListItemWire {
+    pub r#type: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl McpOutputListItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type"];
+}
+
+impl Serialize for McpOutputListItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(McpOutputListItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for McpOutputListItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = McpOutputListItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+/// MCP tool execution result
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum McpOutput {
+    Text(String),
+    List(Vec<McpOutputListItem>),
+    Map(serde_json::Map<String, serde_json::Value>),
+    /// A value matching none of the pinned upstream shapes exactly; it round-trips unchanged.
+    Unknown(serde_json::Value),
+}
+
+impl Serialize for McpOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Text(inner) => inner.serialize(serializer),
+            Self::List(inner) => inner.serialize(serializer),
+            Self::Map(inner) => inner.serialize(serializer),
+            Self::Unknown(inner) => inner.serialize(serializer),
+        }
+    }
+}
+
+impl McpOutput {
+    /// Decodes `value` into the declared member that reproduces it exactly with the fewest
+    /// undeclared keys, earliest declared on ties, or `None` when no member matches.
+    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
+        let mut best: Option<(usize, Self)> = None;
+        super::support::keep_best(&mut best, super::support::exact::<String>(value).map(|inner| (0, Self::Text(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<Vec<McpOutputListItem>>(value).map(|inner| (0, Self::List(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<serde_json::Map<String, serde_json::Value>>(value).map(|inner| (super::support::unknown_keys(value, &[]), Self::Map(inner))));
+        best
+    }
+}
+
+impl<'de> Deserialize<'de> for McpOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match Self::best_match(&value) {
+            Some((_, matched)) => matched,
+            None => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum NotebookEditOutputCellType {
+    /// `code`
+    Code,
+    /// `markdown`
+    Markdown,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl NotebookEditOutputCellType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Code => "code",
+            Self::Markdown => "markdown",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for NotebookEditOutputCellType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for NotebookEditOutputCellType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "code" => Self::Code,
+            "markdown" => Self::Markdown,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotebookEditOutput {
+    /// The new source code that was written to the cell
+    pub new_source: String,
+    /// The previous cell source (replace/delete only). Enables cell-relative diff rendering without re-reading the notebook.
+    pub old_source: Option<String>,
+    /// The ID of the cell that was edited
+    pub cell_id: Option<String>,
+    /// The type of the cell
+    pub cell_type: NotebookEditOutputCellType,
+    /// The programming language of the notebook
+    pub language: String,
+    /// The edit mode that was used
+    pub edit_mode: String,
+    /// Error message if the operation failed
+    pub error: Option<String>,
+    /// The path to the notebook file
+    pub notebook_path: String,
+    /// The original notebook content before modification
+    pub original_file: String,
+    /// The updated notebook content after modification
+    pub updated_file: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "NotebookEditOutput")]
+struct NotebookEditOutputWire {
+    pub new_source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_id: Option<String>,
+    pub cell_type: NotebookEditOutputCellType,
+    pub language: String,
+    pub edit_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub notebook_path: String,
+    pub original_file: String,
+    pub updated_file: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl NotebookEditOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["new_source", "old_source", "cell_id", "cell_type", "language", "edit_mode", "error", "notebook_path", "original_file", "updated_file"];
+}
+
+impl Serialize for NotebookEditOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(NotebookEditOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for NotebookEditOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = NotebookEditOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadMcpResourceDirOutputResourcesItem {
+    /// Child resource URI
+    pub uri: String,
+    /// Child resource name
+    pub name: String,
+    /// Child MIME type
+    pub mime_type: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReadMcpResourceDirOutputResourcesItem")]
+struct ReadMcpResourceDirOutputResourcesItemWire {
+    pub uri: String,
+    pub name: String,
+    #[serde(rename = "mimeType", default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReadMcpResourceDirOutputResourcesItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["uri", "name", "mimeType"];
+}
+
+impl Serialize for ReadMcpResourceDirOutputResourcesItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReadMcpResourceDirOutputResourcesItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReadMcpResourceDirOutputResourcesItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReadMcpResourceDirOutputResourcesItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadMcpResourceDirOutput {
+    /// Direct children of the directory resource. Subdirectories appear with mimeType "inode/directory".
+    pub resources: Vec<ReadMcpResourceDirOutputResourcesItem>,
+    /// Human-readable error when the server could not list the directory
+    pub error: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReadMcpResourceDirOutput")]
+struct ReadMcpResourceDirOutputWire {
+    pub resources: Vec<ReadMcpResourceDirOutputResourcesItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReadMcpResourceDirOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["resources", "error"];
+}
+
+impl Serialize for ReadMcpResourceDirOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReadMcpResourceDirOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReadMcpResourceDirOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReadMcpResourceDirOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadMcpResourceOutputContentsItem {
+    /// Resource URI
+    pub uri: String,
+    /// MIME type of the content
+    pub mime_type: Option<String>,
+    /// Text content of the resource
+    pub text: Option<String>,
+    /// Path where binary blob content was saved
+    pub blob_saved_to: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReadMcpResourceOutputContentsItem")]
+struct ReadMcpResourceOutputContentsItemWire {
+    pub uri: String,
+    #[serde(rename = "mimeType", default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(rename = "blobSavedTo", default, skip_serializing_if = "Option::is_none")]
+    pub blob_saved_to: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReadMcpResourceOutputContentsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["uri", "mimeType", "text", "blobSavedTo"];
+}
+
+impl Serialize for ReadMcpResourceOutputContentsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReadMcpResourceOutputContentsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReadMcpResourceOutputContentsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReadMcpResourceOutputContentsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadMcpResourceOutput {
+    pub contents: Vec<ReadMcpResourceOutputContentsItem>,
+    /// Human-readable error when the server could not read the resource
+    pub error: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReadMcpResourceOutput")]
+struct ReadMcpResourceOutputWire {
+    pub contents: Vec<ReadMcpResourceOutputContentsItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReadMcpResourceOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["contents", "error"];
+}
+
+impl Serialize for ReadMcpResourceOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReadMcpResourceOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReadMcpResourceOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReadMcpResourceOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ReportFindingsOutputLevel {
+    /// `low`
+    Low,
+    /// `medium`
+    Medium,
+    /// `high`
+    High,
+    /// `xhigh`
+    Xhigh,
+    /// `max`
+    Max,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ReportFindingsOutputLevel {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ReportFindingsOutputLevel {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportFindingsOutputLevel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "xhigh" => Self::Xhigh,
+            "max" => Self::Max,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ReportFindingsOutputFindingsItemVerdict {
+    /// `CONFIRMED`
+    Confirmed,
+    /// `PLAUSIBLE`
+    Plausible,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ReportFindingsOutputFindingsItemVerdict {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Confirmed => "CONFIRMED",
+            Self::Plausible => "PLAUSIBLE",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ReportFindingsOutputFindingsItemVerdict {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportFindingsOutputFindingsItemVerdict {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "CONFIRMED" => Self::Confirmed,
+            "PLAUSIBLE" => Self::Plausible,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ReportFindingsOutputFindingsItemOutcome {
+    /// `fixed`
+    Fixed,
+    /// `skipped`
+    Skipped,
+    /// `no_change_needed`
+    NoChangeNeeded,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ReportFindingsOutputFindingsItemOutcome {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Fixed => "fixed",
+            Self::Skipped => "skipped",
+            Self::NoChangeNeeded => "no_change_needed",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ReportFindingsOutputFindingsItemOutcome {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportFindingsOutputFindingsItemOutcome {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "fixed" => Self::Fixed,
+            "skipped" => Self::Skipped,
+            "no_change_needed" => Self::NoChangeNeeded,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReportFindingsOutputFindingsItem {
+    /// Repo-relative path of the file the finding is in
+    pub file: String,
+    /// 1-indexed line the finding anchors to
+    pub line: Option<serde_json::Number>,
+    /// One-sentence statement of the defect
+    pub summary: String,
+    /// Compressed label for compact UI (≤60 chars): the claim alone, no rationale or consequence clause
+    pub short_summary: Option<String>,
+    /// Concrete inputs/state → wrong output/crash
+    pub failure_scenario: String,
+    /// Short kebab-case slug of the finding type, e.g. "correctness", "simplification", "efficiency", "test-coverage"
+    pub category: Option<String>,
+    /// Set when a verify pass ran; absent on inline-only reviews
+    pub verdict: Option<ReportFindingsOutputFindingsItemVerdict>,
+    /// Set ONLY when re-reporting after applying fixes: what happened to this finding
+    pub outcome: Option<ReportFindingsOutputFindingsItemOutcome>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReportFindingsOutputFindingsItem")]
+struct ReportFindingsOutputFindingsItemWire {
+    pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<serde_json::Number>,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short_summary: Option<String>,
+    pub failure_scenario: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<ReportFindingsOutputFindingsItemVerdict>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<ReportFindingsOutputFindingsItemOutcome>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReportFindingsOutputFindingsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["file", "line", "summary", "short_summary", "failure_scenario", "category", "verdict", "outcome"];
+}
+
+impl Serialize for ReportFindingsOutputFindingsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReportFindingsOutputFindingsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportFindingsOutputFindingsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReportFindingsOutputFindingsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReportFindingsOutput {
+    /// Number of findings reported
+    pub count: serde_json::Number,
+    /// Effort level the review ran at
+    pub level: Option<ReportFindingsOutputLevel>,
+    /// Echoed for the result body
+    pub findings: Vec<ReportFindingsOutputFindingsItem>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReportFindingsOutput")]
+struct ReportFindingsOutputWire {
+    pub count: serde_json::Number,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<ReportFindingsOutputLevel>,
+    pub findings: Vec<ReportFindingsOutputFindingsItem>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReportFindingsOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["count", "level", "findings"];
+}
+
+impl Serialize for ReportFindingsOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReportFindingsOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportFindingsOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReportFindingsOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum TodoWriteOutputOldTodosItemStatus {
     /// `pending`
     Pending,
     /// `in_progress`
@@ -685,7 +7642,7 @@ pub enum TodoWriteInputTodosItemStatus {
     Unknown(String),
 }
 
-impl TodoWriteInputTodosItemStatus {
+impl TodoWriteOutputOldTodosItemStatus {
     pub fn as_str(&self) -> &str {
         match self {
             Self::Pending => "pending",
@@ -696,13 +7653,13 @@ impl TodoWriteInputTodosItemStatus {
     }
 }
 
-impl Serialize for TodoWriteInputTodosItemStatus {
+impl Serialize for TodoWriteOutputOldTodosItemStatus {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.as_str())
     }
 }
 
-impl<'de> Deserialize<'de> for TodoWriteInputTodosItemStatus {
+impl<'de> Deserialize<'de> for TodoWriteOutputOldTodosItemStatus {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
@@ -715,9 +7672,9 @@ impl<'de> Deserialize<'de> for TodoWriteInputTodosItemStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TodoWriteInputTodosItem {
+pub struct TodoWriteOutputOldTodosItem {
     pub content: String,
-    pub status: TodoWriteInputTodosItemStatus,
+    pub status: TodoWriteOutputOldTodosItemStatus,
     pub active_form: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -726,10 +7683,10 @@ pub struct TodoWriteInputTodosItem {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(remote = "TodoWriteInputTodosItem")]
-struct TodoWriteInputTodosItemWire {
+#[serde(remote = "TodoWriteOutputOldTodosItem")]
+struct TodoWriteOutputOldTodosItemWire {
     pub content: String,
-    pub status: TodoWriteInputTodosItemStatus,
+    pub status: TodoWriteOutputOldTodosItemStatus,
     #[serde(rename = "activeForm")]
     pub active_form: String,
     #[serde(flatten)]
@@ -738,30 +7695,72 @@ struct TodoWriteInputTodosItemWire {
     pub key_order: super::support::KeyOrder,
 }
 
-impl TodoWriteInputTodosItem {
+impl TodoWriteOutputOldTodosItem {
     /// The keys the pinned upstream declarations list for this object.
     pub const KNOWN_KEYS: &'static [&'static str] = &["content", "status", "activeForm"];
 }
 
-impl Serialize for TodoWriteInputTodosItem {
+impl Serialize for TodoWriteOutputOldTodosItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(TodoWriteInputTodosItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(TodoWriteOutputOldTodosItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for TodoWriteInputTodosItem {
+impl<'de> Deserialize<'de> for TodoWriteOutputOldTodosItem {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
-        let mut decoded = TodoWriteInputTodosItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        let mut decoded = TodoWriteOutputOldTodosItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
         decoded.key_order = super::support::KeyOrder::of(&value);
         Ok(decoded)
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum TodoWriteOutputNewTodosItemStatus {
+    /// `pending`
+    Pending,
+    /// `in_progress`
+    InProgress,
+    /// `completed`
+    Completed,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl TodoWriteOutputNewTodosItemStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for TodoWriteOutputNewTodosItemStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for TodoWriteOutputNewTodosItemStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "pending" => Self::Pending,
+            "in_progress" => Self::InProgress,
+            "completed" => Self::Completed,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TodoWriteInput {
-    /// The updated todo list
-    pub todos: Vec<TodoWriteInputTodosItem>,
+pub struct TodoWriteOutputNewTodosItem {
+    pub content: String,
+    pub status: TodoWriteOutputNewTodosItemStatus,
+    pub active_form: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
     pub extra: serde_json::Map<String, serde_json::Value>,
     /// The key order this value was decoded with; encoding reproduces it.
@@ -769,31 +7768,5303 @@ pub struct TodoWriteInput {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(remote = "TodoWriteInput")]
-struct TodoWriteInputWire {
-    pub todos: Vec<TodoWriteInputTodosItem>,
+#[serde(remote = "TodoWriteOutputNewTodosItem")]
+struct TodoWriteOutputNewTodosItemWire {
+    pub content: String,
+    pub status: TodoWriteOutputNewTodosItemStatus,
+    #[serde(rename = "activeForm")]
+    pub active_form: String,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
 
-impl TodoWriteInput {
+impl TodoWriteOutputNewTodosItem {
     /// The keys the pinned upstream declarations list for this object.
-    pub const KNOWN_KEYS: &'static [&'static str] = &["todos"];
+    pub const KNOWN_KEYS: &'static [&'static str] = &["content", "status", "activeForm"];
 }
 
-impl Serialize for TodoWriteInput {
+impl Serialize for TodoWriteOutputNewTodosItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(TodoWriteInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(TodoWriteOutputNewTodosItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for TodoWriteInput {
+impl<'de> Deserialize<'de> for TodoWriteOutputNewTodosItem {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
-        let mut decoded = TodoWriteInputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        let mut decoded = TodoWriteOutputNewTodosItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
         decoded.key_order = super::support::KeyOrder::of(&value);
         Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TodoWriteOutput {
+    /// The todo list before the update
+    pub old_todos: Vec<TodoWriteOutputOldTodosItem>,
+    /// The todo list after the update
+    pub new_todos: Vec<TodoWriteOutputNewTodosItem>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TodoWriteOutput")]
+struct TodoWriteOutputWire {
+    #[serde(rename = "oldTodos")]
+    pub old_todos: Vec<TodoWriteOutputOldTodosItem>,
+    #[serde(rename = "newTodos")]
+    pub new_todos: Vec<TodoWriteOutputNewTodosItem>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TodoWriteOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["oldTodos", "newTodos"];
+}
+
+impl Serialize for TodoWriteOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TodoWriteOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TodoWriteOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TodoWriteOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebFetchOutputArtifactRead {
+    pub slug: String,
+    pub ver: Option<String>,
+    pub seeded: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "WebFetchOutputArtifactRead")]
+struct WebFetchOutputArtifactReadWire {
+    pub slug: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ver: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seeded: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl WebFetchOutputArtifactRead {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["slug", "ver", "seeded"];
+}
+
+impl Serialize for WebFetchOutputArtifactRead {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(WebFetchOutputArtifactReadWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for WebFetchOutputArtifactRead {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = WebFetchOutputArtifactReadWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebFetchOutput {
+    /// Size of the fetched content in bytes
+    pub bytes: serde_json::Number,
+    /// HTTP response code
+    pub code: serde_json::Number,
+    /// HTTP response code text
+    pub code_text: String,
+    /// Processed result from applying the prompt to the content
+    pub result: String,
+    /// Time taken to fetch and process the content
+    pub duration_ms: serde_json::Number,
+    /// The URL that was fetched
+    pub url: String,
+    pub artifact_read: Option<WebFetchOutputArtifactRead>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "WebFetchOutput")]
+struct WebFetchOutputWire {
+    pub bytes: serde_json::Number,
+    pub code: serde_json::Number,
+    #[serde(rename = "codeText")]
+    pub code_text: String,
+    pub result: String,
+    #[serde(rename = "durationMs")]
+    pub duration_ms: serde_json::Number,
+    pub url: String,
+    #[serde(rename = "artifactRead", default, skip_serializing_if = "Option::is_none")]
+    pub artifact_read: Option<WebFetchOutputArtifactRead>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl WebFetchOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["bytes", "code", "codeText", "result", "durationMs", "url", "artifactRead"];
+}
+
+impl Serialize for WebFetchOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(WebFetchOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for WebFetchOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = WebFetchOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebSearchOutputResultsItemVariant1ContentItem {
+    /// The title of the search result
+    pub title: String,
+    /// The URL of the search result
+    pub url: String,
+    /// Page text. PostToolUse hooks get it; tool_use_result does not.
+    pub snippet: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "WebSearchOutputResultsItemVariant1ContentItem")]
+struct WebSearchOutputResultsItemVariant1ContentItemWire {
+    pub title: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl WebSearchOutputResultsItemVariant1ContentItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["title", "url", "snippet"];
+}
+
+impl Serialize for WebSearchOutputResultsItemVariant1ContentItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(WebSearchOutputResultsItemVariant1ContentItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for WebSearchOutputResultsItemVariant1ContentItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = WebSearchOutputResultsItemVariant1ContentItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebSearchOutputResultsItemVariant1 {
+    /// ID of the tool use
+    pub tool_use_id: String,
+    /// Array of search hits
+    pub content: Vec<WebSearchOutputResultsItemVariant1ContentItem>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "WebSearchOutputResultsItemVariant1")]
+struct WebSearchOutputResultsItemVariant1Wire {
+    pub tool_use_id: String,
+    pub content: Vec<WebSearchOutputResultsItemVariant1ContentItem>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl WebSearchOutputResultsItemVariant1 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["tool_use_id", "content"];
+}
+
+impl Serialize for WebSearchOutputResultsItemVariant1 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(WebSearchOutputResultsItemVariant1Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for WebSearchOutputResultsItemVariant1 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = WebSearchOutputResultsItemVariant1Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WebSearchOutputResultsItem {
+    Variant1(WebSearchOutputResultsItemVariant1),
+    Text(String),
+    /// A value matching none of the pinned upstream shapes exactly; it round-trips unchanged.
+    Unknown(serde_json::Value),
+}
+
+impl Serialize for WebSearchOutputResultsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Variant1(inner) => inner.serialize(serializer),
+            Self::Text(inner) => inner.serialize(serializer),
+            Self::Unknown(inner) => inner.serialize(serializer),
+        }
+    }
+}
+
+impl WebSearchOutputResultsItem {
+    /// Decodes `value` into the declared member that reproduces it exactly with the fewest
+    /// undeclared keys, earliest declared on ties, or `None` when no member matches.
+    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
+        let mut best: Option<(usize, Self)> = None;
+        super::support::keep_best(&mut best, super::support::exact::<WebSearchOutputResultsItemVariant1>(value).map(|inner| (super::support::unknown_keys(value, WebSearchOutputResultsItemVariant1::KNOWN_KEYS), Self::Variant1(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<String>(value).map(|inner| (0, Self::Text(inner))));
+        best
+    }
+}
+
+impl<'de> Deserialize<'de> for WebSearchOutputResultsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match Self::best_match(&value) {
+            Some((_, matched)) => matched,
+            None => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebSearchOutput {
+    /// The search query that was executed
+    pub query: String,
+    /// Search results and/or text commentary from the model
+    pub results: Vec<WebSearchOutputResultsItem>,
+    /// Time taken to complete the search operation
+    pub duration_seconds: serde_json::Number,
+    /// Number of web searches performed
+    pub search_count: Option<serde_json::Number>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "WebSearchOutput")]
+struct WebSearchOutputWire {
+    pub query: String,
+    pub results: Vec<WebSearchOutputResultsItem>,
+    #[serde(rename = "durationSeconds")]
+    pub duration_seconds: serde_json::Number,
+    #[serde(rename = "searchCount", default, skip_serializing_if = "Option::is_none")]
+    pub search_count: Option<serde_json::Number>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl WebSearchOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["query", "results", "durationSeconds", "searchCount"];
+}
+
+impl Serialize for WebSearchOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(WebSearchOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for WebSearchOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = WebSearchOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AskUserQuestionOutputQuestionsItemOptionsItem {
+    /// The display text for this option that the user will see and select. Should be concise (1-5 words) and clearly describe the choice.
+    pub label: String,
+    /// Explanation of what this option means or what will happen if chosen. Useful for providing context about trade-offs or implications.
+    pub description: String,
+    /// Optional preview content rendered when this option is focused. Use for mockups, code snippets, or visual comparisons that help users compare options. See the tool description for the expected content format.
+    pub preview: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AskUserQuestionOutputQuestionsItemOptionsItem")]
+struct AskUserQuestionOutputQuestionsItemOptionsItemWire {
+    pub label: String,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AskUserQuestionOutputQuestionsItemOptionsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["label", "description", "preview"];
+}
+
+impl Serialize for AskUserQuestionOutputQuestionsItemOptionsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AskUserQuestionOutputQuestionsItemOptionsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AskUserQuestionOutputQuestionsItemOptionsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AskUserQuestionOutputQuestionsItemOptionsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AskUserQuestionOutputQuestionsItem {
+    /// The complete question to ask the user. Should be clear, specific, and end with a question mark. Example: "Which library should we use for date formatting?" If multiSelect is true, phrase it accordingly, e.g. "Which features do you want to enable?"
+    pub question: String,
+    /// Very short label displayed as a chip/tag (max 12 chars). Examples: "Auth method", "Library", "Approach".
+    pub header: String,
+    /// The available choices for this question. Must have 2-4 options. Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled). There should be no 'Other' option, that will be provided automatically.
+    pub options: Vec<AskUserQuestionOutputQuestionsItemOptionsItem>,
+    /// Set to true to allow the user to select multiple options instead of just one. Use when choices are not mutually exclusive.
+    pub multi_select: bool,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AskUserQuestionOutputQuestionsItem")]
+struct AskUserQuestionOutputQuestionsItemWire {
+    pub question: String,
+    pub header: String,
+    pub options: Vec<AskUserQuestionOutputQuestionsItemOptionsItem>,
+    #[serde(rename = "multiSelect")]
+    pub multi_select: bool,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AskUserQuestionOutputQuestionsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["question", "header", "options", "multiSelect"];
+}
+
+impl Serialize for AskUserQuestionOutputQuestionsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AskUserQuestionOutputQuestionsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AskUserQuestionOutputQuestionsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AskUserQuestionOutputQuestionsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AskUserQuestionOutputAnnotationsValueUnanswered {
+    /// `skipped`
+    Skipped,
+    /// `replied_in_chat`
+    RepliedInChat,
+    /// `dismissed`
+    Dismissed,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl AskUserQuestionOutputAnnotationsValueUnanswered {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Skipped => "skipped",
+            Self::RepliedInChat => "replied_in_chat",
+            Self::Dismissed => "dismissed",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for AskUserQuestionOutputAnnotationsValueUnanswered {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for AskUserQuestionOutputAnnotationsValueUnanswered {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "skipped" => Self::Skipped,
+            "replied_in_chat" => Self::RepliedInChat,
+            "dismissed" => Self::Dismissed,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AskUserQuestionOutputAnnotationsValue {
+    /// The preview content of the selected option, if the question used previews.
+    pub preview: Option<String>,
+    /// Free-text notes the user added to their selection.
+    pub notes: Option<String>,
+    /// How the question went unanswered: 'skipped' (the user skipped it), 'replied_in_chat' (the user sent a chat message instead), or 'dismissed' (the user closed the card). The model does not see this field; put the text it should read in `answers`. Absent when the question was answered, and also when the answering client did not report it (in a session that does not advertise ask_user_question_unanswered_v1, from an older client, or in an older transcript): then only the text in `answers` says how it ended. Treat any other value as absent.
+    pub unanswered: Option<AskUserQuestionOutputAnnotationsValueUnanswered>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AskUserQuestionOutputAnnotationsValue")]
+struct AskUserQuestionOutputAnnotationsValueWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unanswered: Option<AskUserQuestionOutputAnnotationsValueUnanswered>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AskUserQuestionOutputAnnotationsValue {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["preview", "notes", "unanswered"];
+}
+
+impl Serialize for AskUserQuestionOutputAnnotationsValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AskUserQuestionOutputAnnotationsValueWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AskUserQuestionOutputAnnotationsValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AskUserQuestionOutputAnnotationsValueWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AskUserQuestionOutput {
+    /// The questions that were asked
+    pub questions: Vec<AskUserQuestionOutputQuestionsItem>,
+    /// The answers provided by the user (question text -\> answer string; multi-select answers are comma-separated)
+    pub answers: indexmap::IndexMap<String, String>,
+    /// Freeform text the user typed instead of selecting a structured option
+    pub response: Option<String>,
+    /// Optional per-question annotations from the user (e.g., notes on preview selections). Keyed by question text.
+    pub annotations: Option<indexmap::IndexMap<String, AskUserQuestionOutputAnnotationsValue>>,
+    /// Set when the dialog auto-resolved after this many milliseconds of idle (user away from keyboard). Absent on every human-resolved path.
+    pub afk_timeout_ms: Option<serde_json::Number>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "AskUserQuestionOutput")]
+struct AskUserQuestionOutputWire {
+    pub questions: Vec<AskUserQuestionOutputQuestionsItem>,
+    pub answers: indexmap::IndexMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<indexmap::IndexMap<String, AskUserQuestionOutputAnnotationsValue>>,
+    #[serde(rename = "afkTimeoutMs", default, skip_serializing_if = "Option::is_none")]
+    pub afk_timeout_ms: Option<serde_json::Number>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl AskUserQuestionOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["questions", "answers", "response", "annotations", "afkTimeoutMs"];
+}
+
+impl Serialize for AskUserQuestionOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(AskUserQuestionOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AskUserQuestionOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = AskUserQuestionOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SendFeedbackOutput {
+    pub success: bool,
+    pub message: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "SendFeedbackOutput")]
+struct SendFeedbackOutputWire {
+    pub success: bool,
+    pub message: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl SendFeedbackOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["success", "message"];
+}
+
+impl Serialize for SendFeedbackOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(SendFeedbackOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SendFeedbackOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = SendFeedbackOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnterWorktreeOutput {
+    pub worktree_path: String,
+    pub worktree_branch: Option<String>,
+    pub message: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "EnterWorktreeOutput")]
+struct EnterWorktreeOutputWire {
+    #[serde(rename = "worktreePath")]
+    pub worktree_path: String,
+    #[serde(rename = "worktreeBranch", default, skip_serializing_if = "Option::is_none")]
+    pub worktree_branch: Option<String>,
+    pub message: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl EnterWorktreeOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["worktreePath", "worktreeBranch", "message"];
+}
+
+impl Serialize for EnterWorktreeOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(EnterWorktreeOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for EnterWorktreeOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = EnterWorktreeOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ExitWorktreeOutputAction {
+    /// `keep`
+    Keep,
+    /// `remove`
+    Remove,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ExitWorktreeOutputAction {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Keep => "keep",
+            Self::Remove => "remove",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ExitWorktreeOutputAction {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ExitWorktreeOutputAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "keep" => Self::Keep,
+            "remove" => Self::Remove,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExitWorktreeOutput {
+    pub action: ExitWorktreeOutputAction,
+    pub original_cwd: String,
+    pub worktree_path: String,
+    pub worktree_branch: Option<String>,
+    pub tmux_session_name: Option<String>,
+    pub discarded_files: Option<serde_json::Number>,
+    pub discarded_commits: Option<serde_json::Number>,
+    pub message: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ExitWorktreeOutput")]
+struct ExitWorktreeOutputWire {
+    pub action: ExitWorktreeOutputAction,
+    #[serde(rename = "originalCwd")]
+    pub original_cwd: String,
+    #[serde(rename = "worktreePath")]
+    pub worktree_path: String,
+    #[serde(rename = "worktreeBranch", default, skip_serializing_if = "Option::is_none")]
+    pub worktree_branch: Option<String>,
+    #[serde(rename = "tmuxSessionName", default, skip_serializing_if = "Option::is_none")]
+    pub tmux_session_name: Option<String>,
+    #[serde(rename = "discardedFiles", default, skip_serializing_if = "Option::is_none")]
+    pub discarded_files: Option<serde_json::Number>,
+    #[serde(rename = "discardedCommits", default, skip_serializing_if = "Option::is_none")]
+    pub discarded_commits: Option<serde_json::Number>,
+    pub message: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ExitWorktreeOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["action", "originalCwd", "worktreePath", "worktreeBranch", "tmuxSessionName", "discardedFiles", "discardedCommits", "message"];
+}
+
+impl Serialize for ExitWorktreeOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ExitWorktreeOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ExitWorktreeOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ExitWorktreeOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskCreateOutputTask {
+    pub id: String,
+    pub subject: String,
+    /// The task's description as saved. It can differ from the tool_use input if Claude Code corrects a malformed call or a PreToolUse hook changes the input. Absent in results from older Claude Code versions.
+    pub description: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskCreateOutputTask")]
+struct TaskCreateOutputTaskWire {
+    pub id: String,
+    pub subject: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskCreateOutputTask {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["id", "subject", "description"];
+}
+
+impl Serialize for TaskCreateOutputTask {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskCreateOutputTaskWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskCreateOutputTask {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskCreateOutputTaskWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskCreateOutput {
+    pub task: TaskCreateOutputTask,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskCreateOutput")]
+struct TaskCreateOutputWire {
+    pub task: TaskCreateOutputTask,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskCreateOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["task"];
+}
+
+impl Serialize for TaskCreateOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskCreateOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskCreateOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskCreateOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum TaskGetOutputTaskStatus {
+    /// `pending`
+    Pending,
+    /// `in_progress`
+    InProgress,
+    /// `completed`
+    Completed,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl TaskGetOutputTaskStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for TaskGetOutputTaskStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskGetOutputTaskStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "pending" => Self::Pending,
+            "in_progress" => Self::InProgress,
+            "completed" => Self::Completed,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskGetOutputTask {
+    pub id: String,
+    pub subject: String,
+    pub description: String,
+    pub status: TaskGetOutputTaskStatus,
+    pub blocks: Vec<String>,
+    pub blocked_by: Vec<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskGetOutputTask")]
+struct TaskGetOutputTaskWire {
+    pub id: String,
+    pub subject: String,
+    pub description: String,
+    pub status: TaskGetOutputTaskStatus,
+    pub blocks: Vec<String>,
+    #[serde(rename = "blockedBy")]
+    pub blocked_by: Vec<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskGetOutputTask {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["id", "subject", "description", "status", "blocks", "blockedBy"];
+}
+
+impl Serialize for TaskGetOutputTask {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskGetOutputTaskWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskGetOutputTask {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskGetOutputTaskWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskGetOutput {
+    pub task: Option<TaskGetOutputTask>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskGetOutput")]
+struct TaskGetOutputWire {
+    #[serde(default)]
+    pub task: Option<TaskGetOutputTask>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskGetOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["task"];
+}
+
+impl Serialize for TaskGetOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskGetOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskGetOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskGetOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskUpdateOutputStatusChange {
+    pub from: String,
+    pub to: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskUpdateOutputStatusChange")]
+struct TaskUpdateOutputStatusChangeWire {
+    pub from: String,
+    pub to: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskUpdateOutputStatusChange {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["from", "to"];
+}
+
+impl Serialize for TaskUpdateOutputStatusChange {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskUpdateOutputStatusChangeWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskUpdateOutputStatusChange {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskUpdateOutputStatusChangeWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskUpdateOutput {
+    pub success: bool,
+    pub task_id: String,
+    pub updated_fields: Vec<String>,
+    pub error: Option<String>,
+    pub status_change: Option<TaskUpdateOutputStatusChange>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskUpdateOutput")]
+struct TaskUpdateOutputWire {
+    pub success: bool,
+    #[serde(rename = "taskId")]
+    pub task_id: String,
+    #[serde(rename = "updatedFields")]
+    pub updated_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(rename = "statusChange", default, skip_serializing_if = "Option::is_none")]
+    pub status_change: Option<TaskUpdateOutputStatusChange>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskUpdateOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["success", "taskId", "updatedFields", "error", "statusChange"];
+}
+
+impl Serialize for TaskUpdateOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskUpdateOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskUpdateOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskUpdateOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum TaskListOutputTasksItemStatus {
+    /// `pending`
+    Pending,
+    /// `in_progress`
+    InProgress,
+    /// `completed`
+    Completed,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl TaskListOutputTasksItemStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for TaskListOutputTasksItemStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskListOutputTasksItemStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "pending" => Self::Pending,
+            "in_progress" => Self::InProgress,
+            "completed" => Self::Completed,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskListOutputTasksItem {
+    pub id: String,
+    pub subject: String,
+    pub status: TaskListOutputTasksItemStatus,
+    pub owner: Option<String>,
+    pub blocked_by: Vec<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskListOutputTasksItem")]
+struct TaskListOutputTasksItemWire {
+    pub id: String,
+    pub subject: String,
+    pub status: TaskListOutputTasksItemStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(rename = "blockedBy")]
+    pub blocked_by: Vec<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskListOutputTasksItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["id", "subject", "status", "owner", "blockedBy"];
+}
+
+impl Serialize for TaskListOutputTasksItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskListOutputTasksItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskListOutputTasksItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskListOutputTasksItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskListOutput {
+    pub tasks: Vec<TaskListOutputTasksItem>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "TaskListOutput")]
+struct TaskListOutputWire {
+    pub tasks: Vec<TaskListOutputTasksItem>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl TaskListOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["tasks"];
+}
+
+impl Serialize for TaskListOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(TaskListOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskListOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = TaskListOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant1Stored {
+    pub contract: String,
+    pub preferred_contract: Option<String>,
+    pub capabilities: Option<serde_json::Map<String, serde_json::Value>>,
+    pub carried: Option<bool>,
+    pub read: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant1Stored")]
+struct ArtifactOutputVariant1StoredWire {
+    pub contract: String,
+    #[serde(rename = "preferredContract", default, skip_serializing_if = "Option::is_none")]
+    pub preferred_contract: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carried: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant1Stored {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["contract", "preferredContract", "capabilities", "carried", "read"];
+}
+
+impl Serialize for ArtifactOutputVariant1Stored {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant1StoredWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant1Stored {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant1StoredWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant1 {
+    pub url: String,
+    pub path: String,
+    pub artifact_id: Option<String>,
+    pub title: Option<String>,
+    pub version: Option<String>,
+    pub capabilities: Option<serde_json::Value>,
+    pub stored: Option<ArtifactOutputVariant1Stored>,
+    pub warnings: Option<Vec<String>>,
+    pub publishes_remaining: Option<serde_json::Number>,
+    pub publishes_reset_at: Option<serde_json::Number>,
+    pub contract: Option<String>,
+    pub updated: Option<bool>,
+    pub owned: Option<bool>,
+    pub icon: Option<String>,
+    pub favicon_sent: Option<bool>,
+    pub icon_dropped: Option<bool>,
+    pub audience: Option<String>,
+    pub seq: Option<serde_json::Number>,
+    pub unchanged: Option<bool>,
+    pub live_subscription: Option<String>,
+    pub pinned: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant1")]
+struct ArtifactOutputVariant1Wire {
+    pub url: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "super::support::optional_value")]
+    pub capabilities: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stored: Option<ArtifactOutputVariant1Stored>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<String>>,
+    #[serde(rename = "publishesRemaining", default, skip_serializing_if = "Option::is_none")]
+    pub publishes_remaining: Option<serde_json::Number>,
+    #[serde(rename = "publishesResetAt", default, skip_serializing_if = "Option::is_none")]
+    pub publishes_reset_at: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(rename = "faviconSent", default, skip_serializing_if = "Option::is_none")]
+    pub favicon_sent: Option<bool>,
+    #[serde(rename = "iconDropped", default, skip_serializing_if = "Option::is_none")]
+    pub icon_dropped: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unchanged: Option<bool>,
+    #[serde(rename = "liveSubscription", default, skip_serializing_if = "Option::is_none")]
+    pub live_subscription: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant1 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "path", "artifact_id", "title", "version", "capabilities", "stored", "warnings", "publishesRemaining", "publishesResetAt", "contract", "updated", "owned", "icon", "faviconSent", "iconDropped", "audience", "seq", "unchanged", "liveSubscription", "pinned"];
+}
+
+impl Serialize for ArtifactOutputVariant1 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant1Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant1 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant1Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ArtifactOutputVariant2ArtifactsItemRel {
+    /// `mine`
+    Mine,
+    /// `shared`
+    Shared,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ArtifactOutputVariant2ArtifactsItemRel {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Mine => "mine",
+            Self::Shared => "shared",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ArtifactOutputVariant2ArtifactsItemRel {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant2ArtifactsItemRel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "mine" => Self::Mine,
+            "shared" => Self::Shared,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ArtifactOutputVariant2ArtifactsItemRole {
+    /// `editor`
+    Editor,
+    /// `commenter`
+    Commenter,
+    /// `reader`
+    Reader,
+    /// `viewer`
+    Viewer,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ArtifactOutputVariant2ArtifactsItemRole {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Editor => "editor",
+            Self::Commenter => "commenter",
+            Self::Reader => "reader",
+            Self::Viewer => "viewer",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ArtifactOutputVariant2ArtifactsItemRole {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant2ArtifactsItemRole {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "editor" => Self::Editor,
+            "commenter" => Self::Commenter,
+            "reader" => Self::Reader,
+            "viewer" => Self::Viewer,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant2ArtifactsItem {
+    pub title: String,
+    pub url: String,
+    pub favicon: Option<String>,
+    pub updated_at: Option<String>,
+    pub rel: Option<ArtifactOutputVariant2ArtifactsItemRel>,
+    pub external: Option<bool>,
+    pub role: Option<ArtifactOutputVariant2ArtifactsItemRole>,
+    pub outsiders_may_have_written: Option<bool>,
+    pub pinned: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant2ArtifactsItem")]
+struct ArtifactOutputVariant2ArtifactsItemWire {
+    pub title: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favicon: Option<String>,
+    #[serde(rename = "updatedAt", default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rel: Option<ArtifactOutputVariant2ArtifactsItemRel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<ArtifactOutputVariant2ArtifactsItemRole>,
+    #[serde(rename = "outsidersMayHaveWritten", default, skip_serializing_if = "Option::is_none")]
+    pub outsiders_may_have_written: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant2ArtifactsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["title", "url", "favicon", "updatedAt", "rel", "external", "role", "outsidersMayHaveWritten", "pinned"];
+}
+
+impl Serialize for ArtifactOutputVariant2ArtifactsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant2ArtifactsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant2ArtifactsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant2ArtifactsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ArtifactOutputVariant2Scope {
+    /// `shared`
+    Shared,
+    /// `all`
+    All,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ArtifactOutputVariant2Scope {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Shared => "shared",
+            Self::All => "all",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ArtifactOutputVariant2Scope {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant2Scope {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "shared" => Self::Shared,
+            "all" => Self::All,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant2 {
+    pub artifacts: Vec<ArtifactOutputVariant2ArtifactsItem>,
+    pub truncated: Option<bool>,
+    pub total: Option<serde_json::Number>,
+    pub total_at_least: Option<bool>,
+    pub next_page_token: Option<String>,
+    pub pins_enabled: Option<bool>,
+    pub scope: Option<ArtifactOutputVariant2Scope>,
+    pub external_listed: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant2")]
+struct ArtifactOutputVariant2Wire {
+    pub artifacts: Vec<ArtifactOutputVariant2ArtifactsItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_at_least: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_page_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pins_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ArtifactOutputVariant2Scope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_listed: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant2 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["artifacts", "truncated", "total", "total_at_least", "next_page_token", "pins_enabled", "scope", "external_listed"];
+}
+
+impl Serialize for ArtifactOutputVariant2 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant2Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant2 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant2Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant3Read {
+    pub url: String,
+    pub bytes: serde_json::Number,
+    pub code: serde_json::Number,
+    pub code_text: String,
+    pub result: String,
+    pub duration_ms: serde_json::Number,
+    pub title: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant3Read")]
+struct ArtifactOutputVariant3ReadWire {
+    pub url: String,
+    pub bytes: serde_json::Number,
+    pub code: serde_json::Number,
+    #[serde(rename = "codeText")]
+    pub code_text: String,
+    pub result: String,
+    #[serde(rename = "durationMs")]
+    pub duration_ms: serde_json::Number,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant3Read {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "bytes", "code", "codeText", "result", "durationMs", "title"];
+}
+
+impl Serialize for ArtifactOutputVariant3Read {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant3ReadWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant3Read {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant3ReadWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant3ArtifactRead {
+    pub slug: String,
+    pub ver: Option<String>,
+    pub seeded: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant3ArtifactRead")]
+struct ArtifactOutputVariant3ArtifactReadWire {
+    pub slug: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ver: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seeded: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant3ArtifactRead {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["slug", "ver", "seeded"];
+}
+
+impl Serialize for ArtifactOutputVariant3ArtifactRead {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant3ArtifactReadWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant3ArtifactRead {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant3ArtifactReadWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant3 {
+    pub read: ArtifactOutputVariant3Read,
+    pub owned: Option<bool>,
+    pub artifact_read: Option<ArtifactOutputVariant3ArtifactRead>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant3")]
+struct ArtifactOutputVariant3Wire {
+    pub read: ArtifactOutputVariant3Read,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned: Option<bool>,
+    #[serde(rename = "artifactRead", default, skip_serializing_if = "Option::is_none")]
+    pub artifact_read: Option<ArtifactOutputVariant3ArtifactRead>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant3 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["read", "owned", "artifactRead"];
+}
+
+impl Serialize for ArtifactOutputVariant3 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant3Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant3 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant3Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant4Watch {
+    pub url: String,
+    pub watching: bool,
+    pub outcome: String,
+    pub reason: Option<String>,
+    pub durable_skip_reason: Option<String>,
+    pub task_id: Option<String>,
+    pub since: Option<serde_json::Number>,
+    pub token_expires_at: Option<serde_json::Number>,
+    pub rail: Option<String>,
+    pub trigger_id: Option<String>,
+    pub durable_since: Option<String>,
+    pub status: Option<serde_json::Number>,
+    pub detail: Option<String>,
+    pub note: Option<String>,
+    pub events: Option<Vec<String>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant4Watch")]
+struct ArtifactOutputVariant4WatchWire {
+    pub url: String,
+    pub watching: bool,
+    pub outcome: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable_skip_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_expires_at: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable_since: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub events: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant4Watch {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "watching", "outcome", "reason", "durable_skip_reason", "task_id", "since", "token_expires_at", "rail", "trigger_id", "durable_since", "status", "detail", "note", "events"];
+}
+
+impl Serialize for ArtifactOutputVariant4Watch {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant4WatchWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant4Watch {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant4WatchWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant4 {
+    pub watch: ArtifactOutputVariant4Watch,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant4")]
+struct ArtifactOutputVariant4Wire {
+    pub watch: ArtifactOutputVariant4Watch,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant4 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["watch"];
+}
+
+impl Serialize for ArtifactOutputVariant4 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant4Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant4 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant4Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant5Unwatch {
+    pub url: String,
+    pub was_watching: bool,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant5Unwatch")]
+struct ArtifactOutputVariant5UnwatchWire {
+    pub url: String,
+    pub was_watching: bool,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant5Unwatch {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "was_watching"];
+}
+
+impl Serialize for ArtifactOutputVariant5Unwatch {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant5UnwatchWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant5Unwatch {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant5UnwatchWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant5 {
+    pub unwatch: ArtifactOutputVariant5Unwatch,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant5")]
+struct ArtifactOutputVariant5Wire {
+    pub unwatch: ArtifactOutputVariant5Unwatch,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant5 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["unwatch"];
+}
+
+impl Serialize for ArtifactOutputVariant5 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant5Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant5 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant5Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant6WatchesItemVariant1 {
+    pub url: String,
+    pub task_id: String,
+    pub since: serde_json::Number,
+    pub explicit: bool,
+    pub connected: bool,
+    pub connecting: Option<bool>,
+    pub token_expires_at: serde_json::Number,
+    pub armed_via: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant6WatchesItemVariant1")]
+struct ArtifactOutputVariant6WatchesItemVariant1Wire {
+    pub url: String,
+    pub task_id: String,
+    pub since: serde_json::Number,
+    pub explicit: bool,
+    pub connected: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connecting: Option<bool>,
+    pub token_expires_at: serde_json::Number,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed_via: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant6WatchesItemVariant1 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "task_id", "since", "explicit", "connected", "connecting", "token_expires_at", "armed_via"];
+}
+
+impl Serialize for ArtifactOutputVariant6WatchesItemVariant1 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant6WatchesItemVariant1Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant6WatchesItemVariant1 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant6WatchesItemVariant1Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ArtifactOutputVariant6WatchesItemVariant2Rail {
+    /// `durable_wake`
+    DurableWake,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ArtifactOutputVariant6WatchesItemVariant2Rail {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::DurableWake => "durable_wake",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ArtifactOutputVariant6WatchesItemVariant2Rail {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant6WatchesItemVariant2Rail {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "durable_wake" => Self::DurableWake,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant6WatchesItemVariant2 {
+    pub url: String,
+    pub rail: ArtifactOutputVariant6WatchesItemVariant2Rail,
+    pub trigger_id: String,
+    pub since: String,
+    pub events: Option<Vec<String>>,
+    pub restored: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant6WatchesItemVariant2")]
+struct ArtifactOutputVariant6WatchesItemVariant2Wire {
+    pub url: String,
+    pub rail: ArtifactOutputVariant6WatchesItemVariant2Rail,
+    pub trigger_id: String,
+    pub since: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub events: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restored: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant6WatchesItemVariant2 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "rail", "trigger_id", "since", "events", "restored"];
+}
+
+impl Serialize for ArtifactOutputVariant6WatchesItemVariant2 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant6WatchesItemVariant2Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant6WatchesItemVariant2 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant6WatchesItemVariant2Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ArtifactOutputVariant6WatchesItemVariant3Rail {
+    /// `live_stopped`
+    LiveStopped,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ArtifactOutputVariant6WatchesItemVariant3Rail {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::LiveStopped => "live_stopped",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ArtifactOutputVariant6WatchesItemVariant3Rail {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant6WatchesItemVariant3Rail {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "live_stopped" => Self::LiveStopped,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant6WatchesItemVariant3 {
+    pub url: String,
+    pub rail: ArtifactOutputVariant6WatchesItemVariant3Rail,
+    pub since: Option<serde_json::Number>,
+    pub explicit: Option<bool>,
+    pub armed_via: Option<String>,
+    pub stop_kind: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant6WatchesItemVariant3")]
+struct ArtifactOutputVariant6WatchesItemVariant3Wire {
+    pub url: String,
+    pub rail: ArtifactOutputVariant6WatchesItemVariant3Rail,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explicit: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed_via: Option<String>,
+    pub stop_kind: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant6WatchesItemVariant3 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "rail", "since", "explicit", "armed_via", "stop_kind"];
+}
+
+impl Serialize for ArtifactOutputVariant6WatchesItemVariant3 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant6WatchesItemVariant3Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant6WatchesItemVariant3 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant6WatchesItemVariant3Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArtifactOutputVariant6WatchesItem {
+    Variant1(ArtifactOutputVariant6WatchesItemVariant1),
+    Variant2(ArtifactOutputVariant6WatchesItemVariant2),
+    Variant3(ArtifactOutputVariant6WatchesItemVariant3),
+    /// A value matching none of the pinned upstream shapes exactly; it round-trips unchanged.
+    Unknown(serde_json::Value),
+}
+
+impl Serialize for ArtifactOutputVariant6WatchesItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Variant1(inner) => inner.serialize(serializer),
+            Self::Variant2(inner) => inner.serialize(serializer),
+            Self::Variant3(inner) => inner.serialize(serializer),
+            Self::Unknown(inner) => inner.serialize(serializer),
+        }
+    }
+}
+
+impl ArtifactOutputVariant6WatchesItem {
+    /// Decodes `value` into the declared member that reproduces it exactly with the fewest
+    /// undeclared keys, earliest declared on ties, or `None` when no member matches.
+    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
+        let mut best: Option<(usize, Self)> = None;
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6WatchesItemVariant1>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant6WatchesItemVariant1::KNOWN_KEYS), Self::Variant1(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6WatchesItemVariant2>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant6WatchesItemVariant2::KNOWN_KEYS), Self::Variant2(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6WatchesItemVariant3>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant6WatchesItemVariant3::KNOWN_KEYS), Self::Variant3(inner))));
+        best
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant6WatchesItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match Self::best_match(&value) {
+            Some((_, matched)) => matched,
+            None => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant6ArmsItem {
+    pub url: String,
+    pub rail: Option<String>,
+    pub state: String,
+    pub reconnect: Option<bool>,
+    pub failures: Option<serde_json::Number>,
+    pub max_failures: Option<serde_json::Number>,
+    pub next_in_s: Option<serde_json::Number>,
+    pub last_failure: Option<String>,
+    pub reason: Option<String>,
+    pub detail: Option<String>,
+    pub server_message: Option<String>,
+    pub at: Option<serde_json::Number>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant6ArmsItem")]
+struct ArtifactOutputVariant6ArmsItemWire {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rail: Option<String>,
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconnect: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failures: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_failures: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_in_s: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_failure: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<serde_json::Number>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant6ArmsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "rail", "state", "reconnect", "failures", "max_failures", "next_in_s", "last_failure", "reason", "detail", "server_message", "at"];
+}
+
+impl Serialize for ArtifactOutputVariant6ArmsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant6ArmsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant6ArmsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant6ArmsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant6 {
+    pub watches: Vec<ArtifactOutputVariant6WatchesItem>,
+    pub filter_url: Option<String>,
+    pub arms: Option<Vec<ArtifactOutputVariant6ArmsItem>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant6")]
+struct ArtifactOutputVariant6Wire {
+    pub watches: Vec<ArtifactOutputVariant6WatchesItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arms: Option<Vec<ArtifactOutputVariant6ArmsItem>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant6 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["watches", "filter_url", "arms"];
+}
+
+impl Serialize for ArtifactOutputVariant6 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant6Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant6 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant6Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant7Written {
+    pub url: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant7Written")]
+struct ArtifactOutputVariant7WrittenWire {
+    pub url: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant7Written {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url"];
+}
+
+impl Serialize for ArtifactOutputVariant7Written {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant7WrittenWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant7Written {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant7WrittenWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant7AssetUpload {
+    pub id: String,
+    pub url: String,
+    pub size_bytes: serde_json::Number,
+    pub content_type: String,
+    pub sha256: Option<String>,
+    pub file_name: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant7AssetUpload")]
+struct ArtifactOutputVariant7AssetUploadWire {
+    pub id: String,
+    pub url: String,
+    pub size_bytes: serde_json::Number,
+    pub content_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    pub file_name: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant7AssetUpload {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["id", "url", "size_bytes", "content_type", "sha256", "file_name"];
+}
+
+impl Serialize for ArtifactOutputVariant7AssetUpload {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant7AssetUploadWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant7AssetUpload {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant7AssetUploadWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant7 {
+    pub written: Option<ArtifactOutputVariant7Written>,
+    pub owned: Option<bool>,
+    pub asset_upload: ArtifactOutputVariant7AssetUpload,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant7")]
+struct ArtifactOutputVariant7Wire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written: Option<ArtifactOutputVariant7Written>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned: Option<bool>,
+    pub asset_upload: ArtifactOutputVariant7AssetUpload,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant7 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["written", "owned", "asset_upload"];
+}
+
+impl Serialize for ArtifactOutputVariant7 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant7Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant7 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant7Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant8Written {
+    pub url: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant8Written")]
+struct ArtifactOutputVariant8WrittenWire {
+    pub url: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant8Written {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url"];
+}
+
+impl Serialize for ArtifactOutputVariant8Written {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant8WrittenWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant8Written {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant8WrittenWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ArtifactOutputVariant8AssetUploadsResultsItemUploadedStatus {
+    /// `uploaded`
+    Uploaded,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ArtifactOutputVariant8AssetUploadsResultsItemUploadedStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Uploaded => "uploaded",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ArtifactOutputVariant8AssetUploadsResultsItemUploadedStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant8AssetUploadsResultsItemUploadedStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "uploaded" => Self::Uploaded,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant8AssetUploadsResultsItemUploaded {
+    pub file_path: String,
+    pub status: ArtifactOutputVariant8AssetUploadsResultsItemUploadedStatus,
+    pub id: String,
+    pub url: String,
+    pub size_bytes: serde_json::Number,
+    pub content_type: String,
+    pub sha256: Option<String>,
+    pub file_name: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant8AssetUploadsResultsItemUploaded")]
+struct ArtifactOutputVariant8AssetUploadsResultsItemUploadedWire {
+    pub file_path: String,
+    pub status: ArtifactOutputVariant8AssetUploadsResultsItemUploadedStatus,
+    pub id: String,
+    pub url: String,
+    pub size_bytes: serde_json::Number,
+    pub content_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    pub file_name: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant8AssetUploadsResultsItemUploaded {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["file_path", "status", "id", "url", "size_bytes", "content_type", "sha256", "file_name"];
+}
+
+impl Serialize for ArtifactOutputVariant8AssetUploadsResultsItemUploaded {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant8AssetUploadsResultsItemUploadedWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant8AssetUploadsResultsItemUploaded {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant8AssetUploadsResultsItemUploadedWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttemptedStatus {
+    /// `failed`
+    Failed,
+    /// `not_attempted`
+    NotAttempted,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttemptedStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Failed => "failed",
+            Self::NotAttempted => "not_attempted",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttemptedStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttemptedStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "failed" => Self::Failed,
+            "not_attempted" => Self::NotAttempted,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted {
+    pub file_path: String,
+    pub status: ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttemptedStatus,
+    pub reason: String,
+    pub message: String,
+    pub may_be_stored: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted")]
+struct ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttemptedWire {
+    pub file_path: String,
+    pub status: ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttemptedStatus,
+    pub reason: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub may_be_stored: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["file_path", "status", "reason", "message", "may_be_stored"];
+}
+
+impl Serialize for ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttemptedWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttemptedWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArtifactOutputVariant8AssetUploadsResultsItem {
+    Uploaded(ArtifactOutputVariant8AssetUploadsResultsItemUploaded),
+    FailedOrNotAttempted(ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted),
+    /// A value matching none of the pinned upstream shapes exactly; it round-trips unchanged.
+    Unknown(serde_json::Value),
+}
+
+impl Serialize for ArtifactOutputVariant8AssetUploadsResultsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Uploaded(inner) => inner.serialize(serializer),
+            Self::FailedOrNotAttempted(inner) => inner.serialize(serializer),
+            Self::Unknown(inner) => inner.serialize(serializer),
+        }
+    }
+}
+
+impl ArtifactOutputVariant8AssetUploadsResultsItem {
+    /// Decodes `value` into the declared member that reproduces it exactly with the fewest
+    /// undeclared keys, earliest declared on ties, or `None` when no member matches.
+    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
+        let mut best: Option<(usize, Self)> = None;
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant8AssetUploadsResultsItemUploaded>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant8AssetUploadsResultsItemUploaded::KNOWN_KEYS), Self::Uploaded(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant8AssetUploadsResultsItemFailedOrNotAttempted::KNOWN_KEYS), Self::FailedOrNotAttempted(inner))));
+        best
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant8AssetUploadsResultsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match Self::best_match(&value) {
+            Some((_, matched)) => matched,
+            None => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant8AssetUploads {
+    pub url: String,
+    pub results: Vec<ArtifactOutputVariant8AssetUploadsResultsItem>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant8AssetUploads")]
+struct ArtifactOutputVariant8AssetUploadsWire {
+    pub url: String,
+    pub results: Vec<ArtifactOutputVariant8AssetUploadsResultsItem>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant8AssetUploads {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "results"];
+}
+
+impl Serialize for ArtifactOutputVariant8AssetUploads {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant8AssetUploadsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant8AssetUploads {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant8AssetUploadsWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant8 {
+    pub written: Option<ArtifactOutputVariant8Written>,
+    pub owned: Option<bool>,
+    pub asset_uploads: ArtifactOutputVariant8AssetUploads,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant8")]
+struct ArtifactOutputVariant8Wire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written: Option<ArtifactOutputVariant8Written>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned: Option<bool>,
+    pub asset_uploads: ArtifactOutputVariant8AssetUploads,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant8 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["written", "owned", "asset_uploads"];
+}
+
+impl Serialize for ArtifactOutputVariant8 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant8Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant8 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant8Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant9AssetListAssetsItem {
+    pub id: String,
+    pub url: String,
+    pub content_type: String,
+    pub size_bytes: serde_json::Number,
+    pub sha256: Option<String>,
+    pub created_at: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant9AssetListAssetsItem")]
+struct ArtifactOutputVariant9AssetListAssetsItemWire {
+    pub id: String,
+    pub url: String,
+    pub content_type: String,
+    pub size_bytes: serde_json::Number,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    pub created_at: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant9AssetListAssetsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["id", "url", "content_type", "size_bytes", "sha256", "created_at"];
+}
+
+impl Serialize for ArtifactOutputVariant9AssetListAssetsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant9AssetListAssetsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant9AssetListAssetsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant9AssetListAssetsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant9AssetListUsage {
+    pub files: serde_json::Number,
+    pub bytes: serde_json::Number,
+    pub max_files: serde_json::Number,
+    pub max_bytes: serde_json::Number,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant9AssetListUsage")]
+struct ArtifactOutputVariant9AssetListUsageWire {
+    pub files: serde_json::Number,
+    pub bytes: serde_json::Number,
+    pub max_files: serde_json::Number,
+    pub max_bytes: serde_json::Number,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant9AssetListUsage {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["files", "bytes", "max_files", "max_bytes"];
+}
+
+impl Serialize for ArtifactOutputVariant9AssetListUsage {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant9AssetListUsageWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant9AssetListUsage {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant9AssetListUsageWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant9AssetList {
+    pub url: String,
+    pub assets: Vec<ArtifactOutputVariant9AssetListAssetsItem>,
+    pub usage: ArtifactOutputVariant9AssetListUsage,
+    pub next: Option<String>,
+    pub cowritten: Option<bool>,
+    pub outside_writer: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant9AssetList")]
+struct ArtifactOutputVariant9AssetListWire {
+    pub url: String,
+    pub assets: Vec<ArtifactOutputVariant9AssetListAssetsItem>,
+    pub usage: ArtifactOutputVariant9AssetListUsage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cowritten: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outside_writer: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant9AssetList {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url", "assets", "usage", "next", "cowritten", "outside_writer"];
+}
+
+impl Serialize for ArtifactOutputVariant9AssetList {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant9AssetListWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant9AssetList {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant9AssetListWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant9 {
+    pub asset_list: ArtifactOutputVariant9AssetList,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant9")]
+struct ArtifactOutputVariant9Wire {
+    pub asset_list: ArtifactOutputVariant9AssetList,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant9 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["asset_list"];
+}
+
+impl Serialize for ArtifactOutputVariant9 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant9Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant9 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant9Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant10AssetRead {
+    pub id: String,
+    pub path: String,
+    pub size_bytes: serde_json::Number,
+    pub content_type: String,
+    pub sha256: String,
+    pub cowritten: Option<bool>,
+    pub outside_writer: Option<bool>,
+    pub public_read: Option<bool>,
+    pub foreign: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant10AssetRead")]
+struct ArtifactOutputVariant10AssetReadWire {
+    pub id: String,
+    pub path: String,
+    pub size_bytes: serde_json::Number,
+    pub content_type: String,
+    pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cowritten: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outside_writer: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_read: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foreign: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant10AssetRead {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["id", "path", "size_bytes", "content_type", "sha256", "cowritten", "outside_writer", "public_read", "foreign"];
+}
+
+impl Serialize for ArtifactOutputVariant10AssetRead {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant10AssetReadWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant10AssetRead {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant10AssetReadWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant10 {
+    pub asset_read: ArtifactOutputVariant10AssetRead,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant10")]
+struct ArtifactOutputVariant10Wire {
+    pub asset_read: ArtifactOutputVariant10AssetRead,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant10 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["asset_read"];
+}
+
+impl Serialize for ArtifactOutputVariant10 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant10Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant10 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant10Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant11Written {
+    pub url: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant11Written")]
+struct ArtifactOutputVariant11WrittenWire {
+    pub url: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant11Written {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["url"];
+}
+
+impl Serialize for ArtifactOutputVariant11Written {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant11WrittenWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant11Written {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant11WrittenWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant11AssetDelete {
+    pub id: String,
+    pub deleted: bool,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant11AssetDelete")]
+struct ArtifactOutputVariant11AssetDeleteWire {
+    pub id: String,
+    pub deleted: bool,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant11AssetDelete {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["id", "deleted"];
+}
+
+impl Serialize for ArtifactOutputVariant11AssetDelete {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant11AssetDeleteWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant11AssetDelete {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant11AssetDeleteWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant11 {
+    pub written: Option<ArtifactOutputVariant11Written>,
+    pub owned: Option<bool>,
+    pub asset_delete: ArtifactOutputVariant11AssetDelete,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant11")]
+struct ArtifactOutputVariant11Wire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written: Option<ArtifactOutputVariant11Written>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned: Option<bool>,
+    pub asset_delete: ArtifactOutputVariant11AssetDelete,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant11 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["written", "owned", "asset_delete"];
+}
+
+impl Serialize for ArtifactOutputVariant11 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant11Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant11 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant11Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ArtifactOutputVariant12PinAction {
+    /// `pin`
+    Pin,
+    /// `unpin`
+    Unpin,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ArtifactOutputVariant12PinAction {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pin => "pin",
+            Self::Unpin => "unpin",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ArtifactOutputVariant12PinAction {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant12PinAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "pin" => Self::Pin,
+            "unpin" => Self::Unpin,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant12Pin {
+    pub action: ArtifactOutputVariant12PinAction,
+    pub url: String,
+    pub pinned: bool,
+    pub title: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant12Pin")]
+struct ArtifactOutputVariant12PinWire {
+    pub action: ArtifactOutputVariant12PinAction,
+    pub url: String,
+    pub pinned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant12Pin {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["action", "url", "pinned", "title"];
+}
+
+impl Serialize for ArtifactOutputVariant12Pin {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant12PinWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant12Pin {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant12PinWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactOutputVariant12 {
+    pub pin: ArtifactOutputVariant12Pin,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ArtifactOutputVariant12")]
+struct ArtifactOutputVariant12Wire {
+    pub pin: ArtifactOutputVariant12Pin,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ArtifactOutputVariant12 {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["pin"];
+}
+
+impl Serialize for ArtifactOutputVariant12 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ArtifactOutputVariant12Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutputVariant12 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ArtifactOutputVariant12Wire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArtifactOutput {
+    Variant1(ArtifactOutputVariant1),
+    Variant2(ArtifactOutputVariant2),
+    Variant3(ArtifactOutputVariant3),
+    Variant4(ArtifactOutputVariant4),
+    Variant5(ArtifactOutputVariant5),
+    Variant6(ArtifactOutputVariant6),
+    Variant7(ArtifactOutputVariant7),
+    Variant8(ArtifactOutputVariant8),
+    Variant9(ArtifactOutputVariant9),
+    Variant10(ArtifactOutputVariant10),
+    Variant11(ArtifactOutputVariant11),
+    Variant12(ArtifactOutputVariant12),
+    /// A value matching none of the pinned upstream shapes exactly; it round-trips unchanged.
+    Unknown(serde_json::Value),
+}
+
+impl Serialize for ArtifactOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Variant1(inner) => inner.serialize(serializer),
+            Self::Variant2(inner) => inner.serialize(serializer),
+            Self::Variant3(inner) => inner.serialize(serializer),
+            Self::Variant4(inner) => inner.serialize(serializer),
+            Self::Variant5(inner) => inner.serialize(serializer),
+            Self::Variant6(inner) => inner.serialize(serializer),
+            Self::Variant7(inner) => inner.serialize(serializer),
+            Self::Variant8(inner) => inner.serialize(serializer),
+            Self::Variant9(inner) => inner.serialize(serializer),
+            Self::Variant10(inner) => inner.serialize(serializer),
+            Self::Variant11(inner) => inner.serialize(serializer),
+            Self::Variant12(inner) => inner.serialize(serializer),
+            Self::Unknown(inner) => inner.serialize(serializer),
+        }
+    }
+}
+
+impl ArtifactOutput {
+    /// Decodes `value` into the declared member that reproduces it exactly with the fewest
+    /// undeclared keys, earliest declared on ties, or `None` when no member matches.
+    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
+        let mut best: Option<(usize, Self)> = None;
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant1>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant1::KNOWN_KEYS), Self::Variant1(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant2>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant2::KNOWN_KEYS), Self::Variant2(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant3>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant3::KNOWN_KEYS), Self::Variant3(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant4>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant4::KNOWN_KEYS), Self::Variant4(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant5>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant5::KNOWN_KEYS), Self::Variant5(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant6>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant6::KNOWN_KEYS), Self::Variant6(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant7>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant7::KNOWN_KEYS), Self::Variant7(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant8>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant8::KNOWN_KEYS), Self::Variant8(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant9>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant9::KNOWN_KEYS), Self::Variant9(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant10>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant10::KNOWN_KEYS), Self::Variant10(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant11>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant11::KNOWN_KEYS), Self::Variant11(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ArtifactOutputVariant12>(value).map(|inner| (super::support::unknown_keys(value, ArtifactOutputVariant12::KNOWN_KEYS), Self::Variant12(inner))));
+        best
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match Self::best_match(&value) {
+            Some((_, matched)) => matched,
+            None => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteTriggerOutput {
+    pub status: serde_json::Number,
+    pub json: String,
+    pub summary: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "RemoteTriggerOutput")]
+struct RemoteTriggerOutputWire {
+    pub status: serde_json::Number,
+    pub json: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl RemoteTriggerOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["status", "json", "summary"];
+}
+
+impl Serialize for RemoteTriggerOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(RemoteTriggerOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RemoteTriggerOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = RemoteTriggerOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShowOnboardingRolePickerOutput {
+    pub role: Option<String>,
+    pub dismissed: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ShowOnboardingRolePickerOutput")]
+struct ShowOnboardingRolePickerOutputWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dismissed: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ShowOnboardingRolePickerOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["role", "dismissed"];
+}
+
+impl Serialize for ShowOnboardingRolePickerOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ShowOnboardingRolePickerOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ShowOnboardingRolePickerOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ShowOnboardingRolePickerOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum OfferChromeSetupOutputOutcome {
+    /// `connected`
+    Connected,
+    /// `not_now`
+    NotNow,
+    /// `no_attempt_yet`
+    NoAttemptYet,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl OfferChromeSetupOutputOutcome {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Connected => "connected",
+            Self::NotNow => "not_now",
+            Self::NoAttemptYet => "no_attempt_yet",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for OfferChromeSetupOutputOutcome {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for OfferChromeSetupOutputOutcome {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "connected" => Self::Connected,
+            "not_now" => Self::NotNow,
+            "no_attempt_yet" => Self::NoAttemptYet,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OfferChromeSetupOutput {
+    pub outcome: OfferChromeSetupOutputOutcome,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "OfferChromeSetupOutput")]
+struct OfferChromeSetupOutputWire {
+    pub outcome: OfferChromeSetupOutputOutcome,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl OfferChromeSetupOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["outcome"];
+}
+
+impl Serialize for OfferChromeSetupOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(OfferChromeSetupOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for OfferChromeSetupOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = OfferChromeSetupOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadNotificationsOutputNotificationsItem {
+    /// Server-assigned stable id - the dedup key across redeliveries.
+    pub notification_id: String,
+    /// Server-attested source token: "github_webhook" | "trigger_fire" | "mcp_send_message" (open set; unknown well-formed tokens pass through verbatim, off-grammar values coerce to "unknown").
+    pub origin: String,
+    /// RFC3339 timestamp of when the backend queued it.
+    pub queued_at: String,
+    /// Verbatim notification body.
+    pub content: String,
+    /// RFC3339 timestamp, by this machine's clock, of when the notification reached this session's queue. Missing from results saved before this field existed.
+    pub arrived_at: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReadNotificationsOutputNotificationsItem")]
+struct ReadNotificationsOutputNotificationsItemWire {
+    pub notification_id: String,
+    pub origin: String,
+    pub queued_at: String,
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arrived_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReadNotificationsOutputNotificationsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["notification_id", "origin", "queued_at", "content", "arrived_at"];
+}
+
+impl Serialize for ReadNotificationsOutputNotificationsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReadNotificationsOutputNotificationsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReadNotificationsOutputNotificationsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReadNotificationsOutputNotificationsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadNotificationsOutput {
+    pub notifications: Vec<ReadNotificationsOutputNotificationsItem>,
+    /// Notifications still queued after this drain (drains are size-budgeted); call the tool again to read them.
+    pub remaining: serde_json::Number,
+    /// RFC3339 timestamp, by this machine's clock, of when this call read the queue. Missing from results saved before this field existed.
+    pub read_at: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ReadNotificationsOutput")]
+struct ReadNotificationsOutputWire {
+    pub notifications: Vec<ReadNotificationsOutputNotificationsItem>,
+    pub remaining: serde_json::Number,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ReadNotificationsOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["notifications", "remaining", "read_at"];
+}
+
+impl Serialize for ReadNotificationsOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ReadNotificationsOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ReadNotificationsOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ReadNotificationsOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScheduleWakeupOutput {
+    /// Epoch ms timestamp when the next wakeup will fire
+    pub scheduled_for: serde_json::Number,
+    /// Actual delay used after clamping to runtime bounds
+    pub clamped_delay_seconds: serde_json::Number,
+    /// True if the requested delaySeconds was outside \[60, 3600\]
+    pub was_clamped: bool,
+    /// True when the model ended the loop via `stop: true`
+    pub stopped: Option<bool>,
+    /// How many pending dynamic-loop wakeups stop:true cancelled. 0 means nothing was pending - a recurring /loop cron is not cancelled by stop:true.
+    pub cancelled_wakeups: Option<serde_json::Number>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ScheduleWakeupOutput")]
+struct ScheduleWakeupOutputWire {
+    #[serde(rename = "scheduledFor")]
+    pub scheduled_for: serde_json::Number,
+    #[serde(rename = "clampedDelaySeconds")]
+    pub clamped_delay_seconds: serde_json::Number,
+    #[serde(rename = "wasClamped")]
+    pub was_clamped: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<bool>,
+    #[serde(rename = "cancelledWakeups", default, skip_serializing_if = "Option::is_none")]
+    pub cancelled_wakeups: Option<serde_json::Number>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ScheduleWakeupOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["scheduledFor", "clampedDelaySeconds", "wasClamped", "stopped", "cancelledWakeups"];
+}
+
+impl Serialize for ScheduleWakeupOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ScheduleWakeupOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ScheduleWakeupOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ScheduleWakeupOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MonitorOutput {
+    /// ID of the background monitor task.
+    pub task_id: String,
+    /// Timeout deadline in milliseconds (0 when persistent).
+    pub timeout_ms: serde_json::Number,
+    /// No timeout - runs until TaskStop or session end.
+    pub persistent: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "MonitorOutput")]
+struct MonitorOutputWire {
+    #[serde(rename = "taskId")]
+    pub task_id: String,
+    #[serde(rename = "timeoutMs")]
+    pub timeout_ms: serde_json::Number,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistent: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl MonitorOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["taskId", "timeoutMs", "persistent"];
+}
+
+impl Serialize for MonitorOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(MonitorOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for MonitorOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = MonitorOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProposeSkillsOutput {
+    /// Number of proposals shown on the review card
+    pub proposal_count: serde_json::Number,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProposeSkillsOutput")]
+struct ProposeSkillsOutputWire {
+    #[serde(rename = "proposalCount")]
+    pub proposal_count: serde_json::Number,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProposeSkillsOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["proposalCount"];
+}
+
+impl Serialize for ProposeSkillsOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProposeSkillsOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProposeSkillsOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProposeSkillsOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProposeGoalOutput {
+    /// The condition shown to the user for approval, or set directly when ask_user was false
+    pub condition: String,
+    /// Whether the user was asked for approval (true) or the goal was set directly (false)
+    pub ask_user: bool,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProposeGoalOutput")]
+struct ProposeGoalOutputWire {
+    pub condition: String,
+    #[serde(rename = "askUser")]
+    pub ask_user: bool,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProposeGoalOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["condition", "askUser"];
+}
+
+impl Serialize for ProposeGoalOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProposeGoalOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProposeGoalOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProposeGoalOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnterPlanModeOutput {
+    /// Confirmation that plan mode was entered
+    pub message: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "EnterPlanModeOutput")]
+struct EnterPlanModeOutputWire {
+    pub message: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl EnterPlanModeOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["message"];
+}
+
+impl Serialize for EnterPlanModeOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(EnterPlanModeOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for EnterPlanModeOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = EnterPlanModeOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum WorkflowOutputStatus {
+    /// `async_launched`
+    AsyncLaunched,
+    /// `remote_launched`
+    RemoteLaunched,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl WorkflowOutputStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::AsyncLaunched => "async_launched",
+            Self::RemoteLaunched => "remote_launched",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for WorkflowOutputStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkflowOutputStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "async_launched" => Self::AsyncLaunched,
+            "remote_launched" => Self::RemoteLaunched,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum WorkflowOutputTaskType {
+    /// `local_workflow`
+    LocalWorkflow,
+    /// `remote_agent`
+    RemoteAgent,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl WorkflowOutputTaskType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::LocalWorkflow => "local_workflow",
+            Self::RemoteAgent => "remote_agent",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for WorkflowOutputTaskType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkflowOutputTaskType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "local_workflow" => Self::LocalWorkflow,
+            "remote_agent" => Self::RemoteAgent,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkflowOutput {
+    pub status: WorkflowOutputStatus,
+    pub task_id: String,
+    /// TaskType of the registered background task - 'local_workflow' for in-process runs, 'remote_agent' when remote:true dispatches to CCR. Set on all new writes; absent only on transcripts written before this field existed.
+    pub task_type: Option<WorkflowOutputTaskType>,
+    /// meta.name from the workflow script - same value as task_started.workflow_name. Set on all new writes; absent only on transcripts written before this field existed.
+    pub workflow_name: Option<String>,
+    /// Local workflow run identifier for resumeFromRunId. Absent for remote_launched (the CCR session URL is the resume handle there) and on transcripts written before this field existed.
+    pub run_id: Option<String>,
+    pub summary: Option<String>,
+    /// Directory where subagent transcripts are written during execution
+    pub transcript_dir: Option<String>,
+    /// Path to the persisted workflow script for this invocation. Editable via Write/Edit; pass back as `scriptPath` to re-run without resending the script.
+    pub script_path: Option<String>,
+    /// CCR session URL when status is remote_launched
+    pub session_url: Option<String>,
+    /// Non-blocking heads-up (e.g. local git state diverges from the pushed branch the cloud session will clone)
+    pub warning: Option<String>,
+    /// Set if syntax check failed
+    pub error: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "WorkflowOutput")]
+struct WorkflowOutputWire {
+    pub status: WorkflowOutputStatus,
+    #[serde(rename = "taskId")]
+    pub task_id: String,
+    #[serde(rename = "taskType", default, skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<WorkflowOutputTaskType>,
+    #[serde(rename = "workflowName", default, skip_serializing_if = "Option::is_none")]
+    pub workflow_name: Option<String>,
+    #[serde(rename = "runId", default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(rename = "transcriptDir", default, skip_serializing_if = "Option::is_none")]
+    pub transcript_dir: Option<String>,
+    #[serde(rename = "scriptPath", default, skip_serializing_if = "Option::is_none")]
+    pub script_path: Option<String>,
+    #[serde(rename = "sessionUrl", default, skip_serializing_if = "Option::is_none")]
+    pub session_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl WorkflowOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["status", "taskId", "taskType", "workflowName", "runId", "summary", "transcriptDir", "scriptPath", "sessionUrl", "warning", "error"];
+}
+
+impl Serialize for WorkflowOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(WorkflowOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkflowOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = WorkflowOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CronCreateOutput {
+    pub id: String,
+    pub human_schedule: String,
+    pub recurring: bool,
+    pub durable: Option<bool>,
+    /// Epoch ms of the job's next run, the scheduler's per-job offset included
+    pub next_fire_at: Option<serde_json::Number>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "CronCreateOutput")]
+struct CronCreateOutputWire {
+    pub id: String,
+    #[serde(rename = "humanSchedule")]
+    pub human_schedule: String,
+    pub recurring: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable: Option<bool>,
+    #[serde(rename = "nextFireAt", default, skip_serializing_if = "Option::is_none")]
+    pub next_fire_at: Option<serde_json::Number>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl CronCreateOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["id", "humanSchedule", "recurring", "durable", "nextFireAt"];
+}
+
+impl Serialize for CronCreateOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(CronCreateOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CronCreateOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = CronCreateOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CronDeleteOutput {
+    pub id: String,
+    pub ended_loop_wakeup: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "CronDeleteOutput")]
+struct CronDeleteOutputWire {
+    pub id: String,
+    #[serde(rename = "endedLoopWakeup", default, skip_serializing_if = "Option::is_none")]
+    pub ended_loop_wakeup: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl CronDeleteOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["id", "endedLoopWakeup"];
+}
+
+impl Serialize for CronDeleteOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(CronDeleteOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CronDeleteOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = CronDeleteOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CronListOutputJobsItem {
+    pub id: String,
+    pub cron: String,
+    pub human_schedule: String,
+    pub prompt: String,
+    pub recurring: Option<bool>,
+    pub durable: Option<bool>,
+    /// Epoch ms of the job's next run, the scheduler's per-job offset included
+    pub next_fire_at: Option<serde_json::Number>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "CronListOutputJobsItem")]
+struct CronListOutputJobsItemWire {
+    pub id: String,
+    pub cron: String,
+    #[serde(rename = "humanSchedule")]
+    pub human_schedule: String,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurring: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable: Option<bool>,
+    #[serde(rename = "nextFireAt", default, skip_serializing_if = "Option::is_none")]
+    pub next_fire_at: Option<serde_json::Number>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl CronListOutputJobsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["id", "cron", "humanSchedule", "prompt", "recurring", "durable", "nextFireAt"];
+}
+
+impl Serialize for CronListOutputJobsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(CronListOutputJobsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CronListOutputJobsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = CronListOutputJobsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CronListOutput {
+    pub jobs: Vec<CronListOutputJobsItem>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "CronListOutput")]
+struct CronListOutputWire {
+    pub jobs: Vec<CronListOutputJobsItem>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl CronListOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["jobs"];
+}
+
+impl Serialize for CronListOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(CronListOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CronListOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = CronListOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum PushNotificationOutputDisabledReason {
+    /// `config_off`
+    ConfigOff,
+    /// `user_present`
+    UserPresent,
+    /// `no_transport`
+    NoTransport,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl PushNotificationOutputDisabledReason {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ConfigOff => "config_off",
+            Self::UserPresent => "user_present",
+            Self::NoTransport => "no_transport",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for PushNotificationOutputDisabledReason {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for PushNotificationOutputDisabledReason {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "config_off" => Self::ConfigOff,
+            "user_present" => Self::UserPresent,
+            "no_transport" => Self::NoTransport,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PushNotificationOutput {
+    pub message: String,
+    pub push_sent: Option<bool>,
+    pub local_sent: Option<bool>,
+    pub disabled_reason: Option<PushNotificationOutputDisabledReason>,
+    /// ISO timestamp captured at tool execution on the emitting process. Optional - resumed sessions replay pre-sentAt outputs verbatim.
+    pub sent_at: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "PushNotificationOutput")]
+struct PushNotificationOutputWire {
+    pub message: String,
+    #[serde(rename = "pushSent", default, skip_serializing_if = "Option::is_none")]
+    pub push_sent: Option<bool>,
+    #[serde(rename = "localSent", default, skip_serializing_if = "Option::is_none")]
+    pub local_sent: Option<bool>,
+    #[serde(rename = "disabledReason", default, skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<PushNotificationOutputDisabledReason>,
+    #[serde(rename = "sentAt", default, skip_serializing_if = "Option::is_none")]
+    pub sent_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl PushNotificationOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["message", "pushSent", "localSent", "disabledReason", "sentAt"];
+}
+
+impl Serialize for PushNotificationOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(PushNotificationOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PushNotificationOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = PushNotificationOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaudeDesignOutput {
+    pub operation: String,
+    pub content: Vec<serde_json::Map<String, serde_json::Value>>,
+    pub is_error: Option<bool>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ClaudeDesignOutput")]
+struct ClaudeDesignOutputWire {
+    pub operation: String,
+    pub content: Vec<serde_json::Map<String, serde_json::Value>>,
+    #[serde(rename = "isError", default, skip_serializing_if = "Option::is_none")]
+    pub is_error: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ClaudeDesignOutput {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["operation", "content", "isError"];
+}
+
+impl Serialize for ClaudeDesignOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ClaudeDesignOutputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ClaudeDesignOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ClaudeDesignOutputWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectsOutputProjectInfoMethod {
+    /// `project_info`
+    ProjectInfo,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ProjectsOutputProjectInfoMethod {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ProjectInfo => "project_info",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ProjectsOutputProjectInfoMethod {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectInfoMethod {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "project_info" => Self::ProjectInfo,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectInfoDocsItem {
+    pub path: String,
+    pub created_at: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectInfoDocsItem")]
+struct ProjectsOutputProjectInfoDocsItemWire {
+    pub path: String,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectInfoDocsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["path", "created_at"];
+}
+
+impl Serialize for ProjectsOutputProjectInfoDocsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectInfoDocsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectInfoDocsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectInfoDocsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectInfoFilesItem {
+    pub path: String,
+    pub file_kind: String,
+    pub created_at: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectInfoFilesItem")]
+struct ProjectsOutputProjectInfoFilesItemWire {
+    pub path: String,
+    pub file_kind: String,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectInfoFilesItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["path", "file_kind", "created_at"];
+}
+
+impl Serialize for ProjectsOutputProjectInfoFilesItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectInfoFilesItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectInfoFilesItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectInfoFilesItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectInfoSyncSourcesItem {
+    pub r#type: Option<String>,
+    pub config: serde_json::Map<String, serde_json::Value>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectInfoSyncSourcesItem")]
+struct ProjectsOutputProjectInfoSyncSourcesItemWire {
+    #[serde(default)]
+    pub r#type: Option<String>,
+    pub config: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectInfoSyncSourcesItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type", "config"];
+}
+
+impl Serialize for ProjectsOutputProjectInfoSyncSourcesItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectInfoSyncSourcesItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectInfoSyncSourcesItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectInfoSyncSourcesItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectInfoKnowledge {
+    pub knowledge_size: serde_json::Number,
+    pub max_knowledge_size: serde_json::Number,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectInfoKnowledge")]
+struct ProjectsOutputProjectInfoKnowledgeWire {
+    pub knowledge_size: serde_json::Number,
+    pub max_knowledge_size: serde_json::Number,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectInfoKnowledge {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["knowledge_size", "max_knowledge_size"];
+}
+
+impl Serialize for ProjectsOutputProjectInfoKnowledge {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectInfoKnowledgeWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectInfoKnowledge {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectInfoKnowledgeWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectInfo {
+    pub method: ProjectsOutputProjectInfoMethod,
+    pub notice: Option<String>,
+    pub local_file: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub instructions: String,
+    pub docs: Vec<ProjectsOutputProjectInfoDocsItem>,
+    pub files: Option<Vec<ProjectsOutputProjectInfoFilesItem>>,
+    pub sync_sources: Option<Vec<ProjectsOutputProjectInfoSyncSourcesItem>>,
+    pub knowledge: ProjectsOutputProjectInfoKnowledge,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectInfo")]
+struct ProjectsOutputProjectInfoWire {
+    pub method: ProjectsOutputProjectInfoMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_file: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub instructions: String,
+    pub docs: Vec<ProjectsOutputProjectInfoDocsItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<ProjectsOutputProjectInfoFilesItem>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_sources: Option<Vec<ProjectsOutputProjectInfoSyncSourcesItem>>,
+    pub knowledge: ProjectsOutputProjectInfoKnowledge,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectInfo {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "local_file", "name", "description", "instructions", "docs", "files", "sync_sources", "knowledge"];
+}
+
+impl Serialize for ProjectsOutputProjectInfo {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectInfoWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectInfo {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectInfoWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectsOutputProjectReadMethod {
+    /// `project_read`
+    ProjectRead,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ProjectsOutputProjectReadMethod {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ProjectRead => "project_read",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ProjectsOutputProjectReadMethod {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectReadMethod {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "project_read" => Self::ProjectRead,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectRead {
+    pub method: ProjectsOutputProjectReadMethod,
+    pub notice: Option<String>,
+    pub path: String,
+    pub file_kind: Option<String>,
+    pub content: Option<String>,
+    pub local_file: Option<String>,
+    pub created_at: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectRead")]
+struct ProjectsOutputProjectReadWire {
+    pub method: ProjectsOutputProjectReadMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_file: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectRead {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "path", "file_kind", "content", "local_file", "created_at"];
+}
+
+impl Serialize for ProjectsOutputProjectRead {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectReadWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectRead {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectReadWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectsOutputProjectSearchMethod {
+    /// `project_search`
+    ProjectSearch,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ProjectsOutputProjectSearchMethod {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ProjectSearch => "project_search",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ProjectsOutputProjectSearchMethod {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectSearchMethod {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "project_search" => Self::ProjectSearch,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectSearchHitsItem {
+    pub name: Option<String>,
+    pub doc_uuid: Option<String>,
+    pub text: Option<String>,
+    pub image_attached: Option<bool>,
+    pub page: Option<serde_json::Number>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectSearchHitsItem")]
+struct ProjectsOutputProjectSearchHitsItemWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_uuid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_attached: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<serde_json::Number>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectSearchHitsItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["name", "doc_uuid", "text", "image_attached", "page"];
+}
+
+impl Serialize for ProjectsOutputProjectSearchHitsItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectSearchHitsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectSearchHitsItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectSearchHitsItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectSearch {
+    pub method: ProjectsOutputProjectSearchMethod,
+    pub notice: Option<String>,
+    pub rag: bool,
+    pub hits: Option<Vec<ProjectsOutputProjectSearchHitsItem>>,
+    pub docs: Option<Vec<String>>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectSearch")]
+struct ProjectsOutputProjectSearchWire {
+    pub method: ProjectsOutputProjectSearchMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    pub rag: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hits: Option<Vec<ProjectsOutputProjectSearchHitsItem>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectSearch {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "rag", "hits", "docs"];
+}
+
+impl Serialize for ProjectsOutputProjectSearch {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectSearchWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectSearch {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectSearchWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectsOutputProjectWriteMethod {
+    /// `project_write`
+    ProjectWrite,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ProjectsOutputProjectWriteMethod {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ProjectWrite => "project_write",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ProjectsOutputProjectWriteMethod {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectWriteMethod {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "project_write" => Self::ProjectWrite,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectWrite {
+    pub method: ProjectsOutputProjectWriteMethod,
+    pub notice: Option<String>,
+    pub path: String,
+    pub doc_uuid: String,
+    pub replaced: bool,
+    pub present_to_user: Option<bool>,
+    pub local_path: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectWrite")]
+struct ProjectsOutputProjectWriteWire {
+    pub method: ProjectsOutputProjectWriteMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    pub path: String,
+    pub doc_uuid: String,
+    pub replaced: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub present_to_user: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectWrite {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "path", "doc_uuid", "replaced", "present_to_user", "local_path"];
+}
+
+impl Serialize for ProjectsOutputProjectWrite {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectWriteWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectWrite {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectWriteWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectsOutputProjectDeleteMethod {
+    /// `project_delete`
+    ProjectDelete,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ProjectsOutputProjectDeleteMethod {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ProjectDelete => "project_delete",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ProjectsOutputProjectDeleteMethod {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectDeleteMethod {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "project_delete" => Self::ProjectDelete,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectDelete {
+    pub method: ProjectsOutputProjectDeleteMethod,
+    pub notice: Option<String>,
+    pub path: String,
+    pub deleted: bool,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectDelete")]
+struct ProjectsOutputProjectDeleteWire {
+    pub method: ProjectsOutputProjectDeleteMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    pub path: String,
+    pub deleted: bool,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectDelete {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "path", "deleted"];
+}
+
+impl Serialize for ProjectsOutputProjectDelete {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectDeleteWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectDelete {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectDeleteWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectsOutputProjectMemoryListMethod {
+    /// `project_memory_list`
+    ProjectMemoryList,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ProjectsOutputProjectMemoryListMethod {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ProjectMemoryList => "project_memory_list",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ProjectsOutputProjectMemoryListMethod {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectMemoryListMethod {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "project_memory_list" => Self::ProjectMemoryList,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectMemoryListFilesItem {
+    pub path: String,
+    pub size_bytes: serde_json::Number,
+    pub updated_at: Option<String>,
+    pub truncated: bool,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectMemoryListFilesItem")]
+struct ProjectsOutputProjectMemoryListFilesItemWire {
+    pub path: String,
+    pub size_bytes: serde_json::Number,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    pub truncated: bool,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectMemoryListFilesItem {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["path", "size_bytes", "updated_at", "truncated"];
+}
+
+impl Serialize for ProjectsOutputProjectMemoryListFilesItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectMemoryListFilesItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectMemoryListFilesItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectMemoryListFilesItemWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectMemoryList {
+    pub method: ProjectsOutputProjectMemoryListMethod,
+    pub notice: Option<String>,
+    pub files: Vec<ProjectsOutputProjectMemoryListFilesItem>,
+    pub truncated: bool,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectMemoryList")]
+struct ProjectsOutputProjectMemoryListWire {
+    pub method: ProjectsOutputProjectMemoryListMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    pub files: Vec<ProjectsOutputProjectMemoryListFilesItem>,
+    pub truncated: bool,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectMemoryList {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "files", "truncated"];
+}
+
+impl Serialize for ProjectsOutputProjectMemoryList {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectMemoryListWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectMemoryList {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectMemoryListWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectsOutputProjectMemoryReadMethod {
+    /// `project_memory_read`
+    ProjectMemoryRead,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl ProjectsOutputProjectMemoryReadMethod {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ProjectMemoryRead => "project_memory_read",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for ProjectsOutputProjectMemoryReadMethod {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectMemoryReadMethod {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "project_memory_read" => Self::ProjectMemoryRead,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsOutputProjectMemoryRead {
+    pub method: ProjectsOutputProjectMemoryReadMethod,
+    pub notice: Option<String>,
+    pub path: String,
+    pub content: Option<String>,
+    pub local_file: Option<String>,
+    pub size_bytes: serde_json::Number,
+    pub updated_at: Option<String>,
+    pub truncated: bool,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "ProjectsOutputProjectMemoryRead")]
+struct ProjectsOutputProjectMemoryReadWire {
+    pub method: ProjectsOutputProjectMemoryReadMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_file: Option<String>,
+    pub size_bytes: serde_json::Number,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    pub truncated: bool,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl ProjectsOutputProjectMemoryRead {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["method", "notice", "path", "content", "local_file", "size_bytes", "updated_at", "truncated"];
+}
+
+impl Serialize for ProjectsOutputProjectMemoryRead {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(ProjectsOutputProjectMemoryReadWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutputProjectMemoryRead {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = ProjectsOutputProjectMemoryReadWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProjectsOutput {
+    ProjectInfo(ProjectsOutputProjectInfo),
+    ProjectRead(ProjectsOutputProjectRead),
+    ProjectSearch(ProjectsOutputProjectSearch),
+    ProjectWrite(ProjectsOutputProjectWrite),
+    ProjectDelete(ProjectsOutputProjectDelete),
+    ProjectMemoryList(ProjectsOutputProjectMemoryList),
+    ProjectMemoryRead(ProjectsOutputProjectMemoryRead),
+    /// A value matching none of the pinned upstream shapes exactly; it round-trips unchanged.
+    Unknown(serde_json::Value),
+}
+
+impl Serialize for ProjectsOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::ProjectInfo(inner) => inner.serialize(serializer),
+            Self::ProjectRead(inner) => inner.serialize(serializer),
+            Self::ProjectSearch(inner) => inner.serialize(serializer),
+            Self::ProjectWrite(inner) => inner.serialize(serializer),
+            Self::ProjectDelete(inner) => inner.serialize(serializer),
+            Self::ProjectMemoryList(inner) => inner.serialize(serializer),
+            Self::ProjectMemoryRead(inner) => inner.serialize(serializer),
+            Self::Unknown(inner) => inner.serialize(serializer),
+        }
+    }
+}
+
+impl ProjectsOutput {
+    /// Decodes `value` into the declared member that reproduces it exactly with the fewest
+    /// undeclared keys, earliest declared on ties, or `None` when no member matches.
+    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {
+        let mut best: Option<(usize, Self)> = None;
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectInfo>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectInfo::KNOWN_KEYS), Self::ProjectInfo(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectRead>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectRead::KNOWN_KEYS), Self::ProjectRead(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectSearch>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectSearch::KNOWN_KEYS), Self::ProjectSearch(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectWrite>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectWrite::KNOWN_KEYS), Self::ProjectWrite(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectDelete>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectDelete::KNOWN_KEYS), Self::ProjectDelete(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectMemoryList>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectMemoryList::KNOWN_KEYS), Self::ProjectMemoryList(inner))));
+        super::support::keep_best(&mut best, super::support::exact::<ProjectsOutputProjectMemoryRead>(value).map(|inner| (super::support::unknown_keys(value, ProjectsOutputProjectMemoryRead::KNOWN_KEYS), Self::ProjectMemoryRead(inner))));
+        best
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectsOutput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match Self::best_match(&value) {
+            Some((_, matched)) => matched,
+            None => Self::Unknown(value),
+        })
     }
 }
