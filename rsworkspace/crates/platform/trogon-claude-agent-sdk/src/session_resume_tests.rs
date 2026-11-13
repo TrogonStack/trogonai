@@ -1,12 +1,20 @@
 use std::{
     error::Error as StdError,
+    ffi::OsString,
     io::{self, Write},
 };
 
 use serde::{Serialize, Serializer};
 
-use super::ResumeWriter;
-use crate::SessionError;
+use super::{
+    AuthSources, ResumeWriter, copy_auth_files, redact_refresh_token, redact_refresh_token_ts,
+    secure_storage_config_dir, strip_settings_for_resume, strip_settings_for_resume_ts,
+};
+use crate::{
+    Environment, EnvironmentMode, SessionError, SummaryDialect,
+    adapters::{NativeFileSystem, TokioProcessSpawner},
+    test_support::FixedEnvironment,
+};
 
 type TestResult = Result<(), Box<dyn StdError>>;
 
@@ -59,10 +67,6 @@ fn encoder_distinguishes_exhausted_writer_budget_from_data_failure() {
 
 #[test]
 fn secure_storage_config_dir_follows_the_typescript_fallback_chain_on_windows_only() {
-    use std::ffi::OsString;
-
-    use super::secure_storage_config_dir;
-    use crate::{Environment, SummaryDialect};
     let typescript = Some(SummaryDialect::TypeScript);
     let configured = |pairs: &[(&str, &str)]| {
         pairs
@@ -119,4 +123,77 @@ fn secure_storage_config_dir_follows_the_typescript_fallback_chain_on_windows_on
     );
     assert_eq!(secure_storage_config_dir(true, None, &env, &process, true), None);
     assert_eq!(secure_storage_config_dir(false, typescript, &env, &process, true), None);
+}
+
+/// Oracle: upstream TypeScript `Ytt` drops `refreshToken` only when JavaScript holds it truthy, and leaves a document
+/// that is not an object as read.
+#[test]
+fn typescript_refresh_token_redaction_follows_javascript_truthiness() {
+    for unchanged in [
+        "[1]",
+        r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":0}}"#,
+        r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":""}}"#,
+    ] {
+        assert_eq!(redact_refresh_token_ts(unchanged.to_owned()), unchanged);
+    }
+    for token in ["1", "0.5", "[]", "{}", "true", r#""r""#] {
+        let credentials = format!(r#"{{"claudeAiOauth":{{"accessToken":"a","refreshToken":{token}}}}}"#);
+        assert_eq!(
+            redact_refresh_token_ts(credentials),
+            r#"{"claudeAiOauth":{"accessToken":"a"}}"#,
+            "{token}"
+        );
+    }
+}
+
+/// Oracle: upstream TypeScript `_7` copies a file that does not parse as read, and drops `env.CLAUDE_CONFIG_DIR`
+/// while keeping the rest of `env`.
+#[test]
+fn typescript_settings_strip_the_config_dir_and_keep_unparsable_files() {
+    assert_eq!(strip_settings_for_resume_ts(b"not json".to_vec()), b"not json");
+    assert_eq!(
+        strip_settings_for_resume_ts(br#"{"env":{"CLAUDE_CONFIG_DIR":"/x","KEEP":"1"},"model":"m"}"#.to_vec()),
+        br#"{"env":{"KEEP":"1"},"model":"m"}"#
+    );
+}
+
+#[test]
+fn python_redaction_and_settings_strip_leave_untouched_documents_as_read() {
+    for unchanged in [&b"not json"[..], br#"{"claudeAiOauth":{"accessToken":"a"}}"#] {
+        assert_eq!(redact_refresh_token(unchanged.to_vec()), unchanged);
+    }
+    for unchanged in [&b"not json"[..], b"[]"] {
+        assert_eq!(strip_settings_for_resume(unchanged.to_vec()), unchanged);
+    }
+}
+
+#[tokio::test]
+async fn python_credentials_that_cannot_be_written_fail_the_resume() -> Result<(), Box<dyn StdError>> {
+    let directory = tempfile::tempdir()?;
+    let source = directory.path().join("source");
+    std::fs::create_dir_all(&source)?;
+    std::fs::write(
+        source.join(".credentials.json"),
+        br#"{"claudeAiOauth":{"accessToken":"a"}}"#,
+    )?;
+    let environment = FixedEnvironment {
+        directory: directory.path().to_path_buf(),
+        variables: [(OsString::from("HOME"), directory.path().as_os_str().to_owned())].into(),
+    };
+    let outcome = copy_auth_files(
+        &NativeFileSystem,
+        &directory.path().join("missing"),
+        AuthSources {
+            caller_config_dir: Some(&source),
+            source_config_dir: &source,
+            subprocess_environment: &Environment::default(),
+            environment_mode: EnvironmentMode::default(),
+            environment: &environment,
+            process: &TokioProcessSpawner,
+            keychain: false,
+        },
+    )
+    .await;
+    assert!(matches!(outcome, Err(SessionError::Io(error)) if error.kind() == io::ErrorKind::NotFound));
+    Ok(())
 }

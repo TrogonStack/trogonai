@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{collections::BTreeMap, ffi::OsString, io, path::Path, process::Stdio};
 
 use tokio::process::{Child, Command};
@@ -8,8 +10,11 @@ type TestResult = Result<(), Box<dyn StdError>>;
 use crate::{
     Environment, EnvironmentMode,
     adapters::{NativeFileSystem, SpawnProcess, TokioProcessSpawner},
+    constants::KEYCHAIN_FALLBACK_ACCOUNT,
     session_error::SessionError,
-    session_resume::{AuthSources, copy_auth_files, copy_auth_files_ts, keychain_service_ts},
+    session_resume::{
+        AuthSources, copy_auth_files, copy_auth_files_ts, keychain_service_ts, read_keychain_credentials,
+    },
     test_support::FixedEnvironment,
 };
 
@@ -231,6 +236,47 @@ impl SpawnProcess for RecordingProcess {
     }
 }
 
+/// Fails the login name lookup (`id -un`) and records the arguments the keychain lookup passes.
+struct NoLoginName(std::path::PathBuf);
+
+impl SpawnProcess for NoLoginName {
+    type Error = io::Error;
+
+    fn spawn(&self, command: &mut Command) -> io::Result<Child> {
+        if command.as_std().get_program() != "id" {
+            return RecordingProcess(self.0.clone()).spawn(command);
+        }
+        let mut shell = Command::new("sh");
+        shell
+            .args(["-c", "exit 1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        TokioProcessSpawner.spawn(&mut shell)
+    }
+}
+
+/// Without `USER` and with no passwd name to read, both SDKs ask the keychain for the fallback account.
+#[tokio::test]
+async fn a_failed_login_name_lookup_uses_the_fallback_account() -> TestResult {
+    for typescript in [false, true] {
+        let directory = tempfile::tempdir()?;
+        let log = directory.path().join("arguments");
+        let environment = fixed(&[("HOME", "/HOME")]);
+        let credentials =
+            read_keychain_credentials(&environment, &NoLoginName(log.clone()), "service", typescript).await;
+        assert!(credentials.is_some(), "typescript {typescript}");
+        let arguments = std::fs::read_to_string(&log)?;
+        assert_eq!(
+            arguments,
+            format!("find-generic-password\n-a\n{KEYCHAIN_FALLBACK_ACCOUNT}\n-w\n-s\nservice\n"),
+            "typescript {typescript}"
+        );
+    }
+    Ok(())
+}
+
 struct Run {
     credentials: Option<Vec<u8>>,
     arguments: Option<String>,
@@ -324,51 +370,46 @@ async fn replace_mode_ignores_auth_variables_of_this_process() -> TestResult {
 }
 
 #[cfg(unix)]
-mod permissions {
-    use std::os::unix::fs::PermissionsExt;
-
-    use super::*;
-
-    async fn copied_modes(typescript: bool, mode: u32) -> Result<u32, Box<dyn StdError>> {
-        let directory = tempfile::tempdir()?;
-        let source = directory.path().join("source");
-        let destination = directory.path().join("destination");
-        std::fs::create_dir_all(&source)?;
-        std::fs::create_dir_all(&destination)?;
-        std::fs::write(directory.path().join(".claude.json"), "{}")?;
-        std::fs::set_permissions(
-            directory.path().join(".claude.json"),
-            std::fs::Permissions::from_mode(mode),
-        )?;
-        let environment = fixed(&[("HOME", directory.path().to_str().unwrap_or("/"))]);
-        let sources = AuthSources {
-            caller_config_dir: None,
-            source_config_dir: &source,
-            subprocess_environment: &Environment::default(),
-            environment_mode: EnvironmentMode::default(),
-            environment: &environment,
-            process: &MissingProcess,
-            keychain: false,
-        };
-        if typescript {
-            copy_auth_files_ts(&NativeFileSystem, &destination, sources).await?;
-        } else {
-            copy_auth_files(&NativeFileSystem, &destination, sources).await?;
-        }
-        Ok(std::fs::metadata(destination.join(".claude.json"))?
-            .permissions()
-            .mode()
-            & 0o777)
+async fn copied_modes(typescript: bool, mode: u32) -> Result<u32, Box<dyn StdError>> {
+    let directory = tempfile::tempdir()?;
+    let source = directory.path().join("source");
+    let destination = directory.path().join("destination");
+    std::fs::create_dir_all(&source)?;
+    std::fs::create_dir_all(&destination)?;
+    std::fs::write(directory.path().join(".claude.json"), "{}")?;
+    std::fs::set_permissions(
+        directory.path().join(".claude.json"),
+        std::fs::Permissions::from_mode(mode),
+    )?;
+    let environment = fixed(&[("HOME", directory.path().to_str().unwrap_or("/"))]);
+    let sources = AuthSources {
+        caller_config_dir: None,
+        source_config_dir: &source,
+        subprocess_environment: &Environment::default(),
+        environment_mode: EnvironmentMode::default(),
+        environment: &environment,
+        process: &MissingProcess,
+        keychain: false,
+    };
+    if typescript {
+        copy_auth_files_ts(&NativeFileSystem, &destination, sources).await?;
+    } else {
+        copy_auth_files(&NativeFileSystem, &destination, sources).await?;
     }
+    Ok(std::fs::metadata(destination.join(".claude.json"))?
+        .permissions()
+        .mode()
+        & 0o777)
+}
 
-    /// Oracle: node's `fs.copyFile` under umask 077 gives 640 -> 640, 755 -> 755, 444 -> 444, 600 -> 600 and
-    /// 666 -> 666, while Python's `write_bytes` plus `chmod(0o600)` gives 600 for every source.
-    #[tokio::test]
-    async fn typescript_keeps_the_source_mode_and_python_forces_0600() -> TestResult {
-        for mode in [0o640, 0o755, 0o444, 0o600, 0o666] {
-            assert_eq!(copied_modes(true, mode).await?, mode, "typescript {mode:o}");
-            assert_eq!(copied_modes(false, mode).await?, 0o600, "python {mode:o}");
-        }
-        Ok(())
+/// Oracle: node's `fs.copyFile` under umask 077 gives 640 -> 640, 755 -> 755, 444 -> 444, 600 -> 600 and
+/// 666 -> 666, while Python's `write_bytes` plus `chmod(0o600)` gives 600 for every source.
+#[cfg(unix)]
+#[tokio::test]
+async fn typescript_keeps_the_source_mode_and_python_forces_0600() -> TestResult {
+    for mode in [0o640, 0o755, 0o444, 0o600, 0o666] {
+        assert_eq!(copied_modes(true, mode).await?, mode, "typescript {mode:o}");
+        assert_eq!(copied_modes(false, mode).await?, 0o600, "python {mode:o}");
     }
+    Ok(())
 }

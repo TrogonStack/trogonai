@@ -6,11 +6,14 @@ use std::{
     process::Stdio,
 };
 
+use sha2::{Digest, Sha256};
 use tokio::time::timeout;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     Environment, EnvironmentMode, JsonObject, SessionEntry, SessionError, SessionId, SessionKey, SessionProjectKey,
-    SessionStoreOperation, SessionStoreOptions, SessionSubpath, SummaryDialect, TranscriptMirror,
+    SessionProjectKeyError, SessionStoreOperation, SessionStoreOptions, SessionSubpath, SummaryDialect,
+    TranscriptMirror,
     adapters::{
         EnvironmentVariable, NativeFileSystem, SessionFileSystem, SpawnProcess, SystemEnvironment, TemporaryDirectory,
         TokioProcessSpawner,
@@ -20,8 +23,8 @@ use crate::{
         KEYCHAIN_TIMEOUT, OAUTH_FILE_SUFFIXES_TS, RESUME_SETTINGS_STRIPPED_KEYS, RESUME_SETTINGS_STRIPPED_KEYS_TS,
     },
     js_object_order::js_ordered,
-    session_fork_ts::js_stringify,
     session_project_key::lexical_resolve,
+    settings_json::js_stringify,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -167,31 +170,10 @@ impl<F: SessionFileSystem> SessionRuntime<F> {
             Some(directory) => directory.clone(),
             None => home_dir(environment, ts)?.join(".claude"),
         };
-        let project = match &options.project_key {
-            Some(key) => key.clone(),
-            None if ts => {
-                // `Wn(directory, env)` reads the project name settings from `options.env` alone when it is given.
-                let lookup = |name: &str| -> Option<String> {
-                    let configured = subprocess_environment.get(name).map(|value| value.expose().to_owned());
-                    if environment_mode == EnvironmentMode::Replace {
-                        return configured;
-                    }
-                    configured.or_else(|| {
-                        environment
-                            .var_os(OsStr::new(name))
-                            .map(|value| value.to_string_lossy().into_owned())
-                    })
-                };
-                let config_dir = lookup("CLAUDE_CONFIG_DIR");
-                let name_override = lookup("CLAUDE_CODE_PROJECT_DIR_NAME");
-                SessionProjectKey::for_directory_ts_with_filesystem(
-                    cwd,
-                    &filesystem,
-                    config_dir.as_deref(),
-                    name_override.as_deref(),
-                )?
-            }
-            None => SessionProjectKey::for_directory_with_filesystem(cwd, &filesystem)?,
+        let project = match (&options.project_key, ts) {
+            (Some(key), _) => key.clone(),
+            (None, true) => project_key_ts(cwd, &filesystem, subprocess_environment, environment_mode, environment)?,
+            (None, false) => SessionProjectKey::for_directory_with_filesystem(cwd, &filesystem)?,
         };
         let resolved = match resume {
             StoreResume::None => None,
@@ -386,6 +368,35 @@ fn caller_config_dir<E: EnvironmentVariable>(
         Some(directory) if !directory.is_absolute() => Err(SessionError::UnsafeConfigPath),
         directory => Ok(directory),
     }
+}
+
+/// `Wn(directory, env)` reads the project name settings from `options.env` alone when it is given.
+fn project_key_ts<F: SessionFileSystem, E: EnvironmentVariable>(
+    cwd: &Path,
+    filesystem: &F,
+    subprocess_environment: &Environment,
+    environment_mode: EnvironmentMode,
+    environment: &E,
+) -> Result<SessionProjectKey, SessionProjectKeyError> {
+    let lookup = |name: &str| -> Option<String> {
+        let configured = subprocess_environment.get(name).map(|value| value.expose().to_owned());
+        if environment_mode == EnvironmentMode::Replace {
+            return configured;
+        }
+        configured.or_else(|| {
+            environment
+                .var_os(OsStr::new(name))
+                .map(|value| value.to_string_lossy().into_owned())
+        })
+    };
+    let config_dir = lookup("CLAUDE_CONFIG_DIR");
+    let name_override = lookup("CLAUDE_CODE_PROJECT_DIR_NAME");
+    SessionProjectKey::for_directory_ts_with_filesystem(
+        cwd,
+        filesystem,
+        config_dir.as_deref(),
+        name_override.as_deref(),
+    )
 }
 
 fn home_dir<E: EnvironmentVariable>(environment: &E, ts: bool) -> Result<PathBuf, SessionError> {
@@ -733,8 +744,6 @@ fn auth_variable_set<E: EnvironmentVariable>(
 /// Upstream TypeScript `p7(d7)`: the Keychain service the CLI stores credentials under. It reads this process's
 /// environment, never `options.env`.
 fn keychain_service_ts<E: EnvironmentVariable>(environment: &E) -> Result<String, SessionError> {
-    use sha2::{Digest, Sha256};
-    use unicode_normalization::UnicodeNormalization;
     let text = |name: &str| {
         environment
             .var_os(OsStr::new(name))
@@ -750,25 +759,14 @@ fn keychain_service_ts<E: EnvironmentVariable>(environment: &E) -> Result<String
         }
         None => "",
     };
-    let secure = text("CLAUDE_SECURESTORAGE_CONFIG_DIR");
-    let config = text("CLAUDE_CONFIG_DIR");
-    let default_service = match &secure {
-        Some(directory) => directory.is_empty(),
-        None => config.as_deref().is_none_or(str::is_empty),
+    // A set secure storage directory decides alone, even when empty; an empty directory keeps the default service.
+    let source = match text("CLAUDE_SECURESTORAGE_CONFIG_DIR") {
+        Some(directory) => directory,
+        None => text("CLAUDE_CONFIG_DIR").unwrap_or_default(),
     };
-    let hash = if default_service {
+    let hash = if source.is_empty() {
         String::new()
     } else {
-        let source = match secure {
-            Some(directory) => directory,
-            None => match config {
-                Some(directory) => directory,
-                None => home_dir(environment, true)?
-                    .join(".claude")
-                    .to_string_lossy()
-                    .into_owned(),
-            },
-        };
         let digest = Sha256::digest(source.nfc().collect::<String>().as_bytes());
         let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
         format!("-{}", &hex[..8])

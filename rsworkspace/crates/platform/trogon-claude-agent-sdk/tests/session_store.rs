@@ -11,9 +11,10 @@ use std::{
 
 use serde_json::json;
 use trogon_claude_agent_sdk::{
-    Environment, InMemorySessionStore, MirrorEnqueueError, MirrorFailureError, SessionEntry, SessionError, SessionId,
-    SessionKey, SessionProjectKey, SessionRuntime, SessionStore, SessionStoreError, SessionStoreFuture,
-    SessionStoreOptions, SessionSubpath, StoreResume, SummaryDialect, Timeout, TranscriptMirror,
+    Environment, EnvironmentMode, InMemorySessionStore, MirrorEnqueueError, MirrorFailureError, SessionEntry,
+    SessionError, SessionId, SessionKey, SessionProjectKey, SessionRuntime, SessionStore, SessionStoreError,
+    SessionStoreFuture, SessionStoreOperation, SessionStoreOptions, SessionSubpath, StoreResume, SummaryDialect,
+    Timeout, TranscriptMirror,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -384,6 +385,240 @@ async fn resume_load_timeout_does_not_install_any_files() -> TestResult {
     .await;
     assert!(matches!(outcome, Err(SessionError::LoadTimeout(_))));
     assert!(std::fs::read_dir(root.path())?.next().is_none());
+    Ok(())
+}
+
+async fn resume(
+    options: &SessionStoreOptions,
+    resume: StoreResume,
+    cwd: &Path,
+) -> Result<SessionRuntime, SessionError> {
+    SessionRuntime::prepare(options, resume, cwd, &Environment::default(), Default::default()).await
+}
+
+/// TypeScript `Wn(directory, env)` names the project from `options.env` alone when it replaces the process
+/// environment, so the store-backed resume loads the session under that name.
+#[tokio::test]
+async fn typescript_resume_reads_the_project_name_from_a_replacing_env() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let store = Arc::new(InMemorySessionStore::new());
+    store
+        .append(&key("named-project", SESSION)?, &[entry("user", 1)?])
+        .await?;
+    let mut options = options(store, root.path())?;
+    options.project_key = None;
+    let subprocess = Environment::from([
+        ("CLAUDE_CONFIG_DIR".into(), "/configured".into()),
+        ("CLAUDE_CODE_PROJECT_DIR_NAME".into(), "named-project".into()),
+    ]);
+    let runtime = SessionRuntime::prepare(
+        &options,
+        StoreResume::Session(SessionId::from(SESSION)),
+        root.path(),
+        &subprocess,
+        EnvironmentMode::Replace,
+    )
+    .await?;
+    assert_eq!(runtime.resume_session_id.as_ref().map(SessionId::as_str), Some(SESSION));
+    let config = runtime.config_dir.clone().ok_or("missing config directory")?;
+    assert!(
+        config
+            .join("projects/named-project")
+            .join(format!("{SESSION}.jsonl"))
+            .is_file()
+    );
+    Ok(())
+}
+
+/// Python derives the project from the working directory alone when no project key is configured.
+#[tokio::test]
+async fn python_resume_without_a_project_key_names_the_project_from_the_directory() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut options = options(Arc::new(InMemorySessionStore::new()), root.path())?;
+    options.project_key = None;
+    options.dialect = SummaryDialect::Python;
+    let runtime = resume(&options, StoreResume::None, root.path()).await?;
+    assert!(runtime.resume_session_id.is_none());
+    assert!(runtime.materialized.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn latest_resume_with_nothing_to_resume_runs_without_a_resumed_session() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let store = Arc::new(InMemorySessionStore::new());
+    let mut options = options(store.clone(), root.path())?;
+    let runtime = resume(&options, StoreResume::Latest, root.path()).await?;
+    assert!(runtime.resume_session_id.is_none(), "typescript, empty listing");
+    // Python skips sessions whose id is not a UUID and resumes nothing when no other session is listed.
+    store
+        .append(&key("project", "not-a-uuid")?, &[entry("user", 1)?])
+        .await?;
+    options.dialect = SummaryDialect::Python;
+    let runtime = resume(&options, StoreResume::Latest, root.path()).await?;
+    assert!(runtime.resume_session_id.is_none(), "python, no UUID session");
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_latest_resume_refuses_a_listing_over_the_entry_limit() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let store = Arc::new(InMemorySessionStore::new());
+    let other = format!("{}1", &SESSION[..SESSION.len() - 1]);
+    for session in [SESSION, other.as_str()] {
+        store.append(&key("project", session)?, &[entry("user", 1)?]).await?;
+    }
+    let mut options = options(store, root.path())?;
+    options.dialect = SummaryDialect::Python;
+    options.limits.max_resume_entries = Some(NonZeroUsize::new(1).ok_or("zero bound")?);
+    assert!(matches!(
+        resume(&options, StoreResume::Latest, root.path()).await,
+        Err(SessionError::EntryLimit)
+    ));
+    Ok(())
+}
+
+/// Python writes a subagent's transcript and its metadata sidecar independently: either may be absent.
+#[tokio::test]
+async fn python_resume_writes_only_the_subagent_files_that_have_entries() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let store = Arc::new(InMemorySessionStore::new());
+    let main = key("project", SESSION)?;
+    store.append(&main, &[entry("user", 1)?]).await?;
+    let metadata = SessionEntry::try_from(json!({"type":"agent_metadata","agentType":"reviewer"}))?;
+    store
+        .append(
+            &main
+                .clone()
+                .with_subpath(SessionSubpath::new("subagents/metadata-only")?),
+            std::slice::from_ref(&metadata),
+        )
+        .await?;
+    store
+        .append(
+            &main
+                .clone()
+                .with_subpath(SessionSubpath::new("subagents/transcript-only")?),
+            &[entry("assistant", 2)?],
+        )
+        .await?;
+    let mut options = options(store, root.path())?;
+    options.dialect = SummaryDialect::Python;
+    let runtime = resume(&options, StoreResume::Session(SessionId::from(SESSION)), root.path()).await?;
+    let subagents = runtime
+        .config_dir
+        .clone()
+        .ok_or("missing config directory")?
+        .join("projects/project")
+        .join(SESSION)
+        .join("subagents");
+    assert!(subagents.join("metadata-only.meta.json").is_file());
+    assert!(!subagents.join("metadata-only.jsonl").exists());
+    assert!(subagents.join("transcript-only.jsonl").is_file());
+    assert!(!subagents.join("transcript-only.meta.json").exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_resume_counts_a_metadata_sidecar_against_the_entry_limit() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let store = Arc::new(InMemorySessionStore::new());
+    let main = key("project", SESSION)?;
+    store.append(&main, &[entry("user", 1)?]).await?;
+    store
+        .append(
+            &main.clone().with_subpath(SessionSubpath::new("subagents/agent-one")?),
+            &[SessionEntry::try_from(json!({"type":"agent_metadata"}))?],
+        )
+        .await?;
+    let mut options = options(store, root.path())?;
+    options.dialect = SummaryDialect::Python;
+    options.limits.max_resume_entries = Some(NonZeroUsize::new(1).ok_or("zero bound")?);
+    assert!(matches!(
+        resume(&options, StoreResume::Session(SessionId::from(SESSION)), root.path()).await,
+        Err(SessionError::EntryLimit)
+    ));
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum Subagents {
+    ListingHangs,
+    LoadHangs,
+    Missing,
+}
+
+/// Serves one main transcript and one listed subagent whose listing or load hangs, or that has no entries.
+struct SubagentStore(Subagents, SessionEntry);
+impl SessionStore for SubagentStore {
+    fn supports(&self, operation: SessionStoreOperation) -> bool {
+        matches!(
+            operation,
+            SessionStoreOperation::Append | SessionStoreOperation::Load | SessionStoreOperation::ListSubkeys
+        )
+    }
+    fn append<'a>(&'a self, _: &'a SessionKey, _: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn load<'a>(&'a self, key: &'a SessionKey) -> SessionStoreFuture<'a, Option<Vec<SessionEntry>>> {
+        Box::pin(async move {
+            if key.subpath().is_none() {
+                return Ok(Some(vec![self.1.clone()]));
+            }
+            match self.0 {
+                Subagents::LoadHangs => std::future::pending().await,
+                Subagents::ListingHangs | Subagents::Missing => Ok(None),
+            }
+        })
+    }
+    fn list_subkeys<'a>(&'a self, _: &'a SessionKey) -> SessionStoreFuture<'a, Vec<String>> {
+        Box::pin(async move {
+            match self.0 {
+                Subagents::ListingHangs => std::future::pending().await,
+                Subagents::LoadHangs | Subagents::Missing => Ok(vec!["subagents/agent-one".to_owned()]),
+            }
+        })
+    }
+}
+
+#[tokio::test]
+async fn hung_subagent_listings_and_loads_time_out_with_upstream_text() -> TestResult {
+    for (subagents, expected) in [
+        (
+            Subagents::ListingHangs,
+            format!("SessionStore.listSubkeys() timed out after 20ms for session {SESSION}"),
+        ),
+        (
+            Subagents::LoadHangs,
+            format!("SessionStore.load() timed out after 20ms for session {SESSION} subpath subagents/agent-one"),
+        ),
+    ] {
+        let root = tempfile::tempdir()?;
+        let mut options = options(Arc::new(SubagentStore(subagents, entry("user", 1)?)), root.path())?;
+        options.limits.load_timeout = Timeout::new(Duration::from_millis(20));
+        match resume(&options, StoreResume::Session(SessionId::from(SESSION)), root.path()).await {
+            Err(SessionError::LoadTimeout(message)) => assert_eq!(message, expected),
+            other => return Err(format!("expected a load timeout, got {:?}", other.err()).into()),
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_listed_subagent_without_entries_is_skipped() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let options = options(
+        Arc::new(SubagentStore(Subagents::Missing, entry("user", 1)?)),
+        root.path(),
+    )?;
+    let runtime = resume(&options, StoreResume::Session(SessionId::from(SESSION)), root.path()).await?;
+    let session = runtime
+        .config_dir
+        .clone()
+        .ok_or("missing config directory")?
+        .join("projects/project");
+    assert!(session.join(format!("{SESSION}.jsonl")).is_file());
+    assert!(!session.join(SESSION).exists());
     Ok(())
 }
 
