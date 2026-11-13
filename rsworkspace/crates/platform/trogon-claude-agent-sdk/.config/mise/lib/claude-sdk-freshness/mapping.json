@@ -1472,6 +1472,10 @@
         },
         {
           "path": "tests/golden_argv_env.rs",
+          "name": "python_mcp_config_json_text_is_passed_verbatim"
+        },
+        {
+          "path": "tests/golden_argv_env.rs",
           "name": "typescript_in_process_servers_alone_send_no_mcp_config"
         },
         {
@@ -1611,8 +1615,7 @@
         "python": {
           "symbols": [
             "ClaudeAgentOptions.session_store",
-            "ClaudeAgentOptions.session_store_flush",
-            "ClaudeAgentOptions.load_timeout_ms"
+            "ClaudeAgentOptions.session_store_flush"
           ],
           "prefixes": []
         },
@@ -2970,6 +2973,81 @@
       ],
       "status": "supported",
       "rationale": "Initialize bytes (key order, omitted undefined fields, kept false, empty string, empty list and empty object) and the Python system prompt flags are asserted against output captured from sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 for 31 option cases. The runtime-only TypeScript options (appendSubagentSystemPrompt, codeRunningMcpTools, webSearchIsolationExemptMcpServers, rapidFollowupPreempt, forwardNestedSubagentToolCalls, workspaceTrust, captureSdkMcpManifests) are absent from sdk.d.ts and are mapped by Rust API only. TypeScript-only fields are not sent with ArgvStyle::Python, which sends only excludeDynamicSections, systemPromptSnapshot and forwardSubagentText when true. captureSdkMcpManifests has no consumer until SDK MCP manifests are captured; ClaudeAgentOptions::captures_sdk_mcp_manifests resolves its default."
+    },
+    {
+      "id": "callback-options",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "Options.toolConfig",
+            "core.Options.toolConfig",
+            "Options.executable",
+            "core.Options.executable",
+            "Options.executableArgs",
+            "core.Options.executableArgs",
+            "Options.loadTimeoutMs",
+            "core.Options.loadTimeoutMs"
+          ],
+          "prefixes": []
+        },
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.add_dirs",
+            "ClaudeAgentOptions.debug_stderr",
+            "ClaudeAgentOptions.load_timeout_ms",
+            "ClaudeAgentOptions.max_buffer_size",
+            "ClaudeAgentOptions.user"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.tool_config",
+        "ClaudeAgentOptions.oauth_token_handler",
+        "ClaudeAgentOptions.host_auth_token_handler",
+        "ClaudeAgentOptions.workload",
+        "ClaudeAgentOptions.script_runtime",
+        "SessionStoreOptions.load_timeout",
+        "ClaudeAgentOptions.additional_directories",
+        "ClaudeAgentOptions.user",
+        "Limits.max_buffer_size",
+        "ToolConfig",
+        "OAuthTokenHandler",
+        "HostAuthTokenHandler",
+        "SessionLoadTimeout"
+      ],
+      "tests": [
+        {
+          "path": "tests/callback_options.rs",
+          "name": "tool_config_and_callbacks_set_the_environment_the_bundle_sets"
+        },
+        {
+          "path": "tests/callback_options.rs",
+          "name": "workload_overrides_an_extra_argument_in_place_like_the_bundle"
+        },
+        {
+          "path": "tests/callback_options.rs",
+          "name": "executable_rules_match_the_bundle_for_native_and_script_paths"
+        },
+        {
+          "path": "tests/callback_options.rs",
+          "name": "oauth_token_responses_match_the_bundle"
+        },
+        {
+          "path": "tests/callback_options.rs",
+          "name": "host_auth_token_responses_match_the_bundle"
+        },
+        {
+          "path": "tests/callback_options.rs",
+          "name": "a_cancel_request_cancels_the_token_callback_signal"
+        },
+        {
+          "path": "tests/session_store.rs",
+          "name": "python_dialect_reports_the_resume_materialization_text"
+        }
+      ],
+      "status": "supported",
+      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; the Python timeout wording is selected by argv_style. debug_stderr is an upstream no-op, so it has no Rust field. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. Known limits: a host token handler returns a string or none, never the bare number the bundle would forward, and token callbacks use the opt-in callback_timeout limit."
     }
   ]
 }
