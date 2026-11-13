@@ -447,6 +447,17 @@ async fn python_mcp_config_path_is_passed_verbatim() -> Result<(), Box<dyn std::
     Ok(())
 }
 
+/// Python passes a `str` holding JSON text through as the `--mcp-config` value just like a path.
+#[tokio::test]
+async fn python_mcp_config_json_text_is_passed_verbatim() -> Result<(), Box<dyn std::error::Error>> {
+    let mut options = base();
+    options.argv_style = ArgvStyle::Python;
+    options.mcp_config = Some(r#"{"mcpServers":{}}"#.into());
+    let capture = run(options, &[]).await?;
+    assert_eq!(mcp_config_values(&capture), [r#"{"mcpServers":{}}"#]);
+    Ok(())
+}
+
 /// TypeScript sends no `--mcp-config` when only in-process servers are configured.
 #[tokio::test]
 async fn typescript_in_process_servers_alone_send_no_mcp_config() -> Result<(), Box<dyn std::error::Error>> {

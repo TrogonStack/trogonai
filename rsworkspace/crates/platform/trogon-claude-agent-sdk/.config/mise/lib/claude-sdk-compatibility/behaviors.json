@@ -2783,7 +2783,7 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "TypeScript is the default dialect. ClaudeAgentOptions::argv_style = ArgvStyle::Python selects Python's argv and request, and the prompt forms that exist in only one SDK (a list of texts, a prompt file) are refused in the other dialect instead of being dropped."
+        "reason": "TypeScript is the default dialect. ClaudeAgentOptions::SummaryDialect::Python on the session store selects Python's argv and request, and the prompt forms that exist in only one SDK (a list of texts, a prompt file) are refused in the other dialect instead of being dropped."
       },
       "contracts": [
         "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects",
@@ -3158,6 +3158,203 @@
         "src/js_json.rs",
         "src/client.rs",
         "src/driver.rs"
+      ]
+    },
+    {
+      "id": "s38-token-refresh-callbacks",
+      "concept": "getOAuthToken and getHostAuthToken callbacks answered over the control channel",
+      "python": {
+        "status": "absent",
+        "reason": "claude_agent_sdk has no OAuth or host auth token callbacks and never answers oauth_token_refresh or host_auth_token_refresh."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "getOAuthToken callback is not provided",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 300,
+        "sha256": "fbaa187982669995091ad92f98131b258030dd9e28769fef768b95f44ad8cfde"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript answers oauth_token_refresh and host_auth_token_refresh with the callback result, forwards the decline reason and the cancel signal, and fails with 'getOAuthToken callback is not provided.' or 'getHostAuthToken callback is not provided.' when no callback is set."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "callback_options::oauth_token_responses_match_the_bundle",
+        "callback_options::oauth_decline_reasons_and_failures_match_the_bundle",
+        "callback_options::host_auth_token_responses_match_the_bundle",
+        "callback_options::missing_callbacks_answer_with_the_bundle_errors",
+        "callback_options::a_cancel_request_cancels_the_token_callback_signal"
+      ],
+      "rust": [
+        "src/auth_token.rs",
+        "src/driver.rs",
+        "src/wire.rs"
+      ]
+    },
+    {
+      "id": "s39-tool-config-environment",
+      "concept": "toolConfig and the token callback flags delivered as child environment variables",
+      "python": {
+        "status": "absent",
+        "reason": "claude_agent_sdk has no toolConfig option and sets none of the CLAUDE_CODE_QUESTION_* or CLAUDE_CODE_SDK_HAS_*_REFRESH variables."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "CLAUDE_CODE_QUESTION_EXTENDED",
+        "occurrence": 1,
+        "occurrences": 2,
+        "span_before": 300,
+        "span_after": 450,
+        "sha256": "82f14ddc94bb5b88200ca4bb01f971866227ab0e2856e8b14e8830d767765b88"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript sets CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH and CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH to 1 when a callback is present, maps toolConfig.askUserQuestion to the CLAUDE_CODE_QUESTION_* variables, and deletes the inherited extended, optional-descriptions and agent-progress-summaries variables in any letter case when no env option is given."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "callback_options::tool_config_and_callbacks_set_the_environment_the_bundle_sets"
+      ],
+      "rust": [
+        "src/tool_config.rs",
+        "src/environment_plan.rs",
+        "src/client.rs"
+      ]
+    },
+    {
+      "id": "s40-workload-extra-argument",
+      "concept": "workload merged into extraArgs",
+      "python": {
+        "status": "absent",
+        "reason": "claude_agent_sdk has no workload option."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "{workload:_e}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 80,
+        "sha256": "580e0ec9b8f07a8d6f28d2988b5700723351aa96cf4c620e2aed991711c37a2c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript spreads extraArgs and then workload, so an existing workload entry keeps its position and takes the new value, a new entry goes last, and an empty string sends nothing."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "callback_options::workload_overrides_an_extra_argument_in_place_like_the_bundle"
+      ],
+      "rust": [
+        "src/argv.rs",
+        "src/settings_option.rs"
+      ]
+    },
+    {
+      "id": "s41-executable-script-detection",
+      "concept": "executable and executableArgs wrapping of the launched path",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 519,
+        "line_end": 523,
+        "sha256": "57b48f7fd966b60fc69f42a0d1ad2b89f6087512eb1ed6bed8da7c25238deffe"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": ".js\",\".mjs\",\".tsx\",\".ts\",\".jsx\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 120,
+        "sha256": "1c3aa1409c17ebe2359a101be344ac42e2d43b08c2986d7d7fab3ddb0cef8da5"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript runs a path ending in .js, .mjs, .ts, .tsx or .jsx (case-sensitive) under executable with executableArgs, the path and the arguments, and runs any other path directly with executableArgs before the arguments. Python has no runtime option and runs cli_path directly."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect. ClaudeAgentOptions::argv_style = ArgvStyle::Python keeps native binaries free of executable arguments."
+      },
+      "contracts": [
+        "callback_options::executable_rules_match_the_bundle_for_native_and_script_paths",
+        "callback_options::python_dialect_keeps_native_binaries_free_of_executable_arguments"
+      ],
+      "rust": [
+        "src/process_transport.rs",
+        "src/argv.rs"
+      ]
+    },
+    {
+      "id": "s42-session-load-timeout-text",
+      "concept": "Wording of a resume session store load timeout",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/session_resume.py",
+        "line_start": 300,
+        "line_end": 312,
+        "sha256": "f474f49bca72ee4922615bbab3430530d3f9038143f68e6556fe020fd3f33ea9"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "SessionStore.load() timed out after",
+        "occurrence": 0,
+        "occurrences": 2,
+        "span_before": 60,
+        "span_after": 140,
+        "sha256": "4b887e9af018149098ee11ac876ff966a0c2350d969e05cfb76be2f62ccc8e55"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript reports 'SessionStore.<call>() timed out after <n>ms for session <id>'. Python reports '<call> timed out after <n>ms during resume materialization' and wraps adapter failures in the same suffix."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect and SummaryDialect::Python on the session store selects the Python timeout text. The Python adapter-failure wrapper text is not reproduced."
+      },
+      "contracts": [
+        "session_store::resume_load_timeout_does_not_install_any_files",
+        "session_store::python_dialect_reports_the_resume_materialization_text"
+      ],
+      "rust": [
+        "src/session_resume.rs"
+      ]
+    },
+    {
+      "id": "s43-mcp-servers-path-or-text",
+      "concept": "mcp_servers given as a file path or JSON text",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 616,
+        "line_end": 641,
+        "sha256": "cf280bf75cce1a922de8ad73dcc8bf06fa4ab2acb10869d7eabd00d461eea28e"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "The TypeScript mcpServers option accepts only a record of server configs, never a path or text."
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python passes a str or Path mcp_servers value to --mcp-config as given, instead of the generated config. TypeScript has no such form."
+      },
+      "decision": {
+        "kind": "follow-python",
+        "reason": "The form exists only in Python. ClaudeAgentOptions::mcp_config carries the str or Path value verbatim as its own --mcp-config value, text or path alike."
+      },
+      "contracts": [
+        "golden_argv_env::python_mcp_config_path_is_passed_verbatim",
+        "golden_argv_env::python_mcp_config_json_text_is_passed_verbatim"
+      ],
+      "rust": [
+        "src/argv.rs"
       ]
     }
   ]
