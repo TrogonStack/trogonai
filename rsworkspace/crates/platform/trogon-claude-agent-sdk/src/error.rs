@@ -164,6 +164,11 @@ pub enum Error {
     DialogKindsWithoutHandler,
     #[error("SDK configuration could not be encoded")]
     InvalidConfiguration,
+    /// TypeScript's refusal of `sessionStore` together with `persistSession: false`.
+    #[error(
+        "sessionStore cannot be used with persistSession: false -- the storage adapter requires local writes to mirror from. To avoid keeping a local copy, pass env: { ...process.env, CLAUDE_CONFIG_DIR: dir }, where dir is a new private directory such as fs.mkdtempSync(path.join(os.tmpdir(), 'claude-')), and delete dir when the query ends."
+    )]
+    SessionStoreWithoutPersistence,
     #[error("file checkpointing is not yet supported with a session store")]
     FileCheckpointingWithSessionStore,
     #[error("continue_conversation with a session store requires the store to support listing sessions")]

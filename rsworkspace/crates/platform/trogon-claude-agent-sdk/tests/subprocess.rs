@@ -1,6 +1,6 @@
 #![cfg(feature = "test-support")]
 
-use std::{error::Error as StdError, num::NonZeroUsize, sync::Arc, time::Duration};
+use std::{error::Error as StdError, sync::Arc, time::Duration};
 
 use tokio::time::{sleep, timeout};
 use trogon_claude_agent_sdk::{
@@ -441,7 +441,7 @@ async fn malformed_known_frame_is_a_terminal_protocol_error_with_python_decoding
 async fn oversized_frame_is_rejected() -> TestResult {
     let mut options = options("oversized")?;
     options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
-    options.limits.max_buffer_size = Some(NonZeroUsize::new(1024).ok_or_else(|| std::io::Error::other("zero limit"))?);
+    options.limits.max_buffer_size = Some(1024);
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("oversized")).await?;
     let error = loop {

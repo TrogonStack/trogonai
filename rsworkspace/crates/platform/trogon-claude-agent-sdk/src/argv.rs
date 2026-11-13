@@ -32,15 +32,30 @@ pub(crate) fn mentions_sdk_url(options: &ClaudeAgentOptions) -> bool {
 pub(crate) fn request_await_initialize(options: &mut ClaudeAgentOptions) {
     if options.cli_path.is_none()
         && options.argv_style == crate::ArgvStyle::TypeScript
-        && (options.resume.is_some() || options.continue_conversation == crate::ContinueConversation::Yes)
+        && (resumes(options) || options.continue_conversation == crate::ContinueConversation::Yes)
         && !mentions_sdk_url(options)
-        && !options.extra_args.iter().any(|extra| extra.flag == "await-initialize")
     {
-        options.extra_args.push(ExtraArgument {
-            flag: "await-initialize".into(),
-            value: None,
-        });
+        // The upstream object spread overwrites an `await-initialize` the caller supplied, keeping its position.
+        match options
+            .extra_args
+            .iter_mut()
+            .find(|extra| extra.flag == "await-initialize")
+        {
+            Some(extra) => extra.value = None,
+            None => options.extra_args.push(ExtraArgument {
+                flag: "await-initialize".into(),
+                value: None,
+            }),
+        }
     }
+}
+
+/// Both SDKs test `resume` for truthiness, so an empty session id resumes nothing.
+fn resumes(options: &ClaudeAgentOptions) -> bool {
+    options
+        .resume
+        .as_ref()
+        .is_some_and(|session| !session.as_str().is_empty())
 }
 
 /// `derived_debug_file` is the TypeScript default debug file, which only a native spawn derives.
@@ -142,7 +157,8 @@ fn mcp_config(options: &ClaudeAgentOptions) -> Result<Option<String>, Error> {
     ))
 }
 
-/// Both SDKs spell a free-form flag as one token when the value starts with `-` and as two otherwise.
+/// TypeScript `yE`: one `flag=value` token when the value is longer than one character and starts with `-`, two
+/// tokens otherwise, so a lone `-` stays a separate token.
 fn push_spaced(arguments: &mut Vec<OsString>, flag: &str, value: impl Into<OsString>) {
     let value = value.into();
     // `yE`: a lone `-` is still a separate token.
@@ -156,16 +172,43 @@ fn push_spaced(arguments: &mut Vec<OsString>, flag: &str, value: impl Into<OsStr
     }
 }
 
-fn push_extra(arguments: &mut Vec<OsString>, extra: &[ExtraArgument]) {
+/// A JavaScript canonical array index: the keys an object lists first, in ascending order.
+fn array_index(key: &str) -> Option<u32> {
+    let index = key.parse::<u32>().ok().filter(|index| *index != u32::MAX)?;
+    (index.to_string() == key).then_some(index)
+}
+
+/// Python's `extra_args` is a dictionary: a repeated key keeps its first position and its last value. The
+/// TypeScript object does the same, and `typescript_extra_entries` collapses them before `settings` is merged.
+fn python_extra_entries(extra: &[ExtraArgument]) -> Vec<(&str, Option<&str>)> {
+    let mut entries: Vec<(&str, Option<&str>)> = Vec::new();
     for ExtraArgument { flag, value } in extra {
+        match entries.iter_mut().find(|(key, _)| *key == flag.as_str()) {
+            Some(entry) => entry.1 = value.as_deref(),
+            None => entries.push((flag.as_str(), value.as_deref())),
+        }
+    }
+    entries
+}
+
+fn push_extra(arguments: &mut Vec<OsString>, extra: &[ExtraArgument]) {
+    for (flag, value) in python_extra_entries(extra) {
+        let flag = format!("--{flag}");
         match value {
-            None => arguments.push(format!("--{flag}").into()),
-            Some(value) => push_spaced(arguments, &format!("--{flag}"), value.as_str()),
+            None => arguments.push(flag.into()),
+            // Python's `str(value).startswith("-")` has no length condition.
+            Some(value) if value.starts_with('-') => equals(arguments, &flag, value),
+            Some(value) => {
+                arguments.push(flag.into());
+                arguments.push(value.into());
+            }
         }
     }
 }
 
-fn push_entries(arguments: &mut Vec<OsString>, entries: Vec<crate::settings_option::ExtraEntry>) {
+fn push_entries(arguments: &mut Vec<OsString>, mut entries: Vec<crate::settings_option::ExtraEntry>) {
+    // A JavaScript object lists its integer-like keys first, in ascending order.
+    entries.sort_by_key(|(flag, _)| array_index(flag).map_or((1, 0), |index| (0, index)));
     for (flag, value) in entries {
         match value {
             None => arguments.push(format!("--{flag}").into()),
@@ -246,7 +289,7 @@ fn typescript(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -
     if let Some(model) = &options.model {
         equals(&mut a, "--model", model.as_str());
     }
-    if let Some(agent) = &options.agent {
+    if let Some(agent) = options.agent.as_ref().filter(|agent| !agent.as_str().is_empty()) {
         equals(&mut a, "--agent", agent.as_str());
     }
     if !options.betas.is_empty() {
@@ -289,8 +332,8 @@ fn typescript(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -
     if options.continue_conversation == crate::ContinueConversation::Yes {
         a.push("--continue".into());
     }
-    if let Some(session) = &options.resume {
-        equals(&mut a, "--resume", session.to_string());
+    if let Some(session) = options.resume.as_ref().filter(|session| !session.as_str().is_empty()) {
+        equals(&mut a, "--resume", session.as_str());
     }
     for channel in &options.channels {
         equals(&mut a, "--channels", channel);
@@ -305,8 +348,10 @@ fn typescript(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -
             joined(options.disallowed_tools.iter().map(|r| r.as_str())),
         );
     }
-    if let ToolSet::Only(tools) = &options.tools {
-        equals(&mut a, "--tools", joined(tools.iter().map(|t| t.as_str())));
+    match &options.tools {
+        ToolSet::CliDefault => {}
+        ToolSet::Only(tools) => equals(&mut a, "--tools", joined(tools.iter().map(|t| t.as_str()))),
+        ToolSet::ClaudeCodePreset => equals(&mut a, "--tools", "default"),
     }
     if let Some(config) = mcp_config(options)? {
         push_spaced(&mut a, "--mcp-config", config);
@@ -442,9 +487,16 @@ where
         .map(OsString::from)
         .into();
     a.extend(options.system_prompt.python_argv()?);
-    if let ToolSet::Only(tools) = &options.tools {
-        a.push("--tools".into());
-        a.push(joined(tools.iter().map(|t| t.as_str())).into());
+    match &options.tools {
+        ToolSet::CliDefault => {}
+        ToolSet::Only(tools) => {
+            a.push("--tools".into());
+            a.push(joined(tools.iter().map(|t| t.as_str())).into());
+        }
+        ToolSet::ClaudeCodePreset => {
+            a.push("--tools".into());
+            a.push("default".into());
+        }
     }
     if !allowed_tools.is_empty() {
         a.push("--allowedTools".into());
@@ -470,7 +522,7 @@ where
         a.push("--model".into());
         a.push(model.as_str().into());
     }
-    if let Some(agent) = &options.agent {
+    if let Some(agent) = options.agent.as_ref().filter(|agent| !agent.as_str().is_empty()) {
         a.push("--agent".into());
         a.push(agent.as_str().into());
     }
@@ -506,8 +558,8 @@ where
         a.push("--continue".into());
     }
     reject_windows_values(options)?;
-    if let Some(session) = &options.resume {
-        equals(&mut a, "--resume", session.to_string());
+    if let Some(session) = options.resume.as_ref().filter(|session| !session.as_str().is_empty()) {
+        equals(&mut a, "--resume", session.as_str());
     }
     if let Some(session) = options.session_id.as_ref().filter(|id| !id.as_str().is_empty()) {
         equals(&mut a, "--session-id", session.as_str());

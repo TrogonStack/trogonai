@@ -2721,6 +2721,131 @@
       ],
       "status": "supported",
       "rationale": "Initialize bytes (key order, omitted undefined fields, kept false, empty string, empty list and empty object) and the Python system prompt flags are asserted against output captured from sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 for 31 option cases. The runtime-only TypeScript options (appendSubagentSystemPrompt, codeRunningMcpTools, webSearchIsolationExemptMcpServers, rapidFollowupPreempt, forwardNestedSubagentToolCalls, workspaceTrust, captureSdkMcpManifests) are absent from sdk.d.ts and are mapped by Rust API only. TypeScript-only fields are not sent with ArgvStyle::Python, which sends only excludeDynamicSections, systemPromptSnapshot and forwardSubagentText when true. captureSdkMcpManifests has no consumer until SDK MCP manifests are captured; ClaudeAgentOptions::captures_sdk_mcp_manifests resolves its default."
+    },
+    {
+      "id": "core-options",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.add_dirs",
+            "ClaudeAgentOptions.allowed_tools",
+            "ClaudeAgentOptions.client_app",
+            "ClaudeAgentOptions.continue_conversation",
+            "ClaudeAgentOptions.disallowed_tools",
+            "ClaudeAgentOptions.extra_args",
+            "ClaudeAgentOptions.fork_session",
+            "ClaudeAgentOptions.include_partial_messages",
+            "ClaudeAgentOptions.max_buffer_size",
+            "ClaudeAgentOptions.max_turns",
+            "ClaudeAgentOptions.resume",
+            "ClaudeAgentOptions.stderr",
+            "ClaudeAgentOptions.tools"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.additionalDirectories",
+            "core.Options.additionalDirectories",
+            "Options.agent",
+            "core.Options.agent",
+            "Options.allowedTools",
+            "core.Options.allowedTools",
+            "Options.continue",
+            "core.Options.continue",
+            "Options.disallowedTools",
+            "core.Options.disallowedTools",
+            "Options.extraArgs",
+            "core.Options.extraArgs",
+            "Options.forkSession",
+            "core.Options.forkSession",
+            "Options.includePartialMessages",
+            "core.Options.includePartialMessages",
+            "Options.maxTurns",
+            "core.Options.maxTurns",
+            "Options.persistSession",
+            "core.Options.persistSession",
+            "Options.resume",
+            "core.Options.resume",
+            "Options.sessionStoreFlush",
+            "core.Options.sessionStoreFlush",
+            "Options.stderr",
+            "core.Options.stderr",
+            "Options.tools",
+            "core.Options.tools"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions",
+        "ToolSet",
+        "ExtraArgument",
+        "ArgvStyle",
+        "StderrHandler",
+        "StderrDelivery",
+        "Limits",
+        "SessionStoreFlush",
+        "Error"
+      ],
+      "tests": [
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "typescript_core_options_match_the_upstream_argv"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "python_core_options_match_the_upstream_argv"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "python_client_app_follows_the_upstream_precedence"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "typescript_stderr_reaches_the_callback_as_raw_chunks"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "python_stderr_reaches_the_callback_as_trimmed_lines"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "typescript_stderr_holds_a_split_character_across_chunks"
+        },
+        {
+          "path": "tests/core_options_golden.rs",
+          "name": "typescript_refuses_a_session_store_without_persistence"
+        },
+        {
+          "path": "tests/session_summary.rs",
+          "name": "eager_flush_appends_every_frame_without_waiting_for_a_flush"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Argv tokens and order, the dash rule, extraArgs dictionary semantics (duplicate keys collapse, TypeScript lists integer keys first), the tools preset, empty agent and resume, stderr delivery (raw decoder chunks for TypeScript, trimmed lines for Python), max_buffer_size including zero, client_app precedence and the sessionStore with persistSession false refusal are pinned against goldens captured from the real sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 driving a recording stand-in for the CLI."
+    },
+    {
+      "id": "core-options-gaps",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.user",
+            "ClaudeAgentOptions.debug_stderr"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions"
+      ],
+      "tests": [],
+      "status": "partial",
+      "rationale": "user resolves the account like Python but the spawn uses std Command::uid, which also clears supplementary groups when run as root, where Python calls setreuid only; matching it needs an unsafe pre_exec hook. debug_stderr is a deprecated option Python no longer reads, so it has no Rust field."
     }
   ]
 }

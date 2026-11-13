@@ -822,7 +822,7 @@ async fn s12_outbound_prompts_and_controls_are_never_capped_by_the_inbound_frame
     let (process, harness) = ScriptedProcessSpawner::new();
     let server = tokio::spawn(serve_controls(harness));
     let mut options = ClaudeAgentOptions::default();
-    options.limits.max_buffer_size = Some(std::num::NonZeroUsize::new(1024).ok_or("invalid limit")?);
+    options.limits.max_buffer_size = Some(1024);
     let client = ClaudeSdkClient::connect_with_adapters(options, process_adapters(process)).await?;
     client.send_prompt(Prompt::from("x".repeat(2048))).await?;
     let replacement = BTreeMap::from([(

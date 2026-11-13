@@ -188,14 +188,13 @@ impl ProcessTransport {
             options
                 .limits
                 .max_buffer_size
-                .unwrap_or(crate::Limits::PYTHON_MAX_BUFFER_SIZE)
-                .get(),
+                .unwrap_or(crate::Limits::PYTHON_MAX_BUFFER_SIZE),
             options.stderr_handler.clone(),
         ));
         Ok(Self {
             child: Some(child),
             stdin: Some(stdin),
-            frames: FrameReader::new(stdout, options.limits.max_buffer_size.map(std::num::NonZeroUsize::get)),
+            frames: FrameReader::new(stdout, options.limits.max_buffer_size),
             stderr,
             stderr_tail,
             argv_style: options.argv_style,

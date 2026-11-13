@@ -88,6 +88,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `trace_context: Option<TraceContext>` | `TRACEPARENT`, `TRACESTATE` | `TRACEPARENT`, `TRACESTATE` |
 | `stderr_handler: Option<StderrHandler>` | `stderr` callback (lines) | `stderr` callback (chunks) |
 | `extra_args: Vec<ExtraArgument>` | `extra_args` | `extraArgs` |
+| `tools: ToolSet` (`CliDefault`, `Only`, `ClaudeCodePreset`) | `tools` list, empty list or `{type: "preset", preset: "claude_code"}` | `tools` list or preset object |
 | `script_runtime: ScriptRuntime` | not applicable | `executable`, `executableArgs` |
 | `user: Option<String>` | `user` | not applicable |
 | `run_as_uid: Option<u32>` | `user` as an int | `spawn` `uid` |
