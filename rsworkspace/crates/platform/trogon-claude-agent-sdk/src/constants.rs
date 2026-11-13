@@ -928,6 +928,54 @@ pub(crate) const CONNECTOR_DOWNLOAD_TEMP_PATTERN: &str = r"^(?:download-[0-9a-f]
 /// Symbolic links the path walk follows before it gives up on the path.
 pub(crate) const LINK_HOP_LIMIT: usize = 64;
 
+/// The sandbox mount that always counts as a connector download folder (`z8e` upstream, the parent of
+/// `/mnt/user-data/uploads` joined with `/connector-downloads`).
+pub(crate) const CONNECTOR_DOWNLOADS_MOUNT: &str = "/mnt/user-data/connector-downloads";
+
+/// Bytes of a `.gitignore` the connector check reads (`t7e` upstream).
+pub(crate) const CONNECTOR_GITIGNORE_READ_BYTES: usize = 4;
+
+/// Error code the path vetting walk throws when it refuses a path (`yd` upstream).
+pub(crate) const VETTING_REFUSAL_CODE: &str = "ERR_SYMLINK_TO_NETWORK_PATH";
+
+/// Environment variable naming the kind of session the CLI runs as (`Nm` upstream).
+pub(crate) const VETTING_SESSION_KIND_VARIABLE: &str = "CLAUDE_CODE_SESSION_KIND";
+
+/// Session kind whose launch directory the path vetting walk does not trust (`Nm` upstream).
+pub(crate) const VETTING_BACKGROUND_SESSION_KIND: &str = "bg";
+
+/// macOS folder of open file descriptors, which the walk never reads through.
+pub(crate) const VETTING_DEV_FD: &str = "/dev/fd";
+
+/// Folder the macOS automounter may own (`TI.homeIsOwnMount` upstream).
+pub(crate) const VETTING_HOME_MOUNT: &str = "/home";
+
+/// Folder whose device `/home` is compared with (`TI.homeIsOwnMount` upstream).
+pub(crate) const VETTING_USERS_MOUNT: &str = "/Users";
+
+/// Path components the automount checks look at (`NQ` upstream).
+pub(crate) const VETTING_AUTOMOUNT_DEPTH: usize = 6;
+
+/// Folders the macOS data volume firmlinks to the root (`VQ` upstream), in upstream order.
+pub(crate) const VETTING_FIRMLINKED_FOLDERS: [&str; 16] = [
+    "usr/local",
+    "usr/libexec/cups",
+    "usr/share/snmp",
+    "AppleInternal",
+    "Applications",
+    "Library",
+    "Users",
+    "Volumes",
+    "cores",
+    "home",
+    "media",
+    "mnt",
+    "opt",
+    "pkg",
+    "private",
+    "sw",
+];
+
 /// `ENAMETOOLONG` as the host reports it.
 #[cfg(target_os = "macos")]
 pub(crate) const NAME_TOO_LONG_ERRNO: i32 = 63;
