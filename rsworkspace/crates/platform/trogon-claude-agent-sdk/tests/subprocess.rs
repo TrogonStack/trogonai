@@ -484,10 +484,11 @@ async fn consumer_lag_fails_with_a_bounded_queue() -> TestResult {
     let mut client = ClaudeSdkClient::connect(options).await?;
     let _ = client.next_message().await?;
     client.send_prompt(Prompt::from("flood")).await?;
-    // The control reply follows the fixture's flood, without consuming the bounded queue.
+    // The control reply follows the fixture's flood, without consuming the bounded queue. When the overflow stops the
+    // run before the interrupt is written, the interrupt fails like any write to a closed transport.
     let fence = timeout(Duration::from_secs(5), client.handle().interrupt()).await?;
     assert!(
-        matches!(&fence, Ok(_) | Err(Error::DriverStopped)),
+        matches!(&fence, Ok(_) | Err(Error::DriverStopped | Error::NotReadyForWriting)),
         "unexpected producer fence outcome: {fence:?}"
     );
     let Some(Message::System(first)) = client.next_message().await? else {
