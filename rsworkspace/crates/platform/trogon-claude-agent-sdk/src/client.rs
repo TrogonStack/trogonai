@@ -277,6 +277,11 @@ impl ClaudeSdkClient {
         let Some(store_options) = &options.session_store else {
             return Ok(None);
         };
+        if options.argv_style == crate::ArgvStyle::TypeScript
+            && options.session_persistence == crate::SessionPersistence::Disabled
+        {
+            return Err(Error::SessionStoreWithoutPersistence);
+        }
         let mut store_options = store_options.clone();
         if let Some((_, directory)) = options
             .env

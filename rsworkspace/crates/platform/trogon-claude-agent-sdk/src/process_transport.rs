@@ -99,10 +99,22 @@ pub(crate) fn command(
         return Err(Error::FileCheckpointingWithSessionStore);
     }
     #[cfg(unix)]
-    if let Some(name) = &options.user {
-        command.uid(crate::run_as::lookup(name).map_err(Error::Io)?);
-    } else if let Some(uid) = options.run_as_uid {
-        command.uid(uid);
+    {
+        let uid = match (&options.user, options.run_as_uid) {
+            (Some(name), _) => Some(crate::run_as::lookup(name).map_err(Error::Io)?),
+            (None, uid) => uid,
+        };
+        if let Some(uid) = uid {
+            // `setreuid(-1, -1)` changes nothing yet succeeds, so a privileged parent would keep its identity;
+            // CPython refuses that value for `Popen(user=)` too.
+            if uid == u32::MAX {
+                return Err(Error::Io(std::io::Error::from(std::io::ErrorKind::InvalidInput)));
+            }
+            // SAFETY: the closure only calls `setreuid`, which is async-signal-safe and allocates nothing.
+            unsafe {
+                command.pre_exec(move || crate::run_as::set_real_and_effective_uid(uid));
+            }
+        }
     }
     command
         .stdin(Stdio::piped())
@@ -211,14 +223,13 @@ impl ProcessTransport {
             options
                 .limits
                 .max_buffer_size
-                .unwrap_or(crate::Limits::PYTHON_MAX_BUFFER_SIZE)
-                .get(),
+                .unwrap_or(crate::Limits::PYTHON_MAX_BUFFER_SIZE),
             options.stderr_handler.clone(),
         ));
         Ok(Self {
             child: Some(child),
             stdin: Some(stdin),
-            frames: FrameReader::new(stdout, options.limits.max_buffer_size.map(std::num::NonZeroUsize::get)),
+            frames: FrameReader::new(stdout, options.limits.max_buffer_size),
             stderr,
             stderr_tail,
             argv_style: options.argv_style,
@@ -462,3 +473,6 @@ mod command_tests;
 
 #[cfg(all(test, unix))]
 mod tests;
+
+#[cfg(all(test, unix))]
+mod run_as_tests;

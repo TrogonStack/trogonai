@@ -93,9 +93,47 @@ fn deliver_lines(handler: &crate::StderrHandler, pending: &mut Vec<u8>, flush: b
     }
 }
 
+/// Python `str.rstrip()` also strips the four ASCII separators U+001C to U+001F.
+fn python_whitespace(character: char) -> bool {
+    character.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&character)
+}
+
+/// Node's `StringDecoder("utf8").write`: an invalid sequence becomes U+FFFD and an incomplete one at the end stays
+/// in `pending` for the next chunk, so a character split across reads reaches the callback whole.
+fn decode_chunk(pending: &mut Vec<u8>, chunk: &[u8]) -> String {
+    pending.extend_from_slice(chunk);
+    let bytes = std::mem::take(pending);
+    let mut text = String::new();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        match std::str::from_utf8(&bytes[offset..]) {
+            Ok(valid) => {
+                text.push_str(valid);
+                break;
+            }
+            Err(error) => {
+                let end = offset + error.valid_up_to();
+                text.push_str(&String::from_utf8_lossy(&bytes[offset..end]));
+                offset = end;
+                match error.error_len() {
+                    Some(length) => {
+                        text.push('\u{fffd}');
+                        offset += length;
+                    }
+                    None => {
+                        pending.extend_from_slice(&bytes[offset..]);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    text
+}
+
 fn deliver_line(handler: &crate::StderrHandler, line: &[u8]) {
     let text = String::from_utf8_lossy(line);
-    let trimmed = text.trim_end();
+    let trimmed = text.trim_end_matches(python_whitespace);
     if !trimmed.is_empty() {
         deliver(handler, trimmed);
     }
@@ -143,7 +181,7 @@ impl SharedTail {
 }
 
 /// Reads stderr to its end into `tail` and delivers it to the handler. A partial line longer than `line_limit`
-/// bytes is delivered without waiting for its newline.
+/// characters is delivered without waiting for its newline.
 pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
     mut reader: R,
     tail: SharedTail,
@@ -151,6 +189,7 @@ pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
     handler: Option<crate::StderrHandler>,
 ) -> Result<(), std::io::Error> {
     let mut pending = Vec::new();
+    let mut incomplete = Vec::new();
     let mut chunk = [0_u8; 8192];
     loop {
         let count = reader.read(&mut chunk).await?;
@@ -164,12 +203,14 @@ pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
         }
         if let Some(handler) = &handler {
             match handler.delivery {
-                crate::StderrDelivery::Chunks => deliver(handler, &String::from_utf8_lossy(&chunk[..count])),
+                crate::StderrDelivery::Chunks => {
+                    deliver(handler, &decode_chunk(&mut incomplete, &chunk[..count]));
+                }
                 crate::StderrDelivery::Lines => {
                     pending.extend_from_slice(&chunk[..count]);
                     deliver_lines(handler, &mut pending, false);
-                    // Python flushes a partial line once it exceeds the buffer limit.
-                    if pending.len() > line_limit {
+                    // Python flushes a partial line once it exceeds the buffer limit, counted in characters.
+                    if chars_in(&pending) > line_limit {
                         deliver_lines(handler, &mut pending, true);
                     }
                 }

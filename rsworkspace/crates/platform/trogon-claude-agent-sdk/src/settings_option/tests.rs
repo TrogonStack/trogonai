@@ -434,3 +434,15 @@ fn a_lone_dash_value_stays_a_separate_token() {
     let argv = run(&options, &Files::new()).unwrap_or_default();
     assert_eq!(argv[5..], ["--flag", "-"]);
 }
+
+#[test]
+fn typescript_repeated_extra_arguments_collapse_before_settings_are_merged() {
+    let options = typescript(ClaudeAgentOptions {
+        extra_args: vec![extra("a", Some("1")), extra("b", None), extra("a", Some("2"))],
+        settings: settings(r#"{"r":2}"#).map(SettingsInput::inline),
+        ..Default::default()
+    });
+    let tokens = run(&options, &Files::new()).unwrap_or_default();
+    assert_eq!(tokens.iter().filter(|token| *token == "--a").count(), 1);
+    assert!(tokens.windows(3).any(|window| window == ["--a", "2", "--b"]));
+}

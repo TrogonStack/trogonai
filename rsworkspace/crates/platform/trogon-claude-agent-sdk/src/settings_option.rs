@@ -222,11 +222,15 @@ pub(crate) type ExtraEntry = (String, Option<OsString>);
 
 /// TypeScript's `extraArgs` after `settings` is added and `_8` merges the sandbox, in emission order.
 pub(crate) fn typescript_extra_entries(options: &ClaudeAgentOptions) -> Result<Vec<ExtraEntry>, Error> {
-    let mut entries: Vec<ExtraEntry> = options
-        .extra_args
-        .iter()
-        .map(|extra| (extra.flag.clone(), extra.value.as_deref().map(OsString::from)))
-        .collect();
+    // The upstream spread `{...extraArgs}` keeps a repeated key at its first position with its last value.
+    let mut entries: Vec<ExtraEntry> = Vec::new();
+    for extra in &options.extra_args {
+        let value = extra.value.as_deref().map(OsString::from);
+        match entries.iter_mut().find(|(flag, _)| *flag == extra.flag) {
+            Some(entry) => entry.1 = value,
+            None => entries.push((extra.flag.clone(), value)),
+        }
+    }
     // `extraArgs` is `{...extraArgs, workload}`: it exists before the settings merge, so settings see it last.
     if let Some(workload) = options.workload.as_deref().filter(|workload| !workload.is_empty()) {
         match entries.iter_mut().find(|(flag, _)| flag == "workload") {

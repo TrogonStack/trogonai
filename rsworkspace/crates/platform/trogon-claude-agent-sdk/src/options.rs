@@ -20,6 +20,8 @@ pub enum ToolSet {
     #[default]
     CliDefault,
     Only(Vec<BuiltinToolName>),
+    /// The `{"type": "preset", "preset": "claude_code"}` object both SDKs accept, passed as `--tools default`.
+    ClaudeCodePreset,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -171,7 +173,9 @@ pub enum InputAfterFinish {
 pub struct Limits {
     /// Python's `max_buffer_size`: the longest stdout line, in characters, before
     /// [`crate::Error::JsonDecode`]. TypeScript has no cap.
-    pub max_buffer_size: Option<NonZeroUsize>,
+    ///
+    /// Zero is valid, as in Python: every non-empty line then exceeds the limit.
+    pub max_buffer_size: Option<usize>,
     /// UTF-16 code units of stderr kept for the process error. TypeScript keeps 2048; Python keeps none.
     pub stderr_tail: usize,
     pub message_buffer: MessageBuffer,
@@ -210,10 +214,7 @@ impl Limits {
     /// TypeScript keeps the last 2048 UTF-16 code units of stderr.
     pub const TYPESCRIPT_STDERR_TAIL: usize = 2048;
     /// Python's `_DEFAULT_MAX_BUFFER_SIZE`.
-    pub const PYTHON_MAX_BUFFER_SIZE: NonZeroUsize = match NonZeroUsize::new(1024 * 1024) {
-        Some(size) => size,
-        None => NonZeroUsize::MIN,
-    };
+    pub const PYTHON_MAX_BUFFER_SIZE: usize = 1024 * 1024;
 
     /// Python's values: a 60-second control wait, a 1 MiB line cap, a 100-message buffer with backpressure, its
     /// initialize wait and shutdown ladder, no stderr tail, and duplicate control requests that all run.
@@ -346,10 +347,13 @@ pub struct ClaudeAgentOptions {
     pub extra_args: Vec<ExtraArgument>,
     pub script_runtime: ScriptRuntime,
     /// Python's `user`: the CLI runs as this account (Unix only). The name is looked up in `/etc/passwd`; only the
-    /// uid changes, as with `Popen(user=...)`. Takes precedence over `run_as_uid`.
+    /// real and effective uid change (`setreuid`, no `setgroups`), as with `Popen(user=...)`. Takes precedence over
+    /// `run_as_uid`.
     pub user: Option<String>,
     /// Numeric user id the CLI runs as (Unix only), as `Popen(user=int)` does.
     pub run_as_uid: Option<u32>,
+    /// Python's `debug_stderr`: deprecated, no longer read by the transport. Accepted so options port unchanged.
+    pub debug_stderr: bool,
     /// `thinking` / `thinkingConfig`. Takes precedence over `max_thinking_tokens`.
     pub thinking: Option<crate::ThinkingConfig>,
     /// The deprecated `max_thinking_tokens`. TypeScript treats `0` as disabled thinking; Python forwards it as is.

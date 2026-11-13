@@ -330,3 +330,28 @@ fn skill_name_errors_surface_before_any_flag_is_built() {
         "Invalid skill name '*': use skills: 'all' to enable every skill."
     );
 }
+
+#[test]
+fn python_extra_args_keep_the_first_position_and_the_last_value() {
+    let options = ClaudeAgentOptions {
+        argv_style: ArgvStyle::Python,
+        extra_args: vec![
+            crate::ExtraArgument {
+                flag: "a".into(),
+                value: Some("1".into()),
+            },
+            crate::ExtraArgument {
+                flag: "b".into(),
+                value: None,
+            },
+            crate::ExtraArgument {
+                flag: "a".into(),
+                value: Some("2".into()),
+            },
+        ],
+        ..ClaudeAgentOptions::default()
+    };
+    let tokens = render(&options, None);
+    assert_eq!(tokens.iter().filter(|token| *token == "--a").count(), 1);
+    assert!(tokens.windows(3).any(|window| window == ["--a", "2", "--b"]));
+}

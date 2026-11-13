@@ -1137,7 +1137,7 @@ async fn mirror_fence_does_not_make_the_deferred_message_queue_unbounded() -> Te
 #[tokio::test]
 async fn owner_disposal_interrupts_a_backpressured_write() -> TestResult {
     let mut configured = options()?;
-    configured.limits.max_buffer_size = Some(NonZeroUsize::new(16 * 1024 * 1024).ok_or("invalid limit")?);
+    configured.limits.max_buffer_size = Some(16 * 1024 * 1024);
     let (client, cli) = connect(configured).await?;
     let ScriptedCli {
         lines,
