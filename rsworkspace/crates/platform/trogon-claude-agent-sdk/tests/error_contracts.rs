@@ -108,7 +108,10 @@ async fn rejected_control_retains_host_details_without_formatting_them() -> Test
         Ok::<_, io::Error>(())
     });
     let client = ClaudeSdkClient::connect_with_adapters(
-        ClaudeAgentOptions::default(),
+        ClaudeAgentOptions {
+            cli_path: Some("scripted-claude".into()),
+            ..ClaudeAgentOptions::default()
+        },
         RuntimeAdapters {
             environment: FixedEnvironment {
                 directory: "unused-memory-directory".into(),

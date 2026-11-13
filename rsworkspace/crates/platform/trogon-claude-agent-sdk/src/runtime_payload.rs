@@ -10,8 +10,8 @@ pub(crate) struct HookMatcherPayload<'a> {
     pub matcher: Option<&'a str>,
     #[serde(rename = "hookCallbackIds")]
     pub callback_ids: Vec<String>,
-    #[serde(rename = "onFailure")]
-    pub on_failure: &'static str,
+    #[serde(rename = "onFailure", skip_serializing_if = "Option::is_none")]
+    pub on_failure: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<f64>,
 }
@@ -25,6 +25,10 @@ pub(crate) enum RequestPayload<'a> {
         agents: Option<JsonObject>,
         #[serde(rename = "supportedDialogKinds", skip_serializing_if = "Option::is_none")]
         supported_dialog_kinds: Option<Vec<&'a str>>,
+        #[serde(rename = "systemPrompt", skip_serializing_if = "Option::is_none")]
+        system_prompt: Option<Vec<&'a str>>,
+        #[serde(rename = "appendSystemPrompt", skip_serializing_if = "Option::is_none")]
+        append_system_prompt: Option<&'a str>,
     },
     Interrupt {
         #[serde(skip_serializing_if = "Option::is_none")]

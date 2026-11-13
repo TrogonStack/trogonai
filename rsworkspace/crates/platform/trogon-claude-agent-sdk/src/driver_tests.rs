@@ -6,8 +6,9 @@ use std::{
 use tokio::io::DuplexStream;
 
 use super::*;
+use crate::framing::drain_stderr;
 use crate::{
-    ToolPermissionRequest,
+    ToolPermissionRequest, ToolSet,
     adapters::{SpawnProcess, TokioProcessSpawner},
 };
 
@@ -102,9 +103,12 @@ async fn stale_permission_completion_cannot_remove_replacement() -> Result<(), B
             hooks: None,
             agents: None,
             supported_dialog_kinds: None,
+            system_prompt: None,
+            append_system_prompt: None,
         }
         .to_value()?,
         blocking_hooks: false,
+        version_check: None,
         elicitation_handler: None,
         user_dialog_handler: None,
         dialog_kinds: HashSet::new(),
@@ -210,9 +214,12 @@ impl DriverFixture {
                 hooks: None,
                 agents: None,
                 supported_dialog_kinds: None,
+                system_prompt: None,
+                append_system_prompt: None,
             }
             .to_value()?,
             blocking_hooks: false,
+            version_check: None,
             elicitation_handler: None,
             user_dialog_handler: None,
             dialog_kinds: HashSet::new(),
@@ -437,7 +444,7 @@ fn tool_lists_reach_the_cli_verbatim() -> Result<(), Error> {
         tools: ToolSet::Only(vec![crate::BuiltinToolName::from("Read Bash")]),
         ..ClaudeAgentOptions::default()
     };
-    let command = command(&options)?;
+    let command = command(&options, std::path::Path::new("claude"), &Inherited::new())?;
     let arguments: Vec<_> = command
         .as_std()
         .get_args()

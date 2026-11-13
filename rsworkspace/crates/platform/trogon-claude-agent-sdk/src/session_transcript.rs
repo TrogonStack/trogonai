@@ -3,6 +3,7 @@
 //! Ports upstream `_parse_transcript_entries`, `_build_conversation_chain`,
 //! `_recover_orphaned_parallel_tool_results`, `_build_subagent_chain` and the paging rules.
 
+use crate::constants::TRANSCRIPT_TYPES;
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
@@ -46,8 +47,6 @@ impl MessagePage {
         }
     }
 }
-
-const TRANSCRIPT_TYPES: [&str; 5] = ["user", "assistant", "progress", "system", "attachment"];
 
 /// Whether an entry is a transcript message: a known type and a string uuid.
 pub(crate) fn is_transcript_entry(entry: &JsonObject) -> bool {

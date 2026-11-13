@@ -4,6 +4,7 @@
 //! metadata line to the transcript, delete removes the transcript and its sibling subagent directory, and fork copies
 //! the transcript under fresh uuids.
 
+use crate::constants::{LITE_READ_BUF_SIZE, TRANSCRIPT_TYPES};
 use std::{
     collections::HashMap,
     fs::OpenOptions,
@@ -18,7 +19,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     JsonObject, SessionFiles, SessionId,
-    session_files::{LITE_READ_BUF_SIZE, extract_first_prompt_from_head, extract_last_json_string_field, valid_uuid},
+    session_files::{extract_first_prompt_from_head, extract_last_json_string_field, valid_uuid},
     session_transcript::truthy,
 };
 
@@ -85,8 +86,6 @@ impl JsonEscaping {
         }
     }
 }
-
-const TRANSCRIPT_TYPES: [&str; 5] = ["user", "assistant", "attachment", "system", "progress"];
 
 impl SessionFiles {
     /// Renames a session by appending a `custom-title` line; the last one wins when listing.
@@ -225,8 +224,7 @@ impl SessionFiles {
         options.write(true).create_new(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+            std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
         }
         let mut file = options.open(&fork_path).map_err(SessionMutationError::Io)?;
         file.write_all(format!("{}\n", lines.join("\n")).as_bytes())

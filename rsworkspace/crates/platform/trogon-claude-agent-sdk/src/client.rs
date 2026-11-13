@@ -34,14 +34,46 @@ pub struct ClientHandle {
     timeout: std::time::Duration,
 }
 
+fn capture_inherited<E: crate::adapters::EnvironmentVariable>(environment: &E) -> crate::environment_plan::Inherited {
+    let mut inherited: crate::environment_plan::Inherited = crate::constants::INHERITED_KEYS
+        .iter()
+        .filter_map(|key| {
+            let key = std::ffi::OsString::from(*key);
+            environment.var_os(&key).map(|value| (key, value))
+        })
+        .collect();
+    // Upstream matches the session-state variable case-insensitively across the whole inherited environment.
+    inherited.extend(environment.vars_os().into_iter().filter(|(key, _)| {
+        key.to_string_lossy()
+            .eq_ignore_ascii_case("CLAUDE_CODE_SDK_READS_SESSION_STATE")
+    }));
+    inherited
+}
+
 impl ClaudeSdkClient {
-    pub async fn connect(options: ClaudeAgentOptions) -> Result<Self, Error> {
+    /// Connects with the native process spawner. Like Python's `SubprocessCLITransport`, an omitted
+    /// `cli_path` is discovered here; `connect_with_adapters` never discovers because its caller owns spawning
+    /// (upstream skips discovery for a custom transport and for TypeScript's `spawnClaudeCodeProcess`).
+    pub async fn connect(mut options: ClaudeAgentOptions) -> Result<Self, Error> {
         let adapters: crate::adapters::RuntimeAdapters = crate::adapters::RuntimeAdapters::default();
-        Self::connect_with_adapters(options, adapters).await
+        let discovered = if options.cli_path.is_none() {
+            let inherited = capture_inherited(&adapters.environment);
+            crate::argv::request_await_initialize(&mut options);
+            Some(crate::cli_discovery::discover(
+                &inherited,
+                &adapters.filesystem,
+                cfg!(windows),
+            )?)
+        } else {
+            None
+        };
+        Self::connect_resolved(options, adapters, discovered).await
     }
 
+    /// Connects through caller-supplied adapters. The caller owns spawning, so no executable discovery runs and
+    /// an omitted `cli_path` reaches the spawner as `claude`.
     pub async fn connect_with_adapters<E, P, F>(
-        mut options: ClaudeAgentOptions,
+        options: ClaudeAgentOptions,
         adapters: crate::adapters::RuntimeAdapters<E, P, F>,
     ) -> Result<Self, Error>
     where
@@ -51,6 +83,27 @@ impl ClaudeSdkClient {
         P: crate::adapters::SpawnProcess<Error = std::io::Error>,
         F: crate::adapters::SessionFileSystem,
     {
+        Self::connect_resolved(options, adapters, None).await
+    }
+
+    async fn connect_resolved<E, P, F>(
+        mut options: ClaudeAgentOptions,
+        adapters: crate::adapters::RuntimeAdapters<E, P, F>,
+        discovered: Option<std::path::PathBuf>,
+    ) -> Result<Self, Error>
+    where
+        E: crate::adapters::EnvironmentVariable
+            + crate::adapters::CurrentDirectory<Error = std::io::Error>
+            + crate::adapters::TemporaryDirectory,
+        P: crate::adapters::SpawnProcess<Error = std::io::Error>,
+        F: crate::adapters::SessionFileSystem,
+    {
+        let inherited = capture_inherited(&adapters.environment);
+        let cli_path = options
+            .cli_path
+            .clone()
+            .or(discovered)
+            .unwrap_or_else(|| "claude".into());
         let session = if let Some(store_options) = &options.session_store {
             let mut store_options = store_options.clone();
             if let Some((_, directory)) = options
@@ -120,6 +173,8 @@ impl ClaudeSdkClient {
             shutdown: shutdown_rx,
             terminal: terminal_tx,
             process: &adapters.process,
+            cli_path,
+            inherited,
         })?;
         let mut runtime = ClientRuntime {
             handle,

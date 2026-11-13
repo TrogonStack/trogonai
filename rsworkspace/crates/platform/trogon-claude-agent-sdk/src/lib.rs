@@ -9,9 +9,12 @@ pub mod test_support;
 
 mod agent_definition;
 mod agent_name;
+mod argv;
 mod builtin_tool_name;
+mod cli_discovery;
 mod cli_path;
 mod client;
+mod client_app;
 mod config_value;
 mod constants;
 mod control;
@@ -21,6 +24,7 @@ mod dialog_kind;
 mod driver;
 mod effort_level;
 mod environment;
+mod environment_plan;
 mod error;
 mod framing;
 mod hooks;
@@ -38,8 +42,10 @@ mod output_schema;
 mod permission;
 mod permission_mode;
 mod permission_update;
+mod process_options;
 mod prompt;
 mod queue_capacity;
+mod run_as;
 mod sdk_mcp_server;
 mod sdk_tool;
 mod sdk_tools;
@@ -55,6 +61,7 @@ mod session_mutations;
 mod session_path_component;
 mod session_project_key;
 mod session_prompt;
+mod session_reader;
 mod session_resume;
 mod session_store;
 mod session_store_helpers;
@@ -63,6 +70,7 @@ mod session_summary;
 mod session_transcript;
 mod setting_source;
 mod stderr_tail;
+mod summary_dialect;
 mod task_id;
 mod timeout;
 mod tool_name;
@@ -71,16 +79,20 @@ mod tool_use_id;
 mod transcript_mirror;
 mod usd_budget;
 mod user_input;
+mod version_check;
 mod wire;
 
 pub use agent_definition::{AgentDefinition, AgentExecution, AgentMcpServerSpec};
 pub use agent_name::AgentName;
 pub use builtin_tool_name::BuiltinToolName;
+pub use cli_discovery::CliNotFoundError;
 pub use cli_path::CliPathError;
 pub use client::{
     ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_with_adapters,
 };
+pub use client_app::{format_client_app, normalize_client_app};
 pub use config_value::ConfigValue;
+pub use constants::{DEFAULT_ENTRYPOINT, MINIMUM_CLAUDE_CODE_VERSION, SDK_VERSION};
 pub use control::{
     ConnectionInfo, ContextUsageCategory, ContextUsageResponse, FeatureSupport, InterruptReceipt, McpEnabled,
     McpSetServersResult, McpStatusResponse, RewindFilesResult, RewindMode,
@@ -93,6 +105,7 @@ pub use dialog::{
 pub use dialog_kind::DialogKind;
 pub use effort_level::EffortLevel;
 pub use environment::Environment;
+pub use environment_plan::EnvironmentPlan;
 pub use error::{ControlOperation, ControlRejectionError, Error, ProtocolError};
 pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
@@ -123,6 +136,10 @@ pub use permission_mode::PermissionMode;
 pub use permission_update::{
     PermissionBehavior, PermissionRuleValue, PermissionUpdate, PermissionUpdateDestination, PermissionUpdateError,
 };
+pub use process_options::{
+    ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, ScriptRuntime, StderrDelivery, StderrHandler,
+    TraceContext,
+};
 pub use prompt::Prompt;
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 pub use sdk_mcp_server::{
@@ -134,8 +151,7 @@ pub use sensitive_string::SensitiveString;
 pub use session_entry::{SessionEntry, SessionEntryError};
 pub use session_error::SessionError;
 pub use session_files::{
-    ListSessionsOptions, SessionFiles, get_session_info, get_session_messages, get_subagent_messages, list_sessions,
-    list_subagents,
+    ListSessionsOptions, SessionFiles, get_session_messages, get_subagent_messages, list_subagents,
 };
 pub use session_id::SessionId;
 pub use session_info::SdkSessionInfo;
@@ -146,6 +162,7 @@ pub use session_mutations::{
 pub use session_project_key::{
     SessionProjectKey, SessionProjectKeyError, project_key_for_directory, project_key_for_directory_in,
 };
+pub use session_reader::{get_session_info, list_sessions};
 pub use session_resume::{MaterializedSession, SessionPreparationOptions, SessionRuntime, StoreResume};
 pub use session_store::{
     InMemorySessionStore, MirrorSizeEstimate, SessionListEntry, SessionStore, SessionStoreError, SessionStoreFlush,
@@ -158,10 +175,11 @@ pub use session_store_helpers::{
     tag_session_via_store,
 };
 pub use session_subpath::{SessionSubpath, SessionSubpathError};
-pub use session_summary::{SessionSummaryEntry, SummaryDialect, fold_session_summary, summary_entry_to_sdk_info};
+pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_entry_to_sdk_info};
 pub use session_transcript::{MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
 pub use stderr_tail::StderrTail;
+pub use summary_dialect::SummaryDialect;
 pub use task_id::TaskId;
 pub use timeout::{Timeout, TimeoutError};
 pub use tokio_util::sync::CancellationToken;
@@ -171,6 +189,7 @@ pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 pub use user_input::{InputBlock, UserInput};
+pub use version_check::{parse_version, unreported_version_warning};
 
 /// A JSON object whose schema is owned by an individual tool or upstream event.
 pub type JsonObject = serde_json::Map<String, serde_json::Value>;

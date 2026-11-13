@@ -5,6 +5,9 @@ use crate::{
     HookRegistration, McpServerName, McpServerOptions, ModelName, OutputSchema, PermissionMode, QueueCapacity,
     SdkMcpServer, SessionId, SessionStoreOptions, SettingSource, Timeout, ToolPermissionHandler, ToolRule, UsdBudget,
     UserDialogHandler,
+    process_options::{
+        ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, ScriptRuntime, StderrHandler, TraceContext,
+    },
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -16,8 +19,9 @@ pub enum ToolSet {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum McpDiscovery {
-    #[default]
+    /// Passes `--strict-mcp-config`. Upstream sends it only when the caller asks for it.
     Disabled,
+    #[default]
     CliDefault,
 }
 
@@ -136,4 +140,20 @@ pub struct ClaudeAgentOptions {
     pub elicitation_handler: Option<Arc<dyn ElicitationHandler>>,
     pub user_dialog_handler: Option<Arc<dyn UserDialogHandler>>,
     pub supported_dialog_kinds: Vec<DialogKind>,
+    pub argv_style: ArgvStyle,
+    pub environment_mode: EnvironmentMode,
+    pub claude_code_marker: ClaudeCodeMarker,
+    /// `CLAUDE_CODE_ENTRYPOINT`; `None` selects `sdk-trogon-rs`.
+    pub entrypoint: Option<String>,
+    /// Application name (optionally `name/version`) reported as `CLAUDE_AGENT_SDK_CLIENT_APP`.
+    pub client_app: Option<String>,
+    pub trace_context: Option<TraceContext>,
+    pub stderr_handler: Option<StderrHandler>,
+    pub extra_args: Vec<ExtraArgument>,
+    pub script_runtime: ScriptRuntime,
+    /// Python's `user`: the CLI runs as this account (Unix only). The name is looked up in `/etc/passwd`; only the
+    /// uid changes, as with `Popen(user=...)`. Takes precedence over `run_as_uid`.
+    pub user: Option<String>,
+    /// Numeric user id the CLI runs as (Unix only), as `Popen(user=int)` does.
+    pub run_as_uid: Option<u32>,
 }

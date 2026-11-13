@@ -34,3 +34,57 @@ pub(crate) const KNOWN_UPDATE_TYPES: [&str; 6] = [
 /// Protocol versions the pinned TypeScript SDK negotiates, newest first.
 pub(crate) const SUPPORTED_PROTOCOL_VERSIONS: [&str; 5] =
     ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
+
+pub(crate) const MAX_CLIENT_APP_LENGTH: usize = 128;
+
+pub(crate) const GENERIC_NAMES: [&str; 6] = ["index", "main", "cli", "server", "app", "node"];
+
+pub const DEFAULT_ENTRYPOINT: &str = "sdk-trogon-rs";
+
+pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Inherited variables the plan consults. Captured through the environment adapter before spawning.
+pub(crate) const INHERITED_KEYS: &[&str] = &[
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_AGENT_SDK_VERSION",
+    "CLAUDE_CODE_SDK_READS_SESSION_STATE",
+    "DEBUG_CLAUDE_AGENT_SDK",
+    "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK",
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+];
+
+/// Upstream `_STORE_LIST_LOAD_CONCURRENCY`.
+pub(crate) const LIST_LOAD_CONCURRENCY: usize = 16;
+
+/// Upstream `MAX_PENDING_ENTRIES` and `MAX_PENDING_BYTES`, the import batch defaults.
+pub(crate) const DEFAULT_IMPORT_BATCH: usize = 500;
+
+pub(crate) const MAX_IMPORT_BYTES: usize = 1024 * 1024;
+
+pub(crate) const MAX_SANITIZED_LENGTH: usize = 200;
+
+/// Size of the head and tail buffers of a lite metadata read.
+pub(crate) const LITE_READ_BUF_SIZE: u64 = 65_536;
+
+pub(crate) const TRANSCRIPT_TYPES: [&str; 5] = ["user", "assistant", "attachment", "system", "progress"];
+
+pub(crate) const SCRIPT_EXTENSIONS: [&str; 5] = ["js", "mjs", "ts", "tsx", "jsx"];
+
+pub(crate) const UNIX_HINT: &str = "Claude Code not found. Install with:\n  npm install -g @anthropic-ai/claude-code\n\nIf already installed locally, try:\n  export PATH=\"$HOME/node_modules/.bin:$PATH\"\n\nOr provide the path via ClaudeAgentOptions:\n  ClaudeAgentOptions(cli_path='/path/to/claude')";
+
+pub(crate) const WINDOWS_HINT: &str = "Claude Code not found. Install the native claude.exe with (PowerShell):\n  irm https://claude.ai/install.ps1 | iex\n\nOr install the claude-agent-sdk wheel for a platform that bundles claude.exe (e.g. Windows x64), or provide the path to a claude.exe via ClaudeAgentOptions:\n  ClaudeAgentOptions(cli_path='C:\\\\path\\\\to\\\\claude.exe')\n\n(npm install -g @anthropic-ai/claude-code produces a claude.cmd shim, which this SDK refuses to run on Windows.)";
+
+/// Oldest Claude Code release the SDK supports without a warning.
+pub const MINIMUM_CLAUDE_CODE_VERSION: &str = "2.0.0";
+
+pub(crate) const PARENT_MARK: &str = "\"parentUuid\":";
+
+pub(crate) const CONTINUED_MARK: &str = "\"type\":\"continued-in\"";
+
+pub(crate) const PAGE_WINDOW: usize = 32;
+
+pub(crate) const CONTINUED_SCAN_LIMIT: u64 = 16_777_216;
+
+pub(crate) const CONTINUED_SCAN_CHUNK: usize = 1_048_576;

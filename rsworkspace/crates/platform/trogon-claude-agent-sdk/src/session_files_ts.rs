@@ -5,6 +5,10 @@
 //! lookups that parse whole lines (`YA`), continued-in chains (`$z`), custom-title sidecars (`sc`), worktree
 //! ownership checks (`c0`/`l0`) and the paged listing pipeline (`Gz`).
 
+use crate::constants::{
+    CONTINUED_MARK, CONTINUED_SCAN_CHUNK, CONTINUED_SCAN_LIMIT, LITE_READ_BUF_SIZE, MAX_SANITIZED_LENGTH, PAGE_WINDOW,
+    PARENT_MARK,
+};
 use std::{
     collections::HashSet,
     fs::File,
@@ -18,20 +22,12 @@ use unicode_general_category::{GeneralCategory, get_general_category};
 use crate::{
     ListSessionsOptions, SdkSessionInfo, SessionFiles, SessionId, SummaryDialect,
     session_files::{
-        LITE_READ_BUF_SIZE, LiteSessionFile, extract_first_prompt_from_head_with, extract_json_string_field,
-        read_session_lite, string_end, unescape_json_string, valid_uuid, worktree_paths,
+        LiteSessionFile, extract_first_prompt_from_head_with, extract_json_string_field, read_session_lite, string_end,
+        unescape_json_string, valid_uuid, worktree_paths,
     },
     session_project_key::{canonicalize_lenient, hyphenate, sanitize_path},
     session_prompt::{entry_first_prompt, iso_to_epoch_ms},
 };
-
-const TS: SummaryDialect = SummaryDialect::TypeScript;
-const PARENT_MARK: &str = "\"parentUuid\":";
-const CONTINUED_MARK: &str = "\"type\":\"continued-in\"";
-const PAGE_WINDOW: usize = 32;
-const MAX_SANITIZED_LENGTH: usize = 200;
-const CONTINUED_SCAN_LIMIT: u64 = 16_777_216;
-const CONTINUED_SCAN_CHUNK: usize = 1_048_576;
 
 enum Parsed {
     Text(String),
@@ -224,9 +220,12 @@ pub(crate) fn session_info_from_lite(
         .or_else(|| titled(head, "custom-title", "customTitle"))
         .or_else(|| titled(tail, "ai-title", "aiTitle"))
         .or_else(|| titled(head, "ai-title", "aiTitle"));
-    let first_prompt = non_empty(Some(extract_first_prompt_from_head_with(head, TS)));
-    let created_at =
-        non_empty(extract_json_string_field(head, "timestamp")).and_then(|timestamp| iso_to_epoch_ms(TS, &timestamp));
+    let first_prompt = non_empty(Some(extract_first_prompt_from_head_with(
+        head,
+        SummaryDialect::TypeScript,
+    )));
+    let created_at = non_empty(extract_json_string_field(head, "timestamp"))
+        .and_then(|timestamp| iso_to_epoch_ms(SummaryDialect::TypeScript, &timestamp));
     let summary = custom_title
         .clone()
         .or_else(|| non_empty(last_typed_string(tail, "lastPrompt", None, false)))
@@ -292,7 +291,7 @@ fn shows_progress(value: &Value) -> bool {
             return flag.and_then(Value::as_bool) != Some(true) && matches!(stop, Some(Some(Value::String(_))));
         }
         let mut fallback = None;
-        return entry_first_prompt(TS, object, &mut fallback).is_some();
+        return entry_first_prompt(SummaryDialect::TypeScript, object, &mut fallback).is_some();
     }
     false
 }
@@ -382,7 +381,7 @@ fn unified(path: &str, fold: bool) -> String {
 
 /// Upstream `Vl` followed by the platform's case rule.
 fn name_key(path: &str, fold: bool) -> String {
-    let name = hyphenate(path, TS);
+    let name = hyphenate(path, SummaryDialect::TypeScript);
     if fold { name.to_lowercase() } else { name }
 }
 
@@ -607,7 +606,7 @@ fn fold_name(name: &str) -> String {
 
 /// Upstream `Yl`/`u0`: some transcript in `dir` was recorded in a directory that sanitizes like `path`.
 fn holds_session_of(dir: &Path, path: &str) -> bool {
-    let wanted = fold_name(&hyphenate(path, TS));
+    let wanted = fold_name(&hyphenate(path, SummaryDialect::TypeScript));
     let Ok(entries) = std::fs::read_dir(dir) else {
         return false;
     };
@@ -618,7 +617,7 @@ fn holds_session_of(dir: &Path, path: &str) -> bool {
         }
         read_session_lite(&file)
             .and_then(|lite| relocated_cwd(&lite))
-            .is_some_and(|cwd| fold_name(&hyphenate(&cwd, TS)) == wanted)
+            .is_some_and(|cwd| fold_name(&hyphenate(&cwd, SummaryDialect::TypeScript)) == wanted)
     })
 }
 
@@ -667,7 +666,7 @@ impl SessionFiles {
     /// was cut at 200 characters may have been hashed differently by another client, so directories with the same
     /// prefix count when one of their transcripts was recorded in `path`.
     pub(crate) fn project_dirs_for_ts(&self, path: &str) -> Vec<PathBuf> {
-        let sanitized = sanitize_path(path, TS);
+        let sanitized = sanitize_path(path, SummaryDialect::TypeScript);
         let exact = self.projects_dir().join(&sanitized);
         let mut found = Vec::new();
         if exact.is_dir() {
@@ -729,7 +728,7 @@ impl SessionFiles {
         let mut named: Vec<(String, String, Option<String>)> = worktrees
             .iter()
             .map(|path| {
-                let exact = fold_name(&sanitize_path(path, TS));
+                let exact = fold_name(&sanitize_path(path, SummaryDialect::TypeScript));
                 let truncated = (exact.len() > MAX_SANITIZED_LENGTH).then(|| exact[..MAX_SANITIZED_LENGTH].to_owned());
                 (path.clone(), exact, truncated)
             })
