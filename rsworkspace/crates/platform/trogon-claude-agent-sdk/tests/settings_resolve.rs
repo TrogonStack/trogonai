@@ -326,6 +326,20 @@ fn wsl_with_the_inherit_flag_reads_the_windows_side_first() {
     assert_eq!(result["effective"]["model"], "windows");
 }
 
+#[test]
+fn wsl_withholds_the_linux_policy_when_the_windows_side_file_is_not_an_object() {
+    // Recorded from the pinned TypeScript resolver with the same two files.
+    let host = FakeHost::linux()
+        .variable("WSL_DISTRO_NAME", "Ubuntu")
+        .file("/mnt/c/Program Files/ClaudeCode/managed-settings.json", "[1]")
+        .file("/etc/claude-code/managed-settings.json", r#"{"model":"linux"}"#);
+    let result = resolve(&host, json!({"settingSources": []}));
+    assert_eq!(
+        js_stringify(&result),
+        r#"{"effective":{},"provenance":{},"sources":[],"machinePolicy":{"didNotLoad":["registry"]}}"#
+    );
+}
+
 fn resolved(effective: Value, sources: Value) -> ResolvedSettings {
     serde_json::from_value(json!({
         "effective": effective,

@@ -532,3 +532,7 @@ pub(crate) fn aws_pairs_across_issues(value: &Value) -> usize {
     }
     issues
 }
+
+#[cfg(test)]
+#[path = "settings_schema_ports_tests.rs"]
+mod tests;
