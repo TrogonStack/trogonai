@@ -140,7 +140,7 @@ pub use session_id::SessionId;
 pub use session_info::SdkSessionInfo;
 pub use session_key::{SessionKey, SessionKeyError};
 pub use session_mutations::{
-    ForkSessionResult, SessionMutationError, delete_session, fork_session, rename_session, tag_session,
+    ForkSessionResult, JsonEscaping, SessionMutationError, delete_session, fork_session, rename_session, tag_session,
 };
 pub use session_project_key::{SessionProjectKey, SessionProjectKeyError, project_key_for_directory};
 pub use session_resume::{MaterializedSession, SessionPreparationOptions, SessionRuntime, StoreResume};
