@@ -12,6 +12,16 @@ mod producer_config;
 mod producer_status;
 mod publication_kind;
 mod publication_receipt;
+mod registration_archive;
+mod registration_archive_capacity;
+mod registration_archive_config;
+mod registration_archive_create;
+mod registration_archive_error;
+mod registration_archive_profile;
+mod registration_archive_role;
+mod registration_artifact;
+mod registration_artifact_input;
+mod registration_artifact_kind;
 mod registration_audit;
 mod registration_broker;
 mod registration_connection;
@@ -39,6 +49,16 @@ pub use error::RegistrationError;
 pub use producer_config::ProducerConfig;
 pub use producer_status::ProducerStatus;
 pub use publication_receipt::PublicationReceipt;
+pub use registration_archive::{RegistrationArchive, RegistrationArchiveReceipt, RegistrationArtifactObservation};
+pub use registration_archive_capacity::RegistrationArchiveCapacity;
+pub use registration_archive_config::RegistrationArchiveConfig;
+pub use registration_archive_create::RegistrationArchiveCreate;
+pub use registration_archive_error::RegistrationArchiveError;
+pub use registration_archive_profile::RegistrationArchiveProfile;
+pub use registration_archive_role::RegistrationArchiveRole;
+pub use registration_artifact::RegistrationArtifact;
+pub use registration_artifact_input::RegistrationArtifactInput;
+pub use registration_artifact_kind::RegistrationArtifactKind;
 pub use registration_producer::{
     ProductionRegistrationProducer, RegistrationProducer, emergency_withdrawal, production_emergency_withdrawal,
     provision_streams,
