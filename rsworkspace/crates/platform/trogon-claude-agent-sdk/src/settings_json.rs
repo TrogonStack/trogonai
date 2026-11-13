@@ -81,35 +81,52 @@ fn js_string(text: &str, out: &mut String) {
     out.push('"');
 }
 
-fn js_write(value: &Value, out: &mut String) {
+/// `JSON.stringify` of `value` with the indentation step `gap`, at the current indentation `indent`.
+fn js_write(value: &Value, gap: &str, indent: &str, out: &mut String) {
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(flag) => out.push_str(if *flag { "true" } else { "false" }),
         Value::Number(number) => out.push_str(&js_number(number)),
         Value::String(text) => js_string(text, out),
-        Value::Array(items) => {
-            out.push('[');
-            for (position, item) in items.iter().enumerate() {
-                if position > 0 {
-                    out.push(',');
-                }
-                js_write(item, out);
-            }
-            out.push(']');
-        }
+        Value::Array(items) => js_write_entries(['[', ']'], items.iter().map(|item| (None, item)), gap, indent, out),
         Value::Object(map) => {
-            out.push('{');
-            for (position, (key, item)) in js_key_order(map).into_iter().enumerate() {
-                if position > 0 {
-                    out.push(',');
-                }
-                js_string(key, out);
-                out.push(':');
-                js_write(item, out);
-            }
-            out.push('}');
+            let entries = js_key_order(map).into_iter().map(|(key, item)| (Some(key), item));
+            js_write_entries(['{', '}'], entries, gap, indent, out);
         }
     }
+}
+
+/// The entries of an array or object between `open` and `close`: one per line under `gap`, or none when it is empty.
+fn js_write_entries<'a>(
+    [open, close]: [char; 2],
+    entries: impl Iterator<Item = (Option<&'a String>, &'a Value)>,
+    gap: &str,
+    indent: &str,
+    out: &mut String,
+) {
+    let inner = format!("{indent}{gap}");
+    let mut written = false;
+    out.push(open);
+    for (key, item) in entries {
+        if written {
+            out.push(',');
+        }
+        if !gap.is_empty() {
+            out.push('\n');
+            out.push_str(&inner);
+        }
+        if let Some(key) = key {
+            js_string(key, out);
+            out.push_str(if gap.is_empty() { ":" } else { ": " });
+        }
+        js_write(item, gap, &inner, out);
+        written = true;
+    }
+    if written && !gap.is_empty() {
+        out.push('\n');
+        out.push_str(indent);
+    }
+    out.push(close);
 }
 
 /// The text TypeScript's `JSON.stringify(value)` prints for `value`, byte for byte.
@@ -128,7 +145,14 @@ fn js_write(value: &Value, out: &mut String) {
 ///   `\u00xx`) and leave every other character, including U+007F and U+2028, as is.
 pub fn js_stringify(value: &Value) -> String {
     let mut out = String::new();
-    js_write(value, &mut out);
+    js_write(value, "", "", &mut out);
+    out
+}
+
+/// `JSON.stringify(value, null, 2)`.
+pub(crate) fn js_stringify_pretty(value: &Value) -> String {
+    let mut out = String::new();
+    js_write(value, "  ", "", &mut out);
     out
 }
 

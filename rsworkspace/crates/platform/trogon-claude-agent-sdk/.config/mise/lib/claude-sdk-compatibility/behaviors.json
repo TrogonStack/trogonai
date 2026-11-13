@@ -229,15 +229,20 @@
         "value_contracts::s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_reinitialize"
       ],
       "rust": [
-        "src/sdk_mcp_server.rs"
+        "src/mcp_server_dialect.rs",
+        "src/sdk_mcp_python.rs",
+        "src/sdk_mcp_server.rs",
+        "src/sdk_mcp_typescript.rs"
       ]
     },
     {
       "id": "s08-mcp-initialized-gating",
       "concept": "Requests before notifications/initialized",
       "python": {
-        "status": "absent",
-        "reason": "Delegated to the mcp Python package, which is outside the pinned SDK sources."
+        "file": "src/claude_agent_sdk/_internal/sdk_mcp_bridge.py",
+        "line_start": 6,
+        "line_end": 9,
+        "sha256": "5cacd610f1aad7ca6b42df9e799836c3c71597eff6d45de1099470a0d69f95da"
       },
       "typescript": {
         "file": "package/sdk.mjs",
@@ -249,25 +254,32 @@
         "sha256": "92e7576785b4625d03dfba5fb061a4b1525715f54dac2226b00c72485bdc1d19"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "The SDK MCP server does not gate requests on notifications/initialized."
+        "verdict": "disagree",
+        "behavior": "TypeScript does not gate requests on initialization. The Python mcp server refuses every request except ping before initialize with -32602, and initialize alone opens the session."
       },
       "decision": {
-        "kind": "upstream"
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; McpServerDialect::Python reproduces the Python server."
       },
       "contracts": [
-        "value_contracts::s08_local_mcp_discovery_does_not_wait_for_the_initialized_notice_and_supports_empty_registries"
+        "value_contracts::s08_local_mcp_discovery_does_not_wait_for_the_initialized_notice_and_supports_empty_registries",
+        "value_contracts::s08_s09_s10_m04_python_dialect_negotiates_gates_and_reads_ids_like_the_mcp_package"
       ],
       "rust": [
-        "src/sdk_mcp_server.rs"
+        "src/mcp_server_dialect.rs",
+        "src/sdk_mcp_python.rs",
+        "src/sdk_mcp_server.rs",
+        "src/sdk_mcp_typescript.rs"
       ]
     },
     {
       "id": "s09-mcp-initialize-params",
       "concept": "initialize parameter validation",
       "python": {
-        "status": "absent",
-        "reason": "Delegated to the mcp Python package, which is outside the pinned SDK sources."
+        "file": "src/claude_agent_sdk/_internal/sdk_mcp_bridge.py",
+        "line_start": 6,
+        "line_end": 9,
+        "sha256": "5cacd610f1aad7ca6b42df9e799836c3c71597eff6d45de1099470a0d69f95da"
       },
       "typescript": {
         "file": "package/sdk.mjs",
@@ -279,25 +291,32 @@
         "sha256": "92e7576785b4625d03dfba5fb061a4b1525715f54dac2226b00c72485bdc1d19"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "initialize params are schema-checked for presence and type only; empty strings are accepted."
+        "verdict": "disagree",
+        "behavior": "Both check initialize params for presence and type only and accept empty strings. TypeScript answers invalid params with -32603 carrying the zod issues; Python answers -32602 Invalid request parameters."
       },
       "decision": {
-        "kind": "upstream"
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; McpServerDialect::Python reproduces the Python server."
       },
       "contracts": [
-        "value_contracts::s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_reinitialize"
+        "value_contracts::s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_reinitialize",
+        "value_contracts::s08_s09_s10_m04_python_dialect_negotiates_gates_and_reads_ids_like_the_mcp_package"
       ],
       "rust": [
-        "src/sdk_mcp_server.rs"
+        "src/mcp_server_dialect.rs",
+        "src/sdk_mcp_python.rs",
+        "src/sdk_mcp_server.rs",
+        "src/sdk_mcp_typescript.rs"
       ]
     },
     {
       "id": "s10-mcp-protocol-versions",
       "concept": "MCP protocol version negotiation",
       "python": {
-        "status": "absent",
-        "reason": "Delegated to the mcp Python package, which is outside the pinned SDK sources."
+        "file": "src/claude_agent_sdk/_internal/sdk_mcp_bridge.py",
+        "line_start": 6,
+        "line_end": 9,
+        "sha256": "5cacd610f1aad7ca6b42df9e799836c3c71597eff6d45de1099470a0d69f95da"
       },
       "typescript": {
         "file": "package/sdk.mjs",
@@ -309,26 +328,33 @@
         "sha256": "ef1af33f781fe535f15907e755ccc7771f4e612fd87c97669000d9c4077af8bb"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "The requested version is echoed when supported (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07), else the latest."
+        "verdict": "disagree",
+        "behavior": "TypeScript echoes 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05 or 2024-10-07; Python echoes the same versions except 2024-10-07. Both answer any other version with 2025-11-25."
       },
       "decision": {
-        "kind": "upstream"
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; McpServerDialect::Python reproduces the Python server."
       },
       "contracts": [
-        "value_contracts::s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_reinitialize"
+        "value_contracts::s07_s09_s10_local_mcp_initialize_negotiates_like_upstream_and_accepts_reinitialize",
+        "value_contracts::s08_s09_s10_m04_python_dialect_negotiates_gates_and_reads_ids_like_the_mcp_package"
       ],
       "rust": [
         "src/constants.rs",
-        "src/sdk_mcp_server.rs"
+        "src/mcp_server_dialect.rs",
+        "src/sdk_mcp_python.rs",
+        "src/sdk_mcp_server.rs",
+        "src/sdk_mcp_typescript.rs"
       ]
     },
     {
       "id": "s11-mcp-tool-name-format",
       "concept": "SDK MCP tool names outside the naming standard",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources do not check tool names."
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 604,
+        "line_end": 618,
+        "sha256": "dba81afce1cc8420d31dcfc63e5b65d58a7f047dc2f6bada1862d36d3525d83b"
       },
       "typescript": {
         "file": "package/sdk.mjs",
@@ -341,7 +367,7 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "An invalid tool name produces a warning; the tool is still registered and listed."
+        "behavior": "A tool name outside the MCP naming standard is still registered and listed; only TypeScript also logs a warning."
       },
       "decision": {
         "kind": "upstream"
@@ -350,7 +376,10 @@
         "value_contracts::s11_local_mcp_lists_tools_whose_names_upstream_only_warns_about"
       ],
       "rust": [
-        "src/sdk_mcp_server.rs"
+        "src/mcp_server_dialect.rs",
+        "src/sdk_mcp_python.rs",
+        "src/sdk_mcp_server.rs",
+        "src/sdk_mcp_typescript.rs"
       ]
     },
     {
@@ -1092,7 +1121,10 @@
         "value_contracts::m02_m03_local_mcp_reports_tool_failures_as_error_results_before_invoking_tools"
       ],
       "rust": [
-        "src/sdk_mcp_server.rs"
+        "src/mcp_server_dialect.rs",
+        "src/sdk_mcp_python.rs",
+        "src/sdk_mcp_server.rs",
+        "src/sdk_mcp_typescript.rs"
       ]
     },
     {
@@ -1124,15 +1156,20 @@
         "value_contracts::m02_m03_local_mcp_reports_tool_failures_as_error_results_before_invoking_tools"
       ],
       "rust": [
-        "src/sdk_mcp_server.rs"
+        "src/mcp_server_dialect.rs",
+        "src/sdk_mcp_python.rs",
+        "src/sdk_mcp_server.rs",
+        "src/sdk_mcp_typescript.rs"
       ]
     },
     {
       "id": "m04-jsonrpc-id",
       "concept": "JSON-RPC request id type",
       "python": {
-        "status": "absent",
-        "reason": "Delegated to the mcp Python package, which is outside the pinned SDK sources."
+        "file": "src/claude_agent_sdk/_internal/sdk_mcp_bridge.py",
+        "line_start": 72,
+        "line_end": 82,
+        "sha256": "ada5b46fbbb8b08510fd99372a37a75dd369821494228a9640fe002022a9cf52"
       },
       "typescript": {
         "file": "package/sdk.mjs",
@@ -1144,15 +1181,22 @@
         "sha256": "348732e08d469f3d92047abe0b35c24614ca7523ac73ecc910f47ee66f66df19"
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "A request id is a string or an integer."
+        "verdict": "disagree",
+        "behavior": "Both read a string or an integer id. TypeScript also reads a number with a zero fraction as that integer and drops ids outside the safe integer range; Python reads any other id as a notification and refuses an id already in flight."
       },
       "decision": {
-        "kind": "upstream"
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; McpServerDialect::Python reproduces the Python server."
       },
-      "contracts": [],
+      "contracts": [
+        "value_contracts::s08_s09_s10_m04_python_dialect_negotiates_gates_and_reads_ids_like_the_mcp_package",
+        "value_contracts::m04_typescript_dialect_reads_string_and_safe_integer_ids"
+      ],
       "rust": [
-        "src/sdk_mcp_server.rs"
+        "src/mcp_server_dialect.rs",
+        "src/sdk_mcp_python.rs",
+        "src/sdk_mcp_server.rs",
+        "src/sdk_mcp_typescript.rs"
       ]
     },
     {

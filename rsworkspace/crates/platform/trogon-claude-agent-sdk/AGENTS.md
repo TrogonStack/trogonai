@@ -21,6 +21,12 @@ client ownership, startup, query completion, hooks or shutdown.
   `SdkTools` rejects duplicate exact tool names before infallible
   `LocalMcpServer::from` assembly. Preserve its private registry and immutable
   access; keep `Default` empty and single-tool conversion infallible.
+  `SdkTools::with_duplicates` is the Python dialect's opt-in exception.
+- `LocalMcpServer` answers like the TypeScript `createSdkMcpServer` by default;
+  `McpServerDialect::Python` answers like the Python `create_sdk_mcp_server`.
+  Keep each dialect's envelope, error and listing behavior in its own module,
+  replayed against the recorded upstream exchanges in
+  `tests/fixtures/sdk_mcp/dialects.json`.
 - Register callbacks before user input. Service controls and callbacks in the
   driver, with bounded queues, callback admission and waits. Preserve explicit
   overflow errors rather than silently dropping messages.

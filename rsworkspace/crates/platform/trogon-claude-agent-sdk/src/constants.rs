@@ -979,3 +979,27 @@ pub(crate) const TOOL_CONFIG_ENVS: [&str; 3] = [
 
 pub(crate) const OAUTH_CALLBACK_MISSING: &str = "getOAuthToken callback is not provided.";
 pub(crate) const HOST_AUTH_CALLBACK_MISSING: &str = "getHostAuthToken callback is not provided.";
+
+/// The protocol versions the Python `mcp` server negotiates; anything else is answered with the latest.
+pub(crate) const PYTHON_MCP_PROTOCOL_VERSIONS: [&str; 4] = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+
+/// The protocol version the Python server answers with when the client asks for an unsupported one.
+pub(crate) const PYTHON_MCP_LATEST_PROTOCOL_VERSION: &str = "2025-11-25";
+
+/// The requests a server built by `create_sdk_mcp_server` registers handlers for.
+pub(crate) const PYTHON_MCP_METHODS: [&str; 4] = ["initialize", "ping", "tools/list", "tools/call"];
+
+/// The `ToolAnnotations` fields `Tool.model_validate` keeps.
+pub(crate) const PYTHON_MCP_ANNOTATION_FIELDS: [&str; 5] = [
+    "title",
+    "readOnlyHint",
+    "destructiveHint",
+    "idempotentHint",
+    "openWorldHint",
+];
+
+/// `Number.MAX_SAFE_INTEGER`, the largest integer request id the TypeScript dialect accepts.
+pub(crate) const JS_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+
+/// The `$schema` the TypeScript dialect adds to a tool input schema.
+pub(crate) const MCP_TS_JSON_SCHEMA_DRAFT_07: &str = "http://json-schema.org/draft-07/schema#";

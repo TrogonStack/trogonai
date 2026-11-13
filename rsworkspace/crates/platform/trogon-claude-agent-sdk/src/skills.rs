@@ -2,10 +2,9 @@
 //! the skill name validation of both upstream SDKs (`Jet` in `sdk.mjs`, `_validate_skill_name` in
 //! `subprocess_cli.py`).
 
-use unicode_general_category::{GeneralCategory, get_general_category};
-
 use crate::{
     ClaudeAgentOptions, OptionError, Skills, constants::SKILLS_DEFAULT_SETTING_SOURCES, process_options::ArgvStyle,
+    python_json::python_repr,
 };
 
 /// JavaScript `String.prototype.trim` whitespace: `WhiteSpace` plus `LineTerminator`.
@@ -49,50 +48,6 @@ fn is_invalid_python(c: char) -> bool {
 /// JSON text of a string, TypeScript `JSON.stringify`.
 fn json_text(name: &str) -> String {
     serde_json::to_string(name).unwrap_or_else(|_| format!("\"{name}\""))
-}
-
-/// Python `repr(str)`.
-pub(crate) fn python_repr(text: &str) -> String {
-    let quote = if text.contains('\'') && !text.contains('"') {
-        '"'
-    } else {
-        '\''
-    };
-    let mut out = String::from(quote);
-    for c in text.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '\t' => out.push_str("\\t"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            c if c == quote => {
-                out.push('\\');
-                out.push(c);
-            }
-            ' ' => out.push(' '),
-            c if is_python_printable(c) => out.push(c),
-            c if (c as u32) < 0x100 => out.push_str(&format!("\\x{:02x}", c as u32)),
-            c if (c as u32) < 0x10000 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push_str(&format!("\\U{:08x}", c as u32)),
-        }
-    }
-    out.push(quote);
-    out
-}
-
-/// Python `str.isprintable` for one character: not in `Other` or `Separator`, except the space.
-fn is_python_printable(c: char) -> bool {
-    !matches!(
-        get_general_category(c),
-        GeneralCategory::Control
-            | GeneralCategory::Format
-            | GeneralCategory::Surrogate
-            | GeneralCategory::PrivateUse
-            | GeneralCategory::Unassigned
-            | GeneralCategory::LineSeparator
-            | GeneralCategory::ParagraphSeparator
-            | GeneralCategory::SpaceSeparator
-    )
 }
 
 fn invalid_name(style: ArgvStyle, name: &str, reason: &str) -> OptionError {

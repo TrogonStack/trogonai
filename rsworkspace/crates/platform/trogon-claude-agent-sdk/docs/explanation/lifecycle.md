@@ -61,8 +61,10 @@ Public constructors that assemble several settings use named fields.
 `SdkTool::from(SdkToolOptions { ... })` identifies the tool name,
 description, input schema and handler at the call site.
 `LocalMcpServer::from(LocalMcpServerOptions { ... })` likewise names its server,
-version and tools. These are required inputs, so a struct literal makes omitted
-fields a compile-time error. The API retains this Options pattern.
+version, tools, instructions, `always_load` and dialect. A struct literal makes
+omitted fields a compile-time error; `LocalMcpServerOptions::new(name)` spells
+out the upstream defaults for the optional ones. The API retains this Options
+pattern.
 
 Scalar text values (`Prompt`, `AgentName`, `ToolRule`, `BuiltinToolName`,
 `ToolName`, `McpToolName`, `McpServerName`, `DialogKind` and the session,
@@ -86,7 +88,10 @@ references. Neither value object exposes mutable access to its value.
 Duplicate names are a constraint across the collection of tools.
 `LocalMcpServerOptions.tools` requires `SdkTools`, which validates exact-name
 uniqueness in `SdkTools::new()` and returns a typed `SdkToolsError` identifying
-the repeated `McpToolName`. Case-distinct names remain separate. Its private
+the repeated `McpToolName`, as `createSdkMcpServer` does.
+`SdkTools::with_duplicates()` keeps repeated names for a server that answers
+like the Python `create_sdk_mcp_server`, which lists every definition and calls
+the last one. Case-distinct names remain separate. Its private
 immutable registry preserves that invariant when cloned; callers cannot modify
 the collection after validation. Empty collections use `SdkTools::default()`
 and one tool uses `tool.into()`, both infallibly. `LocalMcpServer::from` then

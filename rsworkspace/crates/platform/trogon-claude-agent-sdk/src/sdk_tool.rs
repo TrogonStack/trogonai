@@ -65,6 +65,12 @@ pub struct SdkToolOptions {
     pub description: String,
     pub input_schema: McpToolInputSchema,
     pub handler: Arc<dyn McpToolHandler>,
+    /// MCP tool annotations, listed as `annotations`. The Python dialect lists only the five standard hints.
+    pub annotations: Option<JsonObject>,
+    /// TypeScript `searchHint`, listed as `_meta["anthropic/searchHint"]` when non-empty.
+    pub search_hint: Option<String>,
+    /// TypeScript `alwaysLoad`, listed as `_meta["anthropic/alwaysLoad"]`.
+    pub always_load: bool,
 }
 
 impl std::fmt::Debug for SdkToolOptions {
@@ -82,6 +88,9 @@ pub struct SdkTool {
     description: String,
     input_schema: McpToolInputSchema,
     handler: Arc<dyn McpToolHandler>,
+    annotations: Option<JsonObject>,
+    search_hint: Option<String>,
+    always_load: bool,
 }
 
 impl From<SdkToolOptions> for SdkTool {
@@ -91,12 +100,18 @@ impl From<SdkToolOptions> for SdkTool {
             description,
             input_schema,
             handler,
+            annotations,
+            search_hint,
+            always_load,
         } = options;
         Self {
             name,
             description,
             input_schema,
             handler,
+            annotations,
+            search_hint,
+            always_load,
         }
     }
 }
@@ -112,6 +127,18 @@ impl SdkTool {
 
     pub(crate) fn input_schema(&self) -> &McpToolInputSchema {
         &self.input_schema
+    }
+
+    pub(crate) fn annotations(&self) -> Option<&JsonObject> {
+        self.annotations.as_ref()
+    }
+
+    pub(crate) fn search_hint(&self) -> Option<&str> {
+        self.search_hint.as_deref()
+    }
+
+    pub(crate) fn always_load(&self) -> bool {
+        self.always_load
     }
 
     pub(crate) fn call(&self, request: McpToolRequest) -> McpToolFuture<'_> {
