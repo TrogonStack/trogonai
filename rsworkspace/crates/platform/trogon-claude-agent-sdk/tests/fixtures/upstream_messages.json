@@ -1,0 +1,840 @@
+{
+  "SDKMessage": [
+    {
+      "type": "assistant",
+      "message": {
+        "foreign": "object"
+      },
+      "parent_tool_use_id": "text",
+      "error": "authentication_failed",
+      "uuid": "text",
+      "session_id": "text",
+      "request_id": "text",
+      "user_message_uuid": "text",
+      "user_message_uuids": [
+        "text"
+      ],
+      "resume_reason": "text",
+      "resumed_from_incomplete_thinking": true,
+      "supersedes": [
+        "text"
+      ],
+      "aborted": true,
+      "agent_id": "text",
+      "subagent_type": "text",
+      "task_description": "text",
+      "timestamp": "text",
+      "context_usage": {
+        "model": "text",
+        "total_tokens": 3,
+        "raw_max_tokens": 3,
+        "percentage": 3,
+        "over_limit": {
+          "tokens_over": 3,
+          "kind": "hard_limit"
+        },
+        "categories": [
+          {
+            "name": "text",
+            "tokens": 3,
+            "kind": "used"
+          }
+        ],
+        "mcp_tools": [
+          {
+            "name": "text",
+            "server_name": "text",
+            "tokens": 3
+          }
+        ],
+        "memory_files": [
+          {
+            "path": "text",
+            "type": "text",
+            "tokens": 3
+          }
+        ],
+        "agents": [
+          {
+            "agent_type": "text",
+            "source": "text",
+            "tokens": 3
+          }
+        ],
+        "skills": [
+          {
+            "name": "text",
+            "source": "text",
+            "plugin_name": "text",
+            "tokens": 3
+          }
+        ]
+      },
+      "usage_report": {
+        "session": {
+          "total_cost_usd": 3,
+          "total_api_duration_ms": 3,
+          "total_duration_ms": 3,
+          "total_lines_added": 3,
+          "total_lines_removed": 3,
+          "model_usage": {
+            "key": {
+              "inputTokens": 3,
+              "outputTokens": 3,
+              "thinkingTokens": 3,
+              "cacheReadInputTokens": 3,
+              "cacheCreationInputTokens": 3,
+              "cacheCreationEphemeral5mInputTokens": 3,
+              "cacheCreationEphemeral1hInputTokens": 3,
+              "webSearchRequests": 3,
+              "costUSD": 3,
+              "contextWindow": 3,
+              "maxOutputTokens": 3,
+              "canonicalModel": "text",
+              "provider": "text",
+              "costBasis": "list"
+            }
+          }
+        },
+        "rate_limits": {
+          "limits": [
+            {
+              "kind": "text",
+              "group": "text",
+              "percent": 3,
+              "resets_at": "text",
+              "scope": {
+                "model": {
+                  "display_name": "text"
+                },
+                "surface": {
+                  "display_name": "text"
+                }
+              },
+              "severity": "text",
+              "is_active": true
+            }
+          ],
+          "extra_usage": {
+            "is_enabled": true,
+            "monthly_limit": 3,
+            "used_credits": 3,
+            "utilization": 3,
+            "currency": "text"
+          }
+        }
+      }
+    },
+    {
+      "type": "user",
+      "message": {
+        "foreign": "object"
+      },
+      "parent_tool_use_id": "text",
+      "isSynthetic": false,
+      "tool_use_result": {
+        "any": [
+          "thing",
+          null
+        ]
+      },
+      "priority": "next",
+      "origin": {
+        "kind": "channel",
+        "server": "text"
+      },
+      "shouldQuery": false,
+      "timestamp": "text",
+      "client_composed": true,
+      "uuid": "text",
+      "pasted_content": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "inline_pastes": [
+        "text"
+      ],
+      "session_id": "text",
+      "agent_id": "text",
+      "subagent_type": "text",
+      "task_description": "text"
+    },
+    {
+      "type": "user",
+      "message": {
+        "foreign": "object"
+      },
+      "parent_tool_use_id": "text",
+      "isSynthetic": true,
+      "tool_use_result": {
+        "any": [
+          "thing",
+          null
+        ]
+      },
+      "priority": "later",
+      "origin": {
+        "kind": "peer",
+        "from": "text",
+        "fromMode": "bypass",
+        "name": "text",
+        "fromSession": "text",
+        "senderTaskId": "text",
+        "body": "text",
+        "verifiedPeerPid": 3
+      },
+      "shouldQuery": true,
+      "timestamp": "text",
+      "client_composed": true,
+      "uuid": "text",
+      "session_id": "text",
+      "isReplay": true,
+      "file_attachments": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ]
+    },
+    {
+      "type": "result",
+      "subtype": "error_max_structured_output_retries",
+      "duration_ms": 2.5,
+      "duration_api_ms": 2.5,
+      "is_error": false,
+      "num_turns": 2.5,
+      "stop_reason": "text",
+      "total_cost_usd": 2.5,
+      "usage": {
+        "foreign": "object"
+      },
+      "modelUsage": {
+        "key": {
+          "inputTokens": 2.5,
+          "outputTokens": 2.5,
+          "thinkingTokens": 2.5,
+          "cacheReadInputTokens": 2.5,
+          "cacheCreationInputTokens": 2.5,
+          "cacheCreationEphemeral5mInputTokens": 2.5,
+          "cacheCreationEphemeral1hInputTokens": 2.5,
+          "webSearchRequests": 2.5,
+          "costUSD": 2.5,
+          "contextWindow": 2.5,
+          "maxOutputTokens": 2.5,
+          "canonicalModel": "text",
+          "provider": "text",
+          "costBasis": "list"
+        }
+      },
+      "permission_denials": [
+        {
+          "tool_name": "text",
+          "tool_use_id": "text",
+          "tool_input": {
+            "key": {
+              "any": [
+                "thing",
+                null
+              ]
+            }
+          }
+        }
+      ],
+      "queued_turn_count": 2.5,
+      "errors": [
+        "text"
+      ],
+      "startup_failure_reason": "org_pin_mismatch",
+      "user_message_uuid": "text",
+      "user_message_uuids": [
+        "text"
+      ],
+      "resume_reason": "text",
+      "terminal_reason": "image_error",
+      "result_index": 2.5,
+      "credential_expires_at": "text",
+      "fast_mode_state": "off",
+      "fast_mode_disabled_reason": "network_error",
+      "origin": {
+        "kind": "task-notification",
+        "subkind": "session-inbox",
+        "fireReason": "text",
+        "runId": "text"
+      },
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "init",
+      "agents": [
+        "text"
+      ],
+      "apiKeySource": "user",
+      "betas": [
+        "text"
+      ],
+      "claude_code_version": "text",
+      "cwd": "text",
+      "tools": [
+        "text"
+      ],
+      "mcp_servers": [
+        {
+          "name": "text",
+          "status": "text",
+          "source": "text"
+        }
+      ],
+      "model": "text",
+      "permissionMode": "dontAsk",
+      "slash_commands": [
+        "text"
+      ],
+      "terminal_slash_commands": [
+        "text"
+      ],
+      "output_style": "text",
+      "skills": [
+        "text"
+      ],
+      "plugins": [
+        {
+          "name": "text",
+          "path": "text",
+          "version": "text"
+        }
+      ],
+      "plugin_errors": [
+        {
+          "plugin": "text",
+          "type": "text",
+          "message": "text",
+          "path": "text"
+        }
+      ],
+      "fast_mode_state": "cooldown",
+      "fast_mode_disabled_reason": "unknown",
+      "effort": "max",
+      "view_mode": "focus",
+      "capabilities": [
+        "text"
+      ],
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "foreign": "object"
+      },
+      "parent_tool_use_id": "text",
+      "uuid": "text",
+      "session_id": "text",
+      "ttft_ms": 2.5,
+      "user_message_uuid": "text",
+      "user_message_uuids": [
+        "text"
+      ],
+      "resume_reason": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "compact_boundary",
+      "compact_metadata": {
+        "trigger": "manual",
+        "pre_tokens": 3,
+        "post_tokens": 3,
+        "duration_ms": 3,
+        "preserved_segment": {
+          "head_uuid": "text",
+          "anchor_uuid": "text",
+          "tail_uuid": "text"
+        },
+        "preserved_messages": {
+          "anchor_uuid": "text",
+          "uuids": [
+            "text"
+          ]
+        }
+      },
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "status",
+      "status": "requesting",
+      "permissionMode": "acceptEdits",
+      "compact_result": "failed",
+      "compact_error": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "api_retry",
+      "attempt": 3,
+      "max_retries": 3,
+      "retry_delay_ms": 3,
+      "error_status": 3,
+      "error": "model_not_found",
+      "no_response": {
+        "waited_ms": 3,
+        "retry_wait_ms": 3
+      },
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "control_request_progress",
+      "request_id": "text",
+      "status": "api_retry",
+      "attempt": 2.5,
+      "max_retries": 2.5,
+      "retry_delay_ms": 2.5,
+      "error_status": 2.5,
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "model_refusal_fallback",
+      "trigger": "refusal",
+      "direction": "revert",
+      "scope": "session",
+      "original_model": "text",
+      "fallback_model": "text",
+      "request_id": "text",
+      "api_refusal_category": "text",
+      "api_refusal_explanation": "text",
+      "retracted_message_uuids": [
+        "text"
+      ],
+      "refused_user_message_uuid": "text",
+      "content": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "model_refusal_no_fallback",
+      "original_model": "text",
+      "request_id": "text",
+      "api_refusal_category": "text",
+      "api_refusal_explanation": "text",
+      "refused_user_message_uuid": "text",
+      "content": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "local_command_output",
+      "content": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "hook_started",
+      "hook_id": "text",
+      "hook_name": "text",
+      "hook_event": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "hook_progress",
+      "hook_id": "text",
+      "hook_name": "text",
+      "hook_event": "text",
+      "stdout": "text",
+      "stderr": "text",
+      "output": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "hook_response",
+      "hook_id": "text",
+      "hook_name": "text",
+      "hook_event": "text",
+      "output": "text",
+      "stdout": "text",
+      "stderr": "text",
+      "exit_code": 2.5,
+      "outcome": "success",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "plugin_install",
+      "status": "started",
+      "name": "text",
+      "error": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "tool_progress",
+      "tool_use_id": "text",
+      "tool_name": "text",
+      "parent_tool_use_id": "text",
+      "elapsed_time_seconds": 2.5,
+      "task_id": "text",
+      "uuid": "text",
+      "session_id": "text",
+      "heartbeat": false,
+      "subagent_type": "text",
+      "subagent_retry": {
+        "agent_id": "text",
+        "attempt": 2.5,
+        "max_retries": 2.5,
+        "retry_delay_ms": 2.5,
+        "error_status": 2.5,
+        "error_category": "text"
+      }
+    },
+    {
+      "type": "auth_status",
+      "isAuthenticating": true,
+      "output": [
+        "text"
+      ],
+      "error": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "task_notification",
+      "task_id": "text",
+      "run_id": "text",
+      "tool_use_id": "text",
+      "status": "failed",
+      "reason": "worker_restart",
+      "output_file": "text",
+      "summary": "text",
+      "usage": {
+        "total_tokens": 2.5,
+        "tool_uses": 2.5,
+        "duration_ms": 2.5
+      },
+      "resource_links": [
+        {
+          "uri": "text",
+          "name": "text",
+          "title": "text",
+          "description": "text",
+          "mimeType": "text",
+          "size": 2.5,
+          "annotations": {
+            "key": {
+              "any": [
+                "thing",
+                null
+              ]
+            }
+          }
+        }
+      ],
+      "skip_transcript": false,
+      "ambient": false,
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "task_started",
+      "task_id": "text",
+      "run_id": "text",
+      "tool_use_id": "text",
+      "description": "text",
+      "subagent_type": "text",
+      "is_backgrounded": true,
+      "spawn_depth": 3,
+      "parent_task_id": "text",
+      "task_type": "text",
+      "workflow_name": "text",
+      "prompt": "text",
+      "skip_transcript": true,
+      "ambient": true,
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "task_updated",
+      "task_id": "text",
+      "run_id": "text",
+      "patch": {
+        "status": "failed",
+        "description": "text",
+        "end_time": 2.5,
+        "total_paused_ms": 2.5,
+        "error": "text",
+        "is_backgrounded": false
+      },
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "task_progress",
+      "task_id": "text",
+      "run_id": "text",
+      "tool_use_id": "text",
+      "description": "text",
+      "subagent_type": "text",
+      "usage": {
+        "total_tokens": 3,
+        "tool_uses": 3,
+        "duration_ms": 3
+      },
+      "last_tool_name": "text",
+      "summary": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "background_tasks_changed",
+      "tasks": [
+        {
+          "task_id": "text",
+          "run_id": "text",
+          "task_type": "text",
+          "subagent_type": "text",
+          "description": "text",
+          "parent_task_id": "text",
+          "ambient": false
+        }
+      ],
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "thinking_tokens",
+      "estimated_tokens": 3,
+      "estimated_tokens_delta": 3,
+      "user_message_uuid": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "session_state_changed",
+      "state": "running",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "worker_shutting_down",
+      "reason": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "commands_changed",
+      "commands": [
+        {
+          "name": "text",
+          "description": "text",
+          "argumentHint": "text",
+          "aliases": [
+            "text"
+          ],
+          "builtin": false
+        }
+      ],
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "notification",
+      "key": "text",
+      "text": "text",
+      "priority": "low",
+      "color": "text",
+      "timeout_ms": 3,
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "files_persisted",
+      "files": [
+        {
+          "filename": "text",
+          "file_id": "text"
+        }
+      ],
+      "failed": [
+        {
+          "filename": "text",
+          "error": "text"
+        }
+      ],
+      "processed_at": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "tool_use_summary",
+      "summary": "text",
+      "preceding_tool_use_ids": [
+        "text"
+      ],
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "memory_recall",
+      "mode": "synthesize",
+      "memories": [
+        {
+          "path": "text",
+          "scope": "team",
+          "content": "text"
+        }
+      ],
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "rate_limit_event",
+      "rate_limit_info": {
+        "status": "rejected",
+        "resetsAt": 3,
+        "rateLimitType": "seven_day_opus",
+        "utilization": 3,
+        "overageStatus": "rejected",
+        "overageResetsAt": 3,
+        "overageDisabledReason": "seat_tier_zero_credit_limit",
+        "isUsingOverage": true,
+        "overageInUse": true,
+        "overageEnabled": true,
+        "surpassedThreshold": 3,
+        "limitScope": "group_pool",
+        "errorCode": "credits_required",
+        "canUserPurchaseCredits": true,
+        "hasChargeableSavedPaymentMethod": true
+      },
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "elicitation_complete",
+      "mcp_server_name": "text",
+      "elicitation_id": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "permission_denied",
+      "tool_name": "text",
+      "tool_use_id": "text",
+      "agent_id": "text",
+      "decision_reason_type": "text",
+      "decision_reason": "text",
+      "message": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "prompt_suggestion",
+      "suggestion": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "mirror_error",
+      "error": "text",
+      "key": {
+        "projectKey": "text",
+        "sessionId": "text",
+        "subpath": "text"
+      },
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "informational",
+      "content": "text",
+      "level": "notice",
+      "tool_use_id": "text",
+      "prevent_continuation": false,
+      "tag": "text",
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "conversation_reset",
+      "new_conversation_id": "text",
+      "uuid": "text",
+      "session_id": "text",
+      "trigger": "fresh_session",
+      "user_message_uuid": "text",
+      "timestamp": "text"
+    },
+    {
+      "type": "system",
+      "subtype": "session_writes_lost",
+      "error_code": "EDQUOT",
+      "lost": [
+        "global_config"
+      ],
+      "transcript_session_ids": [
+        "text"
+      ],
+      "uuid": "text",
+      "session_id": "text"
+    }
+  ],
+  "SDKActiveGoalMessage": [
+    {
+      "type": "active_goal",
+      "value": {
+        "condition": "text",
+        "iterations": 3,
+        "set_at": 3,
+        "tokens_at_start": 3,
+        "last_reason": "text"
+      },
+      "uuid": "text",
+      "session_id": "text"
+    },
+    {
+      "type": "active_goal",
+      "value": {
+        "condition": "text",
+        "iterations": 2.5,
+        "set_at": 2.5,
+        "tokens_at_start": 2.5,
+        "last_reason": "text"
+      },
+      "uuid": "text",
+      "session_id": "text"
+    }
+  ]
+}

@@ -325,8 +325,16 @@
         ]
       },
       "roots": [
-        "SDKMessage"
-      ]
+        "SDKMessage",
+        "SDKActiveGoalMessage"
+      ],
+      "fixtures": {
+        "output": "tests/fixtures/upstream_messages.json",
+        "roots": [
+          "SDKMessage",
+          "SDKActiveGoalMessage"
+        ]
+      }
     },
     {
       "source": "sdk.d.ts",
