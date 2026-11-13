@@ -31,10 +31,12 @@ mod effort_level;
 mod environment;
 mod environment_plan;
 mod error;
+mod float_digits;
 mod framing;
 mod hooks;
 mod js_json;
 mod js_object_order;
+mod json_scan;
 mod managed_settings_delivery;
 mod mcp_config;
 mod mcp_read_resource_response;
@@ -61,6 +63,7 @@ mod process_options;
 mod process_transport;
 mod prompt;
 mod python_json;
+mod python_json_value;
 mod queue_capacity;
 #[cfg(unix)]
 mod run_as;
@@ -231,6 +234,10 @@ pub use process_options::{
     TraceContext,
 };
 pub use prompt::Prompt;
+pub use python_json_value::{
+    ExactInteger, ExactIntegerError, PythonJsonError, PythonJsonValue, PythonNumber, python_json_dumps,
+    python_json_loads,
+};
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 pub use runtime_options::{
     DangerousPermissionSkip, DebugOutput, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget, ThinkingConfig,
@@ -280,7 +287,8 @@ pub use settings_dialect::SettingsDialect;
 pub use settings_input::SettingsInput;
 pub use settings_json::js_stringify;
 pub use settings_resolve::{
-    ResolveSettingsError, filter_escalating_default_mode, resolve_settings, resolve_settings_in_dialect,
+    ResolveSettingsError, filter_escalating_default_mode, resolve_python_settings, resolve_python_settings_with,
+    resolve_python_settings_with_state, resolve_settings, resolve_settings_in_dialect,
     resolve_settings_in_dialect_with, resolve_settings_in_dialect_with_state, resolve_settings_with,
     resolve_settings_with_state,
 };

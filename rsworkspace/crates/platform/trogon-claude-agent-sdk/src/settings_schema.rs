@@ -472,21 +472,16 @@ impl Check {
             Check::MinLength(minimum) => length_of(value).is_none_or(|length| length >= *minimum),
             Check::MaxLength(maximum) => length_of(value).is_none_or(|length| length <= *maximum),
             Check::LengthEquals(expected) => length_of(value).is_none_or(|length| length == *expected),
-            Check::SafeInteger => value
-                .as_f64()
+            Check::SafeInteger => number_of(value)
                 .is_none_or(|number| number.fract() == 0.0 && number.abs() <= SETTINGS_SCHEMA_SAFE_INTEGER),
             Check::GreaterThan {
                 value: bound,
                 inclusive,
-            } => value
-                .as_f64()
-                .is_none_or(|number| if *inclusive { number >= *bound } else { number > *bound }),
+            } => number_of(value).is_none_or(|number| if *inclusive { number >= *bound } else { number > *bound }),
             Check::LessThan {
                 value: bound,
                 inclusive,
-            } => value
-                .as_f64()
-                .is_none_or(|number| if *inclusive { number <= *bound } else { number < *bound }),
+            } => number_of(value).is_none_or(|number| if *inclusive { number <= *bound } else { number < *bound }),
             Check::Pattern(regex) => value.as_str().is_none_or(|text| regex.is_match(text.as_bytes())),
             Check::StartsWith(prefix) => value.as_str().is_none_or(|text| text.starts_with(prefix.as_str())),
             Check::Url => value.as_str().is_none_or(|text| Url::parse(text).is_ok()),
@@ -696,6 +691,11 @@ impl Node {
             Node::Boolean | Node::Unknown | Node::Undefined | Node::Literal(_) | Node::Enum(_) => {}
         }
     }
+}
+
+/// The JavaScript number a settings value holds, with the number markers read back.
+fn number_of(value: &Value) -> Option<f64> {
+    value.as_number().and_then(js_value)
 }
 
 #[cfg(test)]

@@ -451,12 +451,30 @@ command output. A `ResolverState` holds what upstream keeps between calls;
 `ResolverState::with_rereads(PolicyRereads::Inline)` runs machine policy re-reads on the calling
 thread, so the host's clock alone decides when one has ended. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
 `claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
-byte for byte. Integers above 2^53 read like `JSON.parse` by default; `resolve_settings_in_dialect`
-and `resolve_settings_in_dialect_with` take `SettingsDialect::Python` to keep them exact. A number
-past the double range reads as `Infinity`, as `JSON.parse` reads it: a typed setting refuses it, an
-`env` value spells it `"Infinity"` (env values go through `String()`, as `z.coerce.string()` does),
-and the result holds `null` where it survives, which is what `JSON.stringify` prints for it. Gaps:
-schema value normalization, and cloud and org mode.
+byte for byte. Numbers read as `JSON.parse` reads them: integers above 2^53 round, and a number
+past the double range reads as `Infinity`. A typed setting refuses `Infinity`, an `env` value spells
+it `"Infinity"` (env values go through `String()`, as `z.coerce.string()` does), and the result
+holds `null` where it survives, which is what `JSON.stringify` prints for it. Gaps: schema value
+normalization, and cloud and org mode.
+
+The Python dialect reads every settings file as Python's `json.loads` reads it: integers of any
+size, floats that stay floats (`1.0` is not `1`), and `NaN`, `Infinity` and `-Infinity`.
+`resolve_python_settings`, `resolve_python_settings_with` and `resolve_python_settings_with_state`
+return the result as a `PythonJsonValue`, where each integer is an `ExactInteger` and each float an
+`f64`, and `python_json_dumps` prints it as `json.dumps` does. `resolve_settings_in_dialect` and
+`resolve_settings_in_dialect_with` with `SettingsDialect::Python` return the typed
+`ResolvedSettings` instead, which holds integers up to the `u64` and `i64` range exactly, a double
+for larger ones and `null` for the non-finite floats. `python_json_loads` and `python_json_dumps`
+are checked against CPython over a corpus of doubles, documents and refused text
+(`.config/mise/lib/claude-sdk-freshness/python_json_goldens.py` writes the goldens):
+
+```rust,no_run
+use trogon_claude_agent_sdk::{ResolveSettingsOptions, python_json_dumps, resolve_python_settings};
+
+async fn python_text(options: &ResolveSettingsOptions) -> Result<String, Box<dyn std::error::Error>> {
+    Ok(python_json_dumps(&resolve_python_settings(options).await?))
+}
+```
 
 To print resolved settings exactly as the TypeScript SDK would, serialize them with `js_stringify`
 instead of `serde_json::to_string`. It writes what `JSON.stringify` writes: the shortest digits of

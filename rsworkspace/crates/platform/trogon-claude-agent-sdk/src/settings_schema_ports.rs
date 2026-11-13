@@ -15,7 +15,7 @@ use crate::constants::{
     SETTINGS_REQUEST_TIMEOUT_LIMIT, SETTINGS_RESERVED_MARKETPLACE_NAMES,
 };
 use crate::{
-    settings_json::js_number,
+    settings_json::{js_float, js_number},
     settings_numbers::{finite_number, infinity, js_value},
     settings_schema_hosts::is_https_with_host,
 };
@@ -289,7 +289,7 @@ pub(crate) fn clean_credential_entry(value: &Value) -> Value {
 /// JavaScript `Number(value)` for the JSON values a request timeout can carry; `None` stands for `NaN`.
 pub(crate) fn to_number(value: &Value) -> Option<f64> {
     match value {
-        Value::Number(number) => js_value(number),
+        Value::Number(number) => js_value(number).filter(|value| !value.is_nan()),
         Value::Null => Some(0.0),
         Value::Bool(flag) => Some(f64::from(u8::from(*flag))),
         Value::String(text) => string_to_number(text),
@@ -410,6 +410,8 @@ pub(crate) fn js_string(value: &Value) -> String {
         Value::Bool(flag) => flag.to_string(),
         Value::Number(number) => match js_value(number) {
             Some(value) if value.is_infinite() => if value > 0.0 { "Infinity" } else { "-Infinity" }.to_owned(),
+            Some(value) if value.is_nan() => "NaN".to_owned(),
+            Some(value) if number.is_f64() => js_float(value),
             _ => js_number(number),
         },
         Value::Array(items) => items

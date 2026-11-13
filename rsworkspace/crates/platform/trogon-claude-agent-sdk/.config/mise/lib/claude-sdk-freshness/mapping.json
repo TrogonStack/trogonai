@@ -3448,7 +3448,13 @@
         "adapters::SettingsHost",
         "adapters::NativeHost",
         "adapters::ExecuteFile",
-        "js_stringify"
+        "js_stringify",
+        "resolve_python_settings",
+        "resolve_python_settings_with",
+        "python_json_loads",
+        "python_json_dumps",
+        "PythonJsonValue",
+        "ExactInteger"
       ],
       "tests": [
         {
@@ -3546,10 +3552,18 @@
         {
           "path": "tests/settings_resolve.rs",
           "name": "a_typed_setting_refuses_infinity_and_the_file_does_not_load"
+        },
+        {
+          "path": "tests/settings_resolve.rs",
+          "name": "the_python_resolve_keeps_every_number_as_json_loads_reads_it"
+        },
+        {
+          "path": "tests/python_json_goldens.rs",
+          "name": "every_document_prints_like_json_dumps_after_json_loads"
         }
       ],
       "status": "partial",
-      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 54 fixture trees (mise run claude-sdk:resolve-diff), including the read path of normal settings files (pre-parse sanitizers, managed-only key removal, document key order). Partial until the listed gaps close: the policy-tolerant schema for managed settings (catch substitutions and entry salvage), and cloud and org mode. The MDM re-read throttle follows the pinned state machine against the host clock, with a re-read its caller does not wait for running on a thread of its own (fixtures replay it, slow reads included, with a fake clock). Integers above 2^53 read like JSON.parse in the TypeScript dialect (the Python dialect keeps them exact), and js_stringify prints resolved settings exactly as JSON.stringify does (checked against Node over a corpus of doubles and documents). A number token past the double range reads as Infinity, as JSON.parse reads it: typed settings refuse it, env values spell it with String() as z.coerce.string() does, and the resolver prints it as null; serde_json::to_string prints some doubles in exponent form where JavaScript prints digits. Python has no equivalent."
+      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 54 fixture trees (mise run claude-sdk:resolve-diff), including the read path of normal settings files (pre-parse sanitizers, managed-only key removal, document key order). Partial until the listed gaps close: the policy-tolerant schema for managed settings (catch substitutions and entry salvage), and cloud and org mode. The MDM re-read throttle follows the pinned state machine against the host clock, with a re-read its caller does not wait for running on a thread of its own (fixtures replay it, slow reads included, with a fake clock). Numbers read as JSON.parse reads them: integers above 2^53 round, and a token past the double range reads as Infinity, which typed settings refuse, env values spell with String() as z.coerce.string() does, and the resolver prints as null. js_stringify prints resolved settings exactly as JSON.stringify does (checked against Node over a corpus of doubles and documents). The Python dialect reads files as json.loads reads them, and resolve_python_settings returns integers of any size exactly and floats with their type, so python_json_dumps prints them as json.dumps does (checked against CPython over a corpus of doubles, documents and refused text). Python has no equivalent."
     },
     {
       "id": "initialize-options",

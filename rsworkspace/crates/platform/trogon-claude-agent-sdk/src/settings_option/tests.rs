@@ -396,6 +396,26 @@ fn a_utf8_byte_order_mark_is_dropped_from_a_python_settings_file() {
 }
 
 #[test]
+fn python_keeps_settings_numbers_as_json_loads_reads_them() {
+    let options = ClaudeAgentOptions {
+        argv_style: ArgvStyle::Python,
+        settings: Some(SettingsInput::from_wire_string(
+            r#"{"n": 123456789012345678901234567890, "m": -0, "f": 1.0, "e": 1E400, "x": NaN}"#,
+        )),
+        sandbox: sandbox("{}"),
+        ..Default::default()
+    };
+    let argv = run(&options, &Files::new()).unwrap_or_default();
+    assert!(
+        argv.contains(
+            &r#"{"n": 123456789012345678901234567890, "m": 0, "f": 1.0, "e": Infinity, "x": NaN, "sandbox": {}}"#
+                .to_owned()
+        ),
+        "{argv:?}"
+    );
+}
+
+#[test]
 fn a_python_settings_file_holding_a_non_object_raises_the_python_type_error() {
     let mut files = Files::new();
     files.contents = b"\"text\"".to_vec();

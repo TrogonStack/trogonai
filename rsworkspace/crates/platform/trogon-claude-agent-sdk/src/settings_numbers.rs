@@ -8,6 +8,12 @@
 //! `JSON.parse` reads a token past the double range as `Infinity`, which `serde_json` cannot hold. A settings
 //! value carries it as a marker double that normalization never leaves behind, the number sites read the marker
 //! back as the infinity it stands for, and the resolver prints it as `null`, as `JSON.stringify` does.
+//!
+//! `json.loads` reads an integer of any size exactly and keeps a whole float a float, which `serde_json` cannot
+//! hold either. A Python-dialect resolve keeps such numbers on its thread, each as a marker double, and turns the
+//! markers back into the exact numbers, or into their nearest `serde_json` numbers, when it ends.
+
+use std::cell::RefCell;
 
 use serde_json::{Number, Value};
 
@@ -15,9 +21,138 @@ use crate::{
     constants::{
         JS_MAX_EXACT_INTEGER, SETTINGS_INFINITY_MARKER, SETTINGS_INFINITY_MARKER_INTEGER,
         SETTINGS_NEGATIVE_INFINITY_MARKER, SETTINGS_NEGATIVE_INFINITY_MARKER_INTEGER,
+        SETTINGS_PYTHON_NUMBER_MARKER_BASE, SETTINGS_PYTHON_NUMBER_MARKER_STEP,
     },
+    python_json_value::{PythonJsonValue, PythonNumber},
     settings_dialect::SettingsDialect,
 };
+
+thread_local! {
+    static PYTHON_NUMBERS: RefCell<Option<Vec<PythonNumber>>> = const { RefCell::new(None) };
+}
+
+/// Keeps the exact numbers of a Python-dialect resolve on this thread until it is dropped.
+pub(crate) struct PythonNumbers {
+    previous: Option<Vec<PythonNumber>>,
+}
+
+impl PythonNumbers {
+    pub(crate) fn start() -> Self {
+        Self {
+            previous: PYTHON_NUMBERS.replace(Some(Vec::new())),
+        }
+    }
+}
+
+impl Drop for PythonNumbers {
+    fn drop(&mut self) {
+        PYTHON_NUMBERS.set(self.previous.take());
+    }
+}
+
+/// The settings value for a number `json.loads` read. An integer that fits 64 bits and a float with a fraction
+/// are plain `serde_json` numbers; any other number is a marker while a Python-dialect resolve keeps numbers, and
+/// its nearest `serde_json` value otherwise.
+pub(crate) fn python_number(number: PythonNumber) -> Value {
+    match &number {
+        PythonNumber::Int(integer) => {
+            if let Some(value) = integer.to_u64() {
+                return Value::from(value);
+            }
+            if let Some(value) = integer.to_i64() {
+                return Value::from(value);
+            }
+        }
+        PythonNumber::Float(float) if float.is_finite() && float.fract() != 0.0 => {
+            return Number::from_f64(*float).map_or(Value::Null, Value::Number);
+        }
+        PythonNumber::Float(_) => {}
+    }
+    let marker = PYTHON_NUMBERS.with_borrow_mut(|numbers| {
+        let numbers = numbers.as_mut()?;
+        let index = match numbers.iter().position(|kept| kept.is_identical(&number)) {
+            Some(index) => index,
+            None => {
+                numbers.push(number.clone());
+                numbers.len() - 1
+            }
+        };
+        let marker = SETTINGS_PYTHON_NUMBER_MARKER_BASE + SETTINGS_PYTHON_NUMBER_MARKER_STEP * index as f64;
+        (marker < SETTINGS_INFINITY_MARKER)
+            .then(|| Number::from_f64(marker))
+            .flatten()
+    });
+    marker.map_or_else(|| approximate(&number), Value::Number)
+}
+
+/// The settings value for a JSON value `json.loads` read.
+pub(crate) fn python_value(value: PythonJsonValue) -> Value {
+    match value {
+        PythonJsonValue::Null => Value::Null,
+        PythonJsonValue::Bool(flag) => Value::Bool(flag),
+        PythonJsonValue::Number(number) => python_number(number),
+        PythonJsonValue::String(text) => Value::String(text),
+        PythonJsonValue::Array(items) => Value::Array(items.into_iter().map(python_value).collect()),
+        PythonJsonValue::Object(entries) => Value::Object(
+            entries
+                .into_iter()
+                .map(|(key, entry)| (key, python_value(entry)))
+                .collect(),
+        ),
+    }
+}
+
+/// The exact number a marker stands for, while the resolve that made it keeps numbers.
+fn kept_number(number: &Number) -> Option<PythonNumber> {
+    if !number.is_f64() {
+        return None;
+    }
+    let value = number.as_f64()?;
+    let offset = (value - SETTINGS_PYTHON_NUMBER_MARKER_BASE) / SETTINGS_PYTHON_NUMBER_MARKER_STEP;
+    if !(0.0..).contains(&offset) || offset.fract() != 0.0 || value >= SETTINGS_INFINITY_MARKER {
+        return None;
+    }
+    PYTHON_NUMBERS.with_borrow(|numbers| numbers.as_ref()?.get(offset as usize).cloned())
+}
+
+/// The nearest `serde_json` value: the double of the number, or `null` for one that is not finite.
+fn approximate(number: &PythonNumber) -> Value {
+    Number::from_f64(number.to_f64()).map_or(Value::Null, Value::Number)
+}
+
+/// Replaces every kept-number marker of `value` with its nearest `serde_json` value.
+pub(crate) fn approximate_numbers(value: &mut Value) {
+    match value {
+        Value::Number(number) => {
+            if let Some(kept) = kept_number(number) {
+                *value = approximate(&kept);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(approximate_numbers),
+        Value::Object(entries) => entries.values_mut().for_each(approximate_numbers),
+        _ => {}
+    }
+}
+
+/// `value` with every marker turned back into the number it stands for: a kept number, or an infinity.
+pub(crate) fn exact_numbers(value: &Value) -> PythonJsonValue {
+    match value {
+        Value::Number(number) => PythonJsonValue::Number(kept_number(number).unwrap_or_else(|| {
+            match js_value(number).filter(|value| value.is_infinite()) {
+                Some(infinite) => PythonNumber::Float(infinite),
+                None => PythonNumber::from(number),
+            }
+        })),
+        Value::Array(items) => PythonJsonValue::Array(items.iter().map(exact_numbers).collect()),
+        Value::Object(entries) => PythonJsonValue::Object(
+            entries
+                .iter()
+                .map(|(key, entry)| (key.clone(), exact_numbers(entry)))
+                .collect(),
+        ),
+        other => PythonJsonValue::from(other),
+    }
+}
 
 /// The settings number that stands for `Infinity` or, when `negative`, `-Infinity`.
 pub(crate) fn infinity(negative: bool) -> Number {
@@ -49,6 +184,9 @@ pub(crate) fn finite_number(value: f64) -> Value {
 
 /// The JavaScript number a settings number stands for, with the infinity markers read back as infinities.
 pub(crate) fn js_value(number: &Number) -> Option<f64> {
+    if let Some(kept) = kept_number(number) {
+        return Some(kept.to_f64());
+    }
     let value = number.as_f64()?;
     if !number.is_f64() {
         return Some(value);
@@ -60,6 +198,17 @@ pub(crate) fn js_value(number: &Number) -> Option<f64> {
     } else {
         value
     })
+}
+
+/// JavaScript `SameValueZero`, the equality a `Set` keeps primitives by: numbers compare by the double they
+/// stand for, so `1` and `1.0`, `0` and `-0`, or a kept number and its double are one value, and `NaN` is one.
+pub(crate) fn same_value_zero(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Number(left), Value::Number(right)) => js_value(left)
+            .zip(js_value(right))
+            .is_some_and(|(left, right)| left == right || (left.is_nan() && right.is_nan())),
+        _ => left == right,
+    }
 }
 
 fn is_infinity(number: &Number) -> bool {
@@ -91,7 +240,7 @@ pub(crate) fn normalize_numbers(value: &mut Value, dialect: SettingsDialect) {
 }
 
 fn normalized_number(number: &Number, dialect: SettingsDialect) -> Option<Number> {
-    if is_infinity(number) {
+    if is_infinity(number) || kept_number(number).is_some() {
         return None;
     }
     if number.is_i64() || number.is_u64() {

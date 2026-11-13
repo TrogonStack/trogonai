@@ -4,6 +4,8 @@
 use std::io::{self, Write};
 use unicode_general_category::{GeneralCategory, get_general_category};
 
+use crate::float_digits::shortest_digits;
+
 /// `json.dumps(value)`.
 pub(crate) fn to_string<T: serde::Serialize + ?Sized>(value: &T) -> Result<String, serde_json::Error> {
     let mut out = Vec::new();
@@ -61,13 +63,13 @@ pub(crate) fn float_repr(value: f64) -> String {
     if value.is_infinite() {
         return if value > 0.0 { "Infinity" } else { "-Infinity" }.to_owned();
     }
-    let scientific = format!("{value:e}");
-    let (mantissa, exponent) = scientific.split_once('e').unwrap_or((scientific.as_str(), "0"));
-    let exponent: i32 = exponent.parse().unwrap_or_default();
-    let (sign, mantissa) = mantissa.strip_prefix('-').map_or(("", mantissa), |rest| ("-", rest));
-    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    let sign = if value.is_sign_negative() { "-" } else { "" };
+    if value == 0.0 {
+        return format!("{sign}0.0");
+    }
+    let (digits, point) = shortest_digits(value.abs());
+    let exponent = point - 1;
     if (-4..16).contains(&exponent) {
-        let point = exponent + 1;
         let body = if point <= 0 {
             format!("0.{}{digits}", "0".repeat(usize::try_from(-point).unwrap_or_default()))
         } else {

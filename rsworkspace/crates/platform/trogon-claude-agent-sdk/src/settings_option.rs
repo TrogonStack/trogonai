@@ -11,6 +11,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
 use crate::{
@@ -22,7 +23,9 @@ use crate::{
     },
     process_options::ArgvStyle,
     python_json::python_repr,
+    python_json_value::{PythonJsonValue, PythonNumber, python_json_dumps, python_json_loads},
     settings_json::{js_normalize, js_stringify, python_dumps},
+    settings_numbers::same_value_zero,
 };
 
 /// TypeScript's `managedSettingsViaInitialize`.
@@ -100,7 +103,7 @@ fn unique(items: Vec<Value>) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::with_capacity(items.len());
     for item in items {
         let primitive = !matches!(item, Value::Array(_) | Value::Object(_));
-        if primitive && out.contains(&item) {
+        if primitive && out.iter().any(|seen| same_value_zero(seen, &item)) {
             continue;
         }
         out.push(item);
@@ -275,13 +278,13 @@ fn python_os_error(error: &io::Error, path: &Path) -> String {
     }
 }
 
-fn python_type_error(value: &Value) -> &'static str {
+fn python_type_error(value: &PythonJsonValue) -> &'static str {
     match value {
-        Value::Array(_) => "list indices must be integers or slices, not str",
-        Value::String(_) => "'str' object does not support item assignment",
-        Value::Bool(_) => "'bool' object does not support item assignment",
-        Value::Number(number) if number.is_f64() => "'float' object does not support item assignment",
-        Value::Number(_) => "'int' object does not support item assignment",
+        PythonJsonValue::Array(_) => "list indices must be integers or slices, not str",
+        PythonJsonValue::String(_) => "'str' object does not support item assignment",
+        PythonJsonValue::Bool(_) => "'bool' object does not support item assignment",
+        PythonJsonValue::Number(PythonNumber::Float(_)) => "'float' object does not support item assignment",
+        PythonJsonValue::Number(PythonNumber::Int(_)) => "'int' object does not support item assignment",
         _ => "'NoneType' object does not support item assignment",
     }
 }
@@ -310,7 +313,7 @@ where
         return Ok(settings.filter(|text| !text.is_empty()));
     };
     let failed = |reason: String| -> Error { OptionError::new(format!("Failed to load settings: {reason}")).into() };
-    let mut document = Value::Object(Map::new());
+    let mut document = PythonJsonValue::Object(IndexMap::new());
     if let Some(settings) = settings {
         let trimmed = settings.trim().to_owned();
         let text = if looks_like_json(&trimmed) {
@@ -333,13 +336,16 @@ where
             })?;
             text.strip_prefix('\u{feff}').map(str::to_owned).unwrap_or(text)
         };
-        document = serde_json::from_str(&text).map_err(|error| failed(error.to_string()))?;
+        document = python_json_loads(&text).map_err(|error| failed(error.to_string()))?;
     }
-    let Value::Object(map) = &mut document else {
+    let PythonJsonValue::Object(map) = &mut document else {
         return Err(failed(python_type_error(&document).to_owned()));
     };
-    map.insert("sandbox".into(), Value::Object(sandbox_object(sandbox)?));
-    Ok(Some(python_dumps(&document)))
+    map.insert(
+        "sandbox".into(),
+        PythonJsonValue::from(&Value::Object(sandbox_object(sandbox)?)),
+    );
+    Ok(Some(python_json_dumps(&document)))
 }
 
 #[cfg(test)]

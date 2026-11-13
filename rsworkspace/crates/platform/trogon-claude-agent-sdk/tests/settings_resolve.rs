@@ -2,8 +2,9 @@
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    ResolveSettingsOptions, ResolvedSettings, Settings, SettingsDialect, adapters::OperatingSystem,
-    filter_escalating_default_mode, js_stringify, resolve_settings_in_dialect_with, resolve_settings_with,
+    PythonJsonValue, ResolveSettingsOptions, ResolvedSettings, Settings, SettingsDialect, adapters::OperatingSystem,
+    filter_escalating_default_mode, js_stringify, python_json_dumps, resolve_python_settings_with,
+    resolve_settings_in_dialect_with, resolve_settings_with,
 };
 
 #[path = "support/fake_settings_host.rs"]
@@ -430,8 +431,61 @@ fn the_typescript_dialect_reads_numbers_like_json_parse() {
 fn the_python_dialect_keeps_integer_tokens_exact() {
     assert_eq!(
         custom_numbers(SettingsDialect::Python),
-        r#"{"custom":{"n":12345678901234567890,"m":9007199254740993,"z":0,"w":1,"f":0.1}}"#
+        r#"{"custom":{"n":12345678901234567890,"m":9007199254740993,"z":0,"w":1.0,"f":0.1}}"#
     );
+}
+
+#[test]
+fn the_python_resolve_keeps_every_number_as_json_loads_reads_it() {
+    let host = FakeHost::linux()
+        .file(
+            "/home/fixture/.claude/settings.json",
+            r#"{"custom":{"big":[123456789012345678901234567890,1.0]},"env":{"A":123456789012345678901234567890}}"#,
+        )
+        .file(
+            "/work/project/.claude/settings.json",
+            r#"{"custom":{"big":[123456789012345678901234567890,-98765432109876543210987654321,1.0,NaN,Infinity,1e400],"w":2.0,"z":-0.0}}"#,
+        );
+    let resolved = resolve_python_settings_with(&host, &options(json!({}))).expect("resolve");
+    let PythonJsonValue::Object(resolved) = resolved else {
+        panic!("the resolved settings are not an object");
+    };
+    assert_eq!(
+        python_json_dumps(resolved.get("effective").expect("effective")),
+        r#"{"env": {"A": "1.2345678901234568e+29"}, "custom": {"big": [123456789012345678901234567890, 1.0, -98765432109876543210987654321, NaN, Infinity], "w": 2.0, "z": -0.0}}"#
+    );
+    let approximate = effective_in(
+        SettingsDialect::Python,
+        r#"{"custom":{"big":[123456789012345678901234567890,1.0,NaN,Infinity],"w":2.0}}"#,
+    );
+    assert_eq!(
+        approximate.to_string(),
+        r#"{"custom":{"big":[1.2345678901234568e+29,1.0,null,null],"w":2.0}}"#
+    );
+}
+
+#[test]
+fn the_python_resolve_unions_arrays_by_the_number_javascript_reads() {
+    let host = FakeHost::linux()
+        .file("/home/fixture/.claude/settings.json", r#"{"custom":{"l":[1,0]}}"#)
+        .file(
+            "/work/project/.claude/settings.json",
+            r#"{"custom":{"l":[1.0,-0.0,2,9223372036854775808.0]}}"#,
+        );
+    let resolved = resolve_python_settings_with(&host, &options(json!({}))).expect("resolve");
+    let PythonJsonValue::Object(resolved) = resolved else {
+        panic!("the resolved settings are not an object");
+    };
+    assert_eq!(
+        python_json_dumps(resolved.get("effective").expect("effective")),
+        r#"{"custom": {"l": [1, 0, 2, 9.223372036854776e+18]}}"#
+    );
+}
+
+#[test]
+fn the_python_dialect_keeps_a_whole_float_of_two_to_the_sixty_third_finite() {
+    let effective = effective_in(SettingsDialect::Python, r#"{"custom":{"w":9223372036854775808.0}}"#);
+    assert_eq!(effective.to_string(), r#"{"custom":{"w":9.223372036854776e+18}}"#);
 }
 
 fn effective_text(host: &FakeHost) -> (String, Vec<String>) {

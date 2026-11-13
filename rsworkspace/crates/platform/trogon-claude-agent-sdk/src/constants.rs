@@ -349,6 +349,17 @@ pub(crate) const SETTINGS_INFINITY_MARKER_INTEGER: u64 = 1 << 63;
 /// [`SETTINGS_INFINITY_MARKER_INTEGER`].
 pub(crate) const SETTINGS_NEGATIVE_INFINITY_MARKER_INTEGER: i64 = -(1 << 62);
 
+/// The double the first exact Python number of a resolve stands for (2^62). The n-th one is this plus
+/// `n * SETTINGS_PYTHON_NUMBER_MARKER_STEP`, below [`SETTINGS_INFINITY_MARKER`]. A whole double below 2^64 that a
+/// document holds is normalized into an integer, so only a marker is left as a float in this range.
+pub(crate) const SETTINGS_PYTHON_NUMBER_MARKER_BASE: f64 = 4_611_686_018_427_387_904.0;
+
+/// The distance between two consecutive Python number markers; doubles from 2^62 to 2^63 are 1024 apart.
+pub(crate) const SETTINGS_PYTHON_NUMBER_MARKER_STEP: f64 = 2048.0;
+
+/// The most decimal digits Python's `int()` converts from a string (`sys.get_int_max_str_digits()`).
+pub(crate) const PYTHON_INT_MAX_STR_DIGITS: usize = 4300;
+
 /// Largest integer a JavaScript number holds exactly (`Number.MAX_SAFE_INTEGER`).
 pub(crate) const SETTINGS_SCHEMA_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 
