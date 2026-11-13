@@ -134,6 +134,9 @@ pub(super) fn validate_receipt(receipt: &proto::RecipientReceipt) -> Result<prot
         )?),
         "receipt.recipient_peer_id",
     )?;
+    if let Some(sender) = &receipt.sender_peer_id {
+        value(PeerId::parse(sender), "receipt.sender_peer_id")?;
+    }
     if receipt.recipient_revision.unwrap_or(0) == 0 {
         return Err(EvolveError::InvalidMessageTransition);
     }
@@ -162,7 +165,13 @@ pub(super) fn receipt_matches_message(
 ) -> Result<(), EvolveError> {
     metadata(message)?;
     let outcome = validate_receipt(receipt)?;
-    if receipt.message_id != message.message_id || receipt.recipient_peer_id != message.recipient_peer_id {
+    if receipt.message_id != message.message_id
+        || receipt.recipient_peer_id != message.recipient_peer_id
+        || receipt
+            .sender_peer_id
+            .as_ref()
+            .is_some_and(|sender| Some(sender) != message.sender_peer_id.as_ref())
+    {
         return Err(EvolveError::InvalidMessageTransition);
     }
     let at = state_values::read_time(receipt.decided_at.as_option(), "decided_at")?;
