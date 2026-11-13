@@ -261,9 +261,10 @@ async fn every_case_matches_the_captured_initialize_bytes_in_both_dialects() -> 
             let flags: Vec<String> = serde_json::from_value(golden["py_prompt_argv"].clone())?;
             assert_eq!(prompt_flags(&capture.arguments), flags, "py {name} argv");
             if let Some(expected) = golden.get("py_user_client_composed") {
+                // Python writes the user message with `json.dumps` and its default separators.
                 let line = capture.user_line.as_deref().unwrap_or_default();
                 assert_eq!(
-                    line.ends_with(",\"client_composed\":true}"),
+                    line.ends_with(", \"client_composed\": true}"),
                     expected.as_bool().unwrap_or(false),
                     "py {name} user"
                 );
