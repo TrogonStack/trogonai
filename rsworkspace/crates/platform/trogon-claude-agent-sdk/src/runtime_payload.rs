@@ -302,25 +302,3 @@ pub(crate) struct McpConfigPayload {
 pub(crate) struct McpResponsePayload {
     pub mcp_response: Value,
 }
-
-#[derive(Serialize)]
-struct EmptyResult {}
-
-#[derive(Serialize)]
-struct RpcAcknowledgment {
-    jsonrpc: &'static str,
-    result: EmptyResult,
-}
-
-impl McpResponsePayload {
-    pub(crate) fn new(response: Option<JsonObject>) -> Result<Self, ProtocolError> {
-        let mcp_response = match response {
-            Some(response) => Value::Object(response),
-            None => serde_json::to_value(RpcAcknowledgment {
-                jsonrpc: "2.0",
-                result: EmptyResult {},
-            })?,
-        };
-        Ok(Self { mcp_response })
-    }
-}

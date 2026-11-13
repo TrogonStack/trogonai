@@ -201,6 +201,14 @@ verbatim as an `McpConfig`. Debug output redacts it, and the `extra` keys of
 every server config. An in-process server replaces an external config of the
 same name.
 
+`mcp_message` control requests are routed the way the selected style's SDK
+routes them. TypeScript fails the request for an unknown server or a message
+that is not an object, waits for the server's response to a request with an
+id, and acknowledges anything else with an id 0 result. Python fails the
+request when the server name or message is missing, and answers an unknown
+server or an undeliverable message with a JSON-RPC error under the message's
+id.
+
 `set_mcp_servers` is not serialized, as in TypeScript. It swaps in-process
 servers before the request is sent and keeps the session of a server that stays
 registered. Remove a server and re-add it to replace its registry instance.

@@ -137,6 +137,18 @@ fn is_python_printable(c: char) -> bool {
     )
 }
 
+/// Python truthiness of the value `json.loads` reads from this JSON.
+pub(crate) fn is_truthy(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::Bool(flag) => *flag,
+        serde_json::Value::Number(number) => number.as_f64().is_some_and(|float| float != 0.0),
+        serde_json::Value::String(text) => !text.is_empty(),
+        serde_json::Value::Array(items) => !items.is_empty(),
+        serde_json::Value::Object(object) => !object.is_empty(),
+    }
+}
+
 #[cfg(test)]
 #[path = "python_json_tests.rs"]
 mod tests;

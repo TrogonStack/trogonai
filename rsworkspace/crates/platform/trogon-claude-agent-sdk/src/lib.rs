@@ -40,6 +40,7 @@ mod json_scan;
 mod managed_settings_delivery;
 mod mcp_config;
 mod mcp_read_resource_response;
+mod mcp_routing;
 mod mcp_server_dialect;
 mod mcp_server_name;
 mod mcp_server_options;

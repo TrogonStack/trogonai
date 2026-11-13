@@ -39,9 +39,11 @@ pub(crate) enum IncomingControl {
         input: JsonObject,
         tool_use_id: Option<ToolUseId>,
     },
+    /// The `server_name` and `message` fields as sent: either may be missing or of any JSON type, which the
+    /// TypeScript and Python routing each read their own way.
     Mcp {
-        server_name: String,
-        message: JsonObject,
+        server_name: Option<Value>,
+        message: Option<Value>,
     },
     Elicitation(ElicitationWire),
     UserDialog {
@@ -113,12 +115,6 @@ struct HookRequestWire {
     callback_id: String,
     input: JsonObject,
     tool_use_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct McpRequestWire {
-    server_name: String,
-    message: JsonObject,
 }
 
 #[derive(Deserialize)]
@@ -304,10 +300,9 @@ pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<
                     tool_use_id: optional_tool_id(wire.tool_use_id)?,
                 }
             } else if wire.request.subtype == "mcp_message" {
-                let wire: McpRequestWire = decode(wire.request.data)?;
                 IncomingControl::Mcp {
-                    server_name: wire.server_name,
-                    message: wire.message,
+                    server_name: wire.request.data.get("server_name").cloned(),
+                    message: wire.request.data.get("message").cloned(),
                 }
             } else if wire.request.subtype == "elicitation" {
                 IncomingControl::Elicitation(decode(wire.request.data)?)
