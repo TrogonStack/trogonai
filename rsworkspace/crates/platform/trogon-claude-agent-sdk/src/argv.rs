@@ -120,25 +120,39 @@ where
         .join(",")
 }
 
-fn mcp_config(options: &ClaudeAgentOptions) -> Result<Option<String>, Error> {
+/// The `--mcp-config` JSON. TypeScript sends only the servers the CLI connects to itself (in-process servers go
+/// in `initialize`), as compact JSON. Python also lists each in-process server as `{"type": "sdk", "name": ...}`
+/// and writes `json.dumps` text. An in-process server wins a name shared with an external one, as an object
+/// spread does upstream.
+fn mcp_config(options: &ClaudeAgentOptions, style: ArgvStyle) -> Result<Option<String>, Error> {
     let mut servers = serde_json::Map::new();
     for (name, config) in &options.mcp_servers {
+        if style == ArgvStyle::TypeScript && options.sdk_mcp_servers.contains_key(name) {
+            continue;
+        }
         servers.insert(
             name.as_str().to_owned(),
             config.to_wire_json().map_err(ProtocolError::from)?,
         );
     }
-    for name in options.sdk_mcp_servers.keys() {
-        servers.insert(
-            name.as_str().to_owned(),
-            EmbeddedMcpPayload::Sdk { name: name.as_str() }.to_value()?,
-        );
+    if style == ArgvStyle::Python {
+        for name in options.sdk_mcp_servers.keys() {
+            servers.insert(
+                name.as_str().to_owned(),
+                EmbeddedMcpPayload::Sdk { name: name.as_str() }.to_value()?,
+            );
+        }
     }
     if servers.is_empty() {
         return Ok(None);
     }
+    let payload = McpConfigPayload { servers };
     Ok(Some(
-        serde_json::to_string(&McpConfigPayload { servers }).map_err(ProtocolError::from)?,
+        match style {
+            ArgvStyle::TypeScript => serde_json::to_string(&payload),
+            ArgvStyle::Python => crate::python_json::to_string(&payload),
+        }
+        .map_err(ProtocolError::from)?,
     ))
 }
 
@@ -308,7 +322,10 @@ fn typescript(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -
     if let ToolSet::Only(tools) = &options.tools {
         equals(&mut a, "--tools", joined(tools.iter().map(|t| t.as_str())));
     }
-    if let Some(config) = mcp_config(options)? {
+    if let Some(config) = mcp_config(options, ArgvStyle::TypeScript)? {
+        push_spaced(&mut a, "--mcp-config", config);
+    }
+    if let Some(config) = &options.mcp_config {
         push_spaced(&mut a, "--mcp-config", config);
     }
     if let Some(sources) = &options.setting_sources {
@@ -520,7 +537,11 @@ where
         a.push("--add-dir".into());
         a.push(directory.into());
     }
-    if let Some(config) = mcp_config(options)? {
+    if let Some(config) = mcp_config(options, ArgvStyle::Python)? {
+        a.push("--mcp-config".into());
+        a.push(config.into());
+    }
+    if let Some(config) = &options.mcp_config {
         a.push("--mcp-config".into());
         a.push(config.into());
     }

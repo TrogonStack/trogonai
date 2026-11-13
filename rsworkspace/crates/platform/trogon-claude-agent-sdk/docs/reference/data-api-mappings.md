@@ -42,6 +42,9 @@ integrity-verified published `0.3.319` declaration archive.
 | `allow_dangerously_skip_permissions: DangerousPermissionSkip` | Not exposed in pinned Python | `allowDangerouslySkipPermissions` |
 | `project_config_root: Option<PathBuf>` | Not exposed in pinned Python | `projectConfigRoot` |
 | `skills: Option<Skills>` | `skills` | `skills` |
+| `mcp_servers: McpServers` | [`mcp_servers`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2378) dict | `mcpServers` entries without an `instance`, in insertion order |
+| `sdk_mcp_servers: SdkMcpServers` | `mcp_servers` entries from `create_sdk_mcp_server` | `mcpServers` entries with an `instance` |
+| `mcp_config: Option<OsString>` | `mcp_servers` as a `str` or `Path` | Not exposed |
 
 | Rust value | Upstream scalar or purpose | Value contract |
 | --- | --- | --- |
@@ -54,6 +57,8 @@ integrity-verified published `0.3.319` declaration archive.
 | `ToolName` | [Python `ToolUseBlock.name`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1224); the tool-call name string | Infallible opaque text; every string is stored verbatim. |
 | `BuiltinToolName` | [Python `ClaudeAgentOptions.tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2342) / TypeScript `Options.tools` string-list selection | Infallible opaque text. Names are joined into the `--tools` argument unvalidated, as both upstream SDKs do; callers must avoid commas and the CLI validates each name. |
 | `McpServerName` | [Python `ClaudeAgentOptions.mcp_servers`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2378) / TypeScript `Options.mcpServers` map key | Infallible opaque text; every string is stored verbatim. |
+| `McpUrl` | Python / TypeScript MCP `url` string | Infallible opaque text sent verbatim, as both SDKs do. `McpUrl::validated` is an opt-in check for HTTP(S), userinfo and fragments that neither SDK performs. |
+| `McpServerOptions` | Python `McpStdioServerConfig`, `McpSSEServerConfig`, `McpHttpServerConfig`, `McpSdkServerConfig` / TypeScript `McpServerConfigForProcessTransport` | Every upstream field in declaration order, then `extra` keys verbatim. `McpServerToolPolicy` carries the per-tool `tools` entries. |
 | `DialogKind` | TypeScript `Options.supportedDialogKinds` entry; no corresponding option in pinned Python | Infallible opaque text; every string is stored verbatim. |
 | `McpToolName` | [Python `SdkMcpTool.name`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/__init__.py#L270) / TypeScript `SdkMcpToolDefinition.name` | Infallible opaque text. The built-in MCP server warns about a name outside one to 128 ASCII letters, digits, underscores, hyphens or periods, and still lists it. |
 | `ToolRule` | Python `allowed_tools` / `disallowed_tools` entry; TypeScript `allowedTools` / `disallowedTools` entry | Infallible opaque text. Rules are joined with commas unvalidated, as both upstream SDKs do; callers must avoid commas, which the CLI would split into separate rules. |

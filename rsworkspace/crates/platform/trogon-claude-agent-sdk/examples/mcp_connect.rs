@@ -1,12 +1,12 @@
 #[path = "support/schema.rs"]
 mod schema;
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use trogon_claude_agent_sdk::{
     ClaudeAgentOptions, ClaudeSdkClient, Customizations, LocalMcpServer, LocalMcpServerOptions, McpServerName,
-    McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, SdkMcpServer, SdkTool, SdkToolOptions,
-    SessionPersistence, ToolSet,
+    McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, SdkMcpServer, SdkMcpServers, SdkTool,
+    SdkToolOptions, SessionPersistence, ToolSet,
 };
 
 #[cfg_attr(
@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tools: ToolSet::Only(Vec::new()),
         customizations: Customizations::Bare,
         session_persistence: SessionPersistence::Disabled,
-        sdk_mcp_servers: BTreeMap::from([(name, Arc::new(server) as Arc<dyn SdkMcpServer>)]),
+        sdk_mcp_servers: SdkMcpServers::from([(name, Arc::new(server) as Arc<dyn SdkMcpServer>)]),
         ..ClaudeAgentOptions::default()
     };
     let client = ClaudeSdkClient::connect(options).await?;

@@ -26,11 +26,11 @@ use tokio::{
 use trogon_claude_agent_sdk::{
     AgentName, CallbackError, CancellationToken, ClaudeAgentOptions, ClaudeSdkClient, Content, ContentBlock,
     ContinueConversation, Customizations, DialogKind, ElicitationMode, ElicitationRequest, ElicitationResponse, Error,
-    HookEvent, HookFailureMode, HookRegistration, HookRequest, JsonObject, McpFuture, McpServerName, McpServerOptions,
-    McpUrl, Message, MessageId, PermissionDecision, Prompt, ProtocolError, QueueCapacity, ResultStatus, SdkMcpServer,
-    SdkMcpSession, SessionEntry, SessionError, SessionFork, SessionKey, SessionPersistence, SessionProjectKey,
-    SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreOptions, SystemPrompt, Timeout,
-    ToolPermissionRequest, ToolResultStatus, UserDialogRequest, UserInput,
+    HookEvent, HookFailureMode, HookRegistration, HookRequest, JsonObject, McpFuture, McpRemoteServerOptions,
+    McpServerName, McpServerOptions, McpServers, Message, MessageId, PermissionDecision, Prompt, ProtocolError,
+    QueueCapacity, ResultStatus, SdkMcpServer, SdkMcpServers, SdkMcpSession, SessionEntry, SessionError, SessionFork,
+    SessionKey, SessionPersistence, SessionProjectKey, SessionStore, SessionStoreError, SessionStoreFuture,
+    SessionStoreOptions, SystemPrompt, Timeout, ToolPermissionRequest, ToolResultStatus, UserDialogRequest, UserInput,
     adapters::{NativeFileSystem, RuntimeAdapters, SpawnProcess, TokioProcessSpawner},
     query_turn_with_adapters, query_with_adapters,
     test_support::FixedEnvironment,
@@ -492,68 +492,110 @@ async fn pending_controls_and_mcp_replacements_reject_overlapping_admission() ->
         Err(Error::TooManyControls)
     ));
     assert!(matches!(
-        client.handle().set_mcp_servers(BTreeMap::new(), BTreeMap::new()).await,
+        client
+            .handle()
+            .set_mcp_servers(McpServers::new(), SdkMcpServers::new())
+            .await,
         Err(Error::TooManyControls)
     ));
     cli.success(&request, json!({})).await?;
     pending.await??;
-    let handle = client.handle();
-    let replacing = tokio::spawn(async move { handle.set_mcp_servers(BTreeMap::new(), BTreeMap::new()).await });
-    let request = cli.read().await?;
-    assert!(matches!(
-        client.handle().set_mcp_servers(BTreeMap::new(), BTreeMap::new()).await,
-        Err(Error::McpUpdateInProgress)
-    ));
-    cli.success(&request, json!({"added":[],"removed":[],"errors":{}}))
-        .await?;
-    replacing.await??;
-    let name = McpServerName::from("duplicate");
-    let external = BTreeMap::from([(
-        name.clone(),
-        McpServerOptions::Http {
-            url: McpUrl::new("https://example.com/mcp")?,
-            headers: BTreeMap::new(),
-        },
-    )]);
-    let embedded: BTreeMap<McpServerName, Arc<dyn SdkMcpServer>> =
-        BTreeMap::from([(name, Arc::new(FailedMcp) as Arc<dyn SdkMcpServer>)]);
-    assert!(matches!(
-        client.handle().set_mcp_servers(external, embedded).await,
-        Err(Error::DuplicateMcpServer)
-    ));
     cli.disconnect(client).await?;
     Ok(())
 }
 
+/// TypeScript `setMcpServers` is not serialized: a second replacement goes out while the first is pending.
 #[tokio::test]
-async fn partial_mcp_errors_preserve_previous_server_and_omit_failed_new_server() -> TestResult {
+async fn r18_mcp_replacements_are_not_serialized() -> TestResult {
+    let (client, mut cli) = connect(options()?).await?;
+    let first = client.handle();
+    let first = tokio::spawn(async move { first.set_mcp_servers(McpServers::new(), SdkMcpServers::new()).await });
+    let first_request = cli.read().await?;
+    let second = client.handle();
+    let second = tokio::spawn(async move { second.set_mcp_servers(McpServers::new(), SdkMcpServers::new()).await });
+    let second_request = cli.read().await?;
+    assert_eq!(second_request["request"]["subtype"], "mcp_set_servers");
+    assert_ne!(first_request["request_id"], second_request["request_id"]);
+    cli.success(&second_request, json!({"added":[],"removed":[],"errors":{}}))
+        .await?;
+    cli.success(&first_request, json!({"added":[],"removed":[],"errors":{}}))
+        .await?;
+    second.await??;
+    first.await??;
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// TypeScript spreads in-process servers over external configs, so a shared name silently becomes the
+/// in-process server and keeps the external entry's position.
+#[tokio::test]
+async fn r17_in_process_mcp_server_replaces_an_external_config_of_the_same_name() -> TestResult {
+    let (client, mut cli) = connect(options()?).await?;
+    let external = McpServers::from([
+        (
+            McpServerName::from("duplicate"),
+            McpServerOptions::Http(McpRemoteServerOptions::new("https://example.com/mcp")),
+        ),
+        (
+            McpServerName::from("other"),
+            McpServerOptions::Http(McpRemoteServerOptions::new("https://example.com/other")),
+        ),
+    ]);
+    let embedded = SdkMcpServers::from([(
+        McpServerName::from("duplicate"),
+        Arc::new(FailedMcp) as Arc<dyn SdkMcpServer>,
+    )]);
+    let handle = client.handle();
+    let replacing = tokio::spawn(async move { handle.set_mcp_servers(external, embedded).await });
+    let request = cli.read().await?;
+    assert_eq!(
+        serde_json::to_string(&request["request"]["servers"])?,
+        r#"{"duplicate":{"type":"sdk","name":"duplicate"},"other":{"type":"http","url":"https://example.com/other"}}"#
+    );
+    cli.success(
+        &request,
+        json!({"added":["duplicate","other"],"removed":[],"errors":{}}),
+    )
+    .await?;
+    replacing.await??;
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// TypeScript disconnects removed in-process servers and connects new ones before `mcp_set_servers` is
+/// sent, and never reconciles them against the response errors.
+#[tokio::test]
+async fn mcp_replacement_swaps_in_process_servers_before_the_response() -> TestResult {
     let mut configured = options()?;
     configured
         .sdk_mcp_servers
         .insert(McpServerName::from("previous"), Arc::new(FailedMcp));
     let (client, mut cli) = connect(configured).await?;
-    let embedded: BTreeMap<McpServerName, Arc<dyn SdkMcpServer>> = BTreeMap::from([(
+    let embedded = SdkMcpServers::from([(
         McpServerName::from("fresh"),
         Arc::new(FailedMcp) as Arc<dyn SdkMcpServer>,
     )]);
     let handle = client.handle();
-    let replacing = tokio::spawn(async move { handle.set_mcp_servers(BTreeMap::new(), embedded).await });
+    let replacing = tokio::spawn(async move { handle.set_mcp_servers(McpServers::new(), embedded).await });
     let request = cli.read().await?;
-    cli.success(
-        &request,
-        json!({"added":[],"removed":[],"errors":{"previous":"retain previous","fresh":"reject fresh"}}),
-    )
-    .await?;
-    assert_eq!(replacing.await??.errors.len(), 2);
     for (name, expected) in [
-        ("previous", "SDK MCP request failed"),
-        ("fresh", "Unknown SDK MCP server"),
+        ("previous", "Unknown SDK MCP server"),
+        ("fresh", "SDK MCP request failed"),
     ] {
         cli.send(json!({"type":"control_request","request_id":"lookup","request":{"subtype":"mcp_message","server_name":name,"message":{}}})).await?;
         let response = cli.read().await?;
         assert_eq!(response["response"]["subtype"], "error");
         assert_eq!(response["response"]["error"], expected);
     }
+    cli.success(
+        &request,
+        json!({"added":[],"removed":[],"errors":{"fresh":"reject fresh"}}),
+    )
+    .await?;
+    assert_eq!(replacing.await??.errors.len(), 1);
+    cli.send(json!({"type":"control_request","request_id":"lookup","request":{"subtype":"mcp_message","server_name":"fresh","message":{}}})).await?;
+    let response = cli.read().await?;
+    assert_eq!(response["response"]["error"], "SDK MCP request failed");
     cli.disconnect(client).await?;
     Ok(())
 }
@@ -1164,7 +1206,7 @@ async fn a_control_request_after_the_run_settled_fails_only_that_request() -> Te
     let handle = client.handle();
     assert!(matches!(handle.set_model(None).await, Err(Error::NotReadyForWriting)));
     assert!(matches!(
-        handle.set_mcp_servers(BTreeMap::new(), BTreeMap::new()).await,
+        handle.set_mcp_servers(McpServers::new(), SdkMcpServers::new()).await,
         Err(Error::NotReadyForWriting)
     ));
     assert!(matches!(

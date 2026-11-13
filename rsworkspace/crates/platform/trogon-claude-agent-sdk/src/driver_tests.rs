@@ -91,8 +91,7 @@ impl DriverFixture {
             callback_signals: HashMap::new(),
             detached_callbacks: HashMap::new(),
             hook_callbacks: HashMap::new(),
-            sdk_mcp_servers: BTreeMap::new(),
-            pending_mcp: None,
+            sdk_mcp_servers: McpSessions::new(),
             initialize_request: crate::wire::runtime_payload::InitializeRequest::default()
                 .into_payload(crate::ArgvStyle::TypeScript)
                 .to_value()?,

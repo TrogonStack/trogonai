@@ -2,7 +2,6 @@
 
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
     error::Error as StdError,
     sync::{
         Arc,
@@ -15,11 +14,11 @@ use trogon_claude_agent_sdk::{
     AgentDefinition, AgentName, CancellationToken, ClaudeAgentOptions, ClaudeSdkClient, DialogKind, EffortLevel,
     ElicitationMode, ElicitationRequest, ElicitationResponse, Error, FeatureSupport, FileCheckpointing, HookEvent,
     HookFailureMode, HookOutput, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, InputBlock,
-    InterruptReceipt, LocalMcpServer, LocalMcpServerOptions, LocalPlugin, McpEnabled, McpServerName, McpServerOptions,
-    McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, McpUrl, Message, MessageId, OutputSchema,
-    PermissionDecision, PermissionMode, PluginDelivery, Prompt, QueueCapacity, RewindMode, SdkTool, SdkToolOptions,
-    SyncHookOutput, TaskId, Timeout, ToolPermissionRequest, ToolUseId, UsdBudget, UserDialogRequest,
-    UserDialogResponse, UserInput,
+    InterruptReceipt, LocalMcpServer, LocalMcpServerOptions, LocalPlugin, McpEnabled, McpRemoteServerOptions,
+    McpServerName, McpServerOptions, McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, Message,
+    MessageId, OutputSchema, PermissionDecision, PermissionMode, PluginDelivery, Prompt, QueueCapacity, RewindMode,
+    SdkTool, SdkToolOptions, SyncHookOutput, TaskId, Timeout, ToolPermissionRequest, ToolUseId, UsdBudget,
+    UserDialogRequest, UserDialogResponse, UserInput,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -200,10 +199,7 @@ async fn structured_input_and_declarative_configuration_reach_the_cli() -> TestR
     );
     options.mcp_servers.insert(
         McpServerName::from("external"),
-        McpServerOptions::Http {
-            url: McpUrl::new("https://example.com/mcp")?,
-            headers: BTreeMap::new(),
-        },
+        McpServerOptions::Http(McpRemoteServerOptions::new("https://example.com/mcp")),
     );
     let mut client = ClaudeSdkClient::connect(options).await?;
     let Some(Message::System(init)) = client.next_message().await? else {

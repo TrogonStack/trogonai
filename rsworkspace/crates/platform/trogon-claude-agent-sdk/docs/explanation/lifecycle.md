@@ -54,7 +54,8 @@ ownership, in exchange for a visible readiness and failure boundary.
 SDK-owned public constructor and input settings types use the `Options`
 suffix consistently, whether their fields are required or have defaults.
 This includes `ClaudeAgentOptions`, `SdkToolOptions`, `LocalMcpServerOptions`,
-`McpServerOptions` and `SessionStoreOptions`.
+`McpServerOptions`, `McpStdioServerOptions`, `McpRemoteServerOptions`,
+`McpSdkServerOptions` and `SessionStoreOptions`.
 
 Public constructors that assemble several settings use named fields.
 `SdkTool::from(SdkToolOptions { ... })` identifies the tool name,

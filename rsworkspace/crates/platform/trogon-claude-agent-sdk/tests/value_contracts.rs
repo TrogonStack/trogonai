@@ -21,12 +21,13 @@ use trogon_claude_agent_sdk::{
     AgentDefinition, AgentExecution, AgentMcpServerSpec, AgentName, BuiltinToolName, CallbackError, CancellationToken,
     ClaudeAgentOptions, ControlRequestId, DialogKind, EffortLevel, ElicitationResponse, HookContinuation, HookEvent,
     HookFailureMode, HookOutput, HookOutputVisibility, HookPermissionDecision, HookRegistration, HookSpecificOutput,
-    InputBlock, InterruptReceipt, JsonObject, LocalMcpServer, LocalMcpServerOptions, McpServerError, McpServerName,
-    McpServerOptions, McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, McpUrl, McpUrlError, MessageId,
-    MessageOrigin, OutputSchema, PermissionBehavior, PermissionMode, PermissionUpdate, PermissionUpdateDestination,
-    PermissionUpdateError, Prompt, QueueCapacity, QueueCapacityError, SdkMcpServer, SdkMcpSession, SdkTool,
-    SdkToolOptions, SessionId, SyncHookOutput, TaskId, Timeout, TimeoutError, ToolName, ToolResultStatus, ToolRule,
-    ToolUseId, UserDialogResponse, UserInput,
+    InputBlock, InterruptReceipt, JsonObject, LocalMcpServer, LocalMcpServerOptions, McpRemoteServerOptions,
+    McpSdkServerOptions, McpServerError, McpServerName, McpServerOptions, McpServerToolPolicy, McpStdioServerOptions,
+    McpToolInputSchema, McpToolName, McpToolOrgMaxPermission, McpToolOutput, McpToolPermissionPolicy, McpToolRequest,
+    McpUrl, McpUrlError, MessageId, MessageOrigin, OutputSchema, PermissionBehavior, PermissionMode, PermissionUpdate,
+    PermissionUpdateDestination, PermissionUpdateError, Prompt, QueueCapacity, QueueCapacityError, SdkMcpServer,
+    SdkMcpSession, SdkTool, SdkToolOptions, SessionId, SyncHookOutput, TaskId, Timeout, TimeoutError, ToolName,
+    ToolResultStatus, ToolRule, ToolUseId, UserDialogResponse, UserInput,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -330,31 +331,29 @@ fn callback_configuration_debug_reports_structure_without_callback_or_input_deta
 
 #[test]
 fn mcp_transport_options_preserve_wire_values_but_redact_sensitive_debug_values() -> TestResult {
+    let mut headers = McpRemoteServerOptions::new("https://example.com/mcp?fixture=private");
+    headers.headers = Some(BTreeMap::from([("X-Fixture".into(), "fixture-private-header".into())]));
     let transports = [
         (
-            McpServerOptions::Stdio {
+            McpServerOptions::Stdio(McpStdioServerOptions {
                 command: PathBuf::from("fixture-private-command"),
-                args: vec!["fixture-private-argument".into()],
-                env: trogon_claude_agent_sdk::Environment::from([(
+                declare_type: true,
+                args: Some(vec!["fixture-private-argument".into()]),
+                env: Some(trogon_claude_agent_sdk::Environment::from([(
                     "FIXTURE_CONFIG".into(),
                     "fixture-private-value".into(),
-                )]),
-            },
+                )])),
+                ..McpStdioServerOptions::default()
+            }),
             json!({"type":"stdio","command":"fixture-private-command","args":["fixture-private-argument"],"env":{"FIXTURE_CONFIG":"fixture-private-value"}}),
         ),
         (
-            McpServerOptions::Http {
-                url: McpUrl::new("https://example.com/mcp?fixture=private")?,
-                headers: BTreeMap::from([("X-Fixture".into(), "fixture-private-header".into())]),
-            },
+            McpServerOptions::Http(headers),
             json!({"type":"http","url":"https://example.com/mcp?fixture=private","headers":{"X-Fixture":"fixture-private-header"}}),
         ),
         (
-            McpServerOptions::Sse {
-                url: McpUrl::new("http://example.com/events")?,
-                headers: BTreeMap::new(),
-            },
-            json!({"type":"sse","url":"http://example.com/events","headers":{}}),
+            McpServerOptions::Sse(McpRemoteServerOptions::new("http://example.com/events")),
+            json!({"type":"sse","url":"http://example.com/events"}),
         ),
     ];
     for (transport, expected) in transports {
@@ -365,29 +364,115 @@ fn mcp_transport_options_preserve_wire_values_but_redact_sensitive_debug_values(
         assert!(!debug.contains("fixture-private-header"));
         assert!(!debug.contains("example.com"));
     }
-    let plain = McpServerOptions::Stdio {
+    let plain = McpServerOptions::Stdio(McpStdioServerOptions {
         command: PathBuf::from("fixture-command"),
-        args: vec![trogon_claude_agent_sdk::ConfigValue::Plain("--fixture-flag".into())],
-        env: trogon_claude_agent_sdk::Environment::from([("FIXTURE_CONFIG".into(), "fixture-private-value".into())]),
-    };
+        args: Some(vec![trogon_claude_agent_sdk::ConfigValue::Plain(
+            "--fixture-flag".into(),
+        )]),
+        env: Some(trogon_claude_agent_sdk::Environment::from([(
+            "FIXTURE_CONFIG".into(),
+            "fixture-private-value".into(),
+        )])),
+        ..McpStdioServerOptions::default()
+    });
     let debug = format!("{plain:?}");
     for shown in ["fixture-command", "--fixture-flag", "FIXTURE_CONFIG", "<redacted>"] {
         assert!(debug.contains(shown), "{debug}");
     }
-    assert!(matches!(McpUrl::new("not a URL"), Err(McpUrlError::Parse(_))));
-    assert!(matches!(McpUrl::new("file:///fixture"), Err(McpUrlError::Scheme)));
+    assert_eq!(
+        format!("{:?}", McpUrl::from("https://example.com/mcp")),
+        "McpUrl { .. }"
+    );
+    Ok(())
+}
+
+/// Neither upstream SDK checks MCP URLs, so `McpUrl::from` keeps any text and the checked constructor
+/// is opt-in.
+#[test]
+fn r19_mcp_urls_are_verbatim_unless_validation_is_requested() -> TestResult {
+    for raw in [
+        "not a URL",
+        "file:///fixture",
+        "https://user:pass@localhost/mcp",
+        "HTTPS://Example.com:443/a/../b#f",
+    ] {
+        let server = McpServerOptions::Http(McpRemoteServerOptions::new(raw));
+        assert_eq!(server.to_wire_json()?["url"], raw);
+    }
+    assert!(matches!(McpUrl::validated("not a URL"), Err(McpUrlError::Parse(_))));
+    assert!(matches!(McpUrl::validated("file:///fixture"), Err(McpUrlError::Scheme)));
     assert!(matches!(
-        McpUrl::new("https://user:invalid@localhost/mcp"),
+        McpUrl::validated("https://user:invalid@localhost/mcp"),
         Err(McpUrlError::Credentials)
     ));
     assert!(matches!(
-        McpUrl::new("https://example.com/mcp#fragment"),
+        McpUrl::validated("https://example.com/mcp#fragment"),
         Err(McpUrlError::Fragment)
     ));
     assert_eq!(
-        format!("{:?}", McpUrl::new("https://example.com/mcp")?),
-        "McpUrl { .. }"
+        McpUrl::validated("HTTPS://Example.com/mcp")?.as_str(),
+        "HTTPS://Example.com/mcp"
     );
+    Ok(())
+}
+
+/// Every TypeScript config field is sent in declaration order, followed by caller keys verbatim.
+#[test]
+fn mcp_server_configs_send_every_field_and_extra_keys() -> TestResult {
+    let mut tool = McpServerToolPolicy::new("search");
+    tool.permission_policy = Some(McpToolPermissionPolicy::AlwaysAsk);
+    tool.org_max_permission = Some(McpToolOrgMaxPermission::Blocked);
+    tool.extra.insert("future".into(), json!(1));
+    let mut remote = McpRemoteServerOptions::new("https://example.com/mcp");
+    remote.headers = Some(BTreeMap::from([("Authorization".into(), "Bearer fixture".into())]));
+    remote.tools = Some(vec![tool.clone()]);
+    remote.timeout = Some(5000);
+    remote.always_load = Some(true);
+    remote.extra.insert("oauth".into(), json!({"clientId":"fixture"}));
+    remote.extra.insert("type".into(), json!("ignored"));
+    let stdio = McpStdioServerOptions {
+        command: PathBuf::from("server"),
+        args: Some(Vec::new()),
+        env: Some(trogon_claude_agent_sdk::Environment::default()),
+        timeout: Some(1000),
+        always_load: Some(false),
+        extra: serde_json::from_value(json!({"cwd":"/srv"}))?,
+        ..McpStdioServerOptions::default()
+    };
+    let sdk = McpSdkServerOptions {
+        name: "remote-sdk".into(),
+        timeout: Some(2000),
+        tools: Some(vec![McpServerToolPolicy::new("echo")]),
+        extra: serde_json::from_value(json!({"future":true}))?,
+    };
+    for (server, expected) in [
+        (
+            McpServerOptions::Http(remote.clone()),
+            r#"{"type":"http","url":"https://example.com/mcp","headers":{"Authorization":"Bearer fixture"},"tools":[{"name":"search","permission_policy":"always_ask","org_max_permission":"blocked","future":1}],"timeout":5000,"alwaysLoad":true,"oauth":{"clientId":"fixture"}}"#,
+        ),
+        (
+            McpServerOptions::Sse(remote),
+            r#"{"type":"sse","url":"https://example.com/mcp","headers":{"Authorization":"Bearer fixture"},"tools":[{"name":"search","permission_policy":"always_ask","org_max_permission":"blocked","future":1}],"timeout":5000,"alwaysLoad":true,"oauth":{"clientId":"fixture"}}"#,
+        ),
+        (
+            McpServerOptions::Stdio(stdio),
+            r#"{"command":"server","args":[],"env":{},"timeout":1000,"alwaysLoad":false,"cwd":"/srv"}"#,
+        ),
+        (
+            McpServerOptions::Stdio(McpStdioServerOptions {
+                command: PathBuf::from("server"),
+                declare_type: true,
+                ..McpStdioServerOptions::default()
+            }),
+            r#"{"type":"stdio","command":"server"}"#,
+        ),
+        (
+            McpServerOptions::Sdk(sdk),
+            r#"{"type":"sdk","name":"remote-sdk","timeout":2000,"tools":[{"name":"echo"}],"future":true}"#,
+        ),
+    ] {
+        assert_eq!(serde_json::to_string(&server.to_wire_json()?)?, expected);
+    }
     Ok(())
 }
 
@@ -409,10 +494,7 @@ fn agent_definitions_preserve_inline_and_named_mcp_scopes() -> TestResult {
             AgentMcpServerSpec::Named(McpServerName::from("named")),
             AgentMcpServerSpec::Inline(BTreeMap::from([(
                 McpServerName::from("inline"),
-                McpServerOptions::Sse {
-                    url: McpUrl::new("https://example.com/events")?,
-                    headers: BTreeMap::new(),
-                },
+                McpServerOptions::Sse(McpRemoteServerOptions::new("https://example.com/events")),
             )])),
         ]);
         let wire = agent.to_wire_json()?;
@@ -420,7 +502,7 @@ fn agent_definitions_preserve_inline_and_named_mcp_scopes() -> TestResult {
         assert_eq!(wire["background"], false);
         assert_eq!(
             wire["mcpServers"],
-            json!(["named", {"inline":{"type":"sse","url":"https://example.com/events","headers":{}}}])
+            json!(["named", {"inline":{"type":"sse","url":"https://example.com/events"}}])
         );
     }
     Ok(())

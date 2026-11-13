@@ -18,9 +18,9 @@ use std::{
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
-    ClaudeAgentOptions, ClaudeSdkClient, InMemorySessionStore, McpServerName, McpServerOptions, McpUrl, PermissionMode,
-    Prompt, SessionEntry, SessionError, SessionId, SessionKey, SessionProjectKey, SessionStore, SessionStoreOptions,
-    SettingSource,
+    ClaudeAgentOptions, ClaudeSdkClient, InMemorySessionStore, McpRemoteServerOptions, McpServerName, McpServerOptions,
+    McpServers, PermissionMode, Prompt, SdkMcpServers, SessionEntry, SessionError, SessionId, SessionKey,
+    SessionProjectKey, SessionStore, SessionStoreOptions, SettingSource,
     adapters::{
         CurrentDirectory, EnvironmentVariable, NativeFileSystem, RuntimeAdapters, TemporaryDirectory, WallClock,
     },
@@ -825,14 +825,17 @@ async fn s12_outbound_prompts_and_controls_are_never_capped_by_the_inbound_frame
     options.limits.max_buffer_size = Some(std::num::NonZeroUsize::new(1024).ok_or("invalid limit")?);
     let client = ClaudeSdkClient::connect_with_adapters(options, process_adapters(process)).await?;
     client.send_prompt(Prompt::from("x".repeat(2048))).await?;
-    let replacement = BTreeMap::from([(
+    let replacement = McpServers::from([(
         McpServerName::from("large"),
-        McpServerOptions::Http {
-            url: McpUrl::new(&format!("https://example.com/{}", "x".repeat(2048)))?,
-            headers: BTreeMap::new(),
-        },
+        McpServerOptions::Http(McpRemoteServerOptions::new(format!(
+            "https://example.com/{}",
+            "x".repeat(2048)
+        ))),
     )]);
-    let result = client.handle().set_mcp_servers(replacement, BTreeMap::new()).await?;
+    let result = client
+        .handle()
+        .set_mcp_servers(replacement, SdkMcpServers::new())
+        .await?;
     assert_eq!(result.added, ["large"]);
     client.disconnect().await?;
     assert_eq!(server.await??, ["initialize", "user:2048", "mcp_set_servers"]);

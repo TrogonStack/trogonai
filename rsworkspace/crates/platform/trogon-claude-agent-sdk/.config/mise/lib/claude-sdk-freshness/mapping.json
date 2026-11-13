@@ -705,7 +705,7 @@
         },
         {
           "path": "tests/runtime_sessions.rs",
-          "name": "dynamic_mcp_replacement_installs_handlers_and_rejection_keeps_previous"
+          "name": "rejected_mcp_replacement_still_disconnects_removed_in_process_servers"
         }
       ],
       "status": "supported",
@@ -1337,18 +1337,65 @@
         }
       },
       "rust_api": [
+        "ClaudeAgentOptions.mcp_servers",
+        "ClaudeAgentOptions.mcp_config",
+        "McpServers",
         "McpServerOptions",
+        "McpStdioServerOptions",
+        "McpRemoteServerOptions",
+        "McpSdkServerOptions",
+        "McpServerToolPolicy",
+        "McpToolPermissionPolicy",
+        "McpToolOrgMaxPermission",
         "McpUrl",
-        "McpServerName"
+        "McpUrlError",
+        "McpServerName",
+        "ClaudeSdkClient::set_mcp_servers"
       ],
       "tests": [
         {
           "path": "tests/runtime_features.rs",
           "name": "structured_input_and_declarative_configuration_reach_the_cli"
+        },
+        {
+          "path": "tests/golden_argv_env.rs",
+          "name": "typescript_mcp_config_matches_upstream_bytes"
+        },
+        {
+          "path": "tests/golden_argv_env.rs",
+          "name": "python_mcp_config_matches_upstream_bytes"
+        },
+        {
+          "path": "tests/golden_argv_env.rs",
+          "name": "python_mcp_config_path_is_passed_verbatim"
+        },
+        {
+          "path": "tests/golden_argv_env.rs",
+          "name": "typescript_in_process_servers_alone_send_no_mcp_config"
+        },
+        {
+          "path": "tests/value_contracts.rs",
+          "name": "mcp_server_configs_send_every_field_and_extra_keys"
+        },
+        {
+          "path": "tests/value_contracts.rs",
+          "name": "mcp_transport_options_preserve_wire_values_but_redact_sensitive_debug_values"
+        },
+        {
+          "path": "tests/value_contracts.rs",
+          "name": "r19_mcp_urls_are_verbatim_unless_validation_is_requested"
+        },
+        {
+          "path": "tests/runtime_failure_contracts.rs",
+          "name": "r17_in_process_mcp_server_replaces_an_external_config_of_the_same_name"
+        },
+        {
+          "path": "tests/runtime_failure_contracts.rs",
+          "name": "r18_mcp_replacements_are_not_serialized"
         }
       ],
-      "status": "partial",
-      "rationale": "External stdio/HTTP/SSE declarations are supported with typed URL/name validation. Upstream inline/path conveniences and extra server configuration are not all represented."
+      "status": "supported",
+      "rationale": "Every TypeScript stdio, sse, http and instance-less sdk config field is typed, sent in declaration order and followed by caller keys verbatim, in caller insertion order. URLs are kept verbatim; McpUrl::validated is an opt-in check neither SDK performs. TypeScript style leaves in-process servers out of --mcp-config and names them in initialize sdkMcpServers; Python style lists them as sdk entries with json.dumps formatting, and ClaudeAgentOptions::mcp_config carries Python's str or Path form verbatim. An in-process server replaces an external config of the same name, and set_mcp_servers is not serialized, as in TypeScript."
     },
     {
       "id": "session-store",
