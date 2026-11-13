@@ -23,10 +23,11 @@ use trogon_credential_aggregate::{CREDENTIAL_EVENT_SUBJECT_PREFIX, CREDENTIAL_ST
 use trogon_nats::ConnectError;
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_secrets_service::{
-    ConfigSetting, ReleaseSources, SecretsService, SecretsServiceError, ServiceArgs, ServiceConfig,
+    AdmissionLimit, ConfigSetting, ReleaseSources, SecretsService, SecretsServiceError, ServiceArgs, ServiceConfig,
 };
 use trogon_std::env::InMemoryEnv;
 use trogon_std::fs::MemFs;
+use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 const TENANT_OWNERS_FILE: &str = "/etc/trogon/tenant-owners.toml";
 const RELEASE_POLICIES_FILE: &str = "/etc/trogon/release-policies.toml";
@@ -53,6 +54,7 @@ const SERVING_WITHIN: Duration = Duration::from_secs(10);
 /// reaches a server to give up.
 const REFUSED_WITHIN: Duration = Duration::from_secs(30);
 const STOPPED_WITHIN: Duration = Duration::from_secs(10);
+const SERVING: &str = "the secrets service is serving releases";
 
 async fn serve_openbao(app: Router) -> (String, JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -255,6 +257,8 @@ async fn an_openbao_that_refuses_the_login_keeps_the_service_out_of_the_queue_gr
 
 #[tokio::test]
 async fn the_service_serves_releases_until_it_is_told_to_stop() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::INFO);
     let server = JetStreamTestServer::start().await;
     create_credential_stream(&server).await;
     let (openbao, _openbao) = fake_openbao().await;
@@ -283,6 +287,16 @@ async fn the_service_serves_releases_until_it_is_told_to_stop() {
         .expect("the service did not stop when told to")
         .unwrap()
         .unwrap();
+    let serving = events
+        .events()
+        .into_iter()
+        .find(|event| event.message() == Some(SERVING))
+        .expect("the service did not log that it serves releases");
+    assert_eq!(serving.field("credential_stream"), Some(CREDENTIAL_STREAM));
+    assert_eq!(
+        serving.field("admission_limit"),
+        Some(AdmissionLimit::default().get().to_string().as_str())
+    );
 }
 
 #[tokio::test]
