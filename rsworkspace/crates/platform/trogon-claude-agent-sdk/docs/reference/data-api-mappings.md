@@ -44,3 +44,8 @@ integrity-verified published `0.3.319` declaration archive.
 | `QueueCapacity` | Rust host-side bounded-channel policy; not an upstream SDK class | Positive and no larger than Tokio's `Semaphore::MAX_PERMITS`; the value creates no channel. |
 | `Timeout` | Rust host-side wait policy; not an upstream SDK class | A positive duration no longer than the runtime draft's 24-hour maximum; no clock is read. |
 | `StderrTail` | Rust diagnostic byte container for child-process failures; not an upstream SDK class | Read-only public bytes and a content-free debug representation. Only the empty default is directly publicly constructible. |
+| `SessionSummaryEntry` | Python `SessionSummaryEntry` / TypeScript `SessionSummaryEntry`; `modified_at_ms` is upstream `mtime` | `data` is an opaque JSON object persisted verbatim; the fold never touches the write time unless one is passed. |
+| `SummaryDialect` | Rust selector for the two upstream fold layouts | `TypeScript` (default) stores camelCase `data` keys, honors `relocated` entries and shows bash input as `! command`; `Python` stores snake_case keys. |
+| `SdkSessionInfo` | Python `SDKSessionInfo` / TypeScript `SDKSessionInfo` | `file_size` is empty for store-backed listings; `created_at` is milliseconds since the Unix epoch. |
+| `SessionStoreFlush` | Python `session_store_flush` / TypeScript `sessionStoreFlush` | `Batched` (default) flushes on a result or past the pending limits; `Eager` appends every frame as it is read. |
+| `MirrorSizeEstimate` | Pending-frame size heuristic of each upstream batcher | `TypeScript` (default) counts UTF-16 units of compact JSON; `Python` counts `json.dumps` characters with ASCII escaping. |

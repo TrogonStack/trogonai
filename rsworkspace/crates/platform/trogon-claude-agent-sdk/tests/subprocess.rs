@@ -130,6 +130,40 @@ async fn w2_file_checkpointing_with_a_session_store_is_refused() -> TestResult {
     Ok(())
 }
 
+/// Both upstream SDKs refuse `continue` against a store that cannot list sessions.
+#[tokio::test]
+async fn st06_continue_conversation_requires_a_store_that_lists_sessions() -> TestResult {
+    struct RequiredOnly;
+
+    impl SessionStore for RequiredOnly {
+        fn append<'a>(
+            &'a self,
+            _key: &'a trogon_claude_agent_sdk::SessionKey,
+            _entries: &'a [trogon_claude_agent_sdk::SessionEntry],
+        ) -> trogon_claude_agent_sdk::SessionStoreFuture<'a, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn load<'a>(
+            &'a self,
+            _key: &'a trogon_claude_agent_sdk::SessionKey,
+        ) -> trogon_claude_agent_sdk::SessionStoreFuture<'a, Option<Vec<trogon_claude_agent_sdk::SessionEntry>>>
+        {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
+    let mut options = options("normal")?;
+    options.continue_conversation = trogon_claude_agent_sdk::ContinueConversation::Yes;
+    let store: Arc<dyn SessionStore> = Arc::new(RequiredOnly);
+    options.session_store = Some(SessionStoreOptions::from(store));
+    assert!(matches!(
+        ClaudeSdkClient::connect(options).await,
+        Err(Error::ContinueRequiresListSessions)
+    ));
+    Ok(())
+}
+
 #[tokio::test]
 async fn known_message_metadata_survives_decoding() -> TestResult {
     let mut response = query(Prompt::from("metadata"), options("metadata")?).await?;
