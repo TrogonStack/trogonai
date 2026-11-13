@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tool = SdkTool::from(SdkToolOptions {
         name: McpToolName::from("echo"),
         description: "Return the supplied text".into(),
-        input_schema: McpToolInputSchema::new(schema::echo_schema(None)?)?,
+        input_schema: McpToolInputSchema::new(schema::echo_schema(None)?),
         handler: Arc::new(|request: McpToolRequest| async move {
             Ok(McpToolOutput::text(
                 request.arguments["text"].as_str().unwrap_or_default(),
