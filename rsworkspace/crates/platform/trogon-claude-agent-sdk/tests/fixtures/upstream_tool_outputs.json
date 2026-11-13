@@ -1,0 +1,1061 @@
+{
+  "AgentOutput": [
+    {
+      "agentId": "text",
+      "agentType": "text",
+      "content": [
+        {
+          "type": "text",
+          "text": "text",
+          "citations": [
+            {
+              "any": [
+                "thing",
+                null
+              ]
+            }
+          ]
+        }
+      ],
+      "resolvedModel": "text",
+      "modelsUsed": [
+        "text"
+      ],
+      "totalToolUseCount": 3,
+      "totalDurationMs": 3,
+      "totalTokens": 3,
+      "usage": {
+        "input_tokens": 3,
+        "output_tokens": 3,
+        "cache_creation_input_tokens": 3,
+        "cache_read_input_tokens": 3,
+        "server_tool_use": {
+          "web_search_requests": 3,
+          "web_fetch_requests": 3
+        },
+        "service_tier": "text",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 3,
+          "ephemeral_5m_input_tokens": 3
+        },
+        "inference_geo": "text",
+        "speed": "text",
+        "iterations": {
+          "any": [
+            "thing",
+            null
+          ]
+        },
+        "output_tokens_details": {
+          "thinking_tokens": 3
+        },
+        "fallback_credit": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "toolsUsed": [
+        "text"
+      ],
+      "toolStats": {
+        "readCount": 3,
+        "searchCount": 3,
+        "bashCount": 3,
+        "editFileCount": 3,
+        "linesAdded": 3,
+        "linesRemoved": 3,
+        "otherToolCount": 3,
+        "frameCount": 3
+      },
+      "status": "completed",
+      "prompt": "text",
+      "worktreePath": "text",
+      "worktreeBranch": "text"
+    },
+    {
+      "status": "async_launched",
+      "isAsync": true,
+      "agentId": "text",
+      "description": "text",
+      "resolvedModel": "text",
+      "modelsUsed": [
+        "text"
+      ],
+      "prompt": "text",
+      "outputFile": "text",
+      "canReadOutputFile": true
+    },
+    {
+      "status": "remote_launched",
+      "taskId": "text",
+      "sessionUrl": "text",
+      "description": "text",
+      "prompt": "text",
+      "outputFile": "text"
+    }
+  ],
+  "FileReadOutput": [
+    {
+      "type": "text",
+      "file": {
+        "filePath": "text",
+        "content": "text",
+        "numLines": 3,
+        "startLine": 3,
+        "totalLines": 3,
+        "truncatedByTokenCap": true
+      },
+      "artifactRead": {
+        "slug": "text",
+        "ver": "text"
+      }
+    },
+    {
+      "type": "image",
+      "file": {
+        "base64": "text",
+        "type": "image/png",
+        "originalSize": 2.5,
+        "dimensions": {
+          "originalWidth": 2.5,
+          "originalHeight": 2.5,
+          "displayWidth": 2.5,
+          "displayHeight": 2.5
+        }
+      }
+    },
+    {
+      "type": "notebook",
+      "file": {
+        "filePath": "text",
+        "cells": [
+          {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "pdf",
+      "file": {
+        "filePath": "text",
+        "base64": "text",
+        "originalSize": 2.5
+      }
+    },
+    {
+      "type": "parts",
+      "file": {
+        "filePath": "text",
+        "originalSize": 3,
+        "count": 3,
+        "outputDir": "text"
+      },
+      "firstPage": 3,
+      "pages": [
+        {
+          "base64": "text",
+          "mediaType": "image/jpeg",
+          "error": "text"
+        }
+      ]
+    }
+  ],
+  "ListMcpResourcesOutput": [
+    [
+      {
+        "uri": "text",
+        "name": "text",
+        "mimeType": "text",
+        "description": "text",
+        "server": "text"
+      }
+    ]
+  ],
+  "RefreshMcpToolsOutput": [
+    [
+      {
+        "server": "text",
+        "status": "refreshed",
+        "toolCount": 3,
+        "added": [
+          "text"
+        ],
+        "removed": [
+          "text"
+        ],
+        "error": "text"
+      }
+    ]
+  ],
+  "McpOutput": [
+    "text",
+    [
+      {
+        "type": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    ],
+    {
+      "extra_key": {
+        "any": [
+          "thing",
+          null
+        ]
+      }
+    }
+  ],
+  "ArtifactOutput": [
+    {
+      "url": "text",
+      "path": "text",
+      "artifact_id": "text",
+      "title": "text",
+      "version": "text",
+      "capabilities": {
+        "any": [
+          "thing",
+          null
+        ]
+      },
+      "stored": {
+        "contract": "text",
+        "preferredContract": "text",
+        "capabilities": {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        },
+        "carried": true,
+        "read": "text"
+      },
+      "warnings": [
+        "text"
+      ],
+      "publishesRemaining": 3,
+      "publishesResetAt": 3,
+      "contract": "text",
+      "updated": true,
+      "owned": true,
+      "icon": "text",
+      "faviconSent": true,
+      "iconDropped": true,
+      "audience": "text",
+      "seq": 3,
+      "unchanged": true,
+      "liveSubscription": "text",
+      "pinned": true
+    },
+    {
+      "artifacts": [
+        {
+          "title": "text",
+          "url": "text",
+          "favicon": "text",
+          "updatedAt": "text",
+          "rel": "shared",
+          "external": true,
+          "role": "commenter",
+          "outsidersMayHaveWritten": true,
+          "pinned": true
+        }
+      ],
+      "truncated": true,
+      "total": 2.5,
+      "total_at_least": true,
+      "next_page_token": "text",
+      "pins_enabled": true,
+      "scope": "all",
+      "external_listed": true
+    },
+    {
+      "read": {
+        "url": "text",
+        "bytes": 3,
+        "code": 3,
+        "codeText": "text",
+        "result": "text",
+        "durationMs": 3,
+        "title": "text"
+      },
+      "owned": true,
+      "artifactRead": {
+        "slug": "text",
+        "ver": "text",
+        "seeded": false
+      }
+    },
+    {
+      "watch": {
+        "url": "text",
+        "watching": true,
+        "outcome": "text",
+        "reason": "text",
+        "durable_skip_reason": "text",
+        "task_id": "text",
+        "since": 2.5,
+        "token_expires_at": 2.5,
+        "rail": "text",
+        "trigger_id": "text",
+        "durable_since": "text",
+        "status": 2.5,
+        "detail": "text",
+        "note": "text",
+        "events": [
+          "text"
+        ]
+      }
+    },
+    {
+      "unwatch": {
+        "url": "text",
+        "was_watching": true
+      }
+    },
+    {
+      "watches": [
+        {
+          "url": "text",
+          "rail": "live_stopped",
+          "since": 2.5,
+          "explicit": true,
+          "armed_via": "text",
+          "stop_kind": "text"
+        }
+      ],
+      "filter_url": "text",
+      "arms": [
+        {
+          "url": "text",
+          "rail": "text",
+          "state": "text",
+          "reconnect": true,
+          "failures": 2.5,
+          "max_failures": 2.5,
+          "next_in_s": 2.5,
+          "last_failure": "text",
+          "reason": "text",
+          "detail": "text",
+          "server_message": "text",
+          "at": 2.5
+        }
+      ]
+    },
+    {
+      "written": {
+        "url": "text"
+      },
+      "owned": true,
+      "asset_upload": {
+        "id": "text",
+        "url": "text",
+        "size_bytes": 3,
+        "content_type": "text",
+        "sha256": "text",
+        "file_name": "text"
+      }
+    },
+    {
+      "written": {
+        "url": "text"
+      },
+      "owned": true,
+      "asset_uploads": {
+        "url": "text",
+        "results": [
+          {
+            "file_path": "text",
+            "status": "not_attempted",
+            "reason": "text",
+            "message": "text",
+            "may_be_stored": true
+          }
+        ]
+      }
+    },
+    {
+      "asset_list": {
+        "url": "text",
+        "assets": [
+          {
+            "id": "text",
+            "url": "text",
+            "content_type": "text",
+            "size_bytes": 3,
+            "sha256": "text",
+            "created_at": "text"
+          }
+        ],
+        "usage": {
+          "files": 3,
+          "bytes": 3,
+          "max_files": 3,
+          "max_bytes": 3
+        },
+        "next": "text",
+        "cowritten": true,
+        "outside_writer": true
+      }
+    },
+    {
+      "asset_read": {
+        "id": "text",
+        "path": "text",
+        "size_bytes": 2.5,
+        "content_type": "text",
+        "sha256": "text",
+        "cowritten": true,
+        "outside_writer": true,
+        "public_read": true,
+        "foreign": true
+      }
+    },
+    {
+      "written": {
+        "url": "text"
+      },
+      "owned": true,
+      "asset_delete": {
+        "id": "text",
+        "deleted": true
+      }
+    },
+    {
+      "pin": {
+        "action": "unpin",
+        "url": "text",
+        "pinned": true,
+        "title": "text"
+      }
+    }
+  ],
+  "ProjectsOutput": [
+    {
+      "method": "project_info",
+      "notice": "text",
+      "local_file": "text",
+      "name": "text",
+      "description": "text",
+      "instructions": "text",
+      "docs": [
+        {
+          "path": "text",
+          "created_at": "text"
+        }
+      ],
+      "files": [
+        {
+          "path": "text",
+          "file_kind": "text",
+          "created_at": "text"
+        }
+      ],
+      "sync_sources": [
+        {
+          "type": "text",
+          "config": {
+            "extra_key": {
+              "any": [
+                "thing",
+                null
+              ]
+            }
+          }
+        }
+      ],
+      "knowledge": {
+        "knowledge_size": 3,
+        "max_knowledge_size": 3
+      }
+    },
+    {
+      "method": "project_read",
+      "notice": "text",
+      "path": "text",
+      "file_kind": "text",
+      "content": "text",
+      "local_file": "text",
+      "created_at": "text"
+    },
+    {
+      "method": "project_search",
+      "notice": "text",
+      "rag": true,
+      "hits": [
+        {
+          "name": "text",
+          "doc_uuid": "text",
+          "text": "text",
+          "image_attached": true,
+          "page": 3
+        }
+      ],
+      "docs": [
+        "text"
+      ]
+    },
+    {
+      "method": "project_write",
+      "notice": "text",
+      "path": "text",
+      "doc_uuid": "text",
+      "replaced": true,
+      "present_to_user": true,
+      "local_path": "text"
+    },
+    {
+      "method": "project_delete",
+      "notice": "text",
+      "path": "text",
+      "deleted": true
+    },
+    {
+      "method": "project_memory_list",
+      "notice": "text",
+      "files": [
+        {
+          "path": "text",
+          "size_bytes": 2.5,
+          "updated_at": "text",
+          "truncated": true
+        }
+      ],
+      "truncated": true
+    },
+    {
+      "method": "project_memory_read",
+      "notice": "text",
+      "path": "text",
+      "content": "text",
+      "local_file": "text",
+      "size_bytes": 3,
+      "updated_at": "text",
+      "truncated": true
+    }
+  ],
+  "BashOutput": [
+    {
+      "stdout": "text",
+      "stderr": "text",
+      "rawOutputPath": "text",
+      "interrupted": true,
+      "isImage": true,
+      "backgroundTaskId": "text",
+      "backgroundedByUser": true,
+      "timedOutAfterMs": 3,
+      "backgroundCwdHint": "text",
+      "backgroundEndsWithFinalResponse": true,
+      "backgroundWakesOwner": true,
+      "dangerouslyDisableSandbox": true,
+      "returnCodeInterpretation": "text",
+      "noOutputExpected": true,
+      "structuredContent": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "persistedOutputPath": "text",
+      "persistedOutputSize": 3,
+      "staleReadFileStateHint": "text",
+      "ghRateLimitHint": "text",
+      "gitOperation": {
+        "commit": {
+          "sha": "text",
+          "kind": "committed",
+          "branch": "text"
+        },
+        "push": {
+          "branch": "text"
+        },
+        "branch": {
+          "ref": "text",
+          "action": "merged"
+        },
+        "pr": {
+          "number": 3,
+          "url": "text",
+          "action": "created"
+        }
+      }
+    }
+  ],
+  "ExitPlanModeOutput": [
+    {
+      "plan": "text",
+      "isAgent": true,
+      "filePath": "text",
+      "hasTaskTool": true,
+      "planWasEdited": true,
+      "awaitingLeaderApproval": true,
+      "requestId": "text"
+    }
+  ],
+  "FileEditOutput": [
+    {
+      "filePath": "text",
+      "oldString": "text",
+      "newString": "text",
+      "originalFile": "text",
+      "structuredPatch": [
+        {
+          "oldStart": 3,
+          "oldLines": 3,
+          "newStart": 3,
+          "newLines": 3,
+          "lines": [
+            "text"
+          ]
+        }
+      ],
+      "userModified": true,
+      "replaceAll": true,
+      "gitDiff": {
+        "filename": "text",
+        "status": "modified",
+        "additions": 3,
+        "deletions": 3,
+        "changes": 3,
+        "patch": "text",
+        "repository": "text"
+      },
+      "staged": true
+    }
+  ],
+  "FileWriteOutput": [
+    {
+      "type": "create",
+      "filePath": "text",
+      "content": "text",
+      "structuredPatch": [
+        {
+          "oldStart": 3,
+          "oldLines": 3,
+          "newStart": 3,
+          "newLines": 3,
+          "lines": [
+            "text"
+          ]
+        }
+      ],
+      "originalFile": "text",
+      "gitDiff": {
+        "filename": "text",
+        "status": "modified",
+        "additions": 3,
+        "deletions": 3,
+        "changes": 3,
+        "patch": "text",
+        "repository": "text"
+      },
+      "userModified": true,
+      "staged": true
+    }
+  ],
+  "GlobOutput": [
+    {
+      "durationMs": 3,
+      "numFiles": 3,
+      "filenames": [
+        "text"
+      ],
+      "truncated": true,
+      "totalMatches": 3,
+      "countIsComplete": true,
+      "timedOut": true
+    }
+  ],
+  "GrepOutput": [
+    {
+      "mode": "content",
+      "numFiles": 3,
+      "filenames": [
+        "text"
+      ],
+      "content": "text",
+      "numLines": 3,
+      "numMatches": 3,
+      "totalFiles": 3,
+      "totalLines": 3,
+      "appliedLimit": 3,
+      "appliedOffset": 3,
+      "timedOut": true
+    }
+  ],
+  "TaskStopOutput": [
+    {
+      "message": "text",
+      "task_id": "text",
+      "task_type": "text",
+      "command": "text"
+    }
+  ],
+  "NotebookEditOutput": [
+    {
+      "new_source": "text",
+      "old_source": "text",
+      "cell_id": "text",
+      "cell_type": "code",
+      "language": "text",
+      "edit_mode": "text",
+      "error": "text",
+      "notebook_path": "text",
+      "original_file": "text",
+      "updated_file": "text"
+    }
+  ],
+  "ReadMcpResourceDirOutput": [
+    {
+      "resources": [
+        {
+          "uri": "text",
+          "name": "text",
+          "mimeType": "text"
+        }
+      ],
+      "error": "text"
+    }
+  ],
+  "ReadMcpResourceOutput": [
+    {
+      "contents": [
+        {
+          "uri": "text",
+          "mimeType": "text",
+          "text": "text",
+          "blobSavedTo": "text"
+        }
+      ],
+      "error": "text"
+    }
+  ],
+  "ReportFindingsOutput": [
+    {
+      "count": 3,
+      "level": "low",
+      "findings": [
+        {
+          "file": "text",
+          "line": 3,
+          "summary": "text",
+          "short_summary": "text",
+          "failure_scenario": "text",
+          "category": "text",
+          "verdict": "CONFIRMED",
+          "outcome": "fixed"
+        }
+      ]
+    }
+  ],
+  "TodoWriteOutput": [
+    {
+      "oldTodos": [
+        {
+          "content": "text",
+          "status": "pending",
+          "activeForm": "text"
+        }
+      ],
+      "newTodos": [
+        {
+          "content": "text",
+          "status": "pending",
+          "activeForm": "text"
+        }
+      ]
+    }
+  ],
+  "WebFetchOutput": [
+    {
+      "bytes": 3,
+      "code": 3,
+      "codeText": "text",
+      "result": "text",
+      "durationMs": 3,
+      "url": "text",
+      "artifactRead": {
+        "slug": "text",
+        "ver": "text",
+        "seeded": false
+      }
+    }
+  ],
+  "WebSearchOutput": [
+    {
+      "query": "text",
+      "results": [
+        {
+          "tool_use_id": "text",
+          "content": [
+            {
+              "title": "text",
+              "url": "text",
+              "snippet": "text"
+            }
+          ]
+        }
+      ],
+      "durationSeconds": 3,
+      "searchCount": 3
+    }
+  ],
+  "AskUserQuestionOutput": [
+    {
+      "questions": [
+        {
+          "question": "text",
+          "header": "text",
+          "options": [
+            {
+              "label": "text",
+              "description": "text",
+              "preview": "text"
+            }
+          ],
+          "multiSelect": true
+        }
+      ],
+      "answers": {
+        "extra_key": "text"
+      },
+      "response": "text",
+      "annotations": {
+        "extra_key": {
+          "preview": "text",
+          "notes": "text",
+          "unanswered": "skipped"
+        }
+      },
+      "afkTimeoutMs": 3
+    }
+  ],
+  "SendFeedbackOutput": [
+    {
+      "success": true,
+      "message": "text"
+    }
+  ],
+  "EnterWorktreeOutput": [
+    {
+      "worktreePath": "text",
+      "worktreeBranch": "text",
+      "message": "text"
+    }
+  ],
+  "ExitWorktreeOutput": [
+    {
+      "action": "keep",
+      "originalCwd": "text",
+      "worktreePath": "text",
+      "worktreeBranch": "text",
+      "tmuxSessionName": "text",
+      "discardedFiles": 3,
+      "discardedCommits": 3,
+      "message": "text"
+    }
+  ],
+  "TaskCreateOutput": [
+    {
+      "task": {
+        "id": "text",
+        "subject": "text",
+        "description": "text"
+      }
+    }
+  ],
+  "TaskGetOutput": [
+    {
+      "task": {
+        "id": "text",
+        "subject": "text",
+        "description": "text",
+        "status": "pending",
+        "blocks": [
+          "text"
+        ],
+        "blockedBy": [
+          "text"
+        ]
+      }
+    }
+  ],
+  "TaskUpdateOutput": [
+    {
+      "success": true,
+      "taskId": "text",
+      "updatedFields": [
+        "text"
+      ],
+      "error": "text",
+      "statusChange": {
+        "from": "text",
+        "to": "text"
+      }
+    }
+  ],
+  "TaskListOutput": [
+    {
+      "tasks": [
+        {
+          "id": "text",
+          "subject": "text",
+          "status": "pending",
+          "owner": "text",
+          "blockedBy": [
+            "text"
+          ]
+        }
+      ]
+    }
+  ],
+  "RemoteTriggerOutput": [
+    {
+      "status": 3,
+      "json": "text",
+      "summary": "text"
+    }
+  ],
+  "ShowOnboardingRolePickerOutput": [
+    {
+      "role": "text",
+      "dismissed": true
+    }
+  ],
+  "OfferChromeSetupOutput": [
+    {
+      "outcome": "connected"
+    }
+  ],
+  "ReadNotificationsOutput": [
+    {
+      "notifications": [
+        {
+          "notification_id": "text",
+          "origin": "text",
+          "queued_at": "text",
+          "content": "text",
+          "arrived_at": "text"
+        }
+      ],
+      "remaining": 3,
+      "read_at": "text"
+    }
+  ],
+  "ScheduleWakeupOutput": [
+    {
+      "scheduledFor": 3,
+      "clampedDelaySeconds": 3,
+      "wasClamped": true,
+      "stopped": true,
+      "cancelledWakeups": 3
+    }
+  ],
+  "MonitorOutput": [
+    {
+      "taskId": "text",
+      "timeoutMs": 3,
+      "persistent": true
+    }
+  ],
+  "ProposeSkillsOutput": [
+    {
+      "proposalCount": 3
+    }
+  ],
+  "ProposeGoalOutput": [
+    {
+      "condition": "text",
+      "askUser": true
+    }
+  ],
+  "EnterPlanModeOutput": [
+    {
+      "message": "text"
+    }
+  ],
+  "WorkflowOutput": [
+    {
+      "status": "async_launched",
+      "taskId": "text",
+      "taskType": "local_workflow",
+      "workflowName": "text",
+      "runId": "text",
+      "summary": "text",
+      "transcriptDir": "text",
+      "scriptPath": "text",
+      "sessionUrl": "text",
+      "warning": "text",
+      "error": "text"
+    }
+  ],
+  "CronCreateOutput": [
+    {
+      "id": "text",
+      "humanSchedule": "text",
+      "recurring": true,
+      "durable": true,
+      "nextFireAt": 3
+    }
+  ],
+  "CronDeleteOutput": [
+    {
+      "id": "text",
+      "endedLoopWakeup": true
+    }
+  ],
+  "CronListOutput": [
+    {
+      "jobs": [
+        {
+          "id": "text",
+          "cron": "text",
+          "humanSchedule": "text",
+          "prompt": "text",
+          "recurring": true,
+          "durable": true,
+          "nextFireAt": 3
+        }
+      ]
+    }
+  ],
+  "PushNotificationOutput": [
+    {
+      "message": "text",
+      "pushSent": true,
+      "localSent": true,
+      "disabledReason": "config_off",
+      "sentAt": "text"
+    }
+  ],
+  "ClaudeDesignOutput": [
+    {
+      "operation": "text",
+      "content": [
+        {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      ],
+      "isError": true
+    }
+  ]
+}

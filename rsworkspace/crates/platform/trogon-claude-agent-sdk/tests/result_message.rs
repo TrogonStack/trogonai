@@ -20,7 +20,7 @@ fn result_messages_keep_optional_payloads_costs_identity_and_extensions() -> Tes
         uuid: Some(MessageId::from("result-one")),
         stop_reason: None,
         terminal_reason: Some("aborted_streaming".into()),
-        origin: Some(MessageOrigin::new("task-notification", JsonObject::new())?),
+        origin: Some(MessageOrigin::new("task-notification", JsonObject::new())),
         model_usage: Some(metadata.clone()),
         permission_denials: Some(vec![serde_json::Value::Null]),
         deferred_tool_use: Some(metadata.clone()),
@@ -28,6 +28,7 @@ fn result_messages_keep_optional_payloads_costs_identity_and_extensions() -> Tes
         result_index: Some(0),
         queued_turn_count: Some(0),
         additional_fields: metadata.clone(),
+        raw: JsonObject::new(),
     };
     let unreported = ResultMessage {
         errors: None,
