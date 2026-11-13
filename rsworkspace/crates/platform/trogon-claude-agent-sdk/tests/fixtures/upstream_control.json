@@ -596,7 +596,9 @@
     {
       "subtype": "mcp_message",
       "server_name": "text",
-      "message": {}
+      "message": {
+        "foreign": "object"
+      }
     }
   ],
   "SDKControlMcpReadResourceRequest": [

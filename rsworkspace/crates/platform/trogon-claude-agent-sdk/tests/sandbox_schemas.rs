@@ -23,7 +23,11 @@ fn section(schema: SandboxConfigSchema) -> Result<Vec<Value>, Box<dyn std::error
 
 fn check(schema: SandboxConfigSchema) -> TestResult {
     let entries = section(schema)?;
-    assert!(entries.len() > 15, "the {schema} battery shrank to {} entries", entries.len());
+    assert!(
+        entries.len() > 15,
+        "the {schema} battery shrank to {} entries",
+        entries.len()
+    );
     let mut mismatches = Vec::new();
     for entry in &entries {
         let input = match entry.get("input") {
@@ -38,7 +42,11 @@ fn check(schema: SandboxConfigSchema) -> TestResult {
             mismatches.push(format!("{entry}: got {actual:?}"));
         }
     }
-    assert!(mismatches.is_empty(), "{schema} disagrees with zod:\n{}", mismatches.join("\n"));
+    assert!(
+        mismatches.is_empty(),
+        "{schema} disagrees with zod:\n{}",
+        mismatches.join("\n")
+    );
     Ok(())
 }
 
@@ -75,5 +83,8 @@ fn a_rejection_names_the_schema() {
     let rejected = SandboxConfigSchema::Network.parse(Some(&Value::Bool(true)));
     assert_eq!(rejected, Err(SandboxConfigRejected(SandboxConfigSchema::Network)));
     let message = rejected.err().map(|error| error.to_string());
-    assert_eq!(message.as_deref(), Some("SandboxNetworkConfigSchema rejected the value"));
+    assert_eq!(
+        message.as_deref(),
+        Some("SandboxNetworkConfigSchema rejected the value")
+    );
 }

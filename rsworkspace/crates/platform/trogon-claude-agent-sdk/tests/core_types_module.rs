@@ -17,7 +17,10 @@ fn a_message_decodes_as_the_core_types_union_and_round_trips() -> TestResult {
         "parent_tool_use_id": null
     });
     let typed: SDKMessage = serde_json::from_value(sample.clone())?;
-    assert!(format!("{typed:?}").starts_with("SDKUserMessage("), "decoded as {typed:?}");
+    assert!(
+        format!("{typed:?}").starts_with("SDKUserMessage("),
+        "decoded as {typed:?}"
+    );
     assert_eq!(js_stringify(&serde_json::to_value(&typed)?), js_stringify(&sample));
     Ok(())
 }

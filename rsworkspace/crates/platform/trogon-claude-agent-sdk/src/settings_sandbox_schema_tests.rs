@@ -27,5 +27,8 @@ fn every_schema_has_a_distinct_name_and_root() {
     let names: Vec<_> = SandboxConfigSchema::ALL.iter().map(ToString::to_string).collect();
     assert_eq!(names.len(), 3);
     assert_ne!(names[0], names[1]);
-    assert_ne!(SandboxConfigSchema::Network.root(), SandboxConfigSchema::Credentials.root());
+    assert_ne!(
+        SandboxConfigSchema::Network.root(),
+        SandboxConfigSchema::Credentials.root()
+    );
 }

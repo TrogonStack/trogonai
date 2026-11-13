@@ -7,51 +7,20 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::js_stringify;
 use trogon_claude_agent_sdk::upstream::control::{
-    ControlErrorResponse,
-    ControlResponse,
-    SDKControlApplyFlagSettingsRequest,
-    SDKControlBackgroundTasksRequest,
-    SDKControlCancelAsyncMessageRequest,
-    SDKControlCancelRequest,
-    SDKControlElicitationRequest,
-    SDKControlFileSuggestionsRequest,
-    SDKControlGetBinaryVersionRequest,
-    SDKControlGetContextUsageRequest,
-    SDKControlGetHooksListingRequest,
-    SDKControlGetSessionCostRequest,
-    SDKControlGetSettingsRequest,
-    SDKControlGetTaskOutputRequest,
-    SDKControlGetUsageRequest,
-    SDKControlInitializeRequest,
-    SDKControlInterruptRequest,
-    SDKControlListModelsRequest,
-    SDKControlListPermissionRulesRequest,
-    SDKControlMcpCallRequest,
-    SDKControlMcpMessageRequest,
-    SDKControlMcpReadResourceRequest,
-    SDKControlMcpReconnectRequest,
-    SDKControlMcpSetServersRequest,
-    SDKControlMcpStatusRequest,
-    SDKControlMcpToggleRequest,
-    SDKControlPermissionRequest,
-    SDKControlReadFileRequest,
-    SDKControlRegisterRepoRootRequest,
-    SDKControlReloadOutputStylesRequest,
-    SDKControlReloadPluginsRequest,
-    SDKControlReloadSkillsRequest,
-    SDKControlRenameSessionRequest,
-    SDKControlRequest,
-    SDKControlRequestUserDialogRequest,
-    SDKControlResponse,
-    SDKControlRewindFilesRequest,
-    SDKControlSeedReadStateRequest,
-    SDKControlSetColorRequest,
-    SDKControlSetHasSubscribersRequest,
-    SDKControlSetMaxThinkingTokensRequest,
-    SDKControlSetModelRequest,
-    SDKControlSetPermissionModeRequest,
-    SDKControlStopTaskRequest,
-    SDKControlUpdateSettingsRequest,
+    ControlErrorResponse, ControlResponse, SDKControlApplyFlagSettingsRequest, SDKControlBackgroundTasksRequest,
+    SDKControlCancelAsyncMessageRequest, SDKControlCancelRequest, SDKControlElicitationRequest,
+    SDKControlFileSuggestionsRequest, SDKControlGetBinaryVersionRequest, SDKControlGetContextUsageRequest,
+    SDKControlGetHooksListingRequest, SDKControlGetSessionCostRequest, SDKControlGetSettingsRequest,
+    SDKControlGetTaskOutputRequest, SDKControlGetUsageRequest, SDKControlInitializeRequest, SDKControlInterruptRequest,
+    SDKControlListModelsRequest, SDKControlListPermissionRulesRequest, SDKControlMcpCallRequest,
+    SDKControlMcpMessageRequest, SDKControlMcpReadResourceRequest, SDKControlMcpReconnectRequest,
+    SDKControlMcpSetServersRequest, SDKControlMcpStatusRequest, SDKControlMcpToggleRequest,
+    SDKControlPermissionRequest, SDKControlReadFileRequest, SDKControlRegisterRepoRootRequest,
+    SDKControlReloadOutputStylesRequest, SDKControlReloadPluginsRequest, SDKControlReloadSkillsRequest,
+    SDKControlRenameSessionRequest, SDKControlRequest, SDKControlRequestUserDialogRequest, SDKControlResponse,
+    SDKControlRewindFilesRequest, SDKControlSeedReadStateRequest, SDKControlSetColorRequest,
+    SDKControlSetHasSubscribersRequest, SDKControlSetMaxThinkingTokensRequest, SDKControlSetModelRequest,
+    SDKControlSetPermissionModeRequest, SDKControlStopTaskRequest, SDKControlUpdateSettingsRequest,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -71,10 +40,18 @@ fn round_trips<T: Serialize + DeserializeOwned>(root: &str) -> TestResult {
     for sample in samples(root)? {
         let typed: T = serde_json::from_value(sample.clone())?;
         let encoded = serde_json::to_value(&typed)?;
-        assert_eq!(js_stringify(&encoded), js_stringify(&sample), "{root} did not round-trip");
+        assert_eq!(
+            js_stringify(&encoded),
+            js_stringify(&sample),
+            "{root} did not round-trip"
+        );
         let text = serde_json::to_string(&sample)?;
         let reparsed: T = serde_json::from_str(&text)?;
-        assert_eq!(serde_json::to_string(&reparsed)?, text, "{root} did not re-encode byte-identically");
+        assert_eq!(
+            serde_json::to_string(&reparsed)?,
+            text,
+            "{root} did not re-encode byte-identically"
+        );
     }
     Ok(())
 }
@@ -162,8 +139,16 @@ fn every_request_type_is_its_own_member_of_the_request_union() -> TestResult {
         for sample in samples(root)? {
             let envelope = json!({"type": "control_request", "request_id": "r", "request": sample});
             let typed: SDKControlRequest = serde_json::from_value(envelope.clone())?;
-            assert!(format!("{:?}", typed.request).starts_with(&format!("{root}(")), "{root} decoded as {:?}", typed.request);
-            assert_eq!(js_stringify(&serde_json::to_value(&typed)?), js_stringify(&envelope), "{root} did not round-trip in its envelope");
+            assert!(
+                format!("{:?}", typed.request).starts_with(&format!("{root}(")),
+                "{root} decoded as {:?}",
+                typed.request
+            );
+            assert_eq!(
+                js_stringify(&serde_json::to_value(&typed)?),
+                js_stringify(&envelope),
+                "{root} did not round-trip in its envelope"
+            );
             checked += 1;
         }
     }
