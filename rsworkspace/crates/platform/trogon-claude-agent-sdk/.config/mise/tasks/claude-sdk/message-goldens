@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#MISE description="Regenerate the message decoding goldens from the pinned TypeScript and Python SDKs (--check compares)"
+set -euo pipefail
+
+root="${MISE_PROJECT_ROOT:?Run this task through mise}"
+lib="$root/.config/mise/lib/claude-sdk-freshness"
+fixtures="$root/tests/fixtures/message_decoding"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+python3 "$lib/fetch_pinned_typescript.py" "$scratch/typescript"
+python3 "$lib/fetch_pinned_python.py" "$scratch/python"
+python3 -m venv "$scratch/venv"
+python3 -c 'import sys, tomllib; print("\n".join(tomllib.load(open(sys.argv[1], "rb"))["project"]["dependencies"]))' \
+  "$scratch/python/pyproject.toml" >"$scratch/requirements.txt"
+"$scratch/venv/bin/python" -m pip install --quiet --no-cache-dir --disable-pip-version-check -r "$scratch/requirements.txt"
+node "$lib/message_decoding_oracle.mjs" "$scratch/typescript" "$fixtures/cases.json" >"$scratch/typescript.json"
+"$scratch/venv/bin/python" "$lib/message_decoding_oracle.py" "$scratch/python" "$fixtures/cases.json" >"$scratch/python.json"
+exec python3 "$lib/message_decoding_goldens.py" "$scratch/typescript.json" "$scratch/python.json" "$fixtures/expected.json" "$@"

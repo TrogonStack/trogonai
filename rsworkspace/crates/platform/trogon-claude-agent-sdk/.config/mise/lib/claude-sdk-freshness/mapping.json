@@ -1584,16 +1584,29 @@
       "rust_api": [
         "AssistantMessage",
         "ResultMessage",
-        "MessageOrigin"
+        "MessageOrigin",
+        "Message.raw",
+        "AssistantMessage.to_sdk_message",
+        "ResultMessage.to_sdk_message",
+        "upstream::messages::SDKAssistantMessage",
+        "upstream::messages::SDKResultMessage"
       ],
       "tests": [
         {
           "path": "tests/subprocess.rs",
           "name": "known_message_metadata_survives_decoding"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "typescript_decoding_yields_what_the_pinned_typescript_query_yields"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "python_decoding_yields_what_the_pinned_python_query_yields"
         }
       ],
-      "status": "partial",
-      "rationale": "Known identity/origin/stop/terminal/model-usage/permission metadata and extension fields survive decoding. Nested usage/denial payloads remain JSON, with no claim of identical upstream type modeling."
+      "status": "supported",
+      "rationale": "Every message keeps its exact wire object in raw, and to_sdk_message returns the generated upstream::messages type for it, so identity, origin, stop, terminal, model usage, permission denial and nested usage fields are typed as sdk.d.ts declares them. The corpus goldens from the pinned TypeScript and Python query() pin both views."
     },
     {
       "id": "future-messages",
@@ -1619,9 +1632,12 @@
         }
       },
       "rust_api": [
-        "Message",
-        "SystemMessage",
-        "StreamEvent"
+        "Message.Unknown",
+        "ContentBlock.Unknown",
+        "Message.to_sdk_message",
+        "upstream::messages::SDKMessage",
+        "MessageDecoding",
+        "ClaudeAgentOptions.message_decoding"
       ],
       "tests": [
         {
@@ -1635,10 +1651,18 @@
         {
           "path": "src/wire_tests.rs",
           "name": "a_block_rust_cannot_type_stays_in_the_message"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "typescript_decoding_yields_what_the_pinned_typescript_query_yields"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "python_decoding_yields_what_the_pinned_python_query_yields"
         }
       ],
-      "status": "rust_difference",
-      "rationale": "Rust has explicit unknown informational/content variants and typed malformed-known errors. JSON retention preserves data but does not automatically implement newly added behavior."
+      "status": "supported",
+      "rationale": "MessageDecoding::TypeScript, the default, yields every message the pinned TypeScript query() yields, unknown types and shapes Rust cannot type included, as Message::Unknown with the raw object, and consumes keep_alive. MessageDecoding::Python skips unknown types and raises the KeyError and type errors Python parse_message raises, with its texts."
     },
     {
       "id": "isolation-defaults",
@@ -2087,7 +2111,9 @@
         }
       },
       "rust_api": [
-        "UserMessage.tool_use_result"
+        "UserMessage.tool_use_result",
+        "UserMessage.tool_use_result_object",
+        "UserMessage.to_sdk_message"
       ],
       "tests": [
         {
@@ -2097,10 +2123,18 @@
         {
           "path": "tests/subprocess.rs",
           "name": "compatibility_user_tool_result_retains_all_json_kinds"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "typescript_decoding_yields_what_the_pinned_typescript_query_yields"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "python_decoding_yields_what_the_pinned_python_query_yields"
         }
       ],
-      "status": "rust_difference",
-      "rationale": "Rust retains JSON null, boolean, number, string, array and object tool results, with omission distinct from explicit null. Python annotates an optional dictionary; TypeScript unknown is broader than JSON. Public scripted-process regressions prove Rust wire retention, not native upstream runtime conformance."
+      "status": "supported",
+      "rationale": "tool_use_result keeps any JSON value with omission distinct from null, which is what both pinned SDKs pass through on the wire; tool_use_result_object gives the dictionary view Python annotates. The goldens include list and null results."
     },
     {
       "id": "partial-event-envelope-metadata",
@@ -2120,16 +2154,27 @@
         }
       },
       "rust_api": [
-        "StreamEvent.additional_fields"
+        "StreamEvent.additional_fields",
+        "StreamEvent.raw",
+        "StreamEvent.to_sdk_message",
+        "upstream::messages::SDKPartialAssistantMessage"
       ],
       "tests": [
         {
           "path": "tests/subprocess.rs",
           "name": "compatibility_stream_event_retains_outer_metadata_separately"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "typescript_decoding_yields_what_the_pinned_typescript_query_yields"
+        },
+        {
+          "path": "tests/message_decoding.rs",
+          "name": "python_decoding_yields_what_the_pinned_python_query_yields"
         }
       ],
-      "status": "partial",
-      "rationale": "Timing, user-message correlation, resume reason and future envelope metadata survive Rust wire decoding in additional_fields, separately from event. Values remain raw JSON rather than typed upstream fields; retention does not implement their behavior or prove native runtime parity."
+      "status": "supported",
+      "rationale": "StreamEvent.to_sdk_message types ttft_ms, user_message_uuid, user_message_uuids and resume_reason as sdk.d.ts declares them, raw keeps the exact envelope, and the goldens pin the stream_event corpus against both pinned SDKs."
     },
     {
       "id": "settings-types",

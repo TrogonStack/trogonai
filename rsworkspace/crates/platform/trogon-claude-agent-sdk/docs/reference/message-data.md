@@ -1,10 +1,8 @@
 # Message data reference
 
-These Rust declarations support public data composition. They do not decode
-CLI frames or start a session.
-
-This page documents data composition. Process ownership, wire decoding and
-permission policy are separate runtime concerns.
+These Rust declarations are the messages a session yields. The
+[Decoding](#decoding) section describes how CLI frames become them; process
+ownership and permission policy are separate runtime concerns.
 
 Comparison sources are pinned [Python types](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py)
 and the integrity-verified [TypeScript 0.3.319 declarations](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.319.tgz).
@@ -41,7 +39,8 @@ kind is representable without being treated as a human-origin authorization.
 | Text / Thinking | TextBlock / ThinkingBlock | SDKAssistantMessage.message: BetaMessage | String text, or thinking and signature strings. |
 | ToolUse | ToolUseBlock.id/name/input | BetaMessage content tool-use blocks | ToolUseId/ToolName wrappers and JsonObject input. |
 | ToolResult | ToolResultBlock.tool_use_id/content/is_error | MessageParam content tool-result blocks | ToolUseId, raw JSON content, and separate NotReported/Success/Error status. |
-| Unknown | Python ContentBlock also names server-tool variants | TypeScript content references contain a broader block family | Explicit kind and JsonObject for manual extension data; this layer adds no fallback decoder. |
+| ServerToolUse / ServerToolResult | ServerToolUseBlock / ServerToolResultBlock (from `server_tool_use` and `advisor_tool_result`) | BetaMessage server tool blocks | ToolUseId, name, JsonObject input; raw JSON result content. |
+| Unknown | Any block kind Python does not parse | TypeScript content references contain a broader block family | The block `type` and the block without it. TypeScript decoding keeps every block it cannot type here; Python decoding skips them as `parse_message` does. |
 
 ToolResultStatus distinguishes absent error status from explicit success and
 error. It is a Rust enum representation, not an upstream enum spelling. Raw
@@ -54,6 +53,8 @@ JSON can preserve content shapes beyond Python's annotated str/list/None field.
 | subtype | subtype: str | subtype: 'init' for the named init type | String keeps system subtypes open. |
 | data | data: dict[str, Any] | Init metadata fields are declared on the envelope | Explicit JsonObject holds metadata without claiming the TypeScript flat type is identical. |
 | session_id | Not a declared Python SystemMessage field | session_id: string | Optional SessionId retains a possible envelope identity. |
+| event | TaskStartedMessage, TaskProgressMessage, TaskNotificationMessage, TaskUpdatedMessage, MirrorErrorMessage, HookEventMessage subclasses | SDKTaskStartedMessage and the other system members | SystemEvent holds the Python subclass fields when every annotated value has its annotated type, otherwise Other. |
+| raw | Not a dataclass field | The whole message | The message as written; to_sdk_message types it as SDKMessage. |
 
 ## Turn results
 
@@ -90,7 +91,7 @@ run completion, queued-turn accounting, cancellation or process shutdown.
 | content | str or list[ContentBlock] | message: MessageParam | Content text or block data, flattened from the envelope. |
 | parent_tool_use_id / session_id / uuid | optional parent ID and uuid; no separate session_id field | nullable parent ID and optional session_id/UUID | Optional identifier wrappers. |
 | origin | optional MessageOrigin | origin?: SDKMessageOrigin | Optional validated origin object. |
-| tool_use_result | optional dict[str, Any] | tool_use_result?: unknown | Option<Value> retains every JSON kind; None is omitted data and Some(Value::Null) is explicitly present null. Wire decoding preserves omission separately from explicit null. |
+| tool_use_result | optional dict[str, Any] | tool_use_result?: unknown | Option<Value> retains every JSON kind; None is omitted data and Some(Value::Null) is explicitly present null. Both pinned SDKs pass the wire value through unchanged; tool_use_result_object gives the dictionary view Python annotates. |
 | additional_fields / message_fields | No separate typed extension fields | Envelope and MessageParam scopes differ | Explicit maps preserve manually supplied outer and nested extension data. |
 
 ## Partial events
@@ -101,19 +102,40 @@ run completion, queued-turn accounting, cancellation or process shutdown.
 | event | dict[str, Any] | event: BetaRawMessageStreamEvent | Raw JsonObject rather than a recreated event union. |
 | parent_tool_use_id | optional str | string or null | Optional ToolUseId. |
 | additional_fields | No separate dataclass field | ttft_ms, user_message_uuid, user_message_uuids, resume_reason and future envelope fields | Explicit JsonObject retains outer metadata separately from event through wire decoding. |
+| raw / to_sdk_message | Not a dataclass field | SDKPartialAssistantMessage | The message as written, and its typed TypeScript form with every envelope field typed. |
 
 This declaration does not enable partial messages, decode deltas or reconstruct
 assistant content. Those are separate operational review boundaries.
 
 ## Message envelope
 
-Message exposes Assistant, User, System, Result, StreamEvent and Unknown
-variants. Result retains Box<ResultMessage>, preserving the existing payload
-layout across serde_json feature combinations. The other payloads remain the
-existing Rust data declarations.
+Message has Assistant, User, System, Result, StreamEvent, RateLimit,
+ConversationReset and Unknown variants. RateLimit and ConversationReset are
+Python RateLimitEvent and ConversationResetMessage. Unknown holds the `type`,
+the message without it and the message as written.
 
-Python's Message union includes its named message dataclasses plus typed rate
-limit and conversation-reset variants. TypeScript SDKMessage is a broader
-union of SDK message families. This Rust enum does not claim complete typed
-union parity: Unknown can hold manually supplied kind/object data, and no
-unknown-frame fallback or wire decoding is implemented by this API-only layer.
+Every message keeps the object the CLI wrote in `raw`, so no field is dropped.
+`Message::to_sdk_message` types it as the generated TypeScript `SDKMessage`
+from `upstream::messages`, which covers every member the pinned sdk.d.ts
+declares; encoding that value gives back `raw`. The per-struct
+`to_sdk_message` methods return the matching member, or None when the message
+does not match its shape exactly.
+
+## Decoding
+
+`ClaudeAgentOptions::message_decoding` selects the upstream SDK whose decoding
+is reproduced.
+
+| MessageDecoding | Upstream | Behavior |
+| --- | --- | --- |
+| TypeScript (default) | `query()` in `@anthropic-ai/claude-agent-sdk` | Yields every message, consuming only `keep_alive` and host-only `session_state_changed`. A message of an unknown type, or one whose values do not fit its Rust struct, is Message::Unknown; a block that does not fit is ContentBlock::Unknown. Content never ends the stream. |
+| Python | `parse_message` in `claude-agent-sdk` | Raises a MessageParseError, with Python's text and the message as data, for a known message missing a key Python reads. Skips a message of a type it does not parse and a block of a kind it does not parse. |
+
+Python raises a TypeError, not a MessageParseError, when a value it indexes
+is not a dictionary. Rust reports that as a MessageParseError whose text
+names the field ("Field is not an object in assistant message: 'message'").
+
+The corpus in `tests/fixtures/message_decoding/cases.json` is replayed through
+the pinned TypeScript and Python `query()`; `mise run claude-sdk:message-goldens`
+regenerates `expected.json` and `--check` compares it. `tests/message_decoding.rs`
+holds both Rust modes to those goldens.

@@ -2560,6 +2560,42 @@
         "src/driver.rs",
         "src/error.rs"
       ]
+    },
+    {
+      "id": "s35-message-decoding",
+      "concept": "Messages that are unknown, malformed or missing required keys",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/message_parser.py",
+        "line_start": 50,
+        "line_end": 395,
+        "sha256": "593c3682c27254290fab6957b7bf100bd6c6a1e314df5347de708c464d3594e5"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "e.type===\"keep_alive\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 140,
+        "sha256": "cb2a0debf83466596fd658d07a531814c2d32532eb58d6e23bdb585f24f35b70"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript yields every message the CLI writes without validating it, consuming only keep_alive and host-only session_state_changed. Python parse_message raises MessageParseError with a KeyError text for a known message missing a key it reads, skips unknown message types and skips content blocks of kinds it does not parse."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default and never loses a message, so newer CLI shapes still reach the caller. MessageDecoding::Python reproduces parse_message, error texts included, for callers that need Python's outcome."
+      },
+      "contracts": [
+        "message_decoding::typescript_decoding_yields_what_the_pinned_typescript_query_yields",
+        "message_decoding::python_decoding_yields_what_the_pinned_python_query_yields"
+      ],
+      "rust": [
+        "src/message_decode.rs",
+        "src/message_decode/python.rs",
+        "src/driver.rs"
+      ]
     }
   ]
 }

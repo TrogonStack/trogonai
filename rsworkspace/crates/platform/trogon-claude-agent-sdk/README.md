@@ -70,10 +70,14 @@ await `disconnect()`. Cleanup needs a running Tokio runtime; the child also has 
 
 ## Messages and controls
 
-Known messages retain identity, origin, stop/terminal reasons, usage, permission
-denials and additional fields when reported. Nested upstream usage and denial
-payloads remain JSON. Unknown informational messages and content blocks remain
-explicit variants; malformed known fields cause typed protocol errors.
+Every message keeps the object the CLI wrote (`Message::raw`), and
+`Message::to_sdk_message` types it as the TypeScript `SDKMessage` generated from
+the pinned declarations. `message_decoding` picks the upstream decoder:
+`MessageDecoding::TypeScript` (the default) yields every message, unknown types
+and shapes Rust cannot type included as `Message::Unknown`; `MessageDecoding::Python`
+skips unknown types and raises `Error::MessageParse` with Python's text for a known
+message missing a key. Goldens from both pinned SDKs pin the two modes; see
+[Message data](docs/reference/message-data.md#decoding).
 
 `Message::Result` and `HookOutput::Sync` box their payloads to keep enum values
 compact when another dependency enables `serde_json`'s `preserve_order` feature.
@@ -252,8 +256,9 @@ upstream SDKs).
 - Non-JSON stdout: `ArgvStyle::TypeScript` skips every undecodable line. Python
   style skips lines that do not start with `{` and fails on a corrupt line with
   `Error::JsonDecode` (the line and the original error), except that a corrupt
-  unterminated tail at end of file is dropped. A JSON line that is not a valid
-  message is `Error::MessageParse`, carrying the raw object.
+  unterminated tail at end of file is dropped. With `MessageDecoding::Python`, a
+  known message missing a key Python reads is `Error::MessageParse`, carrying the
+  raw object.
 - `ArgvStyle::TypeScript` appends `--await-initialize` through extra arguments
   when `connect` resumes or continues without `cli_path` and without `sdk-url`,
   as `sdk.mjs` does for its resolved executable. Python never sends it.

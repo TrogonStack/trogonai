@@ -1,0 +1,2111 @@
+{
+  "assistant_every_block": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "assistant",
+          "message": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-test",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              },
+              {
+                "type": "thinking",
+                "thinking": "hmm",
+                "signature": "sig"
+              },
+              {
+                "type": "tool_use",
+                "id": "tool-1",
+                "name": "Read",
+                "input": {
+                  "path": "a"
+                }
+              },
+              {
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "done",
+                "is_error": false
+              },
+              {
+                "type": "server_tool_use",
+                "id": "srv-1",
+                "name": "advisor",
+                "input": {
+                  "q": 1
+                }
+              },
+              {
+                "type": "advisor_tool_result",
+                "tool_use_id": "srv-1",
+                "content": {
+                  "type": "advisor_result",
+                  "text": "ok"
+                }
+              },
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "AA=="
+                }
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            }
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-a"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "AssistantMessage",
+          "fields": {
+            "content": [
+              {
+                "text": "hello"
+              },
+              {
+                "thinking": "hmm",
+                "signature": "sig"
+              },
+              {
+                "id": "tool-1",
+                "name": "Read",
+                "input": {
+                  "path": "a"
+                }
+              },
+              {
+                "tool_use_id": "tool-1",
+                "content": "done",
+                "is_error": false
+              },
+              {
+                "id": "srv-1",
+                "name": "advisor",
+                "input": {
+                  "q": 1
+                }
+              },
+              {
+                "tool_use_id": "srv-1",
+                "content": {
+                  "type": "advisor_result",
+                  "text": "ok"
+                }
+              }
+            ],
+            "model": "claude-test",
+            "parent_tool_use_id": null,
+            "error": null,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            },
+            "message_id": "msg_1",
+            "stop_reason": "end_turn",
+            "session_id": "session-1",
+            "uuid": "uuid-a"
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "assistant_error_field": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "assistant",
+          "message": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-test",
+            "content": [
+              {
+                "type": "text",
+                "text": "x"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            }
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-a",
+          "error": "rate_limit"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "AssistantMessage",
+          "fields": {
+            "content": [
+              {
+                "text": "x"
+              }
+            ],
+            "model": "claude-test",
+            "parent_tool_use_id": null,
+            "error": "rate_limit",
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            },
+            "message_id": "msg_1",
+            "stop_reason": "end_turn",
+            "session_id": "session-1",
+            "uuid": "uuid-a"
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "assistant_missing_model": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "assistant",
+          "message": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "content": [],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            }
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-a"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in assistant message: 'model'"
+      }
+    }
+  },
+  "assistant_content_not_a_list": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "assistant",
+          "message": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-test",
+            "content": "text",
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            }
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-a"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Invalid assistant content (expected list, got str)"
+      }
+    }
+  },
+  "assistant_block_not_an_object": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "assistant",
+          "message": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-test",
+            "content": [
+              1
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            }
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-a"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Invalid content block (expected dict, got int)"
+      }
+    }
+  },
+  "assistant_block_missing_type": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "assistant",
+          "message": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-test",
+            "content": [
+              {
+                "text": "x"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            }
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-a"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in assistant message: 'type'"
+      }
+    }
+  },
+  "assistant_thinking_missing_signature": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "assistant",
+          "message": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-test",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "x"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            }
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-a"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in assistant message: 'signature'"
+      }
+    }
+  },
+  "assistant_tool_use_null_input": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "assistant",
+          "message": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-test",
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "t",
+                "name": "Bash",
+                "input": null
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            }
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-a"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "AssistantMessage",
+          "fields": {
+            "content": [
+              {
+                "id": "t",
+                "name": "Bash",
+                "input": null
+              }
+            ],
+            "model": "claude-test",
+            "parent_tool_use_id": null,
+            "error": null,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            },
+            "message_id": "msg_1",
+            "stop_reason": "end_turn",
+            "session_id": "session-1",
+            "uuid": "uuid-a"
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "assistant_advisor_result_missing_content": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "assistant",
+          "message": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-test",
+            "content": [
+              {
+                "type": "advisor_tool_result",
+                "tool_use_id": "srv-1"
+              }
+            ],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            }
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-a"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in assistant message: 'content'"
+      }
+    }
+  },
+  "assistant_missing_message": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "assistant",
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-a"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in assistant message: 'message'"
+      }
+    }
+  },
+  "user_text_with_origin_and_tool_result": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "user",
+          "message": {
+            "role": "user",
+            "content": "hi"
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-u",
+          "origin": {
+            "kind": "peer",
+            "from": "agent"
+          },
+          "tool_use_result": {
+            "stdout": "x"
+          }
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "UserMessage",
+          "fields": {
+            "content": "hi",
+            "uuid": "uuid-u",
+            "parent_tool_use_id": null,
+            "tool_use_result": {
+              "stdout": "x"
+            },
+            "origin": {
+              "kind": "peer",
+              "from": "agent"
+            }
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "user_blocks": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "user",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "a"
+              },
+              {
+                "type": "thinking",
+                "thinking": "t",
+                "signature": "s"
+              },
+              {
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "r"
+                  }
+                ],
+                "is_error": true
+              },
+              {
+                "type": "image",
+                "source": {}
+              },
+              {
+                "type": "future_block",
+                "x": 1
+              }
+            ]
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-u"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "UserMessage",
+          "fields": {
+            "content": [
+              {
+                "text": "a"
+              },
+              {
+                "tool_use_id": "tool-1",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "r"
+                  }
+                ],
+                "is_error": true
+              }
+            ],
+            "uuid": "uuid-u",
+            "parent_tool_use_id": null,
+            "tool_use_result": null,
+            "origin": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "user_origin_without_string_kind": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "user",
+          "message": {
+            "role": "user",
+            "content": "hi"
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-u",
+          "origin": {
+            "kind": 5
+          }
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "UserMessage",
+          "fields": {
+            "content": "hi",
+            "uuid": "uuid-u",
+            "parent_tool_use_id": null,
+            "tool_use_result": null,
+            "origin": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "user_tool_use_result_list": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "user",
+          "message": {
+            "role": "user",
+            "content": "hi"
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-u",
+          "tool_use_result": [
+            1,
+            2
+          ]
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "UserMessage",
+          "fields": {
+            "content": "hi",
+            "uuid": "uuid-u",
+            "parent_tool_use_id": null,
+            "tool_use_result": [
+              1,
+              2
+            ],
+            "origin": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "user_tool_use_result_null": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "user",
+          "message": {
+            "role": "user",
+            "content": "hi"
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-u",
+          "tool_use_result": null
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "UserMessage",
+          "fields": {
+            "content": "hi",
+            "uuid": "uuid-u",
+            "parent_tool_use_id": null,
+            "tool_use_result": null,
+            "origin": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "user_content_object": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "user",
+          "message": {
+            "role": "user",
+            "content": {
+              "text": "odd"
+            }
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-u"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "UserMessage",
+          "fields": {
+            "content": {
+              "text": "odd"
+            },
+            "uuid": "uuid-u",
+            "parent_tool_use_id": null,
+            "tool_use_result": null,
+            "origin": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "user_missing_content": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "user",
+          "message": {
+            "role": "user"
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-u"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in user message: 'content'"
+      }
+    }
+  },
+  "user_block_missing_type": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "user",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "text": "a"
+              }
+            ]
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-u"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in user message: 'type'"
+      }
+    }
+  },
+  "user_text_block_missing_text": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "user",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text"
+              }
+            ]
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-u"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in user message: 'text'"
+      }
+    }
+  },
+  "user_replay": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "user",
+          "message": {
+            "role": "user",
+            "content": "again"
+          },
+          "parent_tool_use_id": null,
+          "session_id": "session-1",
+          "uuid": "uuid-u",
+          "isReplay": true,
+          "timestamp": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "UserMessage",
+          "fields": {
+            "content": "again",
+            "uuid": "uuid-u",
+            "parent_tool_use_id": null,
+            "tool_use_result": null,
+            "origin": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_init": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "init",
+          "apiKeySource": "none",
+          "claude_code_version": "2.1.319",
+          "cwd": "/work",
+          "tools": [],
+          "mcp_servers": [],
+          "model": "claude-test",
+          "permissionMode": "default",
+          "slash_commands": [],
+          "output_style": "default",
+          "skills": [],
+          "plugins": [],
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "SystemMessage",
+          "fields": {
+            "subtype": "init",
+            "data": {
+              "type": "system",
+              "subtype": "init",
+              "apiKeySource": "none",
+              "claude_code_version": "2.1.319",
+              "cwd": "/work",
+              "tools": [],
+              "mcp_servers": [],
+              "model": "claude-test",
+              "permissionMode": "default",
+              "slash_commands": [],
+              "output_style": "default",
+              "skills": [],
+              "plugins": [],
+              "uuid": "uuid-s",
+              "session_id": "session-1"
+            }
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_task_started": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "task_started",
+          "task_id": "task-1",
+          "description": "Explore",
+          "tool_use_id": "tool-1",
+          "task_type": "local_agent",
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "TaskStartedMessage",
+          "fields": {
+            "subtype": "task_started",
+            "data": {
+              "type": "system",
+              "subtype": "task_started",
+              "task_id": "task-1",
+              "description": "Explore",
+              "tool_use_id": "tool-1",
+              "task_type": "local_agent",
+              "uuid": "uuid-s",
+              "session_id": "session-1"
+            },
+            "task_id": "task-1",
+            "description": "Explore",
+            "uuid": "uuid-s",
+            "session_id": "session-1",
+            "tool_use_id": "tool-1",
+            "task_type": "local_agent"
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_task_started_missing_description": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "task_started",
+          "task_id": "task-1",
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in system message: 'description'"
+      }
+    }
+  },
+  "system_task_progress": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "task_progress",
+          "task_id": "task-1",
+          "description": "Explore",
+          "usage": {
+            "total_tokens": 10,
+            "tool_uses": 1,
+            "duration_ms": 5
+          },
+          "last_tool_name": "Read",
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "TaskProgressMessage",
+          "fields": {
+            "subtype": "task_progress",
+            "data": {
+              "type": "system",
+              "subtype": "task_progress",
+              "task_id": "task-1",
+              "description": "Explore",
+              "usage": {
+                "total_tokens": 10,
+                "tool_uses": 1,
+                "duration_ms": 5
+              },
+              "last_tool_name": "Read",
+              "uuid": "uuid-s",
+              "session_id": "session-1"
+            },
+            "task_id": "task-1",
+            "description": "Explore",
+            "usage": {
+              "total_tokens": 10,
+              "tool_uses": 1,
+              "duration_ms": 5
+            },
+            "uuid": "uuid-s",
+            "session_id": "session-1",
+            "tool_use_id": null,
+            "last_tool_name": "Read"
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_task_progress_missing_usage": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "task_progress",
+          "task_id": "task-1",
+          "description": "Explore",
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in system message: 'usage'"
+      }
+    }
+  },
+  "system_task_notification": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "task_notification",
+          "task_id": "task-1",
+          "status": "completed",
+          "output_file": "/tmp/out",
+          "summary": "done",
+          "usage": {
+            "total_tokens": 10,
+            "tool_uses": 1,
+            "duration_ms": 5
+          },
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "TaskNotificationMessage",
+          "fields": {
+            "subtype": "task_notification",
+            "data": {
+              "type": "system",
+              "subtype": "task_notification",
+              "task_id": "task-1",
+              "status": "completed",
+              "output_file": "/tmp/out",
+              "summary": "done",
+              "usage": {
+                "total_tokens": 10,
+                "tool_uses": 1,
+                "duration_ms": 5
+              },
+              "uuid": "uuid-s",
+              "session_id": "session-1"
+            },
+            "task_id": "task-1",
+            "status": "completed",
+            "output_file": "/tmp/out",
+            "summary": "done",
+            "uuid": "uuid-s",
+            "session_id": "session-1",
+            "tool_use_id": null,
+            "usage": {
+              "total_tokens": 10,
+              "tool_uses": 1,
+              "duration_ms": 5
+            }
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_task_notification_missing_output_file": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "task_notification",
+          "task_id": "task-1",
+          "status": "completed",
+          "summary": "done",
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in system message: 'output_file'"
+      }
+    }
+  },
+  "system_task_updated": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "task_updated",
+          "task_id": "task-1",
+          "patch": {
+            "status": "completed",
+            "end_time": 3
+          },
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "TaskUpdatedMessage",
+          "fields": {
+            "subtype": "task_updated",
+            "data": {
+              "type": "system",
+              "subtype": "task_updated",
+              "task_id": "task-1",
+              "patch": {
+                "status": "completed",
+                "end_time": 3
+              },
+              "uuid": "uuid-s",
+              "session_id": "session-1"
+            },
+            "task_id": "task-1",
+            "patch": {
+              "status": "completed",
+              "end_time": 3
+            },
+            "status": "completed",
+            "session_id": "session-1",
+            "uuid": "uuid-s"
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_task_updated_lenient": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "task_updated",
+          "patch": "oops"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "TaskUpdatedMessage",
+          "fields": {
+            "subtype": "task_updated",
+            "data": {
+              "type": "system",
+              "subtype": "task_updated",
+              "patch": "oops"
+            },
+            "task_id": "",
+            "patch": {},
+            "status": null,
+            "session_id": null,
+            "uuid": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_mirror_error": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "mirror_error",
+          "error": "store failed",
+          "key": {
+            "project_key": "p",
+            "session_id": "session-1"
+          },
+          "uuid": "uuid-m",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "MirrorErrorMessage",
+          "fields": {
+            "subtype": "mirror_error",
+            "data": {
+              "type": "system",
+              "subtype": "mirror_error",
+              "error": "store failed",
+              "key": {
+                "project_key": "p",
+                "session_id": "session-1"
+              },
+              "uuid": "uuid-m",
+              "session_id": "session-1"
+            },
+            "key": {
+              "project_key": "p",
+              "session_id": "session-1"
+            },
+            "error": "store failed"
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_hook_started_hook_name": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "hook_started",
+          "hook_id": "h1",
+          "hook_name": "PreToolUse:Bash",
+          "hook_event": "PreToolUse",
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "HookEventMessage",
+          "fields": {
+            "subtype": "hook_started",
+            "data": {
+              "type": "system",
+              "subtype": "hook_started",
+              "hook_id": "h1",
+              "hook_name": "PreToolUse:Bash",
+              "hook_event": "PreToolUse",
+              "uuid": "uuid-s",
+              "session_id": "session-1"
+            },
+            "hook_event_name": "PreToolUse",
+            "session_id": "session-1",
+            "uuid": "uuid-s"
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_hook_response_fallback": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "hook_response",
+          "hook_id": "h1",
+          "hook_event": "",
+          "hook_name": "",
+          "hook_event_name": "PostToolUse",
+          "output": "",
+          "stdout": "",
+          "stderr": "",
+          "outcome": "success",
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "HookEventMessage",
+          "fields": {
+            "subtype": "hook_response",
+            "data": {
+              "type": "system",
+              "subtype": "hook_response",
+              "hook_id": "h1",
+              "hook_event": "",
+              "hook_name": "",
+              "hook_event_name": "PostToolUse",
+              "output": "",
+              "stdout": "",
+              "stderr": "",
+              "outcome": "success",
+              "uuid": "uuid-s",
+              "session_id": "session-1"
+            },
+            "hook_event_name": "PostToolUse",
+            "session_id": "session-1",
+            "uuid": "uuid-s"
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_hook_started_no_name": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "hook_started"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "HookEventMessage",
+          "fields": {
+            "subtype": "hook_started",
+            "data": {
+              "type": "system",
+              "subtype": "hook_started"
+            },
+            "hook_event_name": "",
+            "session_id": null,
+            "uuid": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_missing_subtype": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in system message: 'subtype'"
+      }
+    }
+  },
+  "system_session_state_changed": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "session_state_changed",
+          "state": "running",
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "SystemMessage",
+          "fields": {
+            "subtype": "session_state_changed",
+            "data": {
+              "type": "system",
+              "subtype": "session_state_changed",
+              "state": "running",
+              "uuid": "uuid-s",
+              "session_id": "session-1"
+            }
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "system_session_state_changed_host_only": {
+    "typescript": {
+      "yielded": [],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": null
+    }
+  },
+  "system_future_subtype": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "system",
+          "subtype": "future_subtype",
+          "detail": {
+            "a": [
+              1,
+              null
+            ]
+          },
+          "uuid": "uuid-s",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "SystemMessage",
+          "fields": {
+            "subtype": "future_subtype",
+            "data": {
+              "type": "system",
+              "subtype": "future_subtype",
+              "detail": {
+                "a": [
+                  1,
+                  null
+                ]
+              },
+              "uuid": "uuid-s",
+              "session_id": "session-1"
+            }
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "result_success": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "result",
+          "subtype": "success",
+          "duration_ms": 10,
+          "duration_api_ms": 8,
+          "is_error": false,
+          "num_turns": 1,
+          "result": "done",
+          "stop_reason": "end_turn",
+          "total_cost_usd": 0.5,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          },
+          "modelUsage": {
+            "claude-test": {
+              "inputTokens": 1
+            }
+          },
+          "permission_denials": [],
+          "uuid": "uuid-r",
+          "session_id": "session-1",
+          "terminal_reason": "completed",
+          "origin": {
+            "kind": "peer"
+          },
+          "fast_mode_state": "off"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "ResultMessage",
+          "fields": {
+            "subtype": "success",
+            "duration_ms": 10,
+            "duration_api_ms": 8,
+            "is_error": false,
+            "num_turns": 1,
+            "session_id": "session-1",
+            "stop_reason": "end_turn",
+            "total_cost_usd": 0.5,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            },
+            "result": "done",
+            "structured_output": null,
+            "model_usage": {
+              "claude-test": {
+                "inputTokens": 1
+              }
+            },
+            "permission_denials": [],
+            "deferred_tool_use": null,
+            "errors": null,
+            "api_error_status": null,
+            "uuid": "uuid-r",
+            "terminal_reason": "completed",
+            "origin": {
+              "kind": "peer"
+            }
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "result_deferred_tool_use": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "result",
+          "subtype": "success",
+          "duration_ms": 10,
+          "duration_api_ms": 8,
+          "is_error": false,
+          "num_turns": 1,
+          "result": "done",
+          "stop_reason": "end_turn",
+          "total_cost_usd": 0.5,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          },
+          "modelUsage": {
+            "claude-test": {
+              "inputTokens": 1
+            }
+          },
+          "permission_denials": [],
+          "uuid": "uuid-r",
+          "session_id": "session-1",
+          "deferred_tool_use": {
+            "id": "tool-9",
+            "name": "Bash",
+            "input": {
+              "command": "ls"
+            }
+          }
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "ResultMessage",
+          "fields": {
+            "subtype": "success",
+            "duration_ms": 10,
+            "duration_api_ms": 8,
+            "is_error": false,
+            "num_turns": 1,
+            "session_id": "session-1",
+            "stop_reason": "end_turn",
+            "total_cost_usd": 0.5,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            },
+            "result": "done",
+            "structured_output": null,
+            "model_usage": {
+              "claude-test": {
+                "inputTokens": 1
+              }
+            },
+            "permission_denials": [],
+            "deferred_tool_use": {
+              "id": "tool-9",
+              "name": "Bash",
+              "input": {
+                "command": "ls"
+              }
+            },
+            "errors": null,
+            "api_error_status": null,
+            "uuid": "uuid-r",
+            "terminal_reason": null,
+            "origin": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "result_deferred_tool_use_missing_input": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "result",
+          "subtype": "success",
+          "duration_ms": 10,
+          "duration_api_ms": 8,
+          "is_error": false,
+          "num_turns": 1,
+          "result": "done",
+          "stop_reason": "end_turn",
+          "total_cost_usd": 0.5,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          },
+          "modelUsage": {
+            "claude-test": {
+              "inputTokens": 1
+            }
+          },
+          "permission_denials": [],
+          "uuid": "uuid-r",
+          "session_id": "session-1",
+          "deferred_tool_use": {
+            "id": "tool-9",
+            "name": "Bash"
+          }
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in result message: 'input'"
+      }
+    }
+  },
+  "result_deferred_tool_use_empty": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "result",
+          "subtype": "success",
+          "duration_ms": 10,
+          "duration_api_ms": 8,
+          "is_error": false,
+          "num_turns": 1,
+          "result": "done",
+          "stop_reason": "end_turn",
+          "total_cost_usd": 0.5,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          },
+          "modelUsage": {
+            "claude-test": {
+              "inputTokens": 1
+            }
+          },
+          "permission_denials": [],
+          "uuid": "uuid-r",
+          "session_id": "session-1",
+          "deferred_tool_use": {}
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "ResultMessage",
+          "fields": {
+            "subtype": "success",
+            "duration_ms": 10,
+            "duration_api_ms": 8,
+            "is_error": false,
+            "num_turns": 1,
+            "session_id": "session-1",
+            "stop_reason": "end_turn",
+            "total_cost_usd": 0.5,
+            "usage": {
+              "input_tokens": 1,
+              "output_tokens": 2
+            },
+            "result": "done",
+            "structured_output": null,
+            "model_usage": {
+              "claude-test": {
+                "inputTokens": 1
+              }
+            },
+            "permission_denials": [],
+            "deferred_tool_use": null,
+            "errors": null,
+            "api_error_status": null,
+            "uuid": "uuid-r",
+            "terminal_reason": null,
+            "origin": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "result_error": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "result",
+          "subtype": "error_during_execution",
+          "duration_ms": 1,
+          "duration_api_ms": 1,
+          "is_error": true,
+          "num_turns": 0,
+          "stop_reason": null,
+          "total_cost_usd": 0,
+          "usage": {},
+          "modelUsage": {},
+          "permission_denials": [],
+          "errors": [
+            "boom"
+          ],
+          "uuid": "uuid-r",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "ResultMessage",
+          "fields": {
+            "subtype": "error_during_execution",
+            "duration_ms": 1,
+            "duration_api_ms": 1,
+            "is_error": true,
+            "num_turns": 0,
+            "session_id": "session-1",
+            "stop_reason": null,
+            "total_cost_usd": 0,
+            "usage": {},
+            "result": null,
+            "structured_output": null,
+            "model_usage": {},
+            "permission_denials": [],
+            "deferred_tool_use": null,
+            "errors": [
+              "boom"
+            ],
+            "api_error_status": null,
+            "uuid": "uuid-r",
+            "terminal_reason": null,
+            "origin": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "result_missing_num_turns": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "result",
+          "subtype": "success",
+          "duration_ms": 10,
+          "duration_api_ms": 8,
+          "is_error": false,
+          "result": "done",
+          "stop_reason": "end_turn",
+          "total_cost_usd": 0.5,
+          "usage": {
+            "input_tokens": 1,
+            "output_tokens": 2
+          },
+          "modelUsage": {
+            "claude-test": {
+              "inputTokens": 1
+            }
+          },
+          "permission_denials": [],
+          "uuid": "uuid-r",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in result message: 'num_turns'"
+      }
+    }
+  },
+  "stream_event": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "stream_event",
+          "event": {
+            "type": "message_start",
+            "message": {}
+          },
+          "parent_tool_use_id": null,
+          "uuid": "uuid-e",
+          "session_id": "session-1",
+          "ttft_ms": 12,
+          "user_message_uuid": "uuid-u"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "StreamEvent",
+          "fields": {
+            "uuid": "uuid-e",
+            "session_id": "session-1",
+            "event": {
+              "type": "message_start",
+              "message": {}
+            },
+            "parent_tool_use_id": null
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "stream_event_missing_event": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "stream_event",
+          "parent_tool_use_id": null,
+          "uuid": "uuid-e",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in stream_event message: 'event'"
+      }
+    }
+  },
+  "rate_limit_event": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "rate_limit_event",
+          "rate_limit_info": {
+            "status": "allowed_warning",
+            "resetsAt": 1767225600,
+            "rateLimitType": "five_hour",
+            "utilization": 0.9,
+            "overageStatus": "rejected",
+            "overageResetsAt": 1767229200,
+            "overageDisabledReason": "org_level_disabled",
+            "isUsingOverage": false
+          },
+          "uuid": "uuid-l",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "RateLimitEvent",
+          "fields": {
+            "rate_limit_info": {
+              "status": "allowed_warning",
+              "resets_at": 1767225600,
+              "rate_limit_type": "five_hour",
+              "utilization": 0.9,
+              "overage_status": "rejected",
+              "overage_resets_at": 1767229200,
+              "overage_disabled_reason": "org_level_disabled",
+              "raw": {
+                "status": "allowed_warning",
+                "resetsAt": 1767225600,
+                "rateLimitType": "five_hour",
+                "utilization": 0.9,
+                "overageStatus": "rejected",
+                "overageResetsAt": 1767229200,
+                "overageDisabledReason": "org_level_disabled",
+                "isUsingOverage": false
+              }
+            },
+            "uuid": "uuid-l",
+            "session_id": "session-1"
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "rate_limit_event_missing_status": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "rate_limit_event",
+          "rate_limit_info": {
+            "resetsAt": 1
+          },
+          "uuid": "uuid-l",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in rate_limit_event message: 'status'"
+      }
+    }
+  },
+  "conversation_reset": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "conversation_reset",
+          "new_conversation_id": "conv-2",
+          "uuid": "uuid-c",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [
+        {
+          "class": "ConversationResetMessage",
+          "fields": {
+            "new_conversation_id": "conv-2",
+            "uuid": "uuid-c",
+            "session_id": "session-1"
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "conversation_reset_missing_id": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "conversation_reset",
+          "uuid": "uuid-c",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Missing required field in conversation_reset message: 'new_conversation_id'"
+      }
+    }
+  },
+  "keep_alive": {
+    "typescript": {
+      "yielded": [],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": null
+    }
+  },
+  "tool_progress": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "tool_progress",
+          "tool_use_id": "tool-1",
+          "tool_name": "Bash",
+          "parent_tool_use_id": null,
+          "elapsed_time_seconds": 2,
+          "uuid": "uuid-p",
+          "session_id": "session-1"
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": null
+    }
+  },
+  "future_type": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "future_event",
+          "field": {
+            "nested": [
+              1,
+              null
+            ]
+          }
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": null
+    }
+  },
+  "missing_type": {
+    "typescript": {
+      "yielded": [
+        {
+          "field": 1
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Message missing 'type' field"
+      }
+    }
+  },
+  "empty_type": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": "",
+          "field": 1
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": {
+        "class": "MessageParseError",
+        "message": "Message missing 'type' field"
+      }
+    }
+  },
+  "number_type": {
+    "typescript": {
+      "yielded": [
+        {
+          "type": 5,
+          "field": 1
+        }
+      ],
+      "error": null
+    },
+    "python": {
+      "yielded": [],
+      "error": null
+    }
+  }
+}
