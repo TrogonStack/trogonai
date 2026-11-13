@@ -18,7 +18,8 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["float_roundtrip", "preserve_order"] }
 indexmap = { version = "=2.14.0", features = ["serde"] }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs", "io-util", "macros", "process", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tokio-util = { workspace = true, features = ["rt"] }
 jsonschema = { workspace = true }
 url = { workspace = true }

@@ -1,0 +1,128 @@
+{
+  "requested_delays": [
+    "interval:50000",
+    "timeout:15000"
+  ],
+  "scenarios": {
+    "session": {
+      "readyAfterOpen": true,
+      "readyAfterClose": false,
+      "received": [
+        "{\"type\":\"auth\",\"credential\":{\"type\":\"oauth\",\"token\":\"token-1\"}}\n",
+        "{\"type\":\"user\",\"message\":\"hi\"}\n",
+        "no newline",
+        "{\"type\":\"keep_alive\"}\n"
+      ],
+      "messages": [
+        {
+          "a": 1
+        },
+        {
+          "b": 2
+        },
+        {
+          "c": 3
+        },
+        [
+          1,
+          2
+        ],
+        "str",
+        {
+          "d": 4
+        }
+      ],
+      "error": null
+    },
+    "abnormal_close": {
+      "code": 4000,
+      "reason": "bye",
+      "messages": [],
+      "error": "WebSocket closed abnormally with code 4000: bye",
+      "errorName": "Error"
+    },
+    "abnormal_close_empty_reason": {
+      "code": 1011,
+      "reason": "",
+      "messages": [],
+      "error": "WebSocket closed abnormally with code 1011: ",
+      "errorName": "Error"
+    },
+    "going_away": {
+      "code": 1001,
+      "reason": "restart",
+      "messages": [],
+      "error": null
+    },
+    "close_without_status": {
+      "code": null,
+      "reason": "",
+      "messages": [],
+      "error": "WebSocket closed abnormally with code 1005: ",
+      "errorName": "Error"
+    },
+    "client_close": {
+      "received": [
+        {
+          "kind": "close",
+          "code": 1000,
+          "reason": "Normal closure"
+        }
+      ],
+      "readyAfterClose": false,
+      "writeError": "WebSocketTransport is not ready for writing",
+      "messages": [],
+      "error": null
+    },
+    "abort": {
+      "received": [
+        {
+          "kind": "close",
+          "code": 1000,
+          "reason": "Normal closure"
+        }
+      ],
+      "writeError": "Operation aborted",
+      "messages": [],
+      "error": "WebSocket connection aborted by user",
+      "errorName": "rn"
+    },
+    "abort_before_connect": {
+      "readError": "WebSocket connection aborted by user",
+      "writeError": "Operation aborted"
+    },
+    "abrupt_drop": {
+      "messages": [
+        {
+          "before": 1
+        }
+      ],
+      "error": "WebSocket closed abnormally with code 1006: ",
+      "errorName": "Error"
+    },
+    "scheme_http": {
+      "url": "http://127.0.0.1:1/",
+      "error": "WebSocket URL must use ws:// or wss:// protocol"
+    },
+    "scheme_https": {
+      "url": "https://127.0.0.1:1/",
+      "error": "WebSocket URL must use ws:// or wss:// protocol"
+    },
+    "not_a_url": {
+      "url": "not a url",
+      "error": "Invalid URL"
+    },
+    "connect_timeout_node": {
+      "error": "WebSocket connection error",
+      "writeError": "WebSocket connection error"
+    },
+    "connect_timeout": {
+      "error": "WebSocket connection timeout after 15000ms",
+      "writeError": "WebSocket connection timeout after 15000ms"
+    },
+    "connect_refused": {
+      "error": "WebSocket connection error",
+      "writeError": "WebSocket connection error"
+    }
+  }
+}

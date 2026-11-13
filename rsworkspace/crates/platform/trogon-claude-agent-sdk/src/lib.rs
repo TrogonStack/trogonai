@@ -176,6 +176,8 @@ mod transport;
 mod usd_budget;
 mod user_input;
 mod version_check;
+mod websocket_error;
+mod websocket_transport;
 mod wire;
 mod workspace_trust;
 
@@ -351,6 +353,8 @@ pub use upstream::settings_resolution::{
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 pub use user_input::{InputBlock, UserInput};
 pub use version_check::{parse_version, unreported_version_warning};
+pub use websocket_error::WebSocketError;
+pub use websocket_transport::{AuthMessage, HeaderDelivery, OAuthCredential, WebSocketOptions, WebSocketTransport};
 pub use workspace_trust::WorkspaceTrust;
 
 /// A JSON object whose schema is owned by an individual tool or upstream event.

@@ -421,7 +421,15 @@ upstream SDKs).
   settings go by `--managed-settings` or, with
   `ManagedSettingsDelivery::Initialize`, in the `initialize` request; the Python
   dialect ignores them.
-- Deferred to other tracks: remote `--sdk-url` transports, flag settings and
+- `WebSocketTransport` is the browser SDK's WebSocket transport as a `Transport`,
+  for `connect_with_transport`: `WebSocketOptions { url, headers, header_delivery,
+  auth_message }` with the `ws://` or `wss://` scheme only, a 15000 ms connect
+  timeout, the auth line first, a `keep_alive` line every 50000 ms while the
+  driver reads, newline-delimited inbound text frames and verbatim writes. Like
+  the browser class it ignores `headers`; `HeaderDelivery::Handshake` sends them
+  on the upgrade request instead. Cancelling the token given to `with_abort`
+  closes the socket and fails the read with `WebSocketError::Aborted`.
+- Deferred to other tracks: the remote SSE transport, flag settings and
   `updateSettings`.
 
 Model strings and paths are stored without extra identifier restrictions.

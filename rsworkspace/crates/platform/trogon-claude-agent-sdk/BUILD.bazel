@@ -35,6 +35,7 @@ workspace_crate(
         "tests/fixtures/probe_ts/*.jsonl",
         "tests/fixtures/sdk_mcp/*.json",
         "tests/fixtures/settings_option/*.json",
+        "tests/fixtures/websocket_transport/*.json",
     ]),
     crate_features = ["test-support"],
     examples = {
@@ -237,6 +238,7 @@ workspace_crate(
         "user_input": {},
         "user_message": {},
         "value_contracts": {},
+        "websocket_remote_store": {},
         "windows_batch_cli": {},
     },
 )
