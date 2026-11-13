@@ -12,6 +12,7 @@ workspace_crate(
         "builtin_tool_name": {},
         "builtin_tool_name_storage": {},
         "control_request_id": {},
+        "control_values": {},
         "dialog_kind": {},
         "dialog_kind_storage": {},
         "disallowed_tools": {},
@@ -32,6 +33,7 @@ workspace_crate(
         "message_origin": {},
         "owned_string_values": {},
         "permission_mode": {},
+        "permission_values": {},
         "process_adapter_contracts": {},
         "prompt": {},
         "public_api": {},
@@ -58,6 +60,7 @@ workspace_crate(
         "tool_use_id": {},
         "tool_use_id_storage": {},
         "usd_budget": {},
+        "user_input": {},
         "user_message": {},
     },
 )
