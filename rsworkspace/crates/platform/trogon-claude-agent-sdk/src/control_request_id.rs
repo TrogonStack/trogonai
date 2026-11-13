@@ -14,6 +14,11 @@ impl ControlRequestId {
         Self(typescript_id(math_random()))
     }
 
+    /// TypeScript `randomUUID()`, the id of a control request the SDK sends for an in-process server's message.
+    pub(crate) fn random_uuid() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+
     /// Python `f"req_{counter}_{os.urandom(4).hex()}"`, where `counter` counts the requests sent so far,
     /// this one included.
     pub(crate) fn python(counter: u64) -> Self {

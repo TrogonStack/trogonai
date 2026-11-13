@@ -1267,6 +1267,14 @@
           "name": "mcp_message_routes_like_the_python_query"
         },
         {
+          "path": "tests/runtime_failure_contracts.rs",
+          "name": "mcp_message_routing_replays_the_typescript_golden"
+        },
+        {
+          "path": "src/control_request_id_tests.rs",
+          "name": "random_uuid_ids_are_version_4_uuids"
+        },
+        {
           "path": "src/mcp_routing_tests.rs",
           "name": "js_string_matches_the_javascript_string_conversion"
         },

@@ -222,6 +222,52 @@ type CallbackOutput = (ControlRequestId, Result<serde_json::Value, ProtocolError
 
 type McpSessions = indexmap::IndexMap<crate::McpServerName, Arc<dyn crate::SdkMcpSession>>;
 
+/// What an in-process server's transport sent, on its way back to the driver.
+pub(crate) enum McpTransportEvent {
+    Message { server: String, message: JsonObject },
+    Failed { key: String },
+}
+
+/// The TypeScript `Query` state behind `mcp_message`: `pendingMcpResponses`, keyed by the JavaScript text
+/// `${server_name}:${id}`, and the work that feeds it.
+pub(crate) struct McpRouting {
+    waiters: HashMap<String, oneshot::Sender<Result<JsonObject, ()>>>,
+    tasks: JoinSet<()>,
+    outbound: tokio::sync::mpsc::UnboundedSender<McpTransportEvent>,
+    inbound: tokio::sync::mpsc::UnboundedReceiver<McpTransportEvent>,
+}
+
+impl McpRouting {
+    /// Forwards what a session's transport sends on its own: notifications, server requests and late replies.
+    fn forward(&mut self, name: &crate::McpServerName, session: &Arc<dyn crate::SdkMcpSession>) {
+        if let Some(mut unsolicited) = session.take_outbound() {
+            let outbound = self.outbound.clone();
+            let server = name.as_str().to_owned();
+            self.tasks.spawn(async move {
+                while let Some(message) = unsolicited.recv().await {
+                    let event = McpTransportEvent::Message {
+                        server: server.clone(),
+                        message,
+                    };
+                    if outbound.send(event).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    }
+
+    pub(crate) fn new() -> Self {
+        let (outbound, inbound) = tokio::sync::mpsc::unbounded_channel();
+        Self {
+            waiters: HashMap::new(),
+            tasks: JoinSet::new(),
+            outbound,
+            inbound,
+        }
+    }
+}
+
 enum State {
     Initializing,
     Idle,
@@ -255,6 +301,7 @@ where
     detached_callbacks: HashMap<tokio::task::Id, crate::CancellationToken>,
     hook_callbacks: HashMap<String, HookCallback>,
     sdk_mcp_servers: McpSessions,
+    mcp: McpRouting,
     initialize_request: serde_json::Value,
     initialize_expectations: InitializeExpectations,
     initialize_timeout: Option<Duration>,
@@ -639,6 +686,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
             .iter()
             .map(|(name, server)| (name.clone(), server.open_session()))
             .collect(),
+        mcp: McpRouting::new(),
         initialize_request: initialization.request,
         initialize_expectations: initialization.expectations,
         initialize_timeout: initialization.timeout,
@@ -663,6 +711,13 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         warn_unsupported_verbatim: options.verbatim_prompts == crate::VerbatimPrompts::Enabled
             && options.argv_style == crate::ArgvStyle::Python,
     };
+    let mut driver = driver;
+    // Only the TypeScript `Query` forwards what a server's transport sends on its own.
+    if driver.argv_style == crate::ArgvStyle::TypeScript {
+        for (name, session) in &driver.sdk_mcp_servers {
+            driver.mcp.forward(name, session);
+        }
+    }
     Ok(tokio::spawn(driver.run(terminal)))
 }
 
@@ -677,6 +732,7 @@ where
             outcome => outcome,
         };
         self.callbacks.abort_all();
+        self.mcp.tasks.abort_all();
         for signal in self.callback_signals.values().chain(self.detached_callbacks.values()) {
             signal.cancel();
         }
@@ -807,6 +863,18 @@ where
                     for failure in failures { self.publish(failure.into_message().map_err(ProtocolError::from)?)?; }
                     self.publish_deferred()?;
                 }
+                outbound = self.mcp.inbound.recv() => {
+                    match outbound {
+                        Some(McpTransportEvent::Message { server, message }) => self.route_mcp_message(server, message).await?,
+                        Some(McpTransportEvent::Failed { key }) => {
+                            if let Some(waiter) = self.mcp.waiters.remove(&key) {
+                                let _ = waiter.send(Err(()));
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                _ = self.mcp.tasks.join_next(), if !self.mcp.tasks.is_empty() => {}
                 command = self.commands.recv() => {
                     let Some(command) = command else { return Ok(()); };
                     self.command(command).await?;
@@ -967,11 +1035,16 @@ where
                         name.as_str().to_owned(),
                         EmbeddedMcpPayload::Sdk { name: name.as_str() }.to_value()?,
                     );
-                    let session = self
-                        .sdk_mcp_servers
-                        .get(&name)
-                        .cloned()
-                        .unwrap_or_else(|| registry.open_session());
+                    let session = match self.sdk_mcp_servers.get(&name).cloned() {
+                        Some(session) => session,
+                        None => {
+                            let session = registry.open_session();
+                            if self.argv_style == crate::ArgvStyle::TypeScript {
+                                self.mcp.forward(&name, &session);
+                            }
+                            session
+                        }
+                    };
                     sessions.insert(name, session);
                 }
                 self.sdk_mcp_servers = sessions;
@@ -1472,21 +1545,24 @@ where
         matches!(self.limits.message_buffer, crate::MessageBuffer::Backpressure(capacity) if self.deferred_messages.len() >= capacity.get())
     }
 
-    /// `sdk.mjs` `mcp_message`: an unknown server or a message that is not an object fails the control request,
-    /// a request waits for the server's response however long it takes, and anything else is handed to the
-    /// server and acknowledged at once.
+    /// `sdk.mjs` `mcp_message`: an unknown server or a message that is not an object fails the control request.
+    /// A request registers a waiter under `${server_name}:${id}` and waits for the server's transport to send a
+    /// message under that id, however long it takes; a second request under the same key replaces the first
+    /// waiter, which is then never answered. Anything else is handed to the server and acknowledged at once.
     async fn typescript_mcp_message(
         &mut self,
         id: ControlRequestId,
         server_name: Option<serde_json::Value>,
         message: Option<serde_json::Value>,
     ) -> Result<(), Error> {
-        let session = match &server_name {
-            Some(serde_json::Value::String(name)) => self
-                .sdk_mcp_servers
-                .get(&crate::McpServerName::from(name.as_str()))
-                .cloned(),
-            _ => None,
+        let (name, session) = match &server_name {
+            Some(serde_json::Value::String(name)) => (
+                name.clone(),
+                self.sdk_mcp_servers
+                    .get(&crate::McpServerName::from(name.as_str()))
+                    .cloned(),
+            ),
+            _ => (String::new(), None),
         };
         let Some(session) = session else {
             let text = format!(
@@ -1509,21 +1585,38 @@ where
             .filter(|message| crate::mcp_routing::typescript_expects_response(message))
         {
             let message = message.clone();
+            let key = format!("{name}:{}", crate::mcp_routing::js_string(message.get("id")));
+            let (waiter, answer) = oneshot::channel();
+            // Replacing the entry drops the earlier waiter, whose control request is never answered.
+            self.mcp.waiters.insert(key.clone(), waiter);
             let signal = crate::CancellationToken::new();
             let callback_signal = signal.clone();
             let response_id = id.clone();
-            let fallback = wire::callback_error_response(&id, "SDK MCP request timed out");
-            self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+            let fallback = wire::callback_error_response(&id, "SDK MCP request failed");
+            let outbound = self.mcp.outbound.clone();
+            self.mcp.tasks.spawn(async move {
                 match session.request(message, callback_signal).await {
-                    Ok(Some(response)) => wire::success_response(
+                    Ok(Some(message)) => {
+                        let _ = outbound.send(McpTransportEvent::Message { server: name, message });
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::debug!(%error, "SDK MCP server failed to handle a request");
+                        let _ = outbound.send(McpTransportEvent::Failed { key });
+                    }
+                }
+            });
+            // `sdk.mjs` has no timeout on this wait: it ends when the server answers or the query closes.
+            self.spawn_callback(id, signal, None, fallback, async move {
+                match answer.await {
+                    Ok(Ok(response)) => wire::success_response(
                         &response_id,
                         McpResponsePayload {
                             mcp_response: serde_json::Value::Object(response),
                         },
                     ),
-                    // `sdk.mjs` waits for a response the server never sends until the query closes.
-                    Ok(None) => pending().await,
-                    Err(_) => wire::callback_error_response(&response_id, "SDK MCP request failed"),
+                    Ok(Err(())) => wire::callback_error_response(&response_id, "SDK MCP request failed"),
+                    Err(_) => pending().await,
                 }
             });
             return Ok(());
@@ -1532,15 +1625,26 @@ where
             // `transport.onmessage` runs the server's handling up to its first wait before the acknowledgment is
             // written; whatever is left keeps running on its own.
             let mut delivery = Box::pin(async move {
-                if let Err(error) = session.request(message, crate::CancellationToken::new()).await {
-                    tracing::debug!(%error, "SDK MCP server failed to handle a message");
+                match session.request(message, crate::CancellationToken::new()).await {
+                    Ok(response) => response,
+                    Err(error) => {
+                        tracing::debug!(%error, "SDK MCP server failed to handle a message");
+                        None
+                    }
                 }
             });
-            let delivered =
-                std::future::poll_fn(|context| std::task::Poll::Ready(delivery.as_mut().poll(context).is_ready()))
-                    .await;
-            if !delivered {
-                drop(tokio::spawn(delivery));
+            let polled = std::future::poll_fn(|context| std::task::Poll::Ready(delivery.as_mut().poll(context))).await;
+            match polled {
+                std::task::Poll::Ready(Some(message)) => self.route_mcp_message(name, message).await?,
+                std::task::Poll::Ready(None) => {}
+                std::task::Poll::Pending => {
+                    let outbound = self.mcp.outbound.clone();
+                    self.mcp.tasks.spawn(async move {
+                        if let Some(message) = delivery.await {
+                            let _ = outbound.send(McpTransportEvent::Message { server: name, message });
+                        }
+                    });
+                }
             }
         }
         self.write_response(wire::success_response(
@@ -1550,6 +1654,32 @@ where
             },
         ))
         .await
+    }
+
+    /// `sdk.mjs` `sendMcpServerMessageToCli`: a message from a server's transport resolves the waiter under
+    /// `${server_name}:${id}`; with no waiter, a late `sdk-manifest-capture:` reply is dropped and anything else
+    /// (a notification, a server request, an unmatched or repeated response) goes to the CLI as an `mcp_message`
+    /// control request under a random UUID.
+    async fn route_mcp_message(&mut self, server: String, message: JsonObject) -> Result<(), Error> {
+        if let Some(id) = message.get("id").filter(|id| !id.is_null()) {
+            let key = format!("{server}:{}", crate::mcp_routing::js_string(Some(id)));
+            if let Some(waiter) = self.mcp.waiters.remove(&key) {
+                let _ = waiter.send(Ok(message));
+                return Ok(());
+            }
+            if matches!(id, serde_json::Value::String(text) if text.starts_with("sdk-manifest-capture:")) {
+                tracing::debug!(%server, "dropping a late manifest-capture reply");
+                return Ok(());
+            }
+        }
+        let id = ControlRequestId::random_uuid();
+        let request = RequestPayload::McpMessage {
+            server_name: &server,
+            message: &message,
+        }
+        .to_value()?;
+        self.write_response(wire::control_request(&id, request, self.argv_style))
+            .await
     }
 
     /// The Python `Query` `mcp_message`: a missing field fails the control request, and everything else is
