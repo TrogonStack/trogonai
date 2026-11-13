@@ -297,12 +297,28 @@ fn capability_issues(capabilities: &JsonObject, issues: &mut Vec<JsonObject>) {
     match capabilities.get("elicitation") {
         None => {}
         Some(Value::Object(elicitation)) => {
-            if let Some(form) = elicitation.get("form")
-                && !form.is_object()
-            {
+            if let Some(form) = elicitation.get("form") {
                 let at = path(&["params", "capabilities", "elicitation", "form"]);
-                issues.push(invalid_type("object", at.clone(), Some(form)));
-                issues.push(invalid_type("record", at, Some(form)));
+                match form {
+                    Value::Object(form) => {
+                        if let Some(apply) = form.get("applyDefaults")
+                            && !apply.is_boolean()
+                        {
+                            let mut at = at;
+                            at.push("applyDefaults".into());
+                            issues.push(invalid_type("boolean", at, Some(apply)));
+                        }
+                    }
+                    other => {
+                        issues.push(invalid_type("object", at.clone(), Some(other)));
+                        issues.push(invalid_type("record", at, Some(other)));
+                    }
+                }
+            }
+            if let Some(url) = elicitation.get("url")
+                && !is_js_object(url)
+            {
+                issues.push(custom(path(&["params", "capabilities", "elicitation", "url"])));
             }
         }
         other => {
@@ -350,11 +366,9 @@ fn client_info_issues(client_info: &JsonObject, issues: &mut Vec<JsonObject>) {
         None => {}
         Some(Value::Array(icons)) => {
             for (index, icon) in icons.iter().enumerate() {
-                if !icon.is_object() {
-                    let mut at = path(&["params", "clientInfo", "icons"]);
-                    at.push(index.into());
-                    issues.push(invalid_type("object", at, Some(icon)));
-                }
+                let mut at = path(&["params", "clientInfo", "icons"]);
+                at.push(index.into());
+                icon_issues(icon, at, issues);
             }
         }
         other => issues.push(invalid_type("array", path(&["params", "clientInfo", "icons"]), other)),
@@ -362,6 +376,46 @@ fn client_info_issues(client_info: &JsonObject, issues: &mut Vec<JsonObject>) {
     string_field(client_info, &BASE, "version", true, issues);
     string_field(client_info, &BASE, "websiteUrl", false, issues);
     string_field(client_info, &BASE, "description", false, issues);
+}
+
+/// The zod issues of the `Icon` object schema: `src` string, optional `mimeType` string, optional `sizes` array of
+/// strings and optional `theme` of `light` or `dark`; unknown keys are stripped without an issue.
+fn icon_issues(icon: &Value, at: Vec<Value>, issues: &mut Vec<JsonObject>) {
+    let Value::Object(icon) = icon else {
+        issues.push(invalid_type("object", at, Some(icon)));
+        return;
+    };
+    let child = |key: &str| {
+        let mut child = at.clone();
+        child.push(key.into());
+        child
+    };
+    match icon.get("src") {
+        Some(Value::String(_)) => {}
+        other => issues.push(invalid_type("string", child("src"), other)),
+    }
+    match icon.get("mimeType") {
+        None | Some(Value::String(_)) => {}
+        other => issues.push(invalid_type("string", child("mimeType"), other)),
+    }
+    match icon.get("sizes") {
+        None => {}
+        Some(Value::Array(sizes)) => {
+            for (index, size) in sizes.iter().enumerate() {
+                if !size.is_string() {
+                    let mut at = child("sizes");
+                    at.push(index.into());
+                    issues.push(invalid_type("string", at, Some(size)));
+                }
+            }
+        }
+        other => issues.push(invalid_type("array", child("sizes"), other)),
+    }
+    match icon.get("theme") {
+        None => {}
+        Some(Value::String(theme)) if theme == "light" || theme == "dark" => {}
+        Some(_) => issues.push(invalid_value(vec!["light".into(), "dark".into()], child("theme"))),
+    }
 }
 
 /// A string field; an optional one may be absent but not `null`.

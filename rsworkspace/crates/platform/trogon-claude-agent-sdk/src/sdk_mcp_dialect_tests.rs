@@ -168,6 +168,61 @@ async fn python_dialect_answers_like_create_sdk_mcp_server() -> TestResult {
     .await
 }
 
+const INITIALIZE_FIXTURE: &str = include_str!("../tests/fixtures/sdk_mcp/initialize_icons.json");
+
+/// Replays the initialize exchanges that vary `clientInfo.icons` and `capabilities.elicitation`.
+async fn replay_initialize(
+    dialect: McpServerDialect,
+    suite: &str,
+    render: fn(&JsonObject) -> Result<String, serde_json::Error>,
+) -> TestResult {
+    let fixture: Value = serde_json::from_str(INITIALIZE_FIXTURE)?;
+    let suite = field(&fixture, suite)?;
+    let servers = field(suite, "servers")?;
+    let cases = field(suite, "cases")?.as_array().ok_or("cases is not a list")?;
+    assert!(cases.len() > 70);
+    for (index, case) in cases.iter().enumerate() {
+        let name = field(case, "server")?.as_str().ok_or("case server is not a string")?;
+        let session = server(field(servers, name)?, dialect)?.open_session();
+        for exchange in field(case, "exchanges")?.as_array().ok_or("exchanges is not a list")? {
+            let request = exchange
+                .get(0)
+                .and_then(Value::as_object)
+                .ok_or("exchange without a request")?;
+            let expected = exchange.get(1).and_then(Value::as_str);
+            let response = session.request(request.clone(), CancellationToken::new()).await?;
+            let actual = response.as_ref().map(render).transpose()?;
+            assert_eq!(
+                actual.as_deref(),
+                expected,
+                "case {index}: {}",
+                Value::Object(request.clone())
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn typescript_dialect_validates_icons_and_elicitation_like_the_bundled_zod_schemas() -> TestResult {
+    replay_initialize(
+        McpServerDialect::TypeScript,
+        "typescript",
+        serde_json::to_string::<JsonObject>,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn python_dialect_validates_icons_and_elicitation_like_the_pydantic_models() -> TestResult {
+    replay_initialize(
+        McpServerDialect::Python,
+        "python",
+        crate::python_json::to_string::<JsonObject>,
+    )
+    .await
+}
+
 fn object(value: Value) -> Result<JsonObject, serde_json::Error> {
     serde_json::from_value(value)
 }
