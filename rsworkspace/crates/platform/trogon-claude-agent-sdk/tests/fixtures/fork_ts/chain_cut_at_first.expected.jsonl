@@ -1,0 +1,9 @@
+{"type":"user","uuid":"id-2","parentUuid":null,"sessionId":"id-3","timestamp":"2023-11-14T22:13:20.123Z","message":{"role":"user","content":"hi"},"isSidechain":false,"forkedFrom":{"sessionId":"s0","messageUuid":"u1"}}
+{"type":"content-replacement","sessionId":"id-3","replacements":[{"id":"r1"}],"uuid":"id-4","timestamp":"2023-11-14T22:13:20.123Z"}
+{"type":"atis-latch","sessionId":"id-3","atis":"abc"}
+{"type":"tools-used","sessionId":"id-3","tools":["Bash","Read"]}
+{"type":"data-flow-records","v":1,"sessionId":"id-3","records":[{"tool_name":"Bash","tool_use_id":"tu1","server":{"type":"unknown"},"source":{"type":"file","id":null},"touched":{"kind":"memory","id":"m","action":"read"}},{"event_id":"e1","inner_call_index":2,"no_message":true}],"snapshot":true}
+{"type":"data-flow-incomplete","v":1,"sessionId":"id-3"}
+{"type":"derived-from","v":1,"sessionId":"id-3","sessions":[{"type":"claude_code_session","id":"old","via":"fork"},{"type":"unknown","id":null,"via":"fork"},{"type":"claude_code_session","id":"anc","via":"fork"},{"type":"claude_code_session","id":"s0","via":"fork"}]}
+{"type":"relocated","sessionId":"id-3","relocatedCwd":"/new"}
+{"type":"custom-title","sessionId":"id-3","customTitle":"Derived (fork)","uuid":"id-5","timestamp":"2023-11-14T22:13:20.123Z"}

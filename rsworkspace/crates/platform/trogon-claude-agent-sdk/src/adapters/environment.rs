@@ -5,6 +5,15 @@ use std::{
 
 pub trait EnvironmentVariable {
     fn var_os(&self, key: &OsStr) -> Option<OsString>;
+
+    /// Every variable the process would inherit, exactly as [`std::env::vars_os`] yields them.
+    ///
+    /// The default is empty so existing adapters keep compiling; an adapter that stands in for the process
+    /// environment should override it so the case-insensitive `CLAUDE_CODE_SDK_READS_SESSION_STATE` check sees
+    /// every inherited name, as upstream does.
+    fn vars_os(&self) -> Vec<(OsString, OsString)> {
+        Vec::new()
+    }
 }
 
 /// Returns the directory for temporary files exactly as [`std::env::temp_dir`] does.
@@ -31,6 +40,10 @@ pub struct SystemEnvironment;
 impl EnvironmentVariable for SystemEnvironment {
     fn var_os(&self, key: &OsStr) -> Option<OsString> {
         std::env::var_os(key)
+    }
+
+    fn vars_os(&self) -> Vec<(OsString, OsString)> {
+        std::env::vars_os().collect()
     }
 }
 

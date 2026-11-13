@@ -1,0 +1,13 @@
+{"type":"history-suppression","sessionId":"s0","cause":"fork_inherit","ts":"x"}
+{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"s0","timestamp":"t1","message":{"role":"user","content":"one"}}
+{"type":"system","subtype":"compact_boundary","uuid":"cb","parentUuid":"u1","sessionId":"s0","timestamp":"t2","compactMetadata":{"durationMs":3}}
+{"type":"data-flow-records","v":1,"sessionId":"s0","snapshot":true,"records":[{"tool_use_id":"tu1","tool_name":"Bash","inner_call_index":0,"carried":true},{"tool_use_id":"tu1","tool_name":"Bash","inner_call_index":0},{"tool_use_id":"tu2","server":{"type":"claude_ai_connector","id":"mcp_01111111111111111111111","directory_id":null},"mcp_tool_name":"t"},{"tool_use_id":"tu3","server":{"type":"client_configured","transport":"http","plugin_id_hash":"h"},"inner_call_index":2147483648},{"event_id":"ev","inner_call_index":-1},{"event_id":"ev2","touched":{"kind":"file","id":null,"action":"read"}},{"event_id":"ev3","server":{"type":"anthropic","id":"x"},"touched":{"kind":"session","id":"i","action":"copy","to":"t"}}]}
+{"type":"data-flow-records","v":1,"sessionId":"s0","records":[{"tool_use_id":"tu1","tool_name":"Bash","inner_call_index":0,"no_message":true},{"tool_use_id":"tu9","implicit":true,"source":{"type":"hook","id":"h1"}}]}
+{"type":"data-flow-records","v":2,"sessionId":"s0","records":[]}
+{"type":"derived-from","v":1,"sessionId":"s0","sessions":[{"type":"claude_code_session","id":"a","via":"fork"},{"type":"claude_code_session","id":"a","via":"fork"},{"type":"claude_code_session","id":"b","via":"nope"}]}
+{"type":"user","uuid":"u2","parentUuid":"cb","sessionId":"s0","timestamp":"t3","forkedFrom":{"sessionId":"a","messageUuid":"k"},"message":{"role":"user","content":"two"}}
+{"type":"user","uuid":"u3","parentUuid":"u2","sessionId":"s0","timestamp":"t4","forkedFrom":{"sessionId":"c","messageUuid":"k"},"message":{"role":"user","content":"three"}}
+{"type":"relocated","sessionId":"s0","relocatedCwd":"/one"}
+{"type":"relocated","sessionId":"s0","relocatedCwd":"/two"}
+{"type":"relocated","sessionId":"other","relocatedCwd":"/ignored"}
+{"type":"content-replacement","sessionId":"s0","replacements":[{"a":1},"x",{"b":2.5,"c":1e21,"d":-0}]}

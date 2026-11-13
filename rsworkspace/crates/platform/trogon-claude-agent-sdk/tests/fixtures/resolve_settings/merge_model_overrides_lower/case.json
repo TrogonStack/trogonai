@@ -1,0 +1,9 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "serverManagedSettings": {"managedSourcesBehavior":"merge","availableModels":["opus"]}
+  }
+}

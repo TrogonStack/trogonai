@@ -1,0 +1,12 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "managedSettings": {
+      "allowManagedHooksOnly": true,
+      "disableAutoMode": "disable"
+    }
+  }
+}
