@@ -218,6 +218,20 @@ fn a_plist_plutil_cannot_convert_is_linted_and_read_as_empty_when_the_lint_fails
     assert!(host.ran().contains(&lint));
 }
 
+/// What the pinned TypeScript resolver printed, recorded from its oracle on darwin, for a per-user managed preferences
+/// plist that does not load while the device-level one is absent: the plist cannot be read, or plutil cannot convert
+/// it but lints it clean.
+const PLIST_DID_NOT_LOAD: &str = r#"{"result":{"effective":{},"provenance":{},"sources":[],"machinePolicy":{"didNotLoad":["profile"]}},"filtered":{}}"#;
+
+/// The result and its filtered settings, printed the way the TypeScript resolver's oracle prints them.
+fn printed(host: &FakeHost, value: Value) -> String {
+    let resolved = resolve_settings_with(host, &options(value)).expect("resolve");
+    js_stringify(&json!({
+        "result": serde_json::to_value(&resolved).expect("encode"),
+        "filtered": serde_json::to_value(filter_escalating_default_mode(&resolved)).expect("encode"),
+    }))
+}
+
 #[test]
 fn a_plist_that_cannot_be_read_does_not_load_and_an_absent_one_is_skipped_without_plutil() {
     let mut host = FakeHost::linux();
@@ -225,9 +239,7 @@ fn a_plist_that_cannot_be_read_does_not_load_and_an_absent_one_is_skipped_withou
     let plist = "/Library/Managed Preferences/fixture-user/com.anthropic.claudecode.plist";
     host.unreadable.insert(plist.into());
     let host = host.file(plist, "bplist");
-    let result = resolve(&host, json!({"settingSources": []}));
-    assert_eq!(result["effective"].get("model"), None);
-    assert_ne!(result["machinePolicy"]["didNotLoad"], json!(false));
+    assert_eq!(printed(&host, json!({"settingSources": []})), PLIST_DID_NOT_LOAD);
     assert!(!host.ran().iter().any(|line| line.starts_with("/usr/bin/plutil")));
 }
 
@@ -236,19 +248,15 @@ fn a_plist_plutil_cannot_convert_but_lints_clean_does_not_load() {
     let mut host = FakeHost::linux();
     host.system = OperatingSystem::Darwin;
     let plist = "/Library/Managed Preferences/fixture-user/com.anthropic.claudecode.plist";
-    let device = "/Library/Managed Preferences/com.anthropic.claudecode.plist";
     let lint = format!("/usr/bin/plutil -lint -s -- {plist}");
     let host = host
         .file(plist, "bplist")
-        .file(device, "bplist")
         .command(
             &format!("/usr/bin/plutil -convert json -o - -- {plist}"),
             exited(1, "invalid"),
         )
         .command(&lint, ok(""));
-    let result = resolve(&host, json!({"settingSources": []}));
-    assert_eq!(result["effective"].get("model"), None);
-    assert_ne!(result["machinePolicy"]["didNotLoad"], json!(false));
+    assert_eq!(printed(&host, json!({"settingSources": []})), PLIST_DID_NOT_LOAD);
     assert!(host.ran().contains(&lint));
 }
 
