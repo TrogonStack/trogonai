@@ -59,6 +59,18 @@ fn radix_number(digits: &str, radix: u32) -> f64 {
         .unwrap_or(f64::NAN)
 }
 
+/// `parseInt(text, 10)`: the leading run of decimal digits after white space and an optional sign, `None` for `NaN`.
+pub(crate) fn js_parse_int(text: &str) -> Option<f64> {
+    let text = text.trim_start_matches(is_js_space);
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
+    };
+    let end = digits.find(|c: char| !c.is_ascii_digit()).unwrap_or(digits.len());
+    let value: f64 = digits.get(..end).filter(|run| !run.is_empty())?.parse().ok()?;
+    Some(if negative { -value } else { value })
+}
+
 /// `Number.isSafeInteger(value)` as the integer it names.
 pub(crate) fn safe_integer(value: f64) -> Option<i64> {
     const MAX_SAFE: f64 = 9_007_199_254_740_991.0;
