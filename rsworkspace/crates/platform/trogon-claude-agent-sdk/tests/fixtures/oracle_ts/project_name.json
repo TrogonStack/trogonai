@@ -1,0 +1,434 @@
+[
+  {
+    "directory": "/oracle/project",
+    "config_dir": null,
+    "name_override": null,
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "",
+    "name_override": null,
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": null,
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "my_project-1",
+    "output": "my_project-1"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "",
+    "name_override": "my_project-1",
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": null,
+    "name_override": "my_project-1",
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "",
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "has space",
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "dot.name",
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "CON",
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "nul",
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "Com7",
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "lpt0",
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "com10",
+    "output": "com10"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "console",
+    "output": "console"
+  },
+  {
+    "directory": "/oracle/project",
+    "config_dir": "/cfg",
+    "name_override": "café",
+    "output": "-oracle-project"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": null,
+    "name_override": null,
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "",
+    "name_override": null,
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": null,
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "my_project-1",
+    "output": "my_project-1"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "",
+    "name_override": "my_project-1",
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": null,
+    "name_override": "my_project-1",
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "",
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "has space",
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "dot.name",
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "CON",
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "nul",
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "Com7",
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "lpt0",
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "com10",
+    "output": "com10"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "console",
+    "output": "console"
+  },
+  {
+    "directory": "/oracle/a b.c",
+    "config_dir": "/cfg",
+    "name_override": "café",
+    "output": "-oracle-a-b-c"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": null,
+    "name_override": null,
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "",
+    "name_override": null,
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": null,
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "my_project-1",
+    "output": "my_project-1"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "",
+    "name_override": "my_project-1",
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": null,
+    "name_override": "my_project-1",
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "",
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "has space",
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "dot.name",
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "CON",
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "nul",
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "Com7",
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "lpt0",
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "com10",
+    "output": "com10"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "console",
+    "output": "console"
+  },
+  {
+    "directory": "/oracle/😀",
+    "config_dir": "/cfg",
+    "name_override": "café",
+    "output": "-oracle---"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": null,
+    "name_override": null,
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "",
+    "name_override": null,
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": null,
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "my_project-1",
+    "output": "my_project-1"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "",
+    "name_override": "my_project-1",
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": null,
+    "name_override": "my_project-1",
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "",
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "has space",
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "dot.name",
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "CON",
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "nul",
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "Com7",
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "lpt0",
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "com10",
+    "output": "com10"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "console",
+    "output": "console"
+  },
+  {
+    "directory": "/oracle/segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-end",
+    "config_dir": "/cfg",
+    "name_override": "café",
+    "output": "-oracle-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment-segment--z5zi99"
+  }
+]

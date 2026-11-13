@@ -1,0 +1,9 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "serverManagedSettings": {"managedSourcesBehavior":"merge","model":"remote","cleanupPeriodDays":3,"permissions":{"deny":["Bash(rm:*)"],"defaultMode":"acceptEdits"},"allowedMcpServers":[{"serverName":"remote-only"}],"env":{"FROM_REMOTE":"1"},"apiKeyHelper":"remote-helper","strictPluginOnlyCustomization":["skills"]}
+  }
+}
