@@ -6,6 +6,7 @@ pub(crate) struct FrameReader<R> {
     reader: BufReader<R>,
     buffer: Vec<u8>,
     limit: usize,
+    tail: bool,
 }
 
 impl<R: AsyncRead + Unpin> FrameReader<R> {
@@ -14,13 +15,21 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
             reader: BufReader::new(reader),
             buffer: Vec::new(),
             limit,
+            tail: false,
         }
     }
 
+    /// Whether the last frame was the unterminated rest of the stream, cut off by end of file.
+    pub(crate) fn last_was_tail(&self) -> bool {
+        self.tail
+    }
+
     pub(crate) async fn next(&mut self) -> Result<Option<Vec<u8>>, Error> {
+        self.tail = false;
         loop {
             let available = self.reader.fill_buf().await.map_err(Error::Io)?;
             if available.is_empty() {
+                self.tail = !self.buffer.is_empty();
                 return Ok(if self.buffer.is_empty() {
                     None
                 } else {

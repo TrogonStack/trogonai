@@ -106,7 +106,10 @@ pub use dialog_kind::DialogKind;
 pub use effort_level::EffortLevel;
 pub use environment::Environment;
 pub use environment_plan::EnvironmentPlan;
-pub use error::{ControlOperation, ControlRejectionError, Error, ProtocolError};
+pub use error::{
+    AbortError, ControlOperation, ControlRejectionError, Error, JsonDecodeError, MessageParseError, ProtocolError,
+    ResultError,
+};
 pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
     HookOutputVisibility, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, SyncHookOutput,

@@ -1130,6 +1130,25 @@ async fn a_declared_dialog_without_a_handler_does_not_emit_a_response() -> TestR
 }
 
 #[tokio::test]
+async fn python_style_reports_a_control_request_after_the_run_settled_as_a_terminated_process() -> TestResult {
+    let mut python = options()?;
+    python.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    let (mut client, mut cli) = connect(python).await?;
+    client.send_prompt(Prompt::from("settle")).await?;
+    client.finish_input().await?;
+    cli.read().await?;
+    cli.send(result()).await?;
+    assert!(matches!(client.next_message().await?, Some(Message::Result(_))));
+    assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
+    let handle = client.handle();
+    assert!(matches!(
+        handle.set_model(None).await,
+        Err(Error::NotReadyForWriting | Error::WriteToTerminatedProcess { .. })
+    ));
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_control_request_after_the_run_settled_fails_only_that_request() -> TestResult {
     let (mut client, mut cli) = connect(options()?).await?;
     client.send_prompt(Prompt::from("settle")).await?;
@@ -1139,14 +1158,14 @@ async fn a_control_request_after_the_run_settled_fails_only_that_request() -> Te
     assert!(matches!(client.next_message().await?, Some(Message::Result(_))));
     assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
     let handle = client.handle();
-    assert!(matches!(handle.set_model(None).await, Err(Error::DriverStopped)));
+    assert!(matches!(handle.set_model(None).await, Err(Error::NotReadyForWriting)));
     assert!(matches!(
         handle.set_mcp_servers(BTreeMap::new(), BTreeMap::new()).await,
-        Err(Error::DriverStopped)
+        Err(Error::NotReadyForWriting)
     ));
     assert!(matches!(
         handle.send_prompt(Prompt::from("late")).await,
-        Err(Error::DriverStopped | Error::InputClosed)
+        Err(Error::NotReadyForWriting | Error::InputClosed)
     ));
     cli.end(0);
     assert!(client.next_message().await?.is_none());
@@ -1393,7 +1412,9 @@ impl SpawnProcess for HeldStderr {
 }
 
 async fn connect_holding_stderr() -> Result<(ClaudeSdkClient, ScriptedCli), Box<dyn std::error::Error>> {
+    // Python style: TypeScript skips an undecodable line, so only Python ends the session on it.
     let mut configured = options()?;
+    configured.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
     configured.limits.shutdown_timeout = Timeout::new(Duration::from_millis(300))?;
     let (process, harness) = ScriptedProcessSpawner::new();
     let mut cli = ScriptedCli::from(harness);
@@ -1425,7 +1446,7 @@ async fn a_stderr_pipe_that_stays_open_is_reported_beside_the_error_that_ended_t
     assert!(matches!(
         terminal(&mut client).await?,
         Error::Cleanup { primary, cleanup }
-            if matches!(*primary, Error::Protocol(_)) && matches!(*cleanup, Error::StderrDrainTimeout)
+            if matches!(*primary, Error::JsonDecode(_)) && matches!(*cleanup, Error::StderrDrainTimeout)
     ));
     Ok(())
 }
@@ -1466,11 +1487,10 @@ async fn a_startup_failure_on_a_healthy_shutdown_reports_only_the_startup_error(
 async fn a_startup_failure_is_reported_beside_the_error_that_stopped_the_session() -> TestResult {
     let (process, harness) = ScriptedProcessSpawner::new();
     let mut cli = ScriptedCli::from(harness);
-    let querying = tokio::spawn(query_with_adapters(
-        Prompt::from("prompt"),
-        options()?,
-        adapters(process),
-    ));
+    // Python style: TypeScript skips an undecodable line, so only Python fails on it.
+    let mut python = options()?;
+    python.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    let querying = tokio::spawn(query_with_adapters(Prompt::from("prompt"), python, adapters(process)));
     let request = cli.read().await?;
     let response = json!({"type":"control_response","response":{"subtype":"success","request_id":request["request_id"],"response":{}}});
     cli.stdout
@@ -1480,7 +1500,7 @@ async fn a_startup_failure_is_reported_beside_the_error_that_stopped_the_session
     assert!(matches!(
         querying.await?,
         Err(Error::Cleanup { primary, cleanup })
-            if matches!(*primary, Error::DriverStopped) && matches!(*cleanup, Error::Protocol(_))
+            if matches!(*primary, Error::DriverStopped) && matches!(*cleanup, Error::JsonDecode(_))
     ));
     Ok(())
 }
