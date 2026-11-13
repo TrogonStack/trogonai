@@ -45,14 +45,23 @@ fn serialized(document: Option<&Value>) -> String {
     document.map_or_else(|| "null".to_owned(), Value::to_string)
 }
 
+/// The number tokens of a probe document as written: every piece between JSON punctuation that starts like a number.
+fn number_tokens(input: &str) -> impl Iterator<Item = &str> {
+    input
+        .split(['{', '}', '[', ']', ',', ':'])
+        .filter(|piece| piece.starts_with(|first: char| first == '-' || first.is_ascii_digit()))
+}
+
 #[test]
 fn every_recorded_number_document_prints_like_the_pinned_resolver() {
     let description: Value = serde_json::from_str(SETTINGS_SCHEMA_JSON).expect("description");
     let probes = description["read"]["numbers"].as_array().expect("numbers");
-    assert!(probes.len() > 150);
+    // One probe per `NUMBER_DOCUMENTS` entry of `settings_number_battery.mjs`: 126 tokens and 12 container documents.
+    assert_eq!(probes.len(), 138);
     // A double of at least 2^64 (below 1e21) or below -2^63, and a fraction between 1e-6 and 1e-5, read exactly but
-    // `serde_json` prints them in exponent form where JavaScript prints digits. A number past the double range reads
-    // as Infinity upstream, which `serde_json` cannot hold, so the document does not load here.
+    // `serde_json` prints them in exponent form where JavaScript prints digits, alone or inside a container. A number
+    // past the double range reads as Infinity upstream, which `serde_json` cannot hold, so the document does not load
+    // here.
     let printed_differently = [
         "-12345678901234567890",
         "-9223372036854775807",
@@ -93,7 +102,9 @@ fn every_recorded_number_document_prints_like_the_pinned_resolver() {
             continue;
         }
         let javascript = document.as_ref().map(js_stringify);
-        if printed_differently.contains(&token) && javascript.as_deref() == Some(expected) {
+        if number_tokens(input).any(|number| printed_differently.contains(&number))
+            && javascript.as_deref() == Some(expected)
+        {
             continue;
         }
         mismatches.push(format!("{input}\n  rust:     {actual}\n  upstream: {expected}"));
