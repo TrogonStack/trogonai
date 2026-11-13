@@ -46,6 +46,7 @@ mod sdk_tools;
 mod sensitive_string;
 mod session_entry;
 mod session_error;
+mod session_files;
 mod session_id;
 mod session_info;
 mod session_key;
@@ -56,6 +57,7 @@ mod session_resume;
 mod session_store;
 mod session_subpath;
 mod session_summary;
+mod session_transcript;
 mod setting_source;
 mod stderr_tail;
 mod task_id;
@@ -128,10 +130,14 @@ pub use sdk_tools::{SdkTools, SdkToolsError};
 pub use sensitive_string::SensitiveString;
 pub use session_entry::{SessionEntry, SessionEntryError};
 pub use session_error::SessionError;
+pub use session_files::{
+    ListSessionsOptions, SessionFiles, get_session_info, get_session_messages, get_subagent_messages, list_sessions,
+    list_subagents,
+};
 pub use session_id::SessionId;
 pub use session_info::SdkSessionInfo;
 pub use session_key::{SessionKey, SessionKeyError};
-pub use session_project_key::{SessionProjectKey, SessionProjectKeyError};
+pub use session_project_key::{SessionProjectKey, SessionProjectKeyError, project_key_for_directory};
 pub use session_resume::{MaterializedSession, SessionPreparationOptions, SessionRuntime, StoreResume};
 pub use session_store::{
     InMemorySessionStore, MirrorSizeEstimate, SessionListEntry, SessionStore, SessionStoreError, SessionStoreFlush,
@@ -139,6 +145,7 @@ pub use session_store::{
 };
 pub use session_subpath::{SessionSubpath, SessionSubpathError};
 pub use session_summary::{SessionSummaryEntry, SummaryDialect, fold_session_summary, summary_entry_to_sdk_info};
+pub use session_transcript::{MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
 pub use stderr_tail::StderrTail;
 pub use task_id::TaskId;
