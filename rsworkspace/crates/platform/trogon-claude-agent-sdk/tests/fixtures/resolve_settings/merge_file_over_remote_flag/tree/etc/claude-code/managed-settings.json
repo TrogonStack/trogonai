@@ -1,0 +1,1 @@
+{"managedSourcesBehavior":"merge","model":"file","permissions":{"allow":["Write"],"deny":["Bash"]},"allowManagedHooksOnly":true,"disableAllHooks":true,"availableModels":["opus"],"enabledPlugins":{"p@m":true}}

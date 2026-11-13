@@ -46,7 +46,7 @@ fn is_primitive(value: &Value) -> bool {
 }
 
 /// `Xe([...a, ...b])` upstream: a `Set` keeps one of each primitive and every object by identity.
-fn union_arrays(left: &[Value], right: &[Value]) -> Vec<Value> {
+pub(crate) fn union_arrays(left: &[Value], right: &[Value]) -> Vec<Value> {
     let mut merged: Vec<Value> = Vec::with_capacity(left.len() + right.len());
     for value in left.iter().chain(right) {
         if is_primitive(value) && merged.iter().any(|seen| seen == value) {

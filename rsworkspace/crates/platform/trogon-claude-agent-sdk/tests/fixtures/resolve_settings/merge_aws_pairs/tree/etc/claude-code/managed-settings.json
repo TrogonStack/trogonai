@@ -1,0 +1,1 @@
+{"sandbox":{"credentials":{"awsPairs":[{"accessKeyIdVar":"AWS_ACCESS_KEY_ID","secretAccessKeyVar":"AWS_SECRET_ACCESS_KEY"},{"accessKeyIdVar":"AWS_SESSION_TOKEN","secretAccessKeyVar":"LOW_SECRET"}]}}}
