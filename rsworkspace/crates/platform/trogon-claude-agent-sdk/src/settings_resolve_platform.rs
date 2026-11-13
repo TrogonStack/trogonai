@@ -139,6 +139,17 @@ impl CommandOutcome {
 #[derive(Clone, Debug)]
 pub(crate) struct PlistDocument {
     pub(crate) stdout: Option<String>,
+    /// The document of the signed-in user rather than the device-level one.
+    pub(crate) per_user: bool,
+    /// The failure to read it carries an operating system error code.
+    pub(crate) errno_known: bool,
+}
+
+/// Which managed preferences document the policy came from (`plist` upstream).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PlistLabel {
+    PerUser,
+    Device,
 }
 
 /// What the host's policy readers produced (`by()` upstream).
@@ -149,6 +160,7 @@ pub(crate) struct MdmRead {
     pub(crate) hklm_oversize: bool,
     pub(crate) hkcu_stdout: Option<String>,
     pub(crate) hklm_outcome: Option<CommandOutcome>,
+    pub(crate) hkcu_outcome: Option<CommandOutcome>,
 }
 
 fn run<H: ExecuteFile>(host: &H, program: &OsStr, args: &[&OsStr], max_buffer: Option<usize>) -> ExecuteFileOutcome {
@@ -168,37 +180,48 @@ fn is_absent_error(error: &io::Error) -> bool {
     matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
 }
 
-fn read_plist<H: SettingsHost>(host: &H, path: &Path) -> Option<PlistDocument> {
+fn read_plist<H: SettingsHost>(host: &H, path: &Path, per_user: bool) -> Option<PlistDocument> {
+    let unreadable = |errno_known: bool| {
+        Some(PlistDocument {
+            stdout: None,
+            per_user,
+            errno_known,
+        })
+    };
     if let Err(error) = host.check_readable(path) {
         if is_absent_error(&error) {
             return None;
         }
-        return Some(PlistDocument { stdout: None });
+        return unreadable(true);
     }
     let program = OsStr::new(PLUTIL_PATH);
     let mut convert: Vec<&OsStr> = PLUTIL_CONVERT_ARGS.iter().map(OsStr::new).collect();
     convert.push(path.as_os_str());
     let converted = run(host, program, &convert, Some(POLICY_READ_MAX_BUFFER));
     if !finished(&converted) {
-        return Some(PlistDocument { stdout: None });
+        return unreadable(false);
     }
     if converted.status == ExecuteFileStatus::Ok {
         return Some(PlistDocument {
             stdout: Some(converted.stdout),
+            per_user,
+            errno_known: false,
         });
     }
     let mut lint: Vec<&OsStr> = PLUTIL_LINT_ARGS.iter().map(OsStr::new).collect();
     lint.push(path.as_os_str());
     let linted = run(host, program, &lint, None);
     if !finished(&linted) || linted.status == ExecuteFileStatus::Ok {
-        return Some(PlistDocument { stdout: None });
+        return unreadable(false);
     }
     match host.check_readable(path) {
         Ok(()) => Some(PlistDocument {
             stdout: Some(String::new()),
+            per_user,
+            errno_known: false,
         }),
         Err(error) if is_absent_error(&error) => None,
-        Err(_) => Some(PlistDocument { stdout: None }),
+        Err(_) => unreadable(true),
     }
 }
 
@@ -221,6 +244,7 @@ fn read_registry<H: SettingsHost>(host: &H, tool: &OsStr) -> MdmRead {
             && machine.errno.as_deref() == Some(MAX_BUFFER_ERRNO),
         hkcu_stdout: (user.status == ExecuteFileStatus::Ok).then(|| user.stdout.clone()),
         hklm_outcome: Some(CommandOutcome::from_run(&machine)),
+        hkcu_outcome: Some(CommandOutcome::from_run(&user)),
     }
 }
 
@@ -228,18 +252,19 @@ fn read_registry<H: SettingsHost>(host: &H, tool: &OsStr) -> MdmRead {
 pub(crate) fn read_policy<H: SettingsHost>(host: &H) -> MdmRead {
     match host.operating_system() {
         OperatingSystem::Darwin => {
-            let mut candidates: Vec<PathBuf> = Vec::new();
+            let mut candidates: Vec<(PathBuf, bool)> = Vec::new();
             if let Some(username) = host.username().filter(|name| !name.is_empty()) {
-                candidates.push(
+                candidates.push((
                     Path::new(PLIST_DIRECTORY)
                         .join(username)
                         .join(format!("{PLIST_DOMAIN}.plist")),
-                );
+                    true,
+                ));
             }
-            candidates.push(Path::new(PLIST_DIRECTORY).join(format!("{PLIST_DOMAIN}.plist")));
+            candidates.push((Path::new(PLIST_DIRECTORY).join(format!("{PLIST_DOMAIN}.plist")), false));
             let mut documents: Vec<PlistDocument> = Vec::new();
-            for path in candidates {
-                if let Some(document) = read_plist(host, &path) {
+            for (path, per_user) in candidates {
+                if let Some(document) = read_plist(host, &path, per_user) {
                     documents.push(document);
                 }
             }
@@ -438,49 +463,98 @@ pub(crate) fn directory_holds_managed_settings<H: SettingsHost>(host: &H, direct
 }
 
 /// What the readers evaluate to (`_E` upstream).
+#[derive(Clone, Debug)]
 pub(crate) struct MdmEvaluation {
     pub(crate) mdm: TierRead,
     pub(crate) hkcu: SettingsMap,
     pub(crate) wsl_inherits: bool,
+    /// The managed preferences document the policy came from, when one held policy content.
+    pub(crate) plist: Option<PlistLabel>,
+    /// The tier carries an error of class `unreadable` without an operating system error code, which the machine
+    /// policy counts as a read that did not answer.
+    pub(crate) unread_without_errno: bool,
+    /// The tier carries an error that is neither a warning nor about a document the user can write.
+    pub(crate) blocking_error: bool,
+}
+
+/// Errors the tier collected so far, as far as the re-read decision looks at them.
+#[derive(Clone, Copy, Debug, Default)]
+struct ErrorFacts {
+    unread_without_errno: bool,
+    blocking: bool,
+}
+
+impl ErrorFacts {
+    fn evaluation(
+        self,
+        mdm: TierRead,
+        hkcu: SettingsMap,
+        wsl_inherits: bool,
+        plist: Option<PlistLabel>,
+    ) -> MdmEvaluation {
+        MdmEvaluation {
+            mdm,
+            hkcu,
+            wsl_inherits,
+            plist,
+            unread_without_errno: self.unread_without_errno,
+            blocking_error: self.blocking,
+        }
+    }
 }
 
 /// `_E` upstream: turn the raw reads into the machine policy tier.
 pub(crate) fn evaluate_policy<H: SettingsHost>(host: &H, read: &MdmRead) -> MdmEvaluation {
     let mut state = LoadState::Absent;
-    let mut lost = false;
     let mut unreadable = false;
+    let mut errors = ErrorFacts::default();
     for document in read.plists.iter().flatten() {
         let parsed = match &document.stdout {
             None => TierRead::did_not_load(true),
             Some(stdout) => TierRead::from_hm(stdout, false),
         };
         if parsed.has_policy_content {
-            return MdmEvaluation {
-                mdm: parsed,
-                hkcu: SettingsMap::new(),
-                wsl_inherits: false,
+            let label = if document.per_user {
+                PlistLabel::PerUser
+            } else {
+                PlistLabel::Device
             };
+            return errors.evaluation(parsed, SettingsMap::new(), false, Some(label));
         }
-        lost |= parsed.lo();
+        if parsed.load_state == LoadState::DidNotLoad {
+            errors.blocking = true;
+        }
+        if document.stdout.is_none() && !document.errno_known {
+            errors.unread_without_errno = true;
+        }
         unreadable |= parsed.unreadable;
         state = state.combine(parsed.load_state);
     }
     let mut machine: Option<TierRead> = None;
     let mut flag = WslFlag::Disarmed;
+    let mut machine_facts = ErrorFacts::default();
     if let Some(stdout) = &read.hklm_stdout {
         let text = registry_value(stdout).unwrap_or_default();
-        machine = Some(TierRead::from_hm(&text, false));
+        let tier = TierRead::from_hm(&text, false);
+        machine_facts.blocking = tier.load_state == LoadState::DidNotLoad;
+        machine = Some(tier);
         if let Some(Value::Object(document)) = serde_json::from_str::<Value>(&text).ok().filter(|_| !text.is_empty()) {
             flag = wsl_flag(&document);
         }
     } else if read.hklm_oversize {
         machine = Some(TierRead::did_not_load(true));
+        machine_facts = ErrorFacts {
+            unread_without_errno: true,
+            blocking: true,
+        };
     }
     let machine_lost = machine.as_ref().is_some_and(TierRead::lo);
     if let Some(machine) = &machine {
         unreadable |= machine.unreadable;
         state = state.combine(machine.load_state);
     }
+    errors.blocking |= machine_facts.blocking;
+    errors.unread_without_errno |= machine_facts.unread_without_errno;
     let under_wsl = runs_under_wsl(host);
     let mut path_flag = flag;
     if under_wsl {
@@ -493,6 +567,7 @@ pub(crate) fn evaluate_policy<H: SettingsHost>(host: &H, read: &MdmRead) -> MdmE
             if path_flag == WslFlag::Disarmed {
                 unreadable |= side.unreadable;
                 state = state.combine(side.load_state);
+                errors.blocking |= side.load_state == LoadState::DidNotLoad;
             }
         }
     }
@@ -504,32 +579,22 @@ pub(crate) fn evaluate_policy<H: SettingsHost>(host: &H, read: &MdmRead) -> MdmE
         user_writable: false,
         unreadable,
     };
-    let _ = lost;
     if under_wsl && !inherits {
-        return MdmEvaluation {
-            mdm: base(),
-            hkcu: SettingsMap::new(),
-            wsl_inherits: false,
-        };
+        return errors.evaluation(base(), SettingsMap::new(), false, None);
     }
     if let Some(machine) = machine
         && machine_lost
     {
-        return MdmEvaluation {
-            mdm: machine,
-            hkcu: SettingsMap::new(),
-            wsl_inherits: inherits,
-        };
+        return machine_facts.evaluation(machine, SettingsMap::new(), inherits, None);
     }
     if path_flag == WslFlag::Unreadable {
         let mut tier = base();
         tier.has_policy_content = true;
         tier.load_state = tier.load_state.combine(LoadState::Loaded);
-        return MdmEvaluation {
-            mdm: tier,
-            hkcu: SettingsMap::new(),
-            wsl_inherits: inherits,
-        };
+        if !directory_holds_managed_settings(host, &wsl_managed_directory()) {
+            errors.blocking = true;
+        }
+        return errors.evaluation(tier, SettingsMap::new(), inherits, None);
     }
     if let Some(stdout) = &read.hkcu_stdout {
         let held = (inherits && directory_holds_managed_settings(host, &wsl_managed_directory()))
@@ -543,17 +608,9 @@ pub(crate) fn evaluate_policy<H: SettingsHost>(host: &H, read: &MdmRead) -> MdmE
                 let mut settings = settings;
                 settings.shift_remove("wslInheritsWindowsSettings");
                 settings.shift_remove(crate::constants::MANAGED_SOURCES_BEHAVIOR_KEY);
-                return MdmEvaluation {
-                    mdm: base(),
-                    hkcu: settings,
-                    wsl_inherits: inherits,
-                };
+                return errors.evaluation(base(), settings, inherits, None);
             }
         }
     }
-    MdmEvaluation {
-        mdm: base(),
-        hkcu: SettingsMap::new(),
-        wsl_inherits: inherits,
-    }
+    errors.evaluation(base(), SettingsMap::new(), inherits, None)
 }

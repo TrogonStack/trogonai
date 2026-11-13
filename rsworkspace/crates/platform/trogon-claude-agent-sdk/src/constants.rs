@@ -822,3 +822,18 @@ pub(crate) const NAME_TOO_LONG_ERRNO: i32 = 63;
 /// `ENAMETOOLONG` as the host reports it.
 #[cfg(not(target_os = "macos"))]
 pub(crate) const NAME_TOO_LONG_ERRNO: i32 = 36;
+
+/// Milliseconds the machine policy reading stays in force when the last read answered (`ret` upstream).
+pub(crate) const MDM_REREAD_IDLE_MS: i128 = 1_800_000;
+
+/// Milliseconds between re-reads while the machine keeps not answering (`_q` upstream).
+pub(crate) const MDM_REREAD_RETRY_MS: i128 = 60_000;
+
+/// Milliseconds before a policy change that would drop settings is believed (`set` upstream).
+pub(crate) const MDM_REREAD_LOSS_MS: i128 = 30_000;
+
+/// Milliseconds a call waits for a re-read before it goes on with the reading in force (`oet` upstream).
+pub(crate) const MDM_REREAD_WAIT_MS: i128 = 1_000;
+
+/// Unanswered reads in a row after which the slow idle interval applies again.
+pub(crate) const MDM_UNANSWERED_RETRY_LIMIT: u32 = 4;
