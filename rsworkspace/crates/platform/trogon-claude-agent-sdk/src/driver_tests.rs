@@ -555,10 +555,15 @@ async fn controls_have_no_deadline_unless_one_is_configured() -> Result<(), Box<
 }
 
 fn receipt(subtype: &str) -> Message {
+    let data = JsonObject::from_iter([("subtype".to_owned(), subtype.into())]);
+    let mut raw = data.clone();
+    raw.insert("type".to_owned(), "system".into());
     Message::System(crate::SystemMessage {
         subtype: subtype.into(),
         session_id: None,
-        data: JsonObject::new(),
+        data,
+        event: crate::SystemEvent::Other,
+        raw,
     })
 }
 
