@@ -1,8 +1,58 @@
 use super::{build, request_await_initialize};
 use crate::{
-    ArgvStyle, ClaudeAgentOptions, ContinueConversation, Customizations, ExtraArgument, ScriptRuntime,
-    SessionPersistence,
+    ArgvStyle, ClaudeAgentOptions, ContinueConversation, Customizations, ExtraArgument, LocalPlugin, PluginDelivery,
+    ScriptRuntime, SessionPersistence,
 };
+
+fn with_plugins(argv_style: ArgvStyle, delivery: PluginDelivery) -> ClaudeAgentOptions {
+    ClaudeAgentOptions {
+        argv_style,
+        plugin_delivery: delivery,
+        plugins: vec![
+            LocalPlugin::new("/p/one"),
+            LocalPlugin {
+                path: "/p/two".into(),
+                skip_mcp_discovery: Some(true),
+            },
+        ],
+        ..ClaudeAgentOptions::default()
+    }
+}
+
+#[test]
+fn typescript_plugins_are_equals_form_flags_and_skip_mcp_selects_the_no_mcp_flag() {
+    let all = tokens(&with_plugins(ArgvStyle::TypeScript, PluginDelivery::Argv));
+    assert!(
+        all.windows(2)
+            .any(|pair| pair == ["--plugin-dir=/p/one", "--plugin-dir-no-mcp=/p/two"])
+    );
+}
+
+#[test]
+fn typescript_initialize_delivery_replaces_the_flags_with_await_initialize() {
+    let all = tokens(&with_plugins(ArgvStyle::TypeScript, PluginDelivery::Initialize));
+    assert!(all.contains(&"--await-initialize".to_owned()));
+    assert!(!all.iter().any(|token| token.starts_with("--plugin-dir")));
+}
+
+#[test]
+fn initialize_delivery_without_plugins_stays_on_argv() {
+    let options = ClaudeAgentOptions {
+        plugin_delivery: PluginDelivery::Initialize,
+        ..ClaudeAgentOptions::default()
+    };
+    assert!(!tokens(&options).contains(&"--await-initialize".to_owned()));
+}
+
+#[test]
+fn python_plugins_are_two_token_flags_and_ignore_the_delivery() {
+    let all = tokens(&with_plugins(ArgvStyle::Python, PluginDelivery::Initialize));
+    assert!(
+        all.windows(4)
+            .any(|quad| quad == ["--plugin-dir", "/p/one", "--plugin-dir", "/p/two"])
+    );
+    assert!(!all.contains(&"--await-initialize".to_owned()));
+}
 
 fn tokens(options: &ClaudeAgentOptions) -> Vec<String> {
     build(options)

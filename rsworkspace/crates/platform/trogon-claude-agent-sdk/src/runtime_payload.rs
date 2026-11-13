@@ -29,6 +29,8 @@ pub(crate) enum RequestPayload<'a> {
         system_prompt: Option<Vec<&'a str>>,
         #[serde(rename = "appendSystemPrompt", skip_serializing_if = "Option::is_none")]
         append_system_prompt: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        plugins: Option<Vec<crate::plugin::PluginPayload<'a>>>,
     },
     Interrupt {
         #[serde(skip_serializing_if = "Option::is_none")]

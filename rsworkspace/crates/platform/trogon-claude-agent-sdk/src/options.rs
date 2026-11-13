@@ -134,6 +134,9 @@ pub struct ClaudeAgentOptions {
     pub effort: Option<EffortLevel>,
     pub env: Environment,
     pub additional_directories: Vec<PathBuf>,
+    pub plugins: Vec<crate::LocalPlugin>,
+    /// TypeScript's `pluginDelivery`. Ignored with `ArgvStyle::Python`, which has no such option.
+    pub plugin_delivery: crate::PluginDelivery,
     pub continue_conversation: ContinueConversation,
     pub fork_session: SessionFork,
     pub session_store: Option<SessionStoreOptions>,
@@ -147,6 +150,8 @@ pub struct ClaudeAgentOptions {
     pub entrypoint: Option<String>,
     /// Application name (optionally `name/version`) reported as `CLAUDE_AGENT_SDK_CLIENT_APP`.
     pub client_app: Option<String>,
+    /// Python dialect: derive `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` for a bundled CLI. TypeScript derives none.
+    pub client_app_derivation: crate::ClientAppDerivation,
     pub trace_context: Option<TraceContext>,
     pub stderr_handler: Option<StderrHandler>,
     pub extra_args: Vec<ExtraArgument>,

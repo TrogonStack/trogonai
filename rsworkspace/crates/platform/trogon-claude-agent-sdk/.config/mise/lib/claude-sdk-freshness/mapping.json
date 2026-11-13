@@ -1640,6 +1640,7 @@
       },
       "rust_api": [
         "ClaudeAgentOptions.env",
+        "ClaudeAgentOptions.client_app_derivation",
         "adapters::EnvironmentVariable",
         "adapters::CurrentDirectory"
       ],
@@ -1655,10 +1656,14 @@
         {
           "path": "tests/runtime_adapters.rs",
           "name": "ordinary_connection_never_reads_session_environment_or_current_directory"
+        },
+        {
+          "path": "src/client_app_derivation/tests.rs",
+          "name": "derives_this_crate_for_a_qualifying_bundled_cli"
         }
       ],
       "status": "rust_difference",
-      "rationale": "Rust overlays inherited environment, matching Python; TypeScript supplied env replaces its subprocess environment. This difference must remain visible in maintenance review. Injectable environment providers control SDK lookups, not implicit native child-environment inheritance."
+      "rationale": "Rust overlays inherited environment, matching Python; TypeScript supplied env replaces its subprocess environment. This difference must remain visible in maintenance review. Injectable environment providers control SDK lookups, not implicit native child-environment inheritance. The Python-dialect client_app_derivation option reproduces CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP with the same trigger (a bundled CLI whose pin and recorded claude.version are at least 999.0.0), the same variable and the same name/version format, but names the application with this crate's package name and version because Rust has no Python distribution metadata to look up; TypeScript derives none, which is the default."
     },
     {
       "id": "session-convenience",
@@ -1778,7 +1783,6 @@
             "ClaudeAgentOptions.fallback_model",
             "ClaudeAgentOptions.betas",
             "ClaudeAgentOptions.settings",
-            "ClaudeAgentOptions.plugins",
             "ClaudeAgentOptions.skills",
             "ClaudeAgentOptions.sandbox",
             "ClaudeAgentOptions.thinking",
@@ -1791,7 +1795,6 @@
             "Options.fallbackModel",
             "Options.betas",
             "Options.settings",
-            "Options.plugins",
             "Options.skills",
             "Options.sandbox",
             "Options.thinking",
@@ -1799,7 +1802,6 @@
             "core.Options.fallbackModel",
             "core.Options.betas",
             "core.Options.settings",
-            "core.Options.plugins",
             "core.Options.skills",
             "core.Options.sandbox",
             "core.Options.thinking",
@@ -1811,7 +1813,41 @@
       "rust_api": [],
       "tests": [],
       "status": "deferred",
-      "rationale": "Fallback/beta/custom settings/plugins/skills/sandbox/thinking/task-budget conveniences require individual Rust design and behavioral evidence; they are not enabled by aggregate configuration support."
+      "rationale": "Fallback/beta/custom settings/skills/sandbox/thinking/task-budget conveniences require individual Rust design and behavioral evidence; they are not enabled by aggregate configuration support."
+    },
+    {
+      "id": "plugins",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.plugins"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.plugins",
+            "Options.pluginDelivery",
+            "core.Options.plugins",
+            "core.Options.pluginDelivery"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.plugins",
+        "ClaudeAgentOptions.plugin_delivery",
+        "LocalPlugin",
+        "PluginDelivery"
+      ],
+      "tests": [
+        {
+          "path": "tests/runtime_features.rs",
+          "name": "plugins_reach_the_cli_by_argv_or_by_the_initialize_request"
+        }
+      ],
+      "status": "supported",
+      "rationale": "TypeScript passes --plugin-dir=PATH or --plugin-dir-no-mcp=PATH per plugin, or with pluginDelivery initialize and at least one plugin passes --await-initialize and sends the plugins in the initialize request; Python passes the two-token --plugin-dir PATH and has no delivery option, so PluginDelivery is ignored with ArgvStyle::Python. The upstream 'Invalid pluginDelivery' and 'Unsupported plugin type' errors cannot occur because the Rust types admit only the valid variants."
     },
     {
       "id": "advanced-controls",

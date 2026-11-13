@@ -124,7 +124,7 @@ transcripts to create another client; it does not resurrect a closed owner.
 `ClientHandle` permits concurrent control and input without extending the
 owner's lifetime. Input sent while a turn runs is written immediately, as both
 upstream SDKs do; outbound frames are not capped by `max_frame_bytes`, which
-bounds inbound frames only. Continue consuming messages while work runs. Queue
+bounds inbound frames only, and only in `ArgvStyle::Python` (TypeScript keeps every line). Continue consuming messages while work runs. Queue
 capacity is finite, and a lagging consumer can end the session with
 `Error::MessageQueueFull`.
 

@@ -67,6 +67,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `claude_code_marker: ClaudeCodeMarker` | removes `CLAUDECODE` | keeps inherited value |
 | `entrypoint: Option<String>` | `CLAUDE_CODE_ENTRYPOINT` | `CLAUDE_CODE_ENTRYPOINT` |
 | `client_app: Option<String>` | `CLAUDE_AGENT_SDK_CLIENT_APP` | `CLAUDE_AGENT_SDK_CLIENT_APP` |
+| `client_app_derivation: ClientAppDerivation` | `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` (bundled CLI at 999.0.0 or later; this crate's identity replaces the distribution metadata) | none |
 | `trace_context: Option<TraceContext>` | `TRACEPARENT`, `TRACESTATE` | `TRACEPARENT`, `TRACESTATE` |
 | `stderr_handler: Option<StderrHandler>` | `stderr` callback (lines) | `stderr` callback (chunks) |
 | `extra_args: Vec<ExtraArgument>` | `extra_args` | `extraArgs` |
@@ -81,7 +82,9 @@ integrity-verified published `0.3.319` declaration archive.
 | `Error::NotReadyForWriting` | `CLIConnectionError` (not ready for writing) | same text |
 | `Error::WriteToTerminatedProcess { exit_code }` | `CLIConnectionError` (terminated process) | same text without the code |
 | `Error::WriteFailed(io::Error)` | `CLIConnectionError` (write failed) | same text |
-| `Error::JsonDecode(JsonDecodeError)` | `CLIJSONDecodeError` (`line`, `original_error`) | not applicable (line skipped) |
+| `Error::JsonDecode(JsonDecodeError)`, `JsonDecodeSourceError` | `CLIJSONDecodeError` (`line`, `original_error`: a `JSONDecodeError`, or the `ValueError("Buffer size L exceeds limit N")` of the `max_buffer_size` guard) | not applicable (line skipped, no line limit) |
+| `ClaudeAgentOptions::plugins`, `LocalPlugin` | `plugins` (`SdkPluginConfig`) | `plugins` (`SdkPluginConfig`, `skipMcpDiscovery`) |
+| `ClaudeAgentOptions::plugin_delivery`, `PluginDelivery` | not applicable | `pluginDelivery` (`argv` or `initialize`) |
 | `Error::MessageParse(MessageParseError)` | `MessageParseError` (`data`) | not applicable |
 | `Transport` | `Transport` | not applicable |
 | `Transport::read_message` | `Transport.read_messages` | not applicable |

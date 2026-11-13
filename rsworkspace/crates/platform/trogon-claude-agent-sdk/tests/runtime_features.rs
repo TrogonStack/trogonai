@@ -15,10 +15,11 @@ use trogon_claude_agent_sdk::{
     AgentDefinition, AgentName, CancellationToken, ClaudeAgentOptions, ClaudeSdkClient, DialogKind, EffortLevel,
     ElicitationMode, ElicitationRequest, ElicitationResponse, Error, FeatureSupport, FileCheckpointing, HookEvent,
     HookFailureMode, HookOutput, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, InputBlock,
-    InterruptReceipt, LocalMcpServer, LocalMcpServerOptions, McpEnabled, McpServerName, McpServerOptions,
+    InterruptReceipt, LocalMcpServer, LocalMcpServerOptions, LocalPlugin, McpEnabled, McpServerName, McpServerOptions,
     McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, McpUrl, Message, MessageId, OutputSchema,
-    PermissionDecision, PermissionMode, Prompt, QueueCapacity, RewindMode, SdkTool, SdkToolOptions, SyncHookOutput,
-    TaskId, Timeout, ToolPermissionRequest, ToolUseId, UsdBudget, UserDialogRequest, UserDialogResponse, UserInput,
+    PermissionDecision, PermissionMode, PluginDelivery, Prompt, QueueCapacity, RewindMode, SdkTool, SdkToolOptions,
+    SyncHookOutput, TaskId, Timeout, ToolPermissionRequest, ToolUseId, UsdBudget, UserDialogRequest,
+    UserDialogResponse, UserInput,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -256,6 +257,54 @@ async fn structured_input_and_declarative_configuration_reach_the_cli() -> TestR
     assert_eq!(observed.data["input"]["message"]["content"][1]["type"], "image");
     assert_eq!(result(&mut client).await?, "structured");
     client.disconnect().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn plugins_reach_the_cli_by_argv_or_by_the_initialize_request() -> TestResult {
+    for delivery in [PluginDelivery::Argv, PluginDelivery::Initialize] {
+        let mut options = options("structured")?;
+        options.plugin_delivery = delivery;
+        options.plugins = vec![
+            LocalPlugin::new("/plugins/one"),
+            LocalPlugin {
+                path: "/plugins/two".into(),
+                skip_mcp_discovery: Some(true),
+            },
+        ];
+        let mut client = ClaudeSdkClient::connect(options).await?;
+        let Some(Message::System(init)) = client.next_message().await? else {
+            return Err(std::io::Error::other("missing init").into());
+        };
+        let arguments = init.data["arguments"]
+            .as_array()
+            .ok_or_else(|| std::io::Error::other("missing argv"))?;
+        let has = |token: &str| arguments.iter().any(|value| value == token);
+        match delivery {
+            PluginDelivery::Argv => {
+                assert!(has("--plugin-dir=/plugins/one"));
+                assert!(has("--plugin-dir-no-mcp=/plugins/two"));
+                assert!(!has("--await-initialize"));
+                assert!(init.data["initialize_request"].get("plugins").is_none());
+            }
+            PluginDelivery::Initialize => {
+                assert!(has("--await-initialize"));
+                assert!(
+                    !arguments
+                        .iter()
+                        .any(|value| value.as_str().is_some_and(|value| value.starts_with("--plugin-dir")))
+                );
+                assert_eq!(
+                    init.data["initialize_request"]["plugins"],
+                    json!([
+                        {"type": "local", "path": "/plugins/one"},
+                        {"type": "local", "path": "/plugins/two", "skipMcpDiscovery": true}
+                    ])
+                );
+            }
+        }
+        client.disconnect().await?;
+    }
     Ok(())
 }
 

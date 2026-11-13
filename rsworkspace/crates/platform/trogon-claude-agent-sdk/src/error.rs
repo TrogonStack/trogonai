@@ -89,8 +89,6 @@ pub enum Error {
     Io(#[source] io::Error),
     #[error(transparent)]
     Protocol(#[from] ProtocolError),
-    #[error("protocol frame exceeds the configured byte limit ({limit})")]
-    FrameTooLarge { limit: usize },
     /// The CLI exited unsuccessfully. `Display` is Python's `ProcessError` text and `typescript_message` is the
     /// TypeScript text; `stderr` carries the real tail, a superset of both upstream messages.
     #[error("{}", process_message(.status))]
@@ -260,20 +258,41 @@ fn signal_name(signal: i32) -> &'static str {
     }
 }
 
-/// Python `CLIJSONDecodeError`: a CLI stdout line that is not valid JSON.
+/// Python `CLIJSONDecodeError`: a CLI stdout line that is not valid JSON, or a message that outgrew
+/// `max_buffer_size`.
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to decode JSON: {}...", self.line.chars().take(100).collect::<String>())]
 pub struct JsonDecodeError {
     line: String,
     #[source]
-    original_error: serde_json::Error,
+    original_error: JsonDecodeSourceError,
+}
+
+/// The exception Python carries as `CLIJSONDecodeError.original_error`.
+#[derive(Debug, thiserror::Error)]
+pub enum JsonDecodeSourceError {
+    /// The JSON parser's error for a corrupt line.
+    #[error(transparent)]
+    Json(serde_json::Error),
+    /// Python's `ValueError` raised when one message exceeds the buffer limit.
+    #[error("Buffer size {length} exceeds limit {limit}")]
+    BufferExceeded { length: usize, limit: usize },
 }
 
 impl JsonDecodeError {
     pub(crate) fn new(line: &[u8], original_error: serde_json::Error) -> Self {
         Self {
             line: String::from_utf8_lossy(line).into_owned(),
-            original_error,
+            original_error: JsonDecodeSourceError::Json(original_error),
+        }
+    }
+
+    /// Python's guard for a message longer than `max_buffer_size`: the text is the `line`, the `ValueError` the
+    /// original error.
+    pub(crate) fn buffer_exceeded(limit: usize, length: usize) -> Self {
+        Self {
+            line: format!("JSON message exceeded maximum buffer size of {limit} bytes"),
+            original_error: JsonDecodeSourceError::BufferExceeded { length, limit },
         }
     }
 
@@ -282,7 +301,7 @@ impl JsonDecodeError {
         &self.line
     }
 
-    pub fn original_error(&self) -> &serde_json::Error {
+    pub fn original_error(&self) -> &JsonDecodeSourceError {
         &self.original_error
     }
 }

@@ -267,6 +267,13 @@ struct HookCallback {
     timeout: Duration,
 }
 
+/// TypeScript's `pluginsViaInitialize`: `pluginDelivery: 'initialize'` with at least one plugin.
+pub(crate) fn plugins_via_initialize(options: &ClaudeAgentOptions) -> bool {
+    options.argv_style == crate::ArgvStyle::TypeScript
+        && options.plugin_delivery == crate::PluginDelivery::Initialize
+        && !options.plugins.is_empty()
+}
+
 fn initialize_config(
     options: &ClaudeAgentOptions,
 ) -> Result<(serde_json::Value, HashMap<String, HookCallback>, bool), Error> {
@@ -348,6 +355,8 @@ fn initialize_config(
         supported_dialog_kinds,
         system_prompt,
         append_system_prompt,
+        plugins: plugins_via_initialize(options)
+            .then(|| options.plugins.iter().map(crate::plugin::PluginPayload::from).collect()),
     }
     .to_value()?;
     Ok((request, callbacks, blocking))
@@ -863,6 +872,19 @@ where
                                 {
                                     let _ = sender.send(Err(Error::HooksNotApplied));
                                     return Err(Error::HooksNotApplied);
+                                }
+                                let sent = self
+                                    .initialize_request
+                                    .get("plugins")
+                                    .and_then(serde_json::Value::as_array)
+                                    .map_or(0, Vec::len);
+                                let applied = connection_info.additional_fields.get("plugins_applied");
+                                if sent > 0 && applied != Some(&serde_json::Value::Bool(true)) {
+                                    tracing::warn!(
+                                        plugins_sent = sent,
+                                        plugins_applied = ?applied,
+                                        "the CLI did not confirm the plugins sent with plugin delivery by initialize; the process runs with the plugins it was launched with"
+                                    );
                                 }
                                 self.state = State::Idle;
                                 let _ = sender.send(Ok(connection_info));

@@ -1,16 +1,26 @@
-use super::uid_for_name;
-
-const PASSWD: &str = "root:x:0:0:root:/root:/bin/sh\ndaemon:*:1:1::/:/usr/sbin/nologin\nbad:x:notanumber:0\n";
+use super::lookup;
 
 #[test]
-fn finds_the_uid_of_an_exact_name() {
-    assert_eq!(uid_for_name(PASSWD, "root"), Some(0));
-    assert_eq!(uid_for_name(PASSWD, "daemon"), Some(1));
+fn the_superuser_resolves_through_the_system_user_database() -> Result<(), std::io::Error> {
+    assert_eq!(lookup("root")?, 0);
+    Ok(())
 }
 
 #[test]
-fn rejects_unknown_prefix_and_malformed_entries() {
-    assert_eq!(uid_for_name(PASSWD, "roo"), None);
-    assert_eq!(uid_for_name(PASSWD, "bad"), None);
-    assert_eq!(uid_for_name(PASSWD, "nobody"), None);
+fn an_unknown_user_reports_the_getpwnam_text() {
+    let error = lookup("trogon-no-such-user-x").err();
+    let message = error.as_ref().map(ToString::to_string);
+    assert_eq!(
+        message.as_deref(),
+        Some("getpwnam(): name not found: 'trogon-no-such-user-x'")
+    );
+    assert_eq!(error.map(|e| e.kind()), Some(std::io::ErrorKind::NotFound));
+}
+
+#[test]
+fn a_name_with_a_nul_byte_is_refused() {
+    assert_eq!(
+        lookup("ro\0ot").err().map(|e| e.kind()),
+        Some(std::io::ErrorKind::InvalidInput)
+    );
 }

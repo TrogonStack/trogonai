@@ -438,6 +438,7 @@ async fn malformed_known_frame_is_a_terminal_protocol_error() -> TestResult {
 #[tokio::test]
 async fn oversized_frame_is_rejected() -> TestResult {
     let mut options = options("oversized")?;
+    options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
     options.limits.max_frame_bytes = NonZeroUsize::new(1024).ok_or_else(|| std::io::Error::other("zero limit"))?;
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("oversized")).await?;
@@ -448,7 +449,14 @@ async fn oversized_frame_is_rejected() -> TestResult {
             Ok(None) => return Err(std::io::Error::other("missing error").into()),
         }
     };
-    assert!(matches!(error, Error::FrameTooLarge { limit: 1024 }));
+    let Error::JsonDecode(decode) = error else {
+        return Err(std::io::Error::other("expected the buffer guard").into());
+    };
+    assert_eq!(decode.line(), "JSON message exceeded maximum buffer size of 1024 bytes");
+    assert!(matches!(
+        decode.original_error(),
+        trogon_claude_agent_sdk::JsonDecodeSourceError::BufferExceeded { limit: 1024, .. }
+    ));
     client.disconnect().await?;
     Ok(())
 }

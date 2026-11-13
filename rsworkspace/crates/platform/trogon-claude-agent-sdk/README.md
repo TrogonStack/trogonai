@@ -241,15 +241,35 @@ the stdin `initialize` bytes).
 - `ArgvStyle::TypeScript` appends `--await-initialize` through extra arguments
   when `connect` resumes or continues without `cli_path` and without `sdk-url`,
   as `sdk.mjs` does for its resolved executable. Python never sends it.
-- `user` runs the CLI as the named account (`Popen(user=...)`: the name is read
-  from `/etc/passwd` and only the uid changes, Unix only); `run_as_uid` is the
-  numeric form.
-- `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` is removed from the child environment and
-  never derived. Python derives it only for its bundled CLI at version
-  `999.0.0` or later and from Python distribution metadata, neither of which
-  exists here.
-- Deferred to other tracks: remote `--sdk-url` transports, the bundled or musl
-  binary lookup, and the thinking, betas and task-budget options.
+- `user` runs the CLI as the named account (`Popen(user=...)`: the name is
+  resolved with libc `getpwnam_r`, so NSS sources apply, an unknown name fails
+  with `getpwnam(): name not found: '<name>'`, and only the uid changes, Unix
+  only); `run_as_uid` is the numeric form.
+- The inbound line limit `max_frame_bytes` exists only in `ArgvStyle::Python`
+  (`max_buffer_size`): a longer line, counted in characters without its
+  newline, is `Error::JsonDecode` with the line `JSON message exceeded maximum
+  buffer size of N bytes` and `JsonDecodeSourceError::BufferExceeded`.
+  TypeScript keeps every line.
+- In `ArgvStyle::TypeScript`, `end_input` leaves the transport ready, so a later
+  write is dropped without an error, as `endInput` does; `close` ends that.
+- `plugins` and `plugin_delivery` map `plugins` and `pluginDelivery`: TypeScript
+  passes `--plugin-dir=PATH` (`--plugin-dir-no-mcp=PATH` with
+  `skip_mcp_discovery`) or, for `PluginDelivery::Initialize` with at least one
+  plugin, `--await-initialize` and the plugins in the `initialize` request;
+  Python passes `--plugin-dir PATH` and ignores the delivery.
+- `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` is removed from the child environment.
+  `ClaudeAgentOptions::client_app_derivation` (Python dialect, off by default
+  like TypeScript) sets it with Python's trigger: the resolved `cli_path` is the
+  `BundledCli` path, its `pinned_version` and the `claude.version` file beside
+  it are both `999.0.0` or later, and no explicit `CLAUDE_AGENT_SDK_CLIENT_APP`
+  exists in `client_app`, `env` or the inherited environment. The value is
+  `name/version` for this crate, standing in for the Python distribution
+  metadata Rust does not have.
+- Not expressible: the `Cannot write to terminated process` and `exited with error` write
+  branches are unreachable upstream because the `exit` event clears readiness
+  first. `cli_path` or `PATH` discovery is the Rust equivalent.
+- Deferred to other tracks: remote `--sdk-url` transports and the thinking,
+  betas and task-budget options.
 
 Model strings and paths are stored without extra identifier restrictions.
 `env` values are `ConfigValue`s, which convert from strings as `Sensitive`;

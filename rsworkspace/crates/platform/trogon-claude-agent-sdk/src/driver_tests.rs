@@ -92,6 +92,7 @@ impl DriverFixture {
                 supported_dialog_kinds: None,
                 system_prompt: None,
                 append_system_prompt: None,
+                plugins: None,
             }
             .to_value()?,
             blocking_hooks: false,
@@ -391,5 +392,79 @@ fn tool_lists_reach_the_cli_verbatim() -> Result<(), Error> {
     for expected in ["--allowedTools=Read,Write", "--disallowedTools=", "--tools=Read Bash"] {
         assert!(arguments.iter().any(|argument| argument == expected));
     }
+    Ok(())
+}
+
+fn plugin_options(delivery: crate::PluginDelivery) -> ClaudeAgentOptions {
+    ClaudeAgentOptions {
+        plugin_delivery: delivery,
+        plugins: vec![
+            crate::LocalPlugin::new("/p/one"),
+            crate::LocalPlugin {
+                path: "/p/two".into(),
+                skip_mcp_discovery: Some(true),
+            },
+        ],
+        ..ClaudeAgentOptions::default()
+    }
+}
+
+#[test]
+fn initialize_delivery_sends_the_plugins_in_the_initialize_request() -> Result<(), Error> {
+    let (request, _, _) = initialize_config(&plugin_options(crate::PluginDelivery::Initialize))?;
+    assert_eq!(
+        request["plugins"],
+        serde_json::json!([
+            {"type": "local", "path": "/p/one"},
+            {"type": "local", "path": "/p/two", "skipMcpDiscovery": true}
+        ])
+    );
+    Ok(())
+}
+
+#[test]
+fn argv_delivery_leaves_the_initialize_request_without_plugins() -> Result<(), Error> {
+    let (request, _, _) = initialize_config(&plugin_options(crate::PluginDelivery::Argv))?;
+    assert!(request.get("plugins").is_none());
+    Ok(())
+}
+
+fn derived_label_in(options: &ClaudeAgentOptions, inherited: &Inherited, cli: &std::path::Path) -> Option<String> {
+    let command = command(options, cli, inherited).ok()?;
+    command
+        .as_std()
+        .get_envs()
+        .find(|(key, _)| *key == "CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP")
+        .and_then(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()))
+}
+
+#[test]
+fn a_derived_client_app_reaches_the_overlay_environment_unless_a_label_exists() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = tempfile::tempdir()?;
+    let cli = root.path().join("claude");
+    std::fs::write(root.path().join("claude.version"), "999.0.0")?;
+    let derived = ClaudeAgentOptions {
+        environment_mode: crate::EnvironmentMode::Overlay,
+        client_app_derivation: crate::ClientAppDerivation::Bundled(crate::BundledCli {
+            path: cli.clone(),
+            pinned_version: "999.0.0".to_owned(),
+        }),
+        ..ClaudeAgentOptions::default()
+    };
+    let label = derived_label_in(&derived, &Inherited::new(), &cli);
+    assert_eq!(label, Some(format!("trogon-claude-agent-sdk/{}", crate::SDK_VERSION)));
+    let explicit = ClaudeAgentOptions {
+        client_app: Some(String::new()),
+        ..derived.clone()
+    };
+    assert_eq!(derived_label_in(&explicit, &Inherited::new(), &cli), None);
+    let inherited = Inherited::from([("CLAUDE_AGENT_SDK_CLIENT_APP".into(), "outer".into())]);
+    assert_eq!(derived_label_in(&derived, &inherited, &cli), None);
+    let inheriting = ClaudeAgentOptions {
+        environment_mode: crate::EnvironmentMode::Inherit,
+        ..derived
+    };
+    assert_eq!(derived_label_in(&inheriting, &Inherited::new(), &cli), None);
     Ok(())
 }
