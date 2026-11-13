@@ -82,8 +82,9 @@ fn capture_inherited<E: crate::adapters::EnvironmentVariable>(
     }
     // Upstream matches the session-state variable case-insensitively across the whole inherited environment.
     inherited.extend(environment.vars_os().into_iter().filter(|(key, _)| {
-        key.to_string_lossy()
-            .eq_ignore_ascii_case("CLAUDE_CODE_SDK_READS_SESSION_STATE")
+        let key = key.to_string_lossy();
+        key.eq_ignore_ascii_case("CLAUDE_CODE_SDK_READS_SESSION_STATE")
+            || key.eq_ignore_ascii_case(crate::constants::AGENT_PROGRESS_SUMMARIES_ENV)
     }));
     inherited
 }

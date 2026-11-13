@@ -635,3 +635,9 @@ pub(crate) const SANDBOX_PROXY_PORTS: [&str; 2] = ["httpProxyPort", "socksProxyP
 
 /// The error TypeScript raises for a settings file path combined with the `sandbox` option.
 pub(crate) const SETTINGS_PATH_WITH_SANDBOX_ERROR: &str = "Cannot use both a settings file path and the sandbox option. Include the sandbox configuration in your settings file instead.";
+
+/// Environment variable `sdk.mjs` deletes so a host cannot force agent progress summaries on.
+pub(crate) const AGENT_PROGRESS_SUMMARIES_ENV: &str = "CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES";
+
+/// Python `VERBATIM_PROMPTS_MINIMUM_CLAUDE_CODE_VERSION`: the first CLI that honors `client_composed`.
+pub(crate) const VERBATIM_PROMPTS_MINIMUM: [u32; 3] = [2, 1, 248];

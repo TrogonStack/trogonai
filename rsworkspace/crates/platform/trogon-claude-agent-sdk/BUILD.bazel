@@ -28,6 +28,7 @@ workspace_crate(
     ] + glob([
         "tests/fixtures/fork_ts/*.jsonl",
         "tests/fixtures/oracle_ts/*.json",
+        "tests/fixtures/initialize_options.json",
         "tests/fixtures/probe_ts/*.jsonl",
         "tests/fixtures/settings_option/*.json",
     ]),
@@ -75,6 +76,11 @@ workspace_crate(
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
         "in_memory_session_store": {},
+        "initialize_options": {
+            "compile_data": glob(["tests/support/*.rs"]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "json_object": {},
         "max_turns": {},
         "mcp_server_name": {},

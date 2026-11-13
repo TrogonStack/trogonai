@@ -197,7 +197,9 @@ upstream SDKs).
 - `ArgvStyle::TypeScript` (default) emits TypeScript `0.3.323` argv: `--flag=value`
   spelling, upstream flag order, and the system prompt inside the `initialize`
   request (`systemPrompt` defaults to `[""]`; a preset with an append sends
-  `appendSystemPrompt`). `ArgvStyle::Python` emits Python `0.2.181` argv. The two
+  `appendSystemPrompt`; `tests/initialize_options.rs` pins every system prompt form
+  and the other initialize-only options against captured upstream bytes).
+  `ArgvStyle::Python` emits Python `0.2.181` argv. The two
   upstream SDKs disagree, so both are exposed and TypeScript is the default.
 - `EnvironmentMode::Overlay` (default, Python): inherited environment, then
   `options.env`. `Replace` (TypeScript with `options.env`): only `options.env`
@@ -340,7 +342,10 @@ schema, checkpointing, environment, additional directories, resume and fork.
 rejects nonfinite/negative values. Rewind requires checkpointing and CLI support.
 
 The default system prompt is empty; choose `SystemPrompt::ClaudeCode` for the
-CLI preset. Filesystem settings inherit CLI defaults when `setting_sources` is
+CLI preset. `SystemPrompt` also carries a list of texts, the custom and preset
+objects with `snapshot` and `exclude_dynamic_sections`, and Python's prompt
+file; a form that only one dialect has is refused in the other. `verbatim_prompts`
+marks each user message `client_composed`. Filesystem settings inherit CLI defaults when `setting_sources` is
 `None`; `Some(vec![])` disables user/project/local settings. Explicit lists retain
 caller order and duplicates. MCP discovery is disabled unless selected through
 `McpDiscovery::CliDefault`. `Customizations::Bare` disables further CLI

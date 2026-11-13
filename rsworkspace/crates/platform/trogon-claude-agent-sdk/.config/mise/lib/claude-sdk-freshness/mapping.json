@@ -2646,6 +2646,77 @@
       ],
       "status": "partial",
       "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 41 fixture trees (mise run claude-sdk:resolve-diff), including the read path of normal settings files (pre-parse sanitizers, managed-only key removal, document key order). Partial until the listed gaps close: the policy-tolerant schema for managed settings (catch substitutions and entry salvage), managedSourcesBehavior merge mode, cloud and org mode, the git-ignored cwd check, the MDM re-read throttle, and the JavaScript rendering of integers above 2^53. Python has no equivalent."
+    },
+    {
+      "id": "initialize-options",
+      "upstream": {
+        "python": {
+          "symbols": [
+            "ClaudeAgentOptions.system_prompt",
+            "ClaudeAgentOptions.forward_subagent_text",
+            "ClaudeAgentOptions.verbatim_prompts"
+          ],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "Options.systemPrompt",
+            "Options.planModeInstructions",
+            "Options.toolAliases",
+            "Options.promptSuggestions",
+            "Options.agentProgressSummaries",
+            "Options.forwardSubagentText",
+            "Options.perTaskStopAffordance",
+            "Options.verbatimPrompts",
+            "Options.title",
+            "core.Options.systemPrompt",
+            "core.Options.planModeInstructions",
+            "core.Options.toolAliases",
+            "core.Options.promptSuggestions",
+            "core.Options.agentProgressSummaries",
+            "core.Options.forwardSubagentText",
+            "core.Options.perTaskStopAffordance",
+            "core.Options.verbatimPrompts",
+            "core.Options.title"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "ClaudeAgentOptions.system_prompt",
+        "ClaudeAgentOptions.plan_mode_instructions",
+        "ClaudeAgentOptions.append_subagent_system_prompt",
+        "ClaudeAgentOptions.tool_aliases",
+        "ClaudeAgentOptions.code_running_mcp_tools",
+        "ClaudeAgentOptions.title",
+        "ClaudeAgentOptions.web_search_isolation_exempt_mcp_servers",
+        "ClaudeAgentOptions.prompt_suggestions",
+        "ClaudeAgentOptions.agent_progress_summaries",
+        "ClaudeAgentOptions.forward_subagent_text",
+        "ClaudeAgentOptions.per_task_stop_affordance",
+        "ClaudeAgentOptions.rapid_followup_preempt",
+        "ClaudeAgentOptions.forward_nested_subagent_tool_calls",
+        "ClaudeAgentOptions.workspace_trust",
+        "ClaudeAgentOptions.capture_sdk_mcp_manifests",
+        "ClaudeAgentOptions.verbatim_prompts",
+        "SystemPrompt",
+        "CustomPrompt",
+        "PresetPrompt",
+        "WorkspaceTrust",
+        "VerbatimPrompts"
+      ],
+      "tests": [
+        {
+          "path": "tests/initialize_options.rs",
+          "name": "every_case_matches_the_captured_initialize_bytes_in_both_dialects"
+        },
+        {
+          "path": "tests/initialize_options.rs",
+          "name": "typescript_refuses_a_prompt_file_and_python_refuses_several_prompt_texts"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Initialize bytes (key order, omitted undefined fields, kept false, empty string, empty list and empty object) and the Python system prompt flags are asserted against output captured from sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 for 31 option cases. The runtime-only TypeScript options (appendSubagentSystemPrompt, codeRunningMcpTools, webSearchIsolationExemptMcpServers, rapidFollowupPreempt, forwardNestedSubagentToolCalls, workspaceTrust, captureSdkMcpManifests) are absent from sdk.d.ts and are mapped by Rust API only. TypeScript-only fields are not sent with ArgvStyle::Python, which sends only excludeDynamicSections, systemPromptSnapshot and forwardSubagentText when true. captureSdkMcpManifests has no consumer until SDK MCP manifests are captured; ClaudeAgentOptions::captures_sdk_mcp_manifests resolves its default."
     }
   ]
 }
