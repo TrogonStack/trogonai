@@ -8,7 +8,6 @@ use crate::{
     settings_dialect::SettingsDialect,
     settings_numbers::normalize_numbers,
     settings_resolve_connector::skips_repository_settings,
-    settings_resolve_platform::{evaluate_policy, read_policy},
     settings_resolve_policy::{PolicyResolution, resolve_policy},
     settings_resolve_sources::{
         local_settings_path, project_settings_path, read_settings_file, resolve_cwd, user_settings_path,
@@ -152,9 +151,9 @@ pub fn resolve_settings_in_dialect_with_state<H: SettingsHost>(
         parent
     });
     let remote = options.server_managed_settings.as_ref().and_then(to_map);
-    let mdm_read = read_policy(host);
-    let evaluation = evaluate_policy(host, &mdm_read);
-    let outcome_lost = mdm_read.hklm_outcome.as_ref().map(|outcome| outcome.lost_the_answer());
+    let reading = state.policy_reading(host);
+    let evaluation = reading.evaluation;
+    let outcome_lost = reading.hklm.as_ref().map(|outcome| outcome.lost_the_answer());
     let PolicyResolution {
         settings: policy_settings,
         origin,

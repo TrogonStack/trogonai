@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 /// Reads a whole file exactly as [`std::fs::read`] does.
@@ -233,6 +233,14 @@ impl super::EnvironmentVariable for NativeHost {
     }
 }
 
+impl super::WallClock for NativeHost {
+    type Time = SystemTime;
+
+    fn now(&self) -> SystemTime {
+        super::WallClock::now(&super::SystemClock)
+    }
+}
+
 impl super::CurrentDirectory for NativeHost {
     type Error = io::Error;
 
@@ -380,6 +388,7 @@ pub trait SettingsHost:
     + HostIdentity
     + super::EnvironmentVariable
     + super::CurrentDirectory<Error = io::Error>
+    + super::WallClock<Time = SystemTime>
     + Send
     + Sync
     + 'static
@@ -396,6 +405,7 @@ impl<T> SettingsHost for T where
         + HostIdentity
         + super::EnvironmentVariable
         + super::CurrentDirectory<Error = io::Error>
+        + super::WallClock<Time = SystemTime>
         + Send
         + Sync
         + 'static
