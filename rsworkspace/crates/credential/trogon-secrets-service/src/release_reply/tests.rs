@@ -71,3 +71,20 @@ fn a_reply_encodes_in_either_contract_encoding() {
         ResolveForReleaseResponse::decode_from_slice(&reply.encode(ContentType::Protobuf).unwrap()).unwrap()
     );
 }
+
+#[test]
+fn a_throttled_reply_asks_for_the_throttle_delay() {
+    let Outcome::Failure(failure) = decoded(&ReleaseReply::throttled()) else {
+        panic!("a throttled reply answered an access");
+    };
+    assert_eq!(
+        failure.category.as_known(),
+        Some(ResolveFailureCategory::RESOLVE_FAILURE_CATEGORY_THROTTLED)
+    );
+    assert_eq!(
+        failure.retry_after.as_option(),
+        Some(&buffa_types::google::protobuf::Duration::from(
+            crate::THROTTLED_RETRY_AFTER
+        ))
+    );
+}

@@ -7889,6 +7889,8 @@ dependencies = [
  "async-nats",
  "buffa",
  "buffa-types",
+ "bytes",
+ "futures",
  "grpc-nats-micro",
  "nkeys",
  "thiserror 2.0.21",

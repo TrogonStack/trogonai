@@ -7,8 +7,8 @@
 //! the service's xkey as the authenticated sender (ADR#0083 Decision 1). It
 //! does no I/O of its own: the tenant's owners, the release policies, the
 //! credential's state, the secret store, the audit trail, the sealer, and the
-//! clock are all ports, so the NATS service that wires them is the only place
-//! that talks to a bus or to OpenBao.
+//! clock are all ports, so the binary that wires them is the only place that
+//! connects to a bus or to OpenBao.
 //!
 //! [`JetStreamCredentialStates`] is the stream-backed [`CredentialStateRead`]:
 //! each read folds one credential's subject of the credential event stream up
@@ -25,6 +25,13 @@
 //! requester cannot tell an unknown tenant from a refusing policy. The
 //! [`DenialReason`] goes to the audit record and the logs only.
 //!
+//! [`ReleaseServer`] serves the release core on the bus as
+//! `SecretExchangeService.ResolveForRelease`. It names the caller from the
+//! subject alone, as a [`ReleaseCaller`], before it decodes the payload, and a
+//! subject that names no caller is denied like any other refusal. The payload
+//! becomes a [`ReleaseCall`], and a release still running at
+//! [`RELEASE_DEADLINE`] answers `UNAVAILABLE`.
+//!
 //! # Features
 //!
 //! - `test-support`: adds `InMemoryCredentialStates` and
@@ -32,6 +39,8 @@
 //!   core without a credential stream or an audit writer. Off by default;
 //!   enable it only from `[dev-dependencies]`.
 
+mod admission_limit;
+mod admission_limit_error;
 mod constants;
 mod credential_release;
 mod credential_release_error;
@@ -64,7 +73,11 @@ mod release_policy_source;
 mod release_record;
 mod release_reply;
 mod release_request;
+mod release_server;
+mod release_server_error;
 mod requester_xkey;
+#[cfg(test)]
+mod scripted_release;
 mod seal_error;
 mod sealed_release;
 mod sealed_value;
@@ -73,10 +86,15 @@ mod static_release_policies;
 mod static_tenant_owners;
 mod tenant_account;
 mod tenant_owners;
+mod throttled_answer;
 mod writer_release_audit;
 mod xkey_sealer;
 
-pub use constants::{RELEASE_DEADLINE, RELEASE_TTL_BOUND, UNBUNDLED_GENERATION};
+pub use admission_limit::AdmissionLimit;
+pub use admission_limit_error::AdmissionLimitError;
+pub use constants::{
+    RELEASE_DEADLINE, RELEASE_SUBSCRIPTION, RELEASE_TTL_BOUND, THROTTLED_RETRY_AFTER, UNBUNDLED_GENERATION,
+};
 pub use credential_release::CredentialRelease;
 pub use credential_release_error::CredentialReleaseError;
 pub use credential_state_read::CredentialStateRead;
@@ -102,6 +120,8 @@ pub use release_destination::ReleaseDestination;
 pub use release_policy_source::ReleasePolicySource;
 pub use release_record::ReleaseRecord;
 pub use release_request::ReleaseRequest;
+pub use release_server::ReleaseServer;
+pub use release_server_error::ReleaseServerError;
 pub use requester_xkey::{RequesterXkey, RequesterXkeyError};
 pub use seal_error::SealError;
 pub use sealed_release::SealedRelease;

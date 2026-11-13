@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 /// The longest a released value may be held, per the ADR#0049 staleness bound.
@@ -24,3 +25,19 @@ pub(crate) const DESTINATION_TOO_LONG_NAME: &str = "destination_too_long";
 /// slow store or stream reaches the caller as a typed failure it backs off
 /// from rather than as its own timeout.
 pub const RELEASE_DEADLINE: Duration = Duration::from_millis(1500);
+
+/// The subscription the release endpoint answers on: the literal principal
+/// kind `service`, with the tenant account and the service id as wildcards, so
+/// every tenant's runtime services reach one queue group. The PLATFORM export
+/// of `*.secrets.v1.>` pins the first token to the importing account, so the
+/// tenant a subject names is the caller's own (ADR#0082 Decision 2).
+pub const RELEASE_SUBSCRIPTION: &str = "*.secrets.v1.service.*.SecretExchangeService.ResolveForRelease";
+
+/// The delay a `THROTTLED` answer asks its caller to wait. Every release in
+/// flight has answered by then, so the retry finds room unless newer calls
+/// took it first.
+pub const THROTTLED_RETRY_AFTER: Duration = RELEASE_DEADLINE;
+
+/// How many releases one member of the queue group works on at once when the
+/// operator sets no limit.
+pub(crate) const DEFAULT_ADMISSION_LIMIT: NonZeroUsize = NonZeroUsize::MIN.saturating_add(63);

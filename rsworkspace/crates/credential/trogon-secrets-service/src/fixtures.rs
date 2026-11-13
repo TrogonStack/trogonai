@@ -1,4 +1,5 @@
 use std::num::NonZeroU16;
+use std::time::{Duration, SystemTime};
 
 use buffa::MessageField;
 use nkeys::KeyPair;
@@ -14,7 +15,7 @@ use trogonai_proto::secrets::exchange::v1alpha1::{
     CredentialAddress, ReleaseLocation, RequesterXkey, ResolveForReleaseRequest,
 };
 
-use crate::{ReleaseDestination, ReleaseRequest, TenantAccount};
+use crate::{ReleaseDestination, ReleaseRequest, SealedRelease, SealedValue, TenantAccount};
 
 pub(crate) const OWNER: &str = "project-1";
 pub(crate) const RUNTIME_SERVICE: &str = "billing-runner";
@@ -167,4 +168,12 @@ pub(crate) mod credential_events {
             stream.publish_message(message).await.unwrap().await.unwrap();
         }
     }
+}
+
+/// A release as the release core answers one, sealed to nobody in particular.
+pub(crate) fn sealed_release() -> SealedRelease {
+    SealedRelease::new(
+        SealedValue::new(vec![7, 7, 7]).unwrap(),
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_300),
+    )
 }

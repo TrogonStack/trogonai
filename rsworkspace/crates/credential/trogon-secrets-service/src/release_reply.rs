@@ -1,10 +1,11 @@
 use buffa::MessageField;
-use buffa_types::google::protobuf::Timestamp;
+use buffa_types::google::protobuf::{Duration, Timestamp};
 use grpc_nats_micro::{ContentType, ServiceFault};
 use trogonai_proto::secrets::exchange::v1alpha1::{
     ResolveFailure, ResolveFailureCategory, ResolveForReleaseResponse, SealedAccess,
 };
 
+use super::constants::THROTTLED_RETRY_AFTER;
 use super::{CredentialReleaseError, SealedRelease};
 
 /// What the release endpoint answers a call it judged, typed as the exchange
@@ -30,6 +31,18 @@ impl ReleaseReply {
             .into(),
         };
         Self(ResolveForReleaseResponse { result })
+    }
+
+    /// The answer to a call the endpoint has no room for, which asks the
+    /// caller to retry after [`THROTTLED_RETRY_AFTER`].
+    pub(crate) fn throttled() -> Self {
+        Self(ResolveForReleaseResponse {
+            result: ResolveFailure {
+                category: ResolveFailureCategory::RESOLVE_FAILURE_CATEGORY_THROTTLED.into(),
+                retry_after: MessageField::some(Duration::from(THROTTLED_RETRY_AFTER)),
+            }
+            .into(),
+        })
     }
 
     pub(crate) fn encode(&self, content_type: ContentType) -> Result<Vec<u8>, ServiceFault> {
