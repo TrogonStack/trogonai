@@ -109,6 +109,7 @@ impl DriverFixture {
             user_dialog_handler: None,
             oauth_token_handler: None,
             host_auth_token_handler: None,
+            host: crate::remote_control::HostState::default(),
             session: None,
             mirror_flush: None,
             deferred_messages: VecDeque::new(),

@@ -356,6 +356,8 @@ where
     user_dialog_handler: Option<Arc<dyn crate::UserDialogHandler>>,
     oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
     host_auth_token_handler: Option<Arc<dyn crate::HostAuthTokenHandler>>,
+    /// The `uiHost` that `ClientHandle` installs.
+    host: crate::remote_control::HostState,
     session: Option<crate::SessionRuntime<F>>,
     mirror_flush: Option<MirrorBarrier>,
     deferred_messages: VecDeque<(Message, Option<MirrorBarrier>)>,
@@ -588,6 +590,7 @@ pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
     /// The CLI path to check against the minimum version, for a transport that runs the CLI itself.
     pub version_check: Option<String>,
     pub latest_commands: LatestCommands,
+    pub host: crate::remote_control::HostState,
 }
 
 /// The initialize request and the callbacks it registers, built before any transport exists so that a bad
@@ -724,6 +727,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         initialization,
         version_check,
         latest_commands,
+        host,
     } = input;
     transport.connect().await?;
     let driver = Driver {
@@ -757,6 +761,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         user_dialog_handler: options.user_dialog_handler,
         oauth_token_handler: options.oauth_token_handler,
         host_auth_token_handler: options.host_auth_token_handler,
+        host,
         session,
         mirror_flush: None,
         deferred_messages: VecDeque::new(),
@@ -1301,6 +1306,36 @@ where
                             wire::success_response(&response_id, crate::auth_token::host_auth_wire_json(&token))
                                 .map(Some)
                         }
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::Ui { subtype, payload } => {
+                let handler = self
+                    .host
+                    .ui_host()
+                    .filter(|_| !python)
+                    .and_then(|host| host.handler(&subtype));
+                let Some(handler) = handler else {
+                    if let Some(response) = wire::unsupported_response(&id, &subtype, style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::UiRequest {
+                    payload,
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "uiHost callback timed out").map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match handler.call(request).await {
+                        Ok(Some(response)) => wire::success_response(&response_id, response).map(Some),
+                        Ok(None) => wire::success_without_response(&response_id).map(Some),
                         Err(error) => wire::handler_error_response(&response_id, &error, style),
                     }
                 });

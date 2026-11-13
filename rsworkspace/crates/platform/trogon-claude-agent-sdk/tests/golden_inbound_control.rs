@@ -23,26 +23,51 @@ use tokio::{
     sync::oneshot,
 };
 use trogon_claude_agent_sdk::{
-    ArgvStyle, CallbackError, ClaudeAgentOptions, ClaudeSdkClient, ComputerFolder, DenialDisposition, DialogKind,
-    DuplicateControlRequests, ElicitationMode, ElicitationRequest, ElicitationResponse, FeatureSupport, HostAuthToken,
-    HostAuthTokenRequest, JsonObject, MatchedAskRule, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
-    PermissionDecision, PermissionDecisionClassification, PermissionMode, PermissionUpdate,
-    PermissionUpdateDestination, ToolPermissionRequest, ToolUseId, UserDialogRequest, UserDialogResponse,
+    ArgvStyle, CallbackError, ClaudeAgentOptions, ClaudeSdkClient, ClientHandle, ComputerFolder, DenialDisposition,
+    DialogKind, DuplicateControlRequests, ElicitationMode, ElicitationRequest, ElicitationResponse, FeatureSupport,
+    HostAuthToken, HostAuthTokenRequest, JsonObject, MatchedAskRule, OAuthTokenRequest, OAuthTokenResponse,
+    OAuthTokenState, PermissionDecision, PermissionDecisionClassification, PermissionMode, PermissionUpdate,
+    PermissionUpdateDestination, ToolPermissionRequest, ToolUseId, UiHost, UiRequest, UserDialogRequest,
+    UserDialogResponse,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
 
+#[path = "support/captured.rs"]
+mod captured;
 #[path = "support/scripted_process.rs"]
 mod scripted_process;
 
+use captured::Captured;
 use scripted_process::{ScriptedProcessHarness, ScriptedProcessSpawner};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+const UI: &str = include_str!("fixtures/auth_callbacks/ui_host.json");
 
 /// One thing the scripted CLI does after `initialize` is answered.
 enum Step {
     Send(Value),
     Wait(u64),
+    /// Holds the steps after it until the scripted CLI answers a control request after `initialize`, so a test can
+    /// finish its handle calls before the CLI sends anything.
+    Hold,
+}
+
+/// Plays `steps`, or sets the ones after a [`Step::Hold`] aside in `held`.
+async fn play(stdout: &mut DuplexStream, steps: Vec<Step>, held: &mut Option<Vec<Step>>) -> Result<(), std::io::Error> {
+    let mut steps = steps.into_iter();
+    while let Some(step) = steps.next() {
+        match step {
+            Step::Send(frame) => write(stdout, &frame).await?,
+            Step::Wait(millis) => tokio::time::sleep(Duration::from_millis(millis)).await,
+            Step::Hold => {
+                *held = Some(steps.collect());
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn write(stdout: &mut DuplexStream, frame: &Value) -> Result<(), std::io::Error> {
@@ -65,6 +90,7 @@ async fn serve(
     let stderr = process.stderr;
     let mut responses = Vec::new();
     let mut steps = Some(steps);
+    let mut held = None;
     let mut report = Some(report);
     loop {
         let grace = match (&steps, responses.len() >= expected) {
@@ -92,12 +118,12 @@ async fn serve(
             if frame["request"]["subtype"] == "initialize"
                 && let Some(steps) = steps.take()
             {
-                for step in steps {
-                    match step {
-                        Step::Send(frame) => write(&mut stdout, &frame).await?,
-                        Step::Wait(millis) => tokio::time::sleep(Duration::from_millis(millis)).await,
-                    }
-                }
+                play(&mut stdout, steps, &mut held).await?;
+            }
+            if frame["request"]["subtype"] != "initialize"
+                && let Some(steps) = held.take()
+            {
+                play(&mut stdout, steps, &mut held).await?;
             }
         } else if frame["type"] == "control_response" && report.is_some() {
             responses.push(line);
@@ -114,10 +140,23 @@ async fn serve(
 
 /// Connects a client with `options`, plays `steps` and returns the response lines the SDK wrote.
 async fn run(
-    mut options: ClaudeAgentOptions,
+    options: ClaudeAgentOptions,
     steps: Vec<Step>,
     expected: usize,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    run_with(options, steps, expected, |_: ClientHandle| async { Ok(()) }).await
+}
+
+/// [`run`] with `act` called on the connected client's handle before the response lines are collected.
+async fn run_with<Fut>(
+    mut options: ClaudeAgentOptions,
+    steps: Vec<Step>,
+    expected: usize,
+    act: impl FnOnce(ClientHandle) -> Fut,
+) -> Result<Vec<String>, Box<dyn std::error::Error>>
+where
+    Fut: std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>,
+{
     let (process, harness) = ScriptedProcessSpawner::new();
     let (report, reported) = oneshot::channel();
     let server = tokio::spawn(serve(harness, steps, expected, report));
@@ -134,6 +173,7 @@ async fn run(
         },
     )
     .await?;
+    act(client.handle()).await?;
     let responses = reported.await?;
     client.disconnect().await?;
     server.await??;
@@ -709,5 +749,91 @@ async fn every_dialog_kind_reaches_the_handler_and_a_null_answer_writes_nothing(
             ("d3".to_owned(), "silent".to_owned()),
         ]
     );
+    Ok(())
+}
+
+/// A `uiHost` whose `copy`, `promptRead` and `readSelection` answer and whose `promptPaint` fails; `promptFill` and
+/// `promptSuggest` are absent.
+fn ui_host(seen: &Arc<Mutex<Vec<(Value, bool)>>>) -> UiHost {
+    let handler = |seen: &Arc<Mutex<Vec<(Value, bool)>>>, answer: Result<Option<Value>, &'static str>| {
+        let seen = Arc::clone(seen);
+        let handler: Arc<dyn trogon_claude_agent_sdk::UiHandler> = Arc::new(move |request: UiRequest| {
+            if let Ok(mut seen) = seen.lock() {
+                seen.push((Value::Object(request.payload), request.signal.is_cancelled()));
+            }
+            let answer = answer.clone();
+            async move { answer.map_err(|message| CallbackError::Failed(message.into())) }
+        });
+        handler
+    };
+    UiHost {
+        copy: Some(handler(seen, Ok(Some(json!({"copied":true}))))),
+        prompt_read: Some(handler(seen, Ok(None))),
+        read_selection: Some(handler(seen, Ok(Some(Value::Null)))),
+        prompt_paint: Some(handler(seen, Err("paint failed"))),
+        ..UiHost::default()
+    }
+}
+
+#[tokio::test]
+async fn ui_requests_reach_the_matching_host_method() -> TestResult {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let host = ui_host(&seen);
+    let responses = run_with(
+        options(ArgvStyle::TypeScript),
+        vec![
+            Step::Hold,
+            request("u1", json!({"subtype":"ui_copy","text":"hi"})),
+            Step::Wait(100),
+            request("u2", json!({"subtype":"ui_prompt_read"})),
+            Step::Wait(100),
+            request("u3", json!({"subtype":"ui_prompt_fill","text":"x"})),
+            request("u4", json!({"subtype":"ui_prompt_suggest"})),
+            Step::Wait(100),
+            request("u5", json!({"subtype":"ui_read_selection"})),
+            Step::Wait(100),
+            request("u6", json!({"subtype":"ui_prompt_paint","rows":[1]})),
+        ],
+        6,
+        |handle: ClientHandle| async move {
+            handle.set_ui_host(Some(host));
+            handle.set_max_thinking_tokens(None).await?;
+            Ok::<(), Box<dyn std::error::Error>>(())
+        },
+    )
+    .await?;
+    assert_eq!(responses, Captured::parse(UI)?.strings("ui", "responses")?);
+    assert_eq!(
+        *seen.lock().map_err(|_| "lock poisoned")?,
+        [
+            (json!({"text":"hi"}), false),
+            (json!({}), false),
+            (json!({}), false),
+            (json!({"rows":[1]}), false),
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_answers_ui_requests_as_unsupported_even_with_a_host_set() -> TestResult {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let host = ui_host(&seen);
+    let responses = run_with(
+        options(ArgvStyle::Python),
+        vec![Step::Hold, request("p4", json!({"subtype":"ui_copy","text":"hi"}))],
+        1,
+        |handle: ClientHandle| async move {
+            handle.set_ui_host(Some(host));
+            handle.set_max_thinking_tokens(None).await?;
+            Ok::<(), Box<dyn std::error::Error>>(())
+        },
+    )
+    .await?;
+    assert_eq!(
+        responses,
+        Captured::parse(UI)?.strings("python_unsupported_ui", "responses")?
+    );
+    assert!(seen.lock().map_err(|_| "lock poisoned")?.is_empty());
     Ok(())
 }

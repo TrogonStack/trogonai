@@ -46,6 +46,7 @@ pub struct ClientHandle {
     /// The first initialize response, which `reinitialize` does not replace; `None` when the reply had none.
     initialization: std::sync::Arc<std::sync::OnceLock<Option<serde_json::Value>>>,
     latest_commands: driver::LatestCommands,
+    host: crate::remote_control::HostState,
     style: crate::ArgvStyle,
 }
 
@@ -392,9 +393,11 @@ impl ClaudeSdkClient {
             closed,
             initialization: std::sync::Arc::default(),
             latest_commands: driver::LatestCommands::default(),
+            host: crate::remote_control::HostState::default(),
             style: options.argv_style,
         };
         let latest_commands = handle.latest_commands.clone();
+        let host = handle.host.clone();
         let driver = driver::spawn(driver::SpawnOptions {
             options,
             session,
@@ -407,6 +410,7 @@ impl ClaudeSdkClient {
             initialization,
             version_check,
             latest_commands,
+            host,
         })
         .await?;
         let mut runtime = ClientRuntime {
@@ -710,6 +714,12 @@ impl ClientHandle {
             None | Some(serde_json::Value::Null) => Some(serde_json::Value::Object(JsonObject::new())),
             response => response,
         }))
+    }
+
+    /// TypeScript `setUiHost`: the host that answers the CLI's `ui_*` requests; `None` removes it. A request whose
+    /// method is absent is answered as unsupported. `ArgvStyle::Python` never reaches it.
+    pub fn set_ui_host(&self, host: Option<crate::UiHost>) {
+        self.host.set_ui_host(host);
     }
 
     /// TypeScript `setMaxThinkingTokens(tokens)`: `thinking_display` is left out.

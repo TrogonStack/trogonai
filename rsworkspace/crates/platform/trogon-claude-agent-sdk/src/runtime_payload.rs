@@ -259,6 +259,11 @@ pub(crate) enum CallbackResponse<'a, T> {
         request_id: &'a str,
         response: T,
     },
+    /// A handler that returned `undefined`: `JSON.stringify` leaves the `response` key out.
+    #[serde(rename = "success")]
+    SuccessWithoutResponse {
+        request_id: &'a str,
+    },
     Error {
         request_id: &'a str,
         error: &'a str,

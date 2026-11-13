@@ -3693,6 +3693,41 @@
         "src/process_options.rs",
         "src/process_transport.rs"
       ]
+    },
+    {
+      "id": "c27-ui-host",
+      "concept": "A uiHost draws the CLI's prompt",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no uiHost option; they answer the request with their unsupported subtype error."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "if(e.request.subtype===\"ui_copy\"&&this.uiHost?.copy){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 789,
+        "sha256": "c0b26e1131ba4cbeebd7abf540545518582821f7c034a4367524e72b6f5d5367"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript routes ui_copy, ui_prompt_read, ui_prompt_fill, ui_prompt_paint, ui_prompt_suggest and ui_read_selection to the matching uiHost method with the request minus its subtype and the signal; the method's return value is the response, and an undefined return answers success without a response key. A subtype whose method is absent falls through to the unsupported request error."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_inbound_control::ui_requests_reach_the_matching_host_method",
+        "golden_inbound_control::python_answers_ui_requests_as_unsupported_even_with_a_host_set"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/remote_control.rs",
+        "src/ui_host.rs",
+        "src/wire.rs"
+      ]
     }
   ]
 }

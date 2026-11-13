@@ -1178,3 +1178,13 @@ pub(crate) const RAW_JSON_MAX_DEPTH: usize = 200;
 
 /// The prefix of the placeholder text a request id that a `Value` cannot hold stands for until it is written.
 pub(crate) const PYTHON_ID_MARKER_PREFIX: &str = "\u{0}pyid:";
+
+/// The `uiHost` subtypes the driver routes to `UiHost`.
+pub(crate) const UI_SUBTYPES: [&str; 6] = [
+    "ui_copy",
+    "ui_prompt_read",
+    "ui_prompt_fill",
+    "ui_prompt_paint",
+    "ui_prompt_suggest",
+    "ui_read_selection",
+];

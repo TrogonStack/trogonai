@@ -156,6 +156,11 @@ kind reaches the handler and `supported_dialog_kinds` is only advertised to the
 CLI. Without a handler an elicitation is declined and a dialog is left for
 another client to answer.
 
+Under the default TypeScript dialect, `ClientHandle::set_ui_host` takes a
+`UiHost` whose methods answer the CLI's six `ui_*` requests; a missing method
+falls through to the unsupported subtype error. Under `ArgvStyle::Python` every
+`ui_*` request gets that error.
+
 [The feature-connect example](examples/feature_connect.rs) checks blocking-hook
 registration and MCP connection without a prompt. It refuses startup when the
 installed CLI does not advertise blocking-hook support. Verification with CLI

@@ -58,6 +58,11 @@ pub(crate) enum IncomingControl {
     HostAuthTokenRefresh {
         status: Option<Value>,
     },
+    /// A `ui_*` subtype, with the request minus its `subtype`.
+    Ui {
+        subtype: String,
+        payload: JsonObject,
+    },
     Unsupported {
         subtype: String,
     },
@@ -325,6 +330,11 @@ pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<
             } else if wire.request.subtype == "host_auth_token_refresh" {
                 let wire: HostAuthTokenWire = decode(wire.request.data)?;
                 IncomingControl::HostAuthTokenRefresh { status: wire.status }
+            } else if crate::constants::UI_SUBTYPES.contains(&wire.request.subtype.as_str()) {
+                IncomingControl::Ui {
+                    subtype: wire.request.subtype,
+                    payload: wire.request.data,
+                }
             } else {
                 IncomingControl::Unsupported {
                     subtype: wire.request.subtype,
@@ -538,6 +548,16 @@ pub(crate) fn success_response<T: Serialize>(id: &ControlRequestId, response: T)
         },
     })
     .map_err(ProtocolError::from)
+}
+
+/// The success frame of a handler that returned `undefined`, which `JSON.stringify` writes without `response`.
+pub(crate) fn success_without_response(id: &ControlRequestId) -> Result<Value, ProtocolError> {
+    let frame: runtime_payload::OutboundFrame<'_, Value> = runtime_payload::OutboundFrame::Response {
+        response: runtime_payload::CallbackResponse::SuccessWithoutResponse {
+            request_id: id.as_str(),
+        },
+    };
+    serde_json::to_value(frame).map_err(ProtocolError::from)
 }
 
 fn error_frame(id: &ControlRequestId, message: &str, error_code: Option<&str>) -> Result<Value, ProtocolError> {

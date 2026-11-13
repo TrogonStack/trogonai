@@ -80,6 +80,7 @@ mod python_json;
 mod python_json_value;
 mod queue_capacity;
 mod raw_json_id;
+mod remote_control;
 #[cfg(unix)]
 mod run_as;
 mod runtime_options;
@@ -159,6 +160,7 @@ mod tool_rule;
 mod tool_use_id;
 mod transcript_mirror;
 mod transport;
+mod ui_host;
 mod usd_budget;
 mod user_input;
 mod version_check;
@@ -331,6 +333,7 @@ pub use tool_rule::ToolRule;
 pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
 pub use transport::Transport;
+pub use ui_host::{UiFuture, UiHandler, UiHost, UiRequest};
 pub use upstream::hooks::{EXIT_REASONS, ExitReason, HOOK_EVENTS, HookInput, HookJSONOutput};
 pub use upstream::settings::Settings;
 pub use upstream::settings_resolution::{
