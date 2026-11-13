@@ -1,6 +1,11 @@
-use std::path::Path;
+use std::{
+    ffi::OsStr,
+    path::{Component, Path},
+};
 
 use unicode_normalization::UnicodeNormalization;
+
+use crate::adapters::{EnvironmentVariable, SystemEnvironment};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SessionProjectKey(String);
@@ -38,22 +43,6 @@ impl SessionProjectKey {
         let absolute = absolute.to_str().ok_or(SessionProjectKeyError::NotUnicode)?;
         let normalized = platform_nfc(&without_verbatim_prefix(absolute), crate::SummaryDialect::TypeScript);
         Self::new(sanitize_path(&normalized, crate::SummaryDialect::TypeScript))
-    }
-
-    /// Upstream TypeScript `Wn(directory, env)` through a filesystem adapter: the path is resolved lexically, its real
-    /// path is taken when that succeeds (the lexical path stays otherwise), and `CLAUDE_CODE_PROJECT_DIR_NAME` names the
-    /// project while `config_dir` is set.
-    pub(crate) fn for_directory_ts_with_filesystem<F: crate::adapters::CanonicalizePath<Error = std::io::Error>>(
-        directory: &Path,
-        filesystem: &F,
-        config_dir: Option<&str>,
-        name_override: Option<&str>,
-    ) -> Result<Self, SessionProjectKeyError> {
-        let lexical = lexical_resolve(directory);
-        let resolved = filesystem.canonicalize(&lexical).unwrap_or(lexical);
-        let text = resolved.to_string_lossy();
-        let canonical = platform_nfc(&without_verbatim_prefix(&text), crate::SummaryDialect::TypeScript);
-        Self::new(project_name_with(&canonical, config_dir, name_override))
     }
 
     pub fn as_str(&self) -> &str {
@@ -158,7 +147,6 @@ pub(crate) fn canonicalize_lenient_in(directory: &Path, dialect: crate::SummaryD
 /// Node `path.resolve(directory ?? ".")`: absolute against the current directory, with `.` and `..` folded
 /// lexically and no trailing separator.
 pub(crate) fn lexical_resolve(directory: &Path) -> std::path::PathBuf {
-    use std::path::Component;
     let directory = if directory.as_os_str().is_empty() {
         Path::new(".")
     } else {
@@ -210,8 +198,13 @@ pub(crate) fn project_name_with(canonical: &str, config_dir: Option<&str>, name_
 
 /// Upstream `_o` / `Wn(directory)`: [`project_name_with`] over the process environment.
 pub(crate) fn project_name_ts(canonical: &str) -> String {
-    let config_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
-    let name = std::env::var("CLAUDE_CODE_PROJECT_DIR_NAME").ok();
+    let unicode_var = |key: &str| {
+        SystemEnvironment
+            .var_os(OsStr::new(key))
+            .and_then(|value| value.into_string().ok())
+    };
+    let config_dir = unicode_var("CLAUDE_CONFIG_DIR");
+    let name = unicode_var("CLAUDE_CODE_PROJECT_DIR_NAME");
     project_name_with(canonical, config_dir.as_deref(), name.as_deref())
 }
 

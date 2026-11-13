@@ -837,3 +837,39 @@ pub(crate) const MDM_REREAD_WAIT_MS: i128 = 1_000;
 
 /// Unanswered reads in a row after which the slow idle interval applies again.
 pub(crate) const MDM_UNANSWERED_RETRY_LIMIT: u32 = 4;
+
+/// Connection info fields the type names; every other `initialize` response field is kept as an additional field.
+pub(crate) const CONNECTION_INFO_FIELDS: &[&str] = &[
+    "commands",
+    "models",
+    "agents",
+    "account",
+    "output_style",
+    "available_output_styles",
+    "hooks_applied",
+    "hook_on_failure_supported",
+    "plugins_applied",
+    "managed_settings_applied",
+    "sdk_mcp_manifests_parked",
+    "claude_code_version",
+    "fast_mode_state",
+    "fast_mode_disabled_reason",
+];
+
+/// The base-36 digits of JavaScript `Number.prototype.toString(36)`, also used for the hex of request ids.
+pub(crate) const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+
+/// TypeScript: how long `initialize` waits when blocking hooks or managed settings are part of the request.
+pub(crate) const TYPESCRIPT_INITIALIZE_TIMEOUT: Duration = Duration::from_millis(660_000);
+
+/// TypeScript `qet`: the wait for the process to exit on its own after stdin closes.
+pub(crate) const TYPESCRIPT_CLOSE_GRACE: Duration = Duration::from_millis(2000);
+
+/// TypeScript: the wait between SIGTERM and SIGKILL.
+pub(crate) const TYPESCRIPT_KILL_DELAY: Duration = Duration::from_millis(5000);
+
+/// TypeScript `Yet`: how long stderr may stay open after the exit.
+pub(crate) const STDERR_SETTLE: Duration = Duration::from_millis(200);
+
+/// Python: each wait of its close sequence.
+pub(crate) const PYTHON_CLOSE_WAIT: Duration = Duration::from_secs(5);

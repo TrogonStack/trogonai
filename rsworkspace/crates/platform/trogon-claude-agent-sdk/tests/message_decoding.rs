@@ -1,4 +1,5 @@
 #![cfg(all(unix, feature = "test-support"))]
+#![allow(clippy::panic)]
 #![cfg_attr(
     dylint_lib = "trogon_dylint_lints",
     allow(

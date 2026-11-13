@@ -5,7 +5,7 @@
 //! `import_session_to_store`. Project keys use the TypeScript sanitization the transcript mirror uses, so they match
 //! what a mirrored or imported session was stored under.
 
-use crate::constants::{DEFAULT_IMPORT_BATCH, LIST_LOAD_CONCURRENCY, LITE_READ_BUF_SIZE, MAX_IMPORT_BYTES};
+use crate::constants::{DEFAULT_IMPORT_BATCH, LIST_LOAD_CONCURRENCY, MAX_IMPORT_BYTES};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -18,87 +18,23 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
     ChainAlgorithm, JsonObject, MessageOptions, MessagePage, SdkSessionInfo, SessionEntry, SessionFiles, SessionId,
-    SessionKey, SessionKeyError, SessionMessage, SessionMutationError, SessionProjectKey, SessionProjectKeyError,
-    SessionStore, SessionStoreError, SessionStoreOperation, SessionSubpath, SummaryDialect,
-    project_key_for_directory_in,
+    SessionKey, SessionKeyError, SessionMessage, SessionMutationError, SessionProjectKey, SessionStore,
+    SessionStoreError, SessionStoreOperation, SessionSubpath, SummaryDialect, project_key_for_directory_in,
     session_files::{
-        LiteSessionFile, extract_first_prompt_from_head, parse_session_info_from_lite, read_agent_metadata_sidecar,
-        sort_page, valid_uuid,
+        extract_first_prompt_from_head, parse_session_info_from_lite, read_agent_metadata_sidecar, sort_page,
+        valid_uuid,
     },
     session_mutations::{build_fork_lines, iso_now, partition_fork_entry, py_strip, sanitize_unicode},
     session_project_key::canonicalize_lenient_in,
     session_prompt::iso_to_epoch_ms,
+    session_store_shared::{
+        ImportOptions, SessionStoreHelperError, StoreListOptions, invalid_session, jsonl_to_lite, main_key, not_found,
+    },
     session_summary::summary_entry_to_sdk_info,
     session_transcript::{
         entries_to_session_messages, entries_to_subagent_messages, is_transcript_entry, parent_ids_from_agent_metadata,
     },
 };
-
-#[derive(Debug, thiserror::Error)]
-pub enum SessionStoreHelperError {
-    #[error(transparent)]
-    Mutation(#[from] SessionMutationError),
-    #[error(transparent)]
-    Store(#[from] SessionStoreError),
-    #[error(transparent)]
-    Project(#[from] SessionProjectKeyError),
-    #[error(transparent)]
-    Key(#[from] SessionKeyError),
-    #[error("session store implements no {0}; it cannot serve this helper")]
-    UnsupportedStore(&'static str),
-    /// TypeScript `listSessions` on a store with neither `listSessionSummaries` nor `listSessions`.
-    #[error(
-        "sessionStore.listSessions is not implemented -- cannot list sessions. Provide a store with a listSessions() method."
-    )]
-    ListNotImplemented,
-    /// TypeScript `listSubagents` on a store without `listSubkeys`.
-    #[error(
-        "sessionStore.listSubkeys is not implemented -- cannot list subagents. Provide a store with a listSubkeys() method."
-    )]
-    ListSubkeysNotImplemented,
-    #[error(transparent)]
-    Messages(#[from] crate::MessagesError),
-    #[error("session file I/O failed")]
-    Io(#[source] std::io::Error),
-    #[error("session transcript line is not valid JSON")]
-    Encoding(#[source] serde_json::Error),
-    #[error("session transcript line is not a JSON object")]
-    NotObject,
-}
-
-/// Arguments of [`list_sessions_from_store`].
-#[derive(Clone, Debug, Default)]
-pub struct StoreListOptions {
-    /// Project directory the key is derived from; the current directory when empty.
-    pub directory: Option<PathBuf>,
-    pub limit: Option<usize>,
-    pub offset: usize,
-    /// How the store's summary sidecars were folded; match the dialect the store was built with.
-    pub summary_dialect: SummaryDialect,
-}
-
-/// Arguments of [`import_session_to_store`].
-#[derive(Clone, Debug)]
-pub struct ImportOptions {
-    pub directory: Option<PathBuf>,
-    pub include_subagents: bool,
-    /// Entries per `append`; zero means the default of 500.
-    pub batch_size: usize,
-    /// Whose import rules apply: TypeScript keys the session by the project directory it names, Python by the name of
-    /// the on-disk project directory the session was found in.
-    pub dialect: SummaryDialect,
-}
-
-impl Default for ImportOptions {
-    fn default() -> Self {
-        Self {
-            directory: None,
-            include_subagents: true,
-            batch_size: DEFAULT_IMPORT_BATCH,
-            dialect: SummaryDialect::TypeScript,
-        }
-    }
-}
 
 fn project_key(directory: Option<&Path>) -> Result<SessionProjectKey, SessionStoreHelperError> {
     Ok(project_key_for_directory_in(
@@ -114,22 +50,6 @@ fn project_path(directory: Option<&Path>) -> String {
             .unwrap_or_else(|| Path::new(".")),
         crate::SummaryDialect::Python,
     )
-}
-
-pub(crate) fn main_key(project: SessionProjectKey, session_id: &str) -> Result<SessionKey, SessionStoreHelperError> {
-    Ok(SessionKey::new(project, SessionId::from(session_id))?)
-}
-
-pub(crate) fn invalid_session(session_id: &str) -> SessionStoreHelperError {
-    SessionMutationError::InvalidSessionId(session_id.to_owned()).into()
-}
-
-pub(crate) fn not_found(session_id: &str) -> SessionStoreHelperError {
-    SessionMutationError::NotFound {
-        session_id: session_id.to_owned(),
-        directory: None,
-    }
-    .into()
 }
 
 /// Upstream `_entries_to_jsonl`: one compact line per entry with `type` hoisted first, because the lite parse scans
@@ -152,25 +72,6 @@ fn entries_to_jsonl(entries: &[SessionEntry]) -> String {
         out.push_str("}\n");
     }
     out
-}
-
-/// Upstream `_jsonl_to_lite`: the same head and tail slices the disk path would read.
-pub(crate) fn jsonl_to_lite(jsonl: &str, mtime: u64) -> LiteSessionFile {
-    let bytes = jsonl.as_bytes();
-    let size = bytes.len();
-    let window = LITE_READ_BUF_SIZE as usize;
-    let head = String::from_utf8_lossy(&bytes[..size.min(window)]).into_owned();
-    let tail = if size > window {
-        String::from_utf8_lossy(&bytes[size - window..]).into_owned()
-    } else {
-        head.clone()
-    };
-    LiteSessionFile {
-        mtime,
-        size: size as u64,
-        head,
-        tail,
-    }
 }
 
 /// Upstream `_mtime_from_jsonl_tail`: the last entry's timestamp, else the current time.
