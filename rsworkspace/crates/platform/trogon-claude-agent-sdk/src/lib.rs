@@ -76,6 +76,7 @@ mod plugin;
 mod process_options;
 mod process_transport;
 mod prompt;
+mod python_int;
 mod python_json;
 mod python_json_value;
 mod queue_capacity;

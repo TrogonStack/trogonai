@@ -175,10 +175,12 @@ no elicitation or dialog handler, auth callback or work secret answerer), a stre
 input closes stdin as soon as it is written. Otherwise stdin closes when the run
 ends, and only the frames decide that, per dialect (`src/run_end.rs`). Under
 TypeScript a result ends the run when the session reported no state or is idle, and
-otherwise `idle` does, or the ceiling (`limits.run_end_timeout`, the
-`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` default) when no `idle` follows; reported tasks
+otherwise `idle` does, or the ceiling (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, read
+from `options.env` or the environment as the dialect's SDK does, 600000 ms by default and
+disabled by 0) when no `idle` follows; reported tasks
 and queued turns play no part. `query()` with a prompt is `sdk.mjs`'s single user turn,
-which closes stdin the moment its run ends. Under `ArgvStyle::Python` the prompt waits
+which closes stdin the moment its run ends. With a session store, a result reaches that machine only after its transcript flush, as in both
+readers; the ceiling and a finished input do not wait for a flush. Under `ArgvStyle::Python` the prompt waits
 the same way, but a tracked `local_agent` or `local_workflow` task still in flight keeps
 the run open at a result, at `idle` and at the ceiling. `query()` and the client keep
 yielding what the CLI sends after the result until the CLI exits; only `query_turn()`

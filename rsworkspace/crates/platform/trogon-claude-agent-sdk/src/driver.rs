@@ -15,6 +15,7 @@ use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
     PermissionDecision, ProtocolError, StderrTail, ToolPermissionHandler, Transport,
     constants::TYPESCRIPT_INITIALIZE_TIMEOUT,
+    python_int::{PythonInt, python_int},
     wire::{
         self, ControlResponse, Frame, IncomingControl,
         runtime_payload::{
@@ -302,6 +303,10 @@ where
     session: Option<crate::SessionRuntime<F>>,
     mirror_flush: Option<MirrorBarrier>,
     deferred_messages: VecDeque<(Message, Option<MirrorBarrier>)>,
+    /// Frames the run-end machine has not seen yet. Both upstream readers wait for the transcript flush before they
+    /// handle a result, so the machine sees a result, and every frame after it, only once that flush finished. The flag
+    /// marks a result that starts a flush.
+    held_observations: VecDeque<(Message, bool)>,
     next_id: u64,
     /// The `mcp_message` ids of the line just read, until the Python `mcp_message` handler takes them.
     wire_ids: Option<crate::McpWireIds>,
@@ -542,6 +547,8 @@ pub(crate) struct Initialization {
     hook_callbacks: HashMap<String, HookCallback>,
     expectations: InitializeExpectations,
     timeout: Option<Duration>,
+    /// The run-end ceiling, `None` when disabled.
+    run_end_ceiling: Option<Duration>,
 }
 
 impl Initialization {
@@ -565,6 +572,7 @@ impl Initialization {
             hook_callbacks,
             expectations,
             timeout,
+            run_end_ceiling: crate::run_end::configured_ceiling(options, environment),
         })
     }
 }
@@ -582,39 +590,6 @@ pub(crate) fn python_initialize_timeout(value: Option<std::ffi::OsString>) -> Re
     Ok(match milliseconds {
         PythonInt::Negative => floor,
         PythonInt::Positive(milliseconds) => Duration::from_millis(milliseconds).max(floor),
-    })
-}
-
-enum PythonInt {
-    Negative,
-    /// Saturated at `u64::MAX`, which is longer than any wait.
-    Positive(u64),
-}
-
-/// The values Python's `int(text)` accepts in base 10: surrounding whitespace, one sign, and ASCII digits with
-/// single underscores between them.
-fn python_int(text: &str) -> Option<PythonInt> {
-    let text = text.trim();
-    let (negative, digits) = match text.as_bytes().first() {
-        Some(b'-') => (true, &text[1..]),
-        Some(b'+') => (false, &text[1..]),
-        _ => (false, text),
-    };
-    if digits.is_empty() || digits.starts_with('_') || digits.ends_with('_') || digits.contains("__") {
-        return None;
-    }
-    let mut value = 0_u64;
-    for byte in digits.bytes() {
-        match byte {
-            b'_' => {}
-            b'0'..=b'9' => value = value.saturating_mul(10).saturating_add(u64::from(byte - b'0')),
-            _ => return None,
-        }
-    }
-    Some(if negative && value > 0 {
-        PythonInt::Negative
-    } else {
-        PythonInt::Positive(value)
     })
 }
 
@@ -707,11 +682,12 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         session,
         mirror_flush: None,
         deferred_messages: VecDeque::new(),
+        held_observations: VecDeque::new(),
         next_id: 0,
         wire_ids: None,
         state: State::Initializing,
         run_state: RunState::default(),
-        run_end: crate::run_end::RunEnd::new(options.argv_style, options.limits.run_end_timeout.as_duration()),
+        run_end: crate::run_end::RunEnd::new(options.argv_style, initialization.run_end_ceiling),
         argv_style: options.argv_style,
         message_decoding: options.message_decoding,
         js_runtime: options.js_runtime,
@@ -841,11 +817,9 @@ where
             if let Some(error) = self.expired_control() {
                 return Err(error);
             }
-            if self.run_end.close_due() && self.mirror_flush.is_none() {
+            if self.run_end.close_due() {
+                self.run_end.closing_input();
                 self.end_input().await;
-            }
-            if self.input_ended {
-                self.run_end.input_closed();
             }
             let deadline = self.pending.values().filter_map(|request| request.deadline).min();
             let run_deadline = self.run_end.deadline();
@@ -862,6 +836,7 @@ where
                 message = self.transport.read_message(), if reading => {
                     let Some(message) = message? else {
                         self.finish_mirror().await?;
+                        self.run_end.reader_gone();
                         return if matches!(self.state, State::Running | State::Initializing) || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
                     };
                     self.wire_ids = self.transport.take_wire_ids();
@@ -870,6 +845,7 @@ where
                 }
                 flushed = async { match self.mirror_flush.as_mut() { Some(flush) => flush.await, None => pending().await } }, if self.mirror_flush.is_some() => {
                     self.mirror_flush = None;
+                    self.release_observations();
                     let failures = flushed?;
                     for failure in failures { self.publish(failure.into_message().map_err(ProtocolError::from)?)?; }
                     self.publish_deferred()?;
@@ -1589,8 +1565,13 @@ where
                         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(commands.clone());
                 }
                 self.run_state.observe(&message, queued_limit, task_limit)?;
-                let needs = self.bidirectional_needs();
-                self.run_end.observe(&message, needs);
+                let flushing = matches!(message, Message::Result(_)) && self.session.is_some();
+                if flushing || self.mirror_flush.is_some() || !self.held_observations.is_empty() {
+                    self.held_observations.push_back((message.clone(), flushing));
+                } else {
+                    let needs = self.bidirectional_needs();
+                    self.run_end.observe(&message, needs);
+                }
                 // Both SDKs drop the state changes the CLI sent only because the SDK asked for them.
                 if let Message::System(system) = &message
                     && system.subtype == "session_state_changed"
@@ -1987,9 +1968,30 @@ where
         Ok(())
     }
 
+    /// A flush finished: the run-end machine sees the result that started it and the frames after it, up to the
+    /// next result that starts a flush of its own.
+    fn release_observations(&mut self) {
+        let mut released_flush = false;
+        while let Some((_, flushing)) = self.held_observations.front() {
+            if *flushing {
+                if released_flush {
+                    break;
+                }
+                released_flush = true;
+            }
+            let Some((message, _)) = self.held_observations.pop_front() else {
+                break;
+            };
+            let needs = self.bidirectional_needs();
+            self.run_end.observe(&message, needs);
+        }
+    }
+
     async fn finish_mirror(&mut self) -> Result<(), Error> {
         while let Some(flush) = self.mirror_flush.take() {
-            for failure in flush.await? {
+            let failures = flush.await?;
+            self.release_observations();
+            for failure in failures {
                 self.publish(failure.into_message().map_err(ProtocolError::from)?)?;
             }
             self.publish_deferred()?;

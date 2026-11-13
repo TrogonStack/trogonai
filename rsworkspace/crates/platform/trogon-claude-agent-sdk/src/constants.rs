@@ -1188,3 +1188,10 @@ pub(crate) const UI_SUBTYPES: [&str; 6] = [
     "ui_prompt_suggest",
     "ui_read_selection",
 ];
+
+/// The variable both upstream SDKs read the run-end ceiling from.
+pub(crate) const RUN_END_CEILING_ENV: &str = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS";
+/// The run-end ceiling when the variable is absent or unusable.
+pub(crate) const RUN_END_DEFAULT_CEILING_MS: u64 = 600_000;
+/// The longest run-end ceiling both upstream SDKs honor (2^31 - 1 ms), because a timer cannot run longer.
+pub(crate) const RUN_END_MAX_CEILING_MS: u64 = (1 << 31) - 1;

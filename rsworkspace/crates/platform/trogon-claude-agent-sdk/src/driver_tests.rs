@@ -113,11 +113,12 @@ impl DriverFixture {
             session: None,
             mirror_flush: None,
             deferred_messages: VecDeque::new(),
+            held_observations: VecDeque::new(),
             next_id: 0,
             wire_ids: None,
             state: State::Idle,
             run_state: RunState::default(),
-            run_end: crate::run_end::RunEnd::new(crate::ArgvStyle::TypeScript, Duration::from_secs(600)),
+            run_end: crate::run_end::RunEnd::new(crate::ArgvStyle::TypeScript, Some(Duration::from_secs(600))),
             argv_style: crate::ArgvStyle::TypeScript,
             last_error_result: None,
         };
@@ -395,6 +396,33 @@ async fn eof_mirror_drain_publishes_failures_before_deferred_messages() -> Resul
     assert!(
         matches!(fixture.messages.recv().await, Some(Message::System(message)) if message.subtype == "after_fence")
     );
+    fixture.finish().await
+}
+
+/// Both upstream readers wait for the transcript flush before they handle a result, so the run ends, and stdin
+/// closes, only after it; a frame after the result waits behind it.
+#[tokio::test]
+async fn a_result_reaches_the_run_end_machine_only_after_its_flush() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    let decode = |value: serde_json::Value| {
+        let raw = value.as_object().cloned().unwrap_or_default();
+        crate::message_decode::typed(&raw, crate::MessageDecoding::TypeScript)
+    };
+    let result = decode(serde_json::json!({
+        "type": "result", "subtype": "success", "is_error": false, "duration_ms": 1, "duration_api_ms": 1,
+        "num_turns": 1, "session_id": "s", "result": "done",
+    }));
+    let later = decode(serde_json::json!({
+        "type": "system", "subtype": "session_state_changed", "state": "idle", "session_id": "s",
+    }));
+    fixture.driver.run_end.prompt_written();
+    fixture.driver.run_end.finish(false, true);
+    fixture.driver.held_observations.push_back((result, true));
+    fixture.driver.held_observations.push_back((later, false));
+    assert!(!fixture.driver.run_end.close_due());
+    fixture.driver.release_observations();
+    assert!(fixture.driver.held_observations.is_empty());
+    assert!(fixture.driver.run_end.close_due());
     fixture.finish().await
 }
 

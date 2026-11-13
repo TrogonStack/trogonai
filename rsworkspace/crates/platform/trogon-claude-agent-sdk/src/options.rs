@@ -202,9 +202,6 @@ pub struct Limits {
     /// Opt-in: how long one stdin write may take before [`crate::Error::WriteTimeout`].
     pub write_timeout: Option<Timeout>,
     pub shutdown: Shutdown,
-    /// `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` in both upstream SDKs: with no idle state after the last result, the
-    /// run ends this long after it.
-    pub run_end_timeout: Timeout,
     pub duplicate_control_requests: DuplicateControlRequests,
     pub request_id_exhaustion: RequestIdExhaustion,
     pub input_after_finish: InputAfterFinish,
@@ -265,7 +262,6 @@ impl Default for Limits {
             callback_timeout: None,
             write_timeout: None,
             shutdown: Shutdown::TypeScript,
-            run_end_timeout: Timeout::new(std::time::Duration::from_millis(600_000)),
             duplicate_control_requests: DuplicateControlRequests::Skip,
             request_id_exhaustion: RequestIdExhaustion::Wrap,
             input_after_finish: InputAfterFinish::Write,

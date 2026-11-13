@@ -121,6 +121,17 @@ async fn serve(
     steps: Vec<Step>,
     closing: Arc<AtomicBool>,
 ) -> Result<&'static str, Failure> {
+    serve_from(process, steps, closing, false).await
+}
+
+/// [`serve`], with the steps played from the answer to `initialize` instead of the first user message when
+/// `from_initialize` is set.
+async fn serve_from(
+    process: ScriptedProcessHarness,
+    steps: Vec<Step>,
+    closing: Arc<AtomicBool>,
+    from_initialize: bool,
+) -> Result<&'static str, Failure> {
     let mut lines = BufReader::new(process.stdin).lines();
     let stdout: Stdout = Arc::new(tokio::sync::Mutex::new(process.stdout));
     let stderr = process.stderr;
@@ -136,6 +147,9 @@ async fn serve(
                     "subtype":"success","request_id":frame["request_id"],"response":{}}}),
             )
             .await?;
+            if from_initialize && let Some(steps) = steps.take() {
+                player = Some(tokio::spawn(play(Arc::clone(&stdout), steps, Arc::clone(&last))));
+            }
         } else if frame["type"] == "user"
             && let Some(steps) = steps.take()
         {
@@ -388,6 +402,53 @@ async fn streamed_to_the_end(
     })
 }
 
+/// A stream that yields no prompt: nothing is written, so stdin closes at once.
+async fn empty_stream_to_the_end(
+    options: ClaudeAgentOptions,
+    steps: Vec<Step>,
+) -> Result<Seen, Box<dyn std::error::Error>> {
+    let (process, harness) = ScriptedProcessSpawner::new();
+    let closing = Arc::new(AtomicBool::new(false));
+    let server = tokio::spawn(serve_from(harness, steps, Arc::clone(&closing), true));
+    let mut client = ClaudeSdkClient::connect_with_adapters(options, adapters(process)).await?;
+    client.finish_input().await?;
+    let mut yielded = Vec::new();
+    let ended = tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(message) = client.next_message().await? {
+            yielded.push(label(&message));
+        }
+        Ok::<(), trogon_claude_agent_sdk::Error>(())
+    })
+    .await;
+    let ended = match ended {
+        Ok(result) => {
+            result?;
+            true
+        }
+        Err(_) => false,
+    };
+    closing.store(true, Ordering::SeqCst);
+    client.disconnect().await?;
+    let closed_after = server.await?.map_err(|error| error.to_string())?;
+    Ok(Seen {
+        closed_after,
+        yielded,
+        ended,
+    })
+}
+
+/// Python's `stream_input` closes stdin at once when it wrote nothing and sets `_run_final`, which keeps the
+/// ceiling from arming for the frames that follow.
+#[tokio::test]
+async fn python_closes_stdin_at_once_for_a_stream_that_writes_nothing() -> TestResult {
+    let captured = Captured::parse(MACHINE)?;
+    assert_seen(
+        &captured,
+        "m_empty_stream_py",
+        &empty_stream_to_the_end(with_ceiling(python_options(true), "500"), ceiling()).await?,
+    )
+}
+
 fn assert_seen(captured: &Captured, scenario: &str, seen: &Seen) -> TestResult {
     assert_eq!(
         captured.field(scenario, "stdin_closed_after")?.as_str(),
@@ -503,8 +564,10 @@ async fn python_without_a_result_closes_stdin_once_the_prompt_is_written_unless_
     Ok(())
 }
 
-fn with_ceiling(mut options: ClaudeAgentOptions) -> ClaudeAgentOptions {
-    options.limits.run_end_timeout = trogon_claude_agent_sdk::Timeout::new(Duration::from_millis(500));
+fn with_ceiling(mut options: ClaudeAgentOptions, milliseconds: &str) -> ClaudeAgentOptions {
+    options
+        .env
+        .insert("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS".into(), milliseconds.into());
     options
 }
 
@@ -595,14 +658,19 @@ fn ceiling() -> Vec<Step> {
 #[tokio::test]
 async fn typescript_closes_stdin_at_idle_or_the_ceiling_whatever_tasks_and_continuations_are_reported() -> TestResult {
     let captured = Captured::parse(MACHINE)?;
-    for (name, steps, with_a_ceiling) in [
-        ("task_open_at_idle", task_open_at_idle as fn() -> Vec<Step>, false),
-        ("task_then_notified", task_then_notified, false),
-        ("continuation_reported", continuation_reported, false),
-        ("running_then_idle", running_then_idle, false),
-        ("ceiling", ceiling, true),
+    for (name, steps, ceiling_ms) in [
+        ("task_open_at_idle", task_open_at_idle as fn() -> Vec<Step>, None),
+        ("task_then_notified", task_then_notified, None),
+        ("continuation_reported", continuation_reported, None),
+        ("running_then_idle", running_then_idle, None),
+        ("ceiling", ceiling, Some("500")),
+        ("ceiling_zero", ceiling, Some("0")),
+        ("ceiling_exponent", ceiling, Some("5e2")),
     ] {
-        let configure = |options: ClaudeAgentOptions| if with_a_ceiling { with_ceiling(options) } else { options };
+        let configure = |options: ClaudeAgentOptions| match ceiling_ms {
+            Some(milliseconds) => with_ceiling(options, milliseconds),
+            None => options,
+        };
         assert_seen(
             &captured,
             &format!("m_{name}_ts_turn"),
@@ -622,17 +690,18 @@ async fn typescript_closes_stdin_at_idle_or_the_ceiling_whatever_tasks_and_conti
 #[tokio::test]
 async fn python_closes_stdin_at_idle_or_the_ceiling_unless_a_tracked_task_is_in_flight() -> TestResult {
     let captured = Captured::parse(MACHINE)?;
-    for (name, steps, with_a_ceiling) in [
-        ("task_open_at_idle", task_open_at_idle as fn() -> Vec<Step>, false),
-        ("task_then_notified", task_then_notified, false),
-        ("continuation_reported", continuation_reported, false),
-        ("running_then_idle", running_then_idle, false),
-        ("ceiling", ceiling, true),
+    for (name, steps, ceiling_ms) in [
+        ("task_open_at_idle", task_open_at_idle as fn() -> Vec<Step>, None),
+        ("task_then_notified", task_then_notified, None),
+        ("continuation_reported", continuation_reported, None),
+        ("running_then_idle", running_then_idle, None),
+        ("ceiling", ceiling, Some("500")),
+        ("ceiling_zero", ceiling, Some("0")),
+        ("ceiling_exponent", ceiling, Some("5e2")),
     ] {
-        let options = if with_a_ceiling {
-            with_ceiling(python_options(true))
-        } else {
-            python_options(true)
+        let options = match ceiling_ms {
+            Some(milliseconds) => with_ceiling(python_options(true), milliseconds),
+            None => python_options(true),
         };
         assert_seen(
             &captured,

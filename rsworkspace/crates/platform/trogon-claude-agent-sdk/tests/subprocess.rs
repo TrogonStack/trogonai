@@ -105,7 +105,9 @@ async fn s05_a_missing_idle_state_ends_the_run_quietly_at_the_ceiling() -> TestR
     options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
         std::future::pending::<PermissionDecision>().await
     }));
-    options.limits.run_end_timeout = Timeout::new(Duration::from_millis(300));
+    options
+        .env
+        .insert("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS".into(), "300".into());
     let mut response = query(Prompt::from("stuck"), options).await?;
     let results = timeout(Duration::from_secs(5), async {
         let mut results = Vec::new();

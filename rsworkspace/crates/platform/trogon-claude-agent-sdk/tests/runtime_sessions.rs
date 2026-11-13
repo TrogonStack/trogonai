@@ -29,7 +29,9 @@ fn options(mode: &str) -> Result<ClaudeAgentOptions, Box<dyn StdError>> {
     // profile at exit, which leaves a corrupt profile. The fixture runs no crate code, so its
     // profile is discarded.
     options.env.insert("LLVM_PROFILE_FILE".into(), "/dev/null".into());
-    options.limits.run_end_timeout = Timeout::new(Duration::from_secs(2));
+    options
+        .env
+        .insert("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS".into(), "2000".into());
     Ok(options)
 }
 

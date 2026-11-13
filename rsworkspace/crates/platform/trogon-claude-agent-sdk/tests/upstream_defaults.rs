@@ -55,7 +55,6 @@ fn the_default_limits_are_the_typescript_sdk() {
     assert_eq!(limits.callback_timeout, None);
     assert_eq!(limits.write_timeout, None);
     assert_eq!(limits.shutdown, Shutdown::TypeScript);
-    assert_eq!(limits.run_end_timeout.as_duration(), Duration::from_millis(600_000));
     assert_eq!(limits.duplicate_control_requests, DuplicateControlRequests::Skip);
     assert_eq!(limits.request_id_exhaustion, RequestIdExhaustion::Wrap);
     assert_eq!(limits.input_after_finish, InputAfterFinish::Write);

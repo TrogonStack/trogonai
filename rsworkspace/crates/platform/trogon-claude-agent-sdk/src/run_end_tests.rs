@@ -36,7 +36,7 @@ fn assistant() -> Message {
 }
 
 fn machine(style: ArgvStyle) -> RunEnd {
-    RunEnd::new(style, Duration::from_secs(60))
+    RunEnd::new(style, Some(Duration::from_secs(60)))
 }
 
 #[test]
@@ -162,5 +162,91 @@ fn python_does_not_arm_the_ceiling_during_a_turn_or_without_needs() {
     run.observe(&assistant(), true);
     assert!(run.deadline().is_none());
     run.observe(&state("running"), true);
+    assert!(run.deadline().is_none());
+}
+
+fn ms(style: ArgvStyle, raw: Option<&str>) -> Option<u64> {
+    crate::run_end::ceiling_from_text(style, raw)
+        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+}
+
+#[test]
+fn the_typescript_ceiling_is_read_as_gd_and_j7_read_it() {
+    let read = |raw| ms(ArgvStyle::TypeScript, Some(raw));
+    assert_eq!(ms(ArgvStyle::TypeScript, None), Some(600_000));
+    assert_eq!(read("0"), None);
+    assert_eq!(read("-5"), Some(600_000));
+    assert_eq!(read("5e2"), Some(500));
+    assert_eq!(read("1.5e3"), Some(1500));
+    assert_eq!(read("500ms"), Some(500));
+    assert_eq!(read(" 500 "), Some(500));
+    assert_eq!(read("1,000"), Some(1000));
+    assert_eq!(read("1 000 000"), Some(1_000_000));
+    assert_eq!(read("abc"), Some(600_000));
+    assert_eq!(read(""), Some(600_000));
+    assert_eq!(read("1e400"), Some(600_000));
+    assert_eq!(read("1.5e0"), Some(600_000));
+    assert_eq!(read("99999999999"), Some((1 << 31) - 1));
+}
+
+#[test]
+fn the_python_ceiling_is_read_as_int_reads_it() {
+    let read = |raw| ms(ArgvStyle::Python, Some(raw));
+    assert_eq!(ms(ArgvStyle::Python, None), Some(600_000));
+    assert_eq!(read("0"), None);
+    assert_eq!(read("-0"), None);
+    assert_eq!(read("+7"), Some(7));
+    assert_eq!(read(" 500 "), Some(500));
+    assert_eq!(read("1_000"), Some(1000));
+    assert_eq!(read("-5"), Some(600_000));
+    assert_eq!(read("5e2"), Some(600_000));
+    assert_eq!(read("500ms"), Some(600_000));
+    assert_eq!(read("1,000"), Some(600_000));
+    assert_eq!(read("99999999999"), Some((1 << 31) - 1));
+}
+
+#[test]
+fn a_disabled_ceiling_never_arms_the_deadline() {
+    for style in [ArgvStyle::TypeScript, ArgvStyle::Python] {
+        let mut run = RunEnd::new(style, None);
+        run.observe(&result(), true);
+        run.observe(&state("running"), true);
+        assert!(run.deadline().is_none());
+    }
+}
+
+/// Python `_run_final`: set when the input waiter closes stdin (clearing the ceiling when something was written),
+/// and when the reader is gone; read by the reopening and by the ceiling.
+#[test]
+fn python_final_state_is_set_and_read_where_query_py_does() {
+    let mut run = machine(ArgvStyle::Python);
+    run.prompt_written();
+    run.finish(false, true);
+    run.observe(&state("running"), true);
+    run.observe(&result(), true);
+    assert!(run.deadline().is_some());
+    run.closing_input();
+    assert!(run.deadline().is_none());
+    run.observe(&state("running"), true);
+    assert!(run.deadline().is_none());
+
+    let mut run = machine(ArgvStyle::Python);
+    run.finish(false, true);
+    run.observe(&state("running"), true);
+    run.observe(&result(), true);
+    assert!(run.deadline().is_some());
+    run.closing_input();
+    assert!(run.deadline().is_some());
+    run.observe(&state("running"), true);
+    assert!(run.deadline().is_none());
+
+    let mut run = machine(ArgvStyle::Python);
+    run.prompt_written();
+    run.finish(false, true);
+    run.reader_gone();
+    assert!(run.close_due());
+    run.observe(&assistant(), true);
+    run.observe(&state("running"), true);
+    run.observe(&result(), true);
     assert!(run.deadline().is_none());
 }
