@@ -1368,6 +1368,11 @@ async fn error_results_and_queue_retractions_preserve_run_completion() -> TestRe
     client.stream_input(futures_util::stream::iter([first, second])).await?;
     cli.read().await?;
     cli.read().await?;
+    // A CLI that reports its session state keeps the run open until `idle`, as `sdk.mjs` does; without state
+    // events the result alone would close stdin before the interrupt below.
+    cli.send(json!({"type":"system","subtype":"session_state_changed","state":"running"}))
+        .await?;
+    assert!(matches!(client.next_message().await?, Some(Message::System(_))));
     let mut response = result();
     response["queued_turn_count"] = 1.into();
     response["is_error"] = true.into();

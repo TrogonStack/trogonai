@@ -117,6 +117,7 @@ impl DriverFixture {
             wire_ids: None,
             state: State::Idle,
             run_state: RunState::default(),
+            run_end: crate::run_end::RunEnd::new(crate::ArgvStyle::TypeScript, Duration::from_secs(600)),
             argv_style: crate::ArgvStyle::TypeScript,
             last_error_result: None,
         };
@@ -727,29 +728,4 @@ fn the_initialize_request_carries_managed_settings_after_the_plugins() -> Result
         },
     )?;
     Ok(())
-}
-
-/// `settled` against `hasBidirectionalNeeds()` in `sdk.mjs`: with no needs the input ends when it finished, and a
-/// single turn ends at the result unless a need keeps the run open while the session is not idle.
-#[test]
-fn settled_follows_the_bidirectional_needs_rule() {
-    let finished = |completion, state| RunState {
-        input_done: Some(completion),
-        session_state: state,
-        ..RunState::default()
-    };
-    // No needs: a finished input run ends before any result.
-    assert!(finished(Completion::Run, None).settled(0, false));
-    assert!(!finished(Completion::Run, None).settled(0, true));
-    // A single turn waits for its result.
-    let mut turn = finished(Completion::Turn, Some(SessionState::Running));
-    assert!(!turn.settled(0, false));
-    turn.result_received = true;
-    assert!(turn.settled(0, false));
-    assert!(!turn.settled(0, true));
-    turn.session_state = Some(SessionState::Idle);
-    assert!(turn.settled(0, true));
-    turn.session_state = None;
-    assert!(turn.settled(0, true));
-    assert!(!turn.settled(1, true));
 }

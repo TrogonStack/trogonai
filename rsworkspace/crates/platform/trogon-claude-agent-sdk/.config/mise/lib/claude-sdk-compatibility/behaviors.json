@@ -3835,6 +3835,40 @@
         "src/client.rs",
         "src/driver.rs"
       ]
+    },
+    {
+      "id": "c30-run-end-machine",
+      "concept": "Stdin closes by the run-end machine of each upstream SDK: results, session state, the ceiling and, in Python, tracked agents, with nothing else moving the moment",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 953,
+        "line_end": 1120,
+        "sha256": "7e43a859e8424330cd91c0302fa6b94dbff11fd6ee1c669c804807f03ab1c9ae"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "endRun(){if(this.runEnded)return;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 560,
+        "sha256": "7f6a513de0a76750084640f55d12dcfcd667aec703609deb8d9c0ba3a5711cf3"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript: a written prompt clears the result and ends nothing; a result ends the run when the session reported no state or is idle or when nothing needs the CLI, and otherwise arms the ceiling; idle after a result ends it; any other state reopens it and restarts or clears the ceiling (requires_action clears); main-thread assistant or stream frames reopen it and clear the ceiling; ending a single user turn closes stdin and a streamed input waits for the end only when it wrote a prompt and something needs the CLI. Tasks and queued turns play no part. Python adds tracked local_agent and local_workflow tasks: while one is in flight a result or idle does not end the run and the ceiling leaves it alone, and the ceiling restarts once the last one settles; it also never arms the ceiling during a main-thread turn or without needs."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_run_end::typescript_closes_stdin_at_idle_or_the_ceiling_whatever_tasks_and_continuations_are_reported",
+        "golden_run_end::python_closes_stdin_at_idle_or_the_ceiling_unless_a_tracked_task_is_in_flight"
+      ],
+      "rust": [
+        "src/run_end.rs",
+        "src/driver.rs"
+      ]
     }
   ]
 }

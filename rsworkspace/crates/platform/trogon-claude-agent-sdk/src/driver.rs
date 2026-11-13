@@ -58,25 +58,13 @@ pub(crate) enum Completion {
     Run,
 }
 
+/// What the Rust limits count: inputs the CLI still owes a result and tracked tasks. When stdin closes is
+/// `RunEnd`'s alone.
 #[derive(Default)]
 struct RunState {
     input_done: Option<Completion>,
-    result_received: bool,
-    turn_active: bool,
-    session_state: Option<SessionState>,
     tasks: HashSet<String>,
-    awaiting_continuation: bool,
-    deadline: Option<Instant>,
     pending_inputs: VecDeque<Option<crate::MessageId>>,
-}
-
-#[derive(Clone, Copy)]
-enum SessionState {
-    Idle,
-    Running,
-    RequiresAction,
-    /// A state this SDK does not know yet. It is treated as not idle.
-    Unknown,
 }
 
 impl RunState {
@@ -88,9 +76,6 @@ impl RunState {
     ) -> Result<(), Error> {
         match message {
             Message::Result(message) => {
-                self.result_received = true;
-                self.turn_active = false;
-                self.awaiting_continuation = false;
                 if let Some(count) = message.queued_turn_count {
                     let count = usize::try_from(count).unwrap_or(usize::MAX);
                     if queued_limit.is_some_and(|limit| count > limit) {
@@ -99,36 +84,11 @@ impl RunState {
                     while self.pending_inputs.len() > count {
                         self.pending_inputs.pop_front();
                     }
-                    if count > 0 {
-                        self.awaiting_continuation = true;
-                    }
                 } else {
                     self.pending_inputs.pop_front();
                 }
             }
-            Message::Assistant(message) if message.parent_tool_use_id.is_none() => {
-                self.turn_active = true;
-                self.deadline = None;
-            }
-            Message::StreamEvent(message) if message.parent_tool_use_id.is_none() => {
-                self.turn_active = true;
-                self.deadline = None;
-            }
             Message::System(message) => match message.subtype.as_str() {
-                "session_state_changed" => {
-                    self.session_state = Some(match message.data.get("state").and_then(serde_json::Value::as_str) {
-                        Some("idle") => SessionState::Idle,
-                        Some("running") => SessionState::Running,
-                        Some("requires_action") => SessionState::RequiresAction,
-                        _ => SessionState::Unknown,
-                    });
-                    if matches!(self.session_state, Some(SessionState::Idle)) && self.result_received {
-                        self.awaiting_continuation = false;
-                    }
-                    if matches!(self.session_state, Some(SessionState::RequiresAction)) {
-                        self.deadline = None;
-                    }
-                }
                 "task_started"
                     if matches!(
                         message.data.get("task_type").and_then(serde_json::Value::as_str),
@@ -152,11 +112,8 @@ impl RunState {
                                 .and_then(serde_json::Value::as_str),
                             Some("completed" | "failed" | "stopped" | "killed")
                         );
-                    if terminal
-                        && let Some(id) = message.data.get("task_id").and_then(serde_json::Value::as_str)
-                        && self.tasks.remove(id)
-                    {
-                        self.awaiting_continuation = true;
+                    if terminal && let Some(id) = message.data.get("task_id").and_then(serde_json::Value::as_str) {
+                        self.tasks.remove(id);
                     }
                 }
                 _ => {}
@@ -164,32 +121,6 @@ impl RunState {
             _ => {}
         }
         Ok(())
-    }
-
-    /// `needs` is `hasBidirectionalNeeds()`, which both upstream SDKs apply.
-    ///
-    /// A streamed input that finished closes stdin as soon as it was written when nothing needs the CLI to keep
-    /// asking, without waiting for a result. For a single prompt (`sdk.mjs` `isSingleUserTurn`) stdin closes at
-    /// the result, or at session idle when something needs the CLI.
-    fn settled(&self, callbacks: usize, needs: bool) -> bool {
-        if !needs && matches!(self.input_done, Some(Completion::Run)) {
-            return true;
-        }
-        self.result_received
-            && match self.input_done {
-                Some(Completion::Turn) => {
-                    callbacks == 0 && (!needs || matches!(self.session_state, None | Some(SessionState::Idle)))
-                }
-                Some(Completion::Run) => {
-                    !self.turn_active
-                        && self.pending_inputs.is_empty()
-                        && callbacks == 0
-                        && self.tasks.is_empty()
-                        && !self.awaiting_continuation
-                        && matches!(self.session_state, None | Some(SessionState::Idle))
-                }
-                None => false,
-            }
     }
 }
 
@@ -376,6 +307,7 @@ where
     wire_ids: Option<crate::McpWireIds>,
     state: State,
     run_state: RunState,
+    run_end: crate::run_end::RunEnd,
     argv_style: crate::ArgvStyle,
     message_decoding: crate::MessageDecoding,
     js_runtime: crate::JsRuntime,
@@ -779,6 +711,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         wire_ids: None,
         state: State::Initializing,
         run_state: RunState::default(),
+        run_end: crate::run_end::RunEnd::new(options.argv_style, options.limits.run_end_timeout.as_duration()),
         argv_style: options.argv_style,
         message_decoding: options.message_decoding,
         js_runtime: options.js_runtime,
@@ -908,28 +841,14 @@ where
             if let Some(error) = self.expired_control() {
                 return Err(error);
             }
-            if self
-                .run_state
-                .settled(self.running_callbacks(), self.bidirectional_needs())
-                && self.mirror_flush.is_none()
-            {
+            if self.run_end.close_due() && self.mirror_flush.is_none() {
                 self.end_input().await;
             }
-            let between_turns = self.run_state.input_done.is_some()
-                && self.run_state.result_received
-                && !self.run_state.turn_active
-                && self.running_callbacks() == 0
-                && self.run_state.tasks.is_empty()
-                && !matches!(self.run_state.session_state, Some(SessionState::RequiresAction));
-            if between_turns && self.input_open() {
-                if self.run_state.deadline.is_none() {
-                    self.run_state.deadline = Instant::now().checked_add(self.limits.run_end_timeout.as_duration());
-                }
-            } else {
-                self.run_state.deadline = None;
+            if self.input_ended {
+                self.run_end.input_closed();
             }
             let deadline = self.pending.values().filter_map(|request| request.deadline).min();
-            let run_deadline = self.run_state.deadline;
+            let run_deadline = self.run_end.deadline();
             // Python stops reading stdout while its message buffer is full, so nothing else on stdout is handled
             // until the caller takes a message.
             let reading = self.overflow.is_empty() && !self.deferred_full();
@@ -999,9 +918,7 @@ where
                     if let Some(error) = self.expired_control() { return Err(error); }
                 }
                 _ = async { match run_deadline { Some(deadline) => sleep_until(deadline).await, None => pending::<()>().await } } => {
-                    tracing::debug!(timeout = ?self.limits.run_end_timeout.as_duration(), "no idle state after the last result; ending the run");
-                    self.run_state.deadline = None;
-                    self.end_input().await;
+                    self.run_end.ceiling_elapsed();
                 }
             }
         }
@@ -1536,8 +1453,7 @@ where
                 }
                 self.write(frame).await?;
                 self.state = State::Running;
-                self.run_state.result_received = false;
-                self.run_state.turn_active = true;
+                self.run_end.prompt_written();
                 self.run_state.pending_inputs.push_back(input.uuid.clone());
                 let _ = response.send(Ok(()));
             }
@@ -1559,6 +1475,8 @@ where
             }
             Command::FinishInput { completion, response } => {
                 self.run_state.input_done = Some(completion);
+                let needs = self.bidirectional_needs();
+                self.run_end.finish(matches!(completion, Completion::Turn), needs);
                 let _ = response.send(Ok(()));
             }
         }
@@ -1671,6 +1589,8 @@ where
                         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(commands.clone());
                 }
                 self.run_state.observe(&message, queued_limit, task_limit)?;
+                let needs = self.bidirectional_needs();
+                self.run_end.observe(&message, needs);
                 // Both SDKs drop the state changes the CLI sent only because the SDK asked for them.
                 if let Message::System(system) = &message
                     && system.subtype == "session_state_changed"

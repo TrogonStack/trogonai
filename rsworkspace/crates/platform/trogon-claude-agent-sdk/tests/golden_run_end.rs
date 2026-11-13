@@ -47,12 +47,17 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 const CAPTURED: &str = include_str!("fixtures/auth_callbacks/run_end.json");
 const POST: &str = include_str!("fixtures/auth_callbacks/run_post.json");
+const MACHINE: &str = include_str!("fixtures/auth_callbacks/run_machine.json");
 
 enum Step {
     Wait(u64),
     State(&'static str),
     Said(&'static str),
     Result,
+    /// A result that reports a queued turn, so a continuation is still owed.
+    ResultQueued,
+    /// A `task_started` or `task_notification` for one delegated agent.
+    Task(&'static str),
 }
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
@@ -85,13 +90,22 @@ async fn play(stdout: Stdout, steps: Vec<Step>, last: Arc<Mutex<&'static str>>) 
                         "content":[{"type":"text","text":text}],"stop_reason":"end_turn","stop_sequence":null,
                         "usage":{"input_tokens":1,"output_tokens":1}}}),
             ),
-            Step::Result => (
+            Step::Result | Step::ResultQueued => (
                 "result",
                 json!({"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,
-                    "num_turns":1,"session_id":"s","result":"done","queued_turn_count":0}),
+                    "num_turns":1,"session_id":"s","result":"done",
+                    "queued_turn_count":u64::from(matches!(step, Step::ResultQueued))}),
+            ),
+            Step::Task(subtype) => (
+                "",
+                json!({"type":"system","subtype":subtype,"task_id":"t1","task_type":"local_agent",
+                    "description":"d","uuid":"fixture-user-1","session_id":"s",
+                    "status":"completed","output_file":"f","summary":"x"}),
             ),
         };
-        *last.lock().map_err(|_| "lock poisoned")? = name;
+        if !name.is_empty() {
+            *last.lock().map_err(|_| "lock poisoned")? = name;
+        }
         if write(&stdout, &frame).await.is_err() {
             break;
         }
@@ -486,5 +500,145 @@ async fn python_without_a_result_closes_stdin_once_the_prompt_is_written_unless_
         "python_none_needs",
         &query_to_the_end(python_options(true), no_result()).await?,
     )?;
+    Ok(())
+}
+
+fn with_ceiling(mut options: ClaudeAgentOptions) -> ClaudeAgentOptions {
+    options.limits.run_end_timeout = trogon_claude_agent_sdk::Timeout::new(Duration::from_millis(500));
+    options
+}
+
+/// A result while a delegated agent is still reported, with `idle` arriving before the agent is done.
+fn task_open_at_idle() -> Vec<Step> {
+    vec![
+        Step::Wait(100),
+        Step::State("running"),
+        Step::Wait(100),
+        Step::Task("task_started"),
+        Step::Said("A"),
+        Step::Result,
+        Step::Wait(300),
+        Step::State("idle"),
+        Step::Wait(300),
+        Step::Said("CCC"),
+    ]
+}
+
+fn task_then_notified() -> Vec<Step> {
+    vec![
+        Step::Wait(100),
+        Step::State("running"),
+        Step::Wait(100),
+        Step::Task("task_started"),
+        Step::Said("A"),
+        Step::Result,
+        Step::Wait(300),
+        Step::Task("task_notification"),
+        Step::Wait(100),
+        Step::State("idle"),
+        Step::Wait(300),
+        Step::Said("CCC"),
+    ]
+}
+
+/// The first result reports a queued turn, and a second turn follows the first `idle`.
+fn continuation_reported() -> Vec<Step> {
+    vec![
+        Step::Wait(100),
+        Step::State("running"),
+        Step::Wait(100),
+        Step::Said("A"),
+        Step::ResultQueued,
+        Step::Wait(300),
+        Step::State("idle"),
+        Step::Wait(300),
+        Step::State("running"),
+        Step::Said("BB"),
+        Step::Result,
+        Step::Wait(300),
+        Step::Said("CCC"),
+    ]
+}
+
+fn running_then_idle() -> Vec<Step> {
+    vec![
+        Step::Wait(100),
+        Step::State("running"),
+        Step::Wait(100),
+        Step::Said("A"),
+        Step::Result,
+        Step::Wait(300),
+        Step::State("idle"),
+        Step::Wait(300),
+        Step::Said("CCC"),
+    ]
+}
+
+/// No `idle` ever follows the result: a second `running` restarts the wait, which ends at the ceiling, before
+/// `requires_action` arrives.
+fn ceiling() -> Vec<Step> {
+    vec![
+        Step::Wait(100),
+        Step::State("running"),
+        Step::Wait(100),
+        Step::Said("A"),
+        Step::Result,
+        Step::Wait(300),
+        Step::State("running"),
+        Step::Wait(900),
+        Step::State("requires_action"),
+    ]
+}
+
+/// Stdin closes at the moment `sdk.mjs` closes it whatever the reported tasks or queued turns are: at `idle`
+/// after a result, or at the ceiling when no `idle` comes. Nothing but the frames moves it.
+#[tokio::test]
+async fn typescript_closes_stdin_at_idle_or_the_ceiling_whatever_tasks_and_continuations_are_reported() -> TestResult {
+    let captured = Captured::parse(MACHINE)?;
+    for (name, steps, with_a_ceiling) in [
+        ("task_open_at_idle", task_open_at_idle as fn() -> Vec<Step>, false),
+        ("task_then_notified", task_then_notified, false),
+        ("continuation_reported", continuation_reported, false),
+        ("running_then_idle", running_then_idle, false),
+        ("ceiling", ceiling, true),
+    ] {
+        let configure = |options: ClaudeAgentOptions| if with_a_ceiling { with_ceiling(options) } else { options };
+        assert_seen(
+            &captured,
+            &format!("m_{name}_ts_turn"),
+            &query_to_the_end(configure(options(true)), steps()).await?,
+        )?;
+        assert_seen(
+            &captured,
+            &format!("m_{name}_ts_stream"),
+            &streamed_to_the_end(configure(options(true)), steps()).await?,
+        )?;
+    }
+    Ok(())
+}
+
+/// Python holds stdin while a tracked agent is in flight, even at `idle`, and otherwise ends the run like
+/// `sdk.mjs`.
+#[tokio::test]
+async fn python_closes_stdin_at_idle_or_the_ceiling_unless_a_tracked_task_is_in_flight() -> TestResult {
+    let captured = Captured::parse(MACHINE)?;
+    for (name, steps, with_a_ceiling) in [
+        ("task_open_at_idle", task_open_at_idle as fn() -> Vec<Step>, false),
+        ("task_then_notified", task_then_notified, false),
+        ("continuation_reported", continuation_reported, false),
+        ("running_then_idle", running_then_idle, false),
+        ("ceiling", ceiling, true),
+    ] {
+        let options = if with_a_ceiling {
+            with_ceiling(python_options(true))
+        } else {
+            python_options(true)
+        };
+        assert_seen(
+            &captured,
+            &format!("m_{name}_py"),
+            &query_to_the_end(options, steps()).await?,
+        )?;
+    }
     Ok(())
 }

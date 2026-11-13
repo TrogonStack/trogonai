@@ -83,6 +83,7 @@ mod raw_json_id;
 mod remote_control;
 #[cfg(unix)]
 mod run_as;
+mod run_end;
 mod runtime_options;
 mod sdk_mcp_server;
 mod sdk_tool;

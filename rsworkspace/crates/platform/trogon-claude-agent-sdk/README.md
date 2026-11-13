@@ -172,13 +172,18 @@ request gets the unsupported subtype error.
 The run ends as `hasBidirectionalNeeds` decides. When nothing needs the CLI to keep
 asking (no embedded MCP server, hook or permission handler, and under TypeScript
 no elicitation or dialog handler, auth callback or work secret answerer), a streamed
-input closes stdin as soon as it is written. `query()` with a prompt follows
-`sdk.mjs`'s single user turn and closes stdin at the result, or at session idle
-when something needs the CLI. Under `ArgvStyle::Python` a prompt closes stdin as
-soon as it is written when nothing needs the CLI, and otherwise waits for the run
-to end. `query()` and the client keep yielding what the CLI sends after the
-result until the CLI exits; only `query_turn()` stops at the first result. A CLI that never
-sends a result still gets its stdin closed after the last prompt when nothing needs it.
+input closes stdin as soon as it is written. Otherwise stdin closes when the run
+ends, and only the frames decide that, per dialect (`src/run_end.rs`). Under
+TypeScript a result ends the run when the session reported no state or is idle, and
+otherwise `idle` does, or the ceiling (`limits.run_end_timeout`, the
+`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` default) when no `idle` follows; reported tasks
+and queued turns play no part. `query()` with a prompt is `sdk.mjs`'s single user turn,
+which closes stdin the moment its run ends. Under `ArgvStyle::Python` the prompt waits
+the same way, but a tracked `local_agent` or `local_workflow` task still in flight keeps
+the run open at a result, at `idle` and at the ceiling. `query()` and the client keep
+yielding what the CLI sends after the result until the CLI exits; only `query_turn()`
+stops at the first result. A CLI that never sends a result still gets its stdin closed
+after the last prompt when nothing needs it.
 
 [The feature-connect example](examples/feature_connect.rs) checks blocking-hook
 registration and MCP connection without a prompt. It refuses startup when the
