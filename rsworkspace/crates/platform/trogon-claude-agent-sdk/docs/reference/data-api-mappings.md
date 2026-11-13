@@ -92,6 +92,19 @@ integrity-verified published `0.3.319` declaration archive.
 | `ClaudeSdkClient::connect_with_transport`, `query_with_transport` | `ClaudeSDKClient(transport=...)`, `query(transport=...)` | not applicable |
 | `Error::Transport(..)` | exception raised by the transport | not applicable |
 
+## Messages
+
+| Rust | Python | TypeScript |
+| --- | --- | --- |
+| `Message` (`raw()`, `to_sdk_message()`) | `Message` union | `SDKMessage` (generated as `upstream::messages::SDKMessage`, every member plus `Unknown`) |
+| `MessageDecoding::{TypeScript, Python}`, `ClaudeAgentOptions::message_decoding` | `parse_message` | `query()` message stream |
+| `Message::RateLimit(RateLimitEvent)`, `RateLimitInfo` | `RateLimitEvent`, `RateLimitInfo` | `SDKRateLimitEvent` |
+| `Message::ConversationReset(ConversationResetMessage)` | `ConversationResetMessage` | `SDKConversationResetMessage` |
+| `SystemEvent::{TaskStarted, TaskProgress, TaskNotification, TaskUpdated, MirrorError, Hook}` | `TaskStartedMessage` and the other `SystemMessage` subclasses | `SDKTaskStartedMessage` and the other system members |
+| `ResultMessage::deferred_tool()` | `DeferredToolUse` | `SDKResultSuccess.deferred_tool_use` |
+| `ContentBlock::{ServerToolUse, ServerToolResult}` | `ServerToolUseBlock`, `ServerToolResultBlock` | server tool blocks of `BetaMessage` |
+| `Error::MessageParse(MessageParseError)` with Python decoding | `MessageParseError` (`KeyError` text) | not applicable |
+
 ## Settings
 
 | Rust | Python | TypeScript |

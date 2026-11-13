@@ -82,6 +82,14 @@ workspace_crate(
         "mcp_tool_values": {},
         "message": {},
         "message_content": {},
+        "message_decoding": {
+            "compile_data": glob([
+                "tests/fixtures/message_decoding/*.json",
+                "tests/support/*.rs",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "message_id": {},
         "message_id_storage": {},
         "message_origin": {},
