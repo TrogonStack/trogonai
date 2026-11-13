@@ -210,6 +210,7 @@ pub(super) fn make_receipt(
         batch_id,
         recipient_revision: Some(revision),
         decided_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&now)),
+        sender_peer_id: message.sender_peer_id.clone(),
     };
     validate_receipt(&receipt)?;
     Ok(receipt)
@@ -226,6 +227,9 @@ pub(super) fn validate_receipt(receipt: &proto::RecipientReceipt) -> Result<prot
         )?),
         "receipt.recipient_peer_id",
     )?;
+    if let Some(sender) = &receipt.sender_peer_id {
+        value(PeerId::parse(sender), "receipt.sender_peer_id")?;
+    }
     if receipt.recipient_revision.unwrap_or(0) == 0 {
         return Err(EvolveError::InvalidMessageTransition);
     }
@@ -306,7 +310,11 @@ pub(super) fn fold_receipt(state: &mut PeerState, receipt: &proto::RecipientRece
         let at = state_values::read_time(receipt.decided_at.as_option(), "receipt.decided_at")?;
         let accepted = state_values::read_time(entry.message.accepted_at.as_option(), "accepted_at")?;
         let expires = state_values::read_time(entry.message.expires_at.as_option(), "expires_at")?;
-        if at < accepted
+        if receipt
+            .sender_peer_id
+            .as_ref()
+            .is_some_and(|sender| Some(sender) != entry.message.sender_peer_id.as_ref())
+            || at < accepted
             || (outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_EXPIRED && at < expires)
             || (outcome == proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED && at >= expires)
         {
@@ -419,7 +427,13 @@ pub(super) fn receipt_matches_message(
 ) -> Result<(), EvolveError> {
     metadata(message)?;
     let outcome = validate_receipt(receipt)?;
-    if receipt.message_id != message.message_id || receipt.recipient_peer_id != message.recipient_peer_id {
+    if receipt.message_id != message.message_id
+        || receipt.recipient_peer_id != message.recipient_peer_id
+        || receipt
+            .sender_peer_id
+            .as_ref()
+            .is_some_and(|sender| Some(sender) != message.sender_peer_id.as_ref())
+    {
         return Err(EvolveError::InvalidMessageTransition);
     }
     let at = state_values::read_time(receipt.decided_at.as_option(), "decided_at")?;
