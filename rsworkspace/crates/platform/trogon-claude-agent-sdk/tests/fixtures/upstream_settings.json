@@ -1,0 +1,5039 @@
+{
+  "auth": [
+    {
+      "$schema": "text",
+      "apiKeyHelper": "text",
+      "proxyAuthHelper": "text",
+      "awsCredentialExport": "text",
+      "awsAuthRefresh": "text",
+      "gcpAuthRefresh": "text",
+      "processWrapper": "text",
+      "policyHelper": {
+        "path": "text",
+        "timeoutMs": 3,
+        "refreshIntervalMs": 0
+      },
+      "forceLoginMethod": "claudeai",
+      "forceLoginGatewayUrl": "text",
+      "gatewayInternalNetworks": [
+        "text"
+      ],
+      "forceLoginOrgUUID": "text",
+      "allowedProviders": [
+        "anthropic"
+      ],
+      "forceRemoteSettingsRefresh": true,
+      "otelHeadersHelper": "text"
+    },
+    {
+      "$schema": "text",
+      "apiKeyHelper": "text",
+      "proxyAuthHelper": "text",
+      "awsCredentialExport": "text",
+      "awsAuthRefresh": "text",
+      "gcpAuthRefresh": "text",
+      "processWrapper": "text",
+      "policyHelper": {
+        "path": "text",
+        "timeoutMs": 2.5,
+        "refreshIntervalMs": 2.5
+      },
+      "forceLoginMethod": "console",
+      "forceLoginGatewayUrl": "text",
+      "gatewayInternalNetworks": [
+        "text"
+      ],
+      "forceLoginOrgUUID": [
+        "text"
+      ],
+      "allowedProviders": [
+        "customEndpoint"
+      ],
+      "forceRemoteSettingsRefresh": false,
+      "otelHeadersHelper": "text"
+    },
+    {
+      "$schema": "text",
+      "apiKeyHelper": "text",
+      "proxyAuthHelper": "text",
+      "awsCredentialExport": "text",
+      "awsAuthRefresh": "text",
+      "gcpAuthRefresh": "text",
+      "processWrapper": "text",
+      "policyHelper": {
+        "path": "text",
+        "timeoutMs": 3,
+        "refreshIntervalMs": 0
+      },
+      "forceLoginMethod": "gateway",
+      "forceLoginGatewayUrl": "text",
+      "gatewayInternalNetworks": [
+        "text"
+      ],
+      "forceLoginOrgUUID": "text",
+      "allowedProviders": [
+        "bedrock"
+      ],
+      "forceRemoteSettingsRefresh": true,
+      "otelHeadersHelper": "text"
+    },
+    {
+      "$schema": "text",
+      "apiKeyHelper": "text",
+      "proxyAuthHelper": "text",
+      "awsCredentialExport": "text",
+      "awsAuthRefresh": "text",
+      "gcpAuthRefresh": "text",
+      "processWrapper": "text",
+      "policyHelper": {
+        "path": "text",
+        "timeoutMs": 2.5,
+        "refreshIntervalMs": 2.5
+      },
+      "forceLoginMethod": "claudeai",
+      "forceLoginGatewayUrl": "text",
+      "gatewayInternalNetworks": [
+        "text"
+      ],
+      "forceLoginOrgUUID": [
+        "text"
+      ],
+      "allowedProviders": [
+        "vertex"
+      ],
+      "forceRemoteSettingsRefresh": false,
+      "otelHeadersHelper": "text"
+    },
+    {
+      "$schema": "text",
+      "apiKeyHelper": "text",
+      "proxyAuthHelper": "text",
+      "awsCredentialExport": "text",
+      "awsAuthRefresh": "text",
+      "gcpAuthRefresh": "text",
+      "processWrapper": "text",
+      "policyHelper": {
+        "path": "text",
+        "timeoutMs": 3,
+        "refreshIntervalMs": 0
+      },
+      "forceLoginMethod": "console",
+      "forceLoginGatewayUrl": "text",
+      "gatewayInternalNetworks": [
+        "text"
+      ],
+      "forceLoginOrgUUID": "text",
+      "allowedProviders": [
+        "foundry"
+      ],
+      "forceRemoteSettingsRefresh": true,
+      "otelHeadersHelper": "text"
+    },
+    {
+      "$schema": "text",
+      "apiKeyHelper": "text",
+      "proxyAuthHelper": "text",
+      "awsCredentialExport": "text",
+      "awsAuthRefresh": "text",
+      "gcpAuthRefresh": "text",
+      "processWrapper": "text",
+      "policyHelper": {
+        "path": "text",
+        "timeoutMs": 2.5,
+        "refreshIntervalMs": 2.5
+      },
+      "forceLoginMethod": "gateway",
+      "forceLoginGatewayUrl": "text",
+      "gatewayInternalNetworks": [
+        "text"
+      ],
+      "forceLoginOrgUUID": [
+        "text"
+      ],
+      "allowedProviders": [
+        "anthropicAws"
+      ],
+      "forceRemoteSettingsRefresh": false,
+      "otelHeadersHelper": "text"
+    },
+    {
+      "$schema": "text",
+      "apiKeyHelper": "text",
+      "proxyAuthHelper": "text",
+      "awsCredentialExport": "text",
+      "awsAuthRefresh": "text",
+      "gcpAuthRefresh": "text",
+      "processWrapper": "text",
+      "policyHelper": {
+        "path": "text",
+        "timeoutMs": 3,
+        "refreshIntervalMs": 0
+      },
+      "forceLoginMethod": "claudeai",
+      "forceLoginGatewayUrl": "text",
+      "gatewayInternalNetworks": [
+        "text"
+      ],
+      "forceLoginOrgUUID": "text",
+      "allowedProviders": [
+        "mantle"
+      ],
+      "forceRemoteSettingsRefresh": true,
+      "otelHeadersHelper": "text"
+    },
+    {
+      "$schema": "text",
+      "apiKeyHelper": "text",
+      "proxyAuthHelper": "text",
+      "awsCredentialExport": "text",
+      "awsAuthRefresh": "text",
+      "gcpAuthRefresh": "text",
+      "processWrapper": "text",
+      "policyHelper": {
+        "path": "text",
+        "timeoutMs": 2.5,
+        "refreshIntervalMs": 2.5
+      },
+      "forceLoginMethod": "console",
+      "forceLoginGatewayUrl": "text",
+      "gatewayInternalNetworks": [
+        "text"
+      ],
+      "forceLoginOrgUUID": [
+        "text"
+      ],
+      "allowedProviders": [
+        "gateway"
+      ],
+      "forceRemoteSettingsRefresh": false,
+      "otelHeadersHelper": "text"
+    },
+    {
+      "$schema": "text",
+      "apiKeyHelper": "text",
+      "proxyAuthHelper": "text",
+      "awsCredentialExport": "text",
+      "awsAuthRefresh": "text",
+      "gcpAuthRefresh": "text",
+      "processWrapper": "text",
+      "policyHelper": {
+        "path": "text",
+        "timeoutMs": 3,
+        "refreshIntervalMs": 0
+      },
+      "forceLoginMethod": "gateway",
+      "forceLoginGatewayUrl": "text",
+      "gatewayInternalNetworks": [
+        "text"
+      ],
+      "forceLoginOrgUUID": "text",
+      "allowedProviders": [
+        "anthropic"
+      ],
+      "forceRemoteSettingsRefresh": true,
+      "otelHeadersHelper": "text"
+    },
+    {
+      "$schema": "text",
+      "apiKeyHelper": "text",
+      "proxyAuthHelper": "text",
+      "awsCredentialExport": "text",
+      "awsAuthRefresh": "text",
+      "gcpAuthRefresh": "text",
+      "processWrapper": "text",
+      "policyHelper": {
+        "path": "text",
+        "timeoutMs": 2.5,
+        "refreshIntervalMs": 2.5
+      },
+      "forceLoginMethod": "claudeai",
+      "forceLoginGatewayUrl": "text",
+      "gatewayInternalNetworks": [
+        "text"
+      ],
+      "forceLoginOrgUUID": [
+        "text"
+      ],
+      "allowedProviders": [
+        "customEndpoint"
+      ],
+      "forceRemoteSettingsRefresh": false,
+      "otelHeadersHelper": "text"
+    }
+  ],
+  "permissions": [
+    {
+      "permissions": {
+        "allow": [
+          "text"
+        ],
+        "deny": [
+          "text"
+        ],
+        "ask": [
+          "text"
+        ],
+        "defaultMode": "acceptEdits",
+        "disableBypassPermissionsMode": "disable",
+        "blockReadsOutsideWorkingDirectories": true,
+        "blockWritesOutsideWorkingDirectories": true,
+        "blockReadsExemptPaths": [
+          "text"
+        ],
+        "workingDirectoriesAsGiven": [
+          "text"
+        ],
+        "disableAutoMode": "disable",
+        "denyInsteadOfPrompting": true,
+        "additionalDirectories": [
+          "text"
+        ],
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "allowManagedPermissionRulesOnly": true,
+      "skipDangerousModePermissionPrompt": true,
+      "disableAutoMode": "disable",
+      "skipAutoPermissionPrompt": true,
+      "useAutoModeDuringPlan": true,
+      "autoMode": {
+        "allow": [
+          "text"
+        ],
+        "soft_deny": [
+          "text"
+        ],
+        "hard_deny": [
+          "text"
+        ],
+        "environment": [
+          "text"
+        ],
+        "classifyAllShell": true
+      }
+    },
+    {
+      "permissions": {
+        "allow": [
+          "text"
+        ],
+        "deny": [
+          "text"
+        ],
+        "ask": [
+          "text"
+        ],
+        "defaultMode": "auto",
+        "disableBypassPermissionsMode": "disable",
+        "blockReadsOutsideWorkingDirectories": false,
+        "blockWritesOutsideWorkingDirectories": false,
+        "blockReadsExemptPaths": [
+          "text"
+        ],
+        "workingDirectoriesAsGiven": [
+          "text"
+        ],
+        "disableAutoMode": "disable",
+        "denyInsteadOfPrompting": false,
+        "additionalDirectories": [
+          "text"
+        ],
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "allowManagedPermissionRulesOnly": false,
+      "skipDangerousModePermissionPrompt": false,
+      "disableAutoMode": "disable",
+      "skipAutoPermissionPrompt": false,
+      "useAutoModeDuringPlan": false,
+      "autoMode": {
+        "allow": [
+          "text"
+        ],
+        "soft_deny": [
+          "text"
+        ],
+        "hard_deny": [
+          "text"
+        ],
+        "environment": [
+          "text"
+        ],
+        "classifyAllShell": false
+      }
+    },
+    {
+      "permissions": {
+        "allow": [
+          "text"
+        ],
+        "deny": [
+          "text"
+        ],
+        "ask": [
+          "text"
+        ],
+        "defaultMode": "bypassPermissions",
+        "disableBypassPermissionsMode": "disable",
+        "blockReadsOutsideWorkingDirectories": true,
+        "blockWritesOutsideWorkingDirectories": true,
+        "blockReadsExemptPaths": [
+          "text"
+        ],
+        "workingDirectoriesAsGiven": [
+          "text"
+        ],
+        "disableAutoMode": "disable",
+        "denyInsteadOfPrompting": true,
+        "additionalDirectories": [
+          "text"
+        ],
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "allowManagedPermissionRulesOnly": true,
+      "skipDangerousModePermissionPrompt": true,
+      "disableAutoMode": "disable",
+      "skipAutoPermissionPrompt": true,
+      "useAutoModeDuringPlan": true,
+      "autoMode": {
+        "allow": [
+          "text"
+        ],
+        "soft_deny": [
+          "text"
+        ],
+        "hard_deny": [
+          "text"
+        ],
+        "environment": [
+          "text"
+        ],
+        "classifyAllShell": true
+      }
+    },
+    {
+      "permissions": {
+        "allow": [
+          "text"
+        ],
+        "deny": [
+          "text"
+        ],
+        "ask": [
+          "text"
+        ],
+        "defaultMode": "default",
+        "disableBypassPermissionsMode": "disable",
+        "blockReadsOutsideWorkingDirectories": false,
+        "blockWritesOutsideWorkingDirectories": false,
+        "blockReadsExemptPaths": [
+          "text"
+        ],
+        "workingDirectoriesAsGiven": [
+          "text"
+        ],
+        "disableAutoMode": "disable",
+        "denyInsteadOfPrompting": false,
+        "additionalDirectories": [
+          "text"
+        ],
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "allowManagedPermissionRulesOnly": false,
+      "skipDangerousModePermissionPrompt": false,
+      "disableAutoMode": "disable",
+      "skipAutoPermissionPrompt": false,
+      "useAutoModeDuringPlan": false,
+      "autoMode": {
+        "allow": [
+          "text"
+        ],
+        "soft_deny": [
+          "text"
+        ],
+        "hard_deny": [
+          "text"
+        ],
+        "environment": [
+          "text"
+        ],
+        "classifyAllShell": false
+      }
+    },
+    {
+      "permissions": {
+        "allow": [
+          "text"
+        ],
+        "deny": [
+          "text"
+        ],
+        "ask": [
+          "text"
+        ],
+        "defaultMode": "dontAsk",
+        "disableBypassPermissionsMode": "disable",
+        "blockReadsOutsideWorkingDirectories": true,
+        "blockWritesOutsideWorkingDirectories": true,
+        "blockReadsExemptPaths": [
+          "text"
+        ],
+        "workingDirectoriesAsGiven": [
+          "text"
+        ],
+        "disableAutoMode": "disable",
+        "denyInsteadOfPrompting": true,
+        "additionalDirectories": [
+          "text"
+        ],
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "allowManagedPermissionRulesOnly": true,
+      "skipDangerousModePermissionPrompt": true,
+      "disableAutoMode": "disable",
+      "skipAutoPermissionPrompt": true,
+      "useAutoModeDuringPlan": true,
+      "autoMode": {
+        "allow": [
+          "text"
+        ],
+        "soft_deny": [
+          "text"
+        ],
+        "hard_deny": [
+          "text"
+        ],
+        "environment": [
+          "text"
+        ],
+        "classifyAllShell": true
+      }
+    },
+    {
+      "permissions": {
+        "allow": [
+          "text"
+        ],
+        "deny": [
+          "text"
+        ],
+        "ask": [
+          "text"
+        ],
+        "defaultMode": "plan",
+        "disableBypassPermissionsMode": "disable",
+        "blockReadsOutsideWorkingDirectories": false,
+        "blockWritesOutsideWorkingDirectories": false,
+        "blockReadsExemptPaths": [
+          "text"
+        ],
+        "workingDirectoriesAsGiven": [
+          "text"
+        ],
+        "disableAutoMode": "disable",
+        "denyInsteadOfPrompting": false,
+        "additionalDirectories": [
+          "text"
+        ],
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "allowManagedPermissionRulesOnly": false,
+      "skipDangerousModePermissionPrompt": false,
+      "disableAutoMode": "disable",
+      "skipAutoPermissionPrompt": false,
+      "useAutoModeDuringPlan": false,
+      "autoMode": {
+        "allow": [
+          "text"
+        ],
+        "soft_deny": [
+          "text"
+        ],
+        "hard_deny": [
+          "text"
+        ],
+        "environment": [
+          "text"
+        ],
+        "classifyAllShell": false
+      }
+    }
+  ],
+  "models": [
+    {
+      "model": "text",
+      "fallbackModel": [
+        "text"
+      ],
+      "availableModels": [
+        "text"
+      ],
+      "enforceAvailableModels": true,
+      "availableModelsMatch": "prefix",
+      "deniedModels": [
+        "text"
+      ],
+      "modelOverrides": {
+        "extra_key": "text"
+      },
+      "modelPicker": {
+        "options": [
+          {
+            "model": "text",
+            "label": "text",
+            "description": "text",
+            "behavesAs": "text"
+          }
+        ],
+        "replaceBuiltInOptions": true
+      },
+      "modelPricing": {
+        "multiplier": 3,
+        "overrides": {
+          "extra_key": {
+            "input": 3,
+            "output": 3,
+            "cacheRead": 3,
+            "cacheWrite": 3
+          }
+        }
+      },
+      "promptCacheTtl": "5m",
+      "subagentPromptCacheTtl": "5m",
+      "alwaysThinkingEnabled": true,
+      "effortLevel": "low",
+      "maxEffortLevel": "low",
+      "modelSettings": {
+        "extra_key": {
+          "effortLevel": "low",
+          "maxEffortLevel": "low",
+          "autoCompactWindow": "auto",
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "ultracode": true,
+      "advisorModel": "text",
+      "fastMode": true,
+      "fastModePerSessionOptIn": true,
+      "switchModelsOnFlag": true
+    },
+    {
+      "model": "text",
+      "fallbackModel": [
+        "text"
+      ],
+      "availableModels": [
+        "text"
+      ],
+      "enforceAvailableModels": false,
+      "availableModelsMatch": "exact",
+      "deniedModels": [
+        "text"
+      ],
+      "modelOverrides": {
+        "extra_key": "text"
+      },
+      "modelPicker": {
+        "options": [
+          {
+            "model": "text",
+            "label": "text",
+            "description": "text",
+            "behavesAs": "text"
+          }
+        ],
+        "replaceBuiltInOptions": false
+      },
+      "modelPricing": {
+        "multiplier": 2.5,
+        "overrides": {
+          "extra_key": {
+            "input": 2.5,
+            "output": 2.5,
+            "cacheRead": 2.5,
+            "cacheWrite": 2.5
+          }
+        }
+      },
+      "promptCacheTtl": "1h",
+      "subagentPromptCacheTtl": "1h",
+      "alwaysThinkingEnabled": false,
+      "effortLevel": "medium",
+      "maxEffortLevel": "medium",
+      "modelSettings": {
+        "extra_key": {
+          "effortLevel": "medium",
+          "maxEffortLevel": "medium",
+          "autoCompactWindow": 2.5,
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "ultracode": false,
+      "advisorModel": "text",
+      "fastMode": false,
+      "fastModePerSessionOptIn": false,
+      "switchModelsOnFlag": false
+    },
+    {
+      "model": "text",
+      "fallbackModel": [
+        "text"
+      ],
+      "availableModels": [
+        "text"
+      ],
+      "enforceAvailableModels": true,
+      "availableModelsMatch": "prefix",
+      "deniedModels": [
+        "text"
+      ],
+      "modelOverrides": {
+        "extra_key": "text"
+      },
+      "modelPicker": {
+        "options": [
+          {
+            "model": "text",
+            "label": "text",
+            "description": "text",
+            "behavesAs": "text"
+          }
+        ],
+        "replaceBuiltInOptions": true
+      },
+      "modelPricing": {
+        "multiplier": 3,
+        "overrides": {
+          "extra_key": {
+            "input": 3,
+            "output": 3,
+            "cacheRead": 3,
+            "cacheWrite": 3
+          }
+        }
+      },
+      "promptCacheTtl": "5m",
+      "subagentPromptCacheTtl": "5m",
+      "alwaysThinkingEnabled": true,
+      "effortLevel": "high",
+      "maxEffortLevel": "high",
+      "modelSettings": {
+        "extra_key": {
+          "effortLevel": "high",
+          "maxEffortLevel": "high",
+          "autoCompactWindow": "auto",
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "ultracode": true,
+      "advisorModel": "text",
+      "fastMode": true,
+      "fastModePerSessionOptIn": true,
+      "switchModelsOnFlag": true
+    },
+    {
+      "model": "text",
+      "fallbackModel": [
+        "text"
+      ],
+      "availableModels": [
+        "text"
+      ],
+      "enforceAvailableModels": false,
+      "availableModelsMatch": "exact",
+      "deniedModels": [
+        "text"
+      ],
+      "modelOverrides": {
+        "extra_key": "text"
+      },
+      "modelPicker": {
+        "options": [
+          {
+            "model": "text",
+            "label": "text",
+            "description": "text",
+            "behavesAs": "text"
+          }
+        ],
+        "replaceBuiltInOptions": false
+      },
+      "modelPricing": {
+        "multiplier": 2.5,
+        "overrides": {
+          "extra_key": {
+            "input": 2.5,
+            "output": 2.5,
+            "cacheRead": 2.5,
+            "cacheWrite": 2.5
+          }
+        }
+      },
+      "promptCacheTtl": "1h",
+      "subagentPromptCacheTtl": "1h",
+      "alwaysThinkingEnabled": false,
+      "effortLevel": "xhigh",
+      "maxEffortLevel": "xhigh",
+      "modelSettings": {
+        "extra_key": {
+          "effortLevel": "xhigh",
+          "maxEffortLevel": "xhigh",
+          "autoCompactWindow": 2.5,
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "ultracode": false,
+      "advisorModel": "text",
+      "fastMode": false,
+      "fastModePerSessionOptIn": false,
+      "switchModelsOnFlag": false
+    },
+    {
+      "model": "text",
+      "fallbackModel": [
+        "text"
+      ],
+      "availableModels": [
+        "text"
+      ],
+      "enforceAvailableModels": true,
+      "availableModelsMatch": "prefix",
+      "deniedModels": [
+        "text"
+      ],
+      "modelOverrides": {
+        "extra_key": "text"
+      },
+      "modelPicker": {
+        "options": [
+          {
+            "model": "text",
+            "label": "text",
+            "description": "text",
+            "behavesAs": "text"
+          }
+        ],
+        "replaceBuiltInOptions": true
+      },
+      "modelPricing": {
+        "multiplier": 3,
+        "overrides": {
+          "extra_key": {
+            "input": 3,
+            "output": 3,
+            "cacheRead": 3,
+            "cacheWrite": 3
+          }
+        }
+      },
+      "promptCacheTtl": "5m",
+      "subagentPromptCacheTtl": "5m",
+      "alwaysThinkingEnabled": true,
+      "effortLevel": "low",
+      "maxEffortLevel": "max",
+      "modelSettings": {
+        "extra_key": {
+          "effortLevel": "low",
+          "maxEffortLevel": "max",
+          "autoCompactWindow": "auto",
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "ultracode": true,
+      "advisorModel": "text",
+      "fastMode": true,
+      "fastModePerSessionOptIn": true,
+      "switchModelsOnFlag": true
+    },
+    {
+      "model": "text",
+      "fallbackModel": [
+        "text"
+      ],
+      "availableModels": [
+        "text"
+      ],
+      "enforceAvailableModels": false,
+      "availableModelsMatch": "exact",
+      "deniedModels": [
+        "text"
+      ],
+      "modelOverrides": {
+        "extra_key": "text"
+      },
+      "modelPicker": {
+        "options": [
+          {
+            "model": "text",
+            "label": "text",
+            "description": "text",
+            "behavesAs": "text"
+          }
+        ],
+        "replaceBuiltInOptions": false
+      },
+      "modelPricing": {
+        "multiplier": 2.5,
+        "overrides": {
+          "extra_key": {
+            "input": 2.5,
+            "output": 2.5,
+            "cacheRead": 2.5,
+            "cacheWrite": 2.5
+          }
+        }
+      },
+      "promptCacheTtl": "1h",
+      "subagentPromptCacheTtl": "1h",
+      "alwaysThinkingEnabled": false,
+      "effortLevel": "medium",
+      "maxEffortLevel": "low",
+      "modelSettings": {
+        "extra_key": {
+          "effortLevel": "medium",
+          "maxEffortLevel": "low",
+          "autoCompactWindow": 2.5,
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "ultracode": false,
+      "advisorModel": "text",
+      "fastMode": false,
+      "fastModePerSessionOptIn": false,
+      "switchModelsOnFlag": false
+    },
+    {
+      "model": "text",
+      "fallbackModel": [
+        "text"
+      ],
+      "availableModels": [
+        "text"
+      ],
+      "enforceAvailableModels": true,
+      "availableModelsMatch": "prefix",
+      "deniedModels": [
+        "text"
+      ],
+      "modelOverrides": {
+        "extra_key": "text"
+      },
+      "modelPicker": {
+        "options": [
+          {
+            "model": "text",
+            "label": "text",
+            "description": "text",
+            "behavesAs": "text"
+          }
+        ],
+        "replaceBuiltInOptions": true
+      },
+      "modelPricing": {
+        "multiplier": 3,
+        "overrides": {
+          "extra_key": {
+            "input": 3,
+            "output": 3,
+            "cacheRead": 3,
+            "cacheWrite": 3
+          }
+        }
+      },
+      "promptCacheTtl": "5m",
+      "subagentPromptCacheTtl": "5m",
+      "alwaysThinkingEnabled": true,
+      "effortLevel": "high",
+      "maxEffortLevel": "medium",
+      "modelSettings": {
+        "extra_key": {
+          "effortLevel": "high",
+          "maxEffortLevel": "medium",
+          "autoCompactWindow": "auto",
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "ultracode": true,
+      "advisorModel": "text",
+      "fastMode": true,
+      "fastModePerSessionOptIn": true,
+      "switchModelsOnFlag": true
+    },
+    {
+      "model": "text",
+      "fallbackModel": [
+        "text"
+      ],
+      "availableModels": [
+        "text"
+      ],
+      "enforceAvailableModels": false,
+      "availableModelsMatch": "exact",
+      "deniedModels": [
+        "text"
+      ],
+      "modelOverrides": {
+        "extra_key": "text"
+      },
+      "modelPicker": {
+        "options": [
+          {
+            "model": "text",
+            "label": "text",
+            "description": "text",
+            "behavesAs": "text"
+          }
+        ],
+        "replaceBuiltInOptions": false
+      },
+      "modelPricing": {
+        "multiplier": 2.5,
+        "overrides": {
+          "extra_key": {
+            "input": 2.5,
+            "output": 2.5,
+            "cacheRead": 2.5,
+            "cacheWrite": 2.5
+          }
+        }
+      },
+      "promptCacheTtl": "1h",
+      "subagentPromptCacheTtl": "1h",
+      "alwaysThinkingEnabled": false,
+      "effortLevel": "xhigh",
+      "maxEffortLevel": "high",
+      "modelSettings": {
+        "extra_key": {
+          "effortLevel": "xhigh",
+          "maxEffortLevel": "high",
+          "autoCompactWindow": 2.5,
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "ultracode": false,
+      "advisorModel": "text",
+      "fastMode": false,
+      "fastModePerSessionOptIn": false,
+      "switchModelsOnFlag": false
+    },
+    {
+      "model": "text",
+      "fallbackModel": [
+        "text"
+      ],
+      "availableModels": [
+        "text"
+      ],
+      "enforceAvailableModels": true,
+      "availableModelsMatch": "prefix",
+      "deniedModels": [
+        "text"
+      ],
+      "modelOverrides": {
+        "extra_key": "text"
+      },
+      "modelPicker": {
+        "options": [
+          {
+            "model": "text",
+            "label": "text",
+            "description": "text",
+            "behavesAs": "text"
+          }
+        ],
+        "replaceBuiltInOptions": true
+      },
+      "modelPricing": {
+        "multiplier": 3,
+        "overrides": {
+          "extra_key": {
+            "input": 3,
+            "output": 3,
+            "cacheRead": 3,
+            "cacheWrite": 3
+          }
+        }
+      },
+      "promptCacheTtl": "5m",
+      "subagentPromptCacheTtl": "5m",
+      "alwaysThinkingEnabled": true,
+      "effortLevel": "low",
+      "maxEffortLevel": "xhigh",
+      "modelSettings": {
+        "extra_key": {
+          "effortLevel": "low",
+          "maxEffortLevel": "xhigh",
+          "autoCompactWindow": "auto",
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "ultracode": true,
+      "advisorModel": "text",
+      "fastMode": true,
+      "fastModePerSessionOptIn": true,
+      "switchModelsOnFlag": true
+    },
+    {
+      "model": "text",
+      "fallbackModel": [
+        "text"
+      ],
+      "availableModels": [
+        "text"
+      ],
+      "enforceAvailableModels": false,
+      "availableModelsMatch": "exact",
+      "deniedModels": [
+        "text"
+      ],
+      "modelOverrides": {
+        "extra_key": "text"
+      },
+      "modelPicker": {
+        "options": [
+          {
+            "model": "text",
+            "label": "text",
+            "description": "text",
+            "behavesAs": "text"
+          }
+        ],
+        "replaceBuiltInOptions": false
+      },
+      "modelPricing": {
+        "multiplier": 2.5,
+        "overrides": {
+          "extra_key": {
+            "input": 2.5,
+            "output": 2.5,
+            "cacheRead": 2.5,
+            "cacheWrite": 2.5
+          }
+        }
+      },
+      "promptCacheTtl": "1h",
+      "subagentPromptCacheTtl": "1h",
+      "alwaysThinkingEnabled": false,
+      "effortLevel": "medium",
+      "maxEffortLevel": "max",
+      "modelSettings": {
+        "extra_key": {
+          "effortLevel": "medium",
+          "maxEffortLevel": "max",
+          "autoCompactWindow": 2.5,
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "ultracode": false,
+      "advisorModel": "text",
+      "fastMode": false,
+      "fastModePerSessionOptIn": false,
+      "switchModelsOnFlag": false
+    }
+  ],
+  "mcp": [
+    {
+      "enableAllProjectMcpServers": true,
+      "enabledMcpjsonServers": [
+        "text"
+      ],
+      "disabledMcpjsonServers": [
+        "text"
+      ],
+      "disableClaudeAiConnectors": true,
+      "managedMcpServers": {
+        "extra_key": {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "allowedMcpServers": [
+        {
+          "serverName": "text",
+          "serverCommand": [
+            "text"
+          ],
+          "serverUrl": "text"
+        }
+      ],
+      "deniedMcpServers": [
+        {
+          "serverName": "text",
+          "serverCommand": [
+            "text"
+          ],
+          "serverUrl": "text"
+        }
+      ],
+      "allowManagedMcpServersOnly": true,
+      "allowAllClaudeAiMcps": true,
+      "allowClaudeInChromeWithManagedMcp": true
+    },
+    {
+      "enableAllProjectMcpServers": false,
+      "enabledMcpjsonServers": [
+        "text"
+      ],
+      "disabledMcpjsonServers": [
+        "text"
+      ],
+      "disableClaudeAiConnectors": false,
+      "managedMcpServers": {
+        "extra_key": {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "allowedMcpServers": [
+        {
+          "serverName": "text",
+          "serverCommand": [
+            "text"
+          ],
+          "serverUrl": "text"
+        }
+      ],
+      "deniedMcpServers": [
+        {
+          "serverName": "text",
+          "serverCommand": [
+            "text"
+          ],
+          "serverUrl": "text"
+        }
+      ],
+      "allowManagedMcpServersOnly": false,
+      "allowAllClaudeAiMcps": false,
+      "allowClaudeInChromeWithManagedMcp": false
+    }
+  ],
+  "hooks": [
+    {
+      "hooks": {
+        "extra_key": [
+          {
+            "matcher": "text",
+            "hooks": [
+              {
+                "type": "command",
+                "command": "text",
+                "args": [
+                  "text"
+                ],
+                "if": "text",
+                "shell": "bash",
+                "timeout": 3,
+                "onFailure": "continue",
+                "statusMessage": "text",
+                "once": true,
+                "async": true,
+                "asyncRewake": true
+              }
+            ]
+          }
+        ]
+      },
+      "disableAllHooks": true,
+      "allowManagedHooksOnly": true,
+      "allowedHttpHookUrls": [
+        "text"
+      ],
+      "httpHookAllowedEnvVars": [
+        "text"
+      ]
+    },
+    {
+      "hooks": {
+        "extra_key": [
+          {
+            "matcher": "text",
+            "hooks": [
+              {
+                "type": "prompt",
+                "prompt": "text",
+                "if": "text",
+                "timeout": 2.5,
+                "model": "text",
+                "continueOnBlock": false,
+                "statusMessage": "text",
+                "once": false
+              }
+            ]
+          }
+        ]
+      },
+      "disableAllHooks": false,
+      "allowManagedHooksOnly": false,
+      "allowedHttpHookUrls": [
+        "text"
+      ],
+      "httpHookAllowedEnvVars": [
+        "text"
+      ]
+    },
+    {
+      "hooks": {
+        "extra_key": [
+          {
+            "matcher": "text",
+            "hooks": [
+              {
+                "type": "agent",
+                "prompt": "text",
+                "if": "text",
+                "timeout": 3,
+                "model": "text",
+                "statusMessage": "text",
+                "once": true
+              }
+            ]
+          }
+        ]
+      },
+      "disableAllHooks": true,
+      "allowManagedHooksOnly": true,
+      "allowedHttpHookUrls": [
+        "text"
+      ],
+      "httpHookAllowedEnvVars": [
+        "text"
+      ]
+    },
+    {
+      "hooks": {
+        "extra_key": [
+          {
+            "matcher": "text",
+            "hooks": [
+              {
+                "type": "http",
+                "url": "text",
+                "if": "text",
+                "timeout": 2.5,
+                "onFailure": "block",
+                "headers": {
+                  "extra_key": "text"
+                },
+                "allowedEnvVars": [
+                  "text"
+                ],
+                "statusMessage": "text",
+                "once": false
+              }
+            ]
+          }
+        ]
+      },
+      "disableAllHooks": false,
+      "allowManagedHooksOnly": false,
+      "allowedHttpHookUrls": [
+        "text"
+      ],
+      "httpHookAllowedEnvVars": [
+        "text"
+      ]
+    },
+    {
+      "hooks": {
+        "extra_key": [
+          {
+            "matcher": "text",
+            "hooks": [
+              {
+                "type": "mcp_tool",
+                "server": "text",
+                "tool": "text",
+                "input": {
+                  "extra_key": {
+                    "any": [
+                      "thing",
+                      null
+                    ]
+                  }
+                },
+                "if": "text",
+                "timeout": 3,
+                "statusMessage": "text",
+                "once": true
+              }
+            ]
+          }
+        ]
+      },
+      "disableAllHooks": true,
+      "allowManagedHooksOnly": true,
+      "allowedHttpHookUrls": [
+        "text"
+      ],
+      "httpHookAllowedEnvVars": [
+        "text"
+      ]
+    },
+    {
+      "hooks": {
+        "extra_key": [
+          {
+            "matcher": "text",
+            "hooks": [
+              {
+                "type": "command",
+                "command": "text",
+                "args": [
+                  "text"
+                ],
+                "if": "text",
+                "shell": "powershell",
+                "timeout": 2.5,
+                "onFailure": "block",
+                "statusMessage": "text",
+                "once": false,
+                "async": false,
+                "asyncRewake": false
+              }
+            ]
+          }
+        ]
+      },
+      "disableAllHooks": false,
+      "allowManagedHooksOnly": false,
+      "allowedHttpHookUrls": [
+        "text"
+      ],
+      "httpHookAllowedEnvVars": [
+        "text"
+      ]
+    },
+    {
+      "hooks": {
+        "extra_key": [
+          {
+            "matcher": "text",
+            "hooks": [
+              {
+                "type": "prompt",
+                "prompt": "text",
+                "if": "text",
+                "timeout": 3,
+                "model": "text",
+                "continueOnBlock": true,
+                "statusMessage": "text",
+                "once": true
+              }
+            ]
+          }
+        ]
+      },
+      "disableAllHooks": true,
+      "allowManagedHooksOnly": true,
+      "allowedHttpHookUrls": [
+        "text"
+      ],
+      "httpHookAllowedEnvVars": [
+        "text"
+      ]
+    },
+    {
+      "hooks": {
+        "extra_key": [
+          {
+            "matcher": "text",
+            "hooks": [
+              {
+                "type": "agent",
+                "prompt": "text",
+                "if": "text",
+                "timeout": 2.5,
+                "model": "text",
+                "statusMessage": "text",
+                "once": false
+              }
+            ]
+          }
+        ]
+      },
+      "disableAllHooks": false,
+      "allowManagedHooksOnly": false,
+      "allowedHttpHookUrls": [
+        "text"
+      ],
+      "httpHookAllowedEnvVars": [
+        "text"
+      ]
+    },
+    {
+      "hooks": {
+        "extra_key": [
+          {
+            "matcher": "text",
+            "hooks": [
+              {
+                "type": "http",
+                "url": "text",
+                "if": "text",
+                "timeout": 3,
+                "onFailure": "continue",
+                "headers": {
+                  "extra_key": "text"
+                },
+                "allowedEnvVars": [
+                  "text"
+                ],
+                "statusMessage": "text",
+                "once": true
+              }
+            ]
+          }
+        ]
+      },
+      "disableAllHooks": true,
+      "allowManagedHooksOnly": true,
+      "allowedHttpHookUrls": [
+        "text"
+      ],
+      "httpHookAllowedEnvVars": [
+        "text"
+      ]
+    },
+    {
+      "hooks": {
+        "extra_key": [
+          {
+            "matcher": "text",
+            "hooks": [
+              {
+                "type": "mcp_tool",
+                "server": "text",
+                "tool": "text",
+                "input": {
+                  "extra_key": {
+                    "any": [
+                      "thing",
+                      null
+                    ]
+                  }
+                },
+                "if": "text",
+                "timeout": 2.5,
+                "statusMessage": "text",
+                "once": false
+              }
+            ]
+          }
+        ]
+      },
+      "disableAllHooks": false,
+      "allowManagedHooksOnly": false,
+      "allowedHttpHookUrls": [
+        "text"
+      ],
+      "httpHookAllowedEnvVars": [
+        "text"
+      ]
+    }
+  ],
+  "sandbox": [
+    {
+      "sandbox": {
+        "enabled": true,
+        "failIfUnavailable": true,
+        "autoAllowBashIfSandboxed": true,
+        "allowUnsandboxedCommands": true,
+        "network": {
+          "allowedDomains": [
+            "text"
+          ],
+          "deniedDomains": [
+            "text"
+          ],
+          "strictAllowlist": true,
+          "allowManagedDomainsOnly": true,
+          "allowUnixSockets": [
+            "text"
+          ],
+          "allowAllUnixSockets": true,
+          "allowLocalBinding": true,
+          "allowMachLookup": [
+            "text"
+          ],
+          "httpProxyPort": 3,
+          "socksProxyPort": 3,
+          "tlsTerminate": {
+            "caCertPath": "text",
+            "caKeyPath": "text"
+          }
+        },
+        "filesystem": {
+          "allowWrite": [
+            "text"
+          ],
+          "denyWrite": [
+            "text"
+          ],
+          "denyRead": [
+            "text"
+          ],
+          "allowRead": [
+            "text"
+          ],
+          "allowManagedReadPathsOnly": true,
+          "disabled": true
+        },
+        "credentials": {
+          "files": [
+            {
+              "path": "text",
+              "mode": "deny",
+              "extract": "text",
+              "onExtractNoMatch": "warn",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "maskDuplicates": true,
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "envVars": [
+            {
+              "name": "text",
+              "mode": "deny",
+              "extract": "text",
+              "onExtractNoMatch": "warn",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "allowPlaintextInject": true,
+          "awsPairs": [
+            {
+              "accessKeyIdVar": "text",
+              "secretAccessKeyVar": "text",
+              "sessionTokenVar": "text"
+            }
+          ],
+          "sigv4": {
+            "streaming": "deny",
+            "presigned": "deny",
+            "sigv4a": "deny"
+          }
+        },
+        "ignoreViolations": {
+          "extra_key": [
+            "text"
+          ]
+        },
+        "enableWeakerNestedSandbox": true,
+        "allowNestedUserNamespaces": true,
+        "enableWeakerNetworkIsolation": true,
+        "allowAppleEvents": true,
+        "excludedCommands": [
+          "text"
+        ],
+        "ripgrep": {
+          "command": "text",
+          "args": [
+            "text"
+          ]
+        },
+        "bwrapPath": "text",
+        "socatPath": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "sandbox": {
+        "enabled": false,
+        "failIfUnavailable": false,
+        "autoAllowBashIfSandboxed": false,
+        "allowUnsandboxedCommands": false,
+        "network": {
+          "allowedDomains": [
+            "text"
+          ],
+          "deniedDomains": [
+            "text"
+          ],
+          "strictAllowlist": false,
+          "allowManagedDomainsOnly": false,
+          "allowUnixSockets": [
+            "text"
+          ],
+          "allowAllUnixSockets": false,
+          "allowLocalBinding": false,
+          "allowMachLookup": [
+            "text"
+          ],
+          "httpProxyPort": 2.5,
+          "socksProxyPort": 2.5,
+          "tlsTerminate": {
+            "caCertPath": "text",
+            "caKeyPath": "text"
+          }
+        },
+        "filesystem": {
+          "allowWrite": [
+            "text"
+          ],
+          "denyWrite": [
+            "text"
+          ],
+          "denyRead": [
+            "text"
+          ],
+          "allowRead": [
+            "text"
+          ],
+          "allowManagedReadPathsOnly": false,
+          "disabled": false
+        },
+        "credentials": {
+          "files": [
+            {
+              "path": "text",
+              "mode": "mask",
+              "extract": "text",
+              "onExtractNoMatch": "deny",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "maskDuplicates": false,
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "envVars": [
+            {
+              "name": "text",
+              "mode": "mask",
+              "extract": "text",
+              "onExtractNoMatch": "deny",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "allowPlaintextInject": false,
+          "awsPairs": [
+            {
+              "accessKeyIdVar": "text",
+              "secretAccessKeyVar": "text",
+              "sessionTokenVar": "text"
+            }
+          ],
+          "sigv4": {
+            "streaming": "passthrough",
+            "presigned": "passthrough",
+            "sigv4a": "passthrough"
+          }
+        },
+        "ignoreViolations": {
+          "extra_key": [
+            "text"
+          ]
+        },
+        "enableWeakerNestedSandbox": false,
+        "allowNestedUserNamespaces": false,
+        "enableWeakerNetworkIsolation": false,
+        "allowAppleEvents": false,
+        "excludedCommands": [
+          "text"
+        ],
+        "ripgrep": {
+          "command": "text",
+          "args": [
+            "text"
+          ]
+        },
+        "bwrapPath": "text",
+        "socatPath": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "sandbox": {
+        "enabled": true,
+        "failIfUnavailable": true,
+        "autoAllowBashIfSandboxed": true,
+        "allowUnsandboxedCommands": true,
+        "network": {
+          "allowedDomains": [
+            "text"
+          ],
+          "deniedDomains": [
+            "text"
+          ],
+          "strictAllowlist": true,
+          "allowManagedDomainsOnly": true,
+          "allowUnixSockets": [
+            "text"
+          ],
+          "allowAllUnixSockets": true,
+          "allowLocalBinding": true,
+          "allowMachLookup": [
+            "text"
+          ],
+          "httpProxyPort": 3,
+          "socksProxyPort": 3,
+          "tlsTerminate": {
+            "caCertPath": "text",
+            "caKeyPath": "text"
+          }
+        },
+        "filesystem": {
+          "allowWrite": [
+            "text"
+          ],
+          "denyWrite": [
+            "text"
+          ],
+          "denyRead": [
+            "text"
+          ],
+          "allowRead": [
+            "text"
+          ],
+          "allowManagedReadPathsOnly": true,
+          "disabled": true
+        },
+        "credentials": {
+          "files": [
+            {
+              "path": "text",
+              "mode": "deny",
+              "extract": "text",
+              "onExtractNoMatch": "error",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "maskDuplicates": true,
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "envVars": [
+            {
+              "name": "text",
+              "mode": "deny",
+              "extract": "text",
+              "onExtractNoMatch": "error",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "allowPlaintextInject": true,
+          "awsPairs": [
+            {
+              "accessKeyIdVar": "text",
+              "secretAccessKeyVar": "text",
+              "sessionTokenVar": "text"
+            }
+          ],
+          "sigv4": {
+            "streaming": "deny",
+            "presigned": "deny",
+            "sigv4a": "deny"
+          }
+        },
+        "ignoreViolations": {
+          "extra_key": [
+            "text"
+          ]
+        },
+        "enableWeakerNestedSandbox": true,
+        "allowNestedUserNamespaces": true,
+        "enableWeakerNetworkIsolation": true,
+        "allowAppleEvents": true,
+        "excludedCommands": [
+          "text"
+        ],
+        "ripgrep": {
+          "command": "text",
+          "args": [
+            "text"
+          ]
+        },
+        "bwrapPath": "text",
+        "socatPath": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "sandbox": {
+        "enabled": false,
+        "failIfUnavailable": false,
+        "autoAllowBashIfSandboxed": false,
+        "allowUnsandboxedCommands": false,
+        "network": {
+          "allowedDomains": [
+            "text"
+          ],
+          "deniedDomains": [
+            "text"
+          ],
+          "strictAllowlist": false,
+          "allowManagedDomainsOnly": false,
+          "allowUnixSockets": [
+            "text"
+          ],
+          "allowAllUnixSockets": false,
+          "allowLocalBinding": false,
+          "allowMachLookup": [
+            "text"
+          ],
+          "httpProxyPort": 2.5,
+          "socksProxyPort": 2.5,
+          "tlsTerminate": {
+            "caCertPath": "text",
+            "caKeyPath": "text"
+          }
+        },
+        "filesystem": {
+          "allowWrite": [
+            "text"
+          ],
+          "denyWrite": [
+            "text"
+          ],
+          "denyRead": [
+            "text"
+          ],
+          "allowRead": [
+            "text"
+          ],
+          "allowManagedReadPathsOnly": false,
+          "disabled": false
+        },
+        "credentials": {
+          "files": [
+            {
+              "path": "text",
+              "mode": "mask",
+              "extract": "text",
+              "onExtractNoMatch": "warn",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "maskDuplicates": false,
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "envVars": [
+            {
+              "name": "text",
+              "mode": "mask",
+              "extract": "text",
+              "onExtractNoMatch": "warn",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "allowPlaintextInject": false,
+          "awsPairs": [
+            {
+              "accessKeyIdVar": "text",
+              "secretAccessKeyVar": "text",
+              "sessionTokenVar": "text"
+            }
+          ],
+          "sigv4": {
+            "streaming": "passthrough",
+            "presigned": "passthrough",
+            "sigv4a": "passthrough"
+          }
+        },
+        "ignoreViolations": {
+          "extra_key": [
+            "text"
+          ]
+        },
+        "enableWeakerNestedSandbox": false,
+        "allowNestedUserNamespaces": false,
+        "enableWeakerNetworkIsolation": false,
+        "allowAppleEvents": false,
+        "excludedCommands": [
+          "text"
+        ],
+        "ripgrep": {
+          "command": "text",
+          "args": [
+            "text"
+          ]
+        },
+        "bwrapPath": "text",
+        "socatPath": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "sandbox": {
+        "enabled": true,
+        "failIfUnavailable": true,
+        "autoAllowBashIfSandboxed": true,
+        "allowUnsandboxedCommands": true,
+        "network": {
+          "allowedDomains": [
+            "text"
+          ],
+          "deniedDomains": [
+            "text"
+          ],
+          "strictAllowlist": true,
+          "allowManagedDomainsOnly": true,
+          "allowUnixSockets": [
+            "text"
+          ],
+          "allowAllUnixSockets": true,
+          "allowLocalBinding": true,
+          "allowMachLookup": [
+            "text"
+          ],
+          "httpProxyPort": 3,
+          "socksProxyPort": 3,
+          "tlsTerminate": {
+            "caCertPath": "text",
+            "caKeyPath": "text"
+          }
+        },
+        "filesystem": {
+          "allowWrite": [
+            "text"
+          ],
+          "denyWrite": [
+            "text"
+          ],
+          "denyRead": [
+            "text"
+          ],
+          "allowRead": [
+            "text"
+          ],
+          "allowManagedReadPathsOnly": true,
+          "disabled": true
+        },
+        "credentials": {
+          "files": [
+            {
+              "path": "text",
+              "mode": "deny",
+              "extract": "text",
+              "onExtractNoMatch": "deny",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "maskDuplicates": true,
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "envVars": [
+            {
+              "name": "text",
+              "mode": "deny",
+              "extract": "text",
+              "onExtractNoMatch": "deny",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "allowPlaintextInject": true,
+          "awsPairs": [
+            {
+              "accessKeyIdVar": "text",
+              "secretAccessKeyVar": "text",
+              "sessionTokenVar": "text"
+            }
+          ],
+          "sigv4": {
+            "streaming": "deny",
+            "presigned": "deny",
+            "sigv4a": "deny"
+          }
+        },
+        "ignoreViolations": {
+          "extra_key": [
+            "text"
+          ]
+        },
+        "enableWeakerNestedSandbox": true,
+        "allowNestedUserNamespaces": true,
+        "enableWeakerNetworkIsolation": true,
+        "allowAppleEvents": true,
+        "excludedCommands": [
+          "text"
+        ],
+        "ripgrep": {
+          "command": "text",
+          "args": [
+            "text"
+          ]
+        },
+        "bwrapPath": "text",
+        "socatPath": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "sandbox": {
+        "enabled": false,
+        "failIfUnavailable": false,
+        "autoAllowBashIfSandboxed": false,
+        "allowUnsandboxedCommands": false,
+        "network": {
+          "allowedDomains": [
+            "text"
+          ],
+          "deniedDomains": [
+            "text"
+          ],
+          "strictAllowlist": false,
+          "allowManagedDomainsOnly": false,
+          "allowUnixSockets": [
+            "text"
+          ],
+          "allowAllUnixSockets": false,
+          "allowLocalBinding": false,
+          "allowMachLookup": [
+            "text"
+          ],
+          "httpProxyPort": 2.5,
+          "socksProxyPort": 2.5,
+          "tlsTerminate": {
+            "caCertPath": "text",
+            "caKeyPath": "text"
+          }
+        },
+        "filesystem": {
+          "allowWrite": [
+            "text"
+          ],
+          "denyWrite": [
+            "text"
+          ],
+          "denyRead": [
+            "text"
+          ],
+          "allowRead": [
+            "text"
+          ],
+          "allowManagedReadPathsOnly": false,
+          "disabled": false
+        },
+        "credentials": {
+          "files": [
+            {
+              "path": "text",
+              "mode": "mask",
+              "extract": "text",
+              "onExtractNoMatch": "error",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "maskDuplicates": false,
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "envVars": [
+            {
+              "name": "text",
+              "mode": "mask",
+              "extract": "text",
+              "onExtractNoMatch": "error",
+              "decode": "jwt",
+              "maskClaims": [
+                "text"
+              ],
+              "injectHosts": [
+                "text"
+              ]
+            }
+          ],
+          "allowPlaintextInject": false,
+          "awsPairs": [
+            {
+              "accessKeyIdVar": "text",
+              "secretAccessKeyVar": "text",
+              "sessionTokenVar": "text"
+            }
+          ],
+          "sigv4": {
+            "streaming": "passthrough",
+            "presigned": "passthrough",
+            "sigv4a": "passthrough"
+          }
+        },
+        "ignoreViolations": {
+          "extra_key": [
+            "text"
+          ]
+        },
+        "enableWeakerNestedSandbox": false,
+        "allowNestedUserNamespaces": false,
+        "enableWeakerNetworkIsolation": false,
+        "allowAppleEvents": false,
+        "excludedCommands": [
+          "text"
+        ],
+        "ripgrep": {
+          "command": "text",
+          "args": [
+            "text"
+          ]
+        },
+        "bwrapPath": "text",
+        "socatPath": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    }
+  ],
+  "plugins": [
+    {
+      "syncClaudeAiPlugins": true,
+      "strictPluginOnlyCustomization": true,
+      "enabledPlugins": {
+        "extra_key": [
+          "text"
+        ]
+      },
+      "prependPlugins": [
+        "text"
+      ],
+      "appendPlugins": [
+        "text"
+      ],
+      "extraKnownMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "url",
+            "url": "text",
+            "headers": {
+              "extra_key": "text"
+            },
+            "headersHelper": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": true,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "additionalMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "url",
+            "url": "text",
+            "headers": {
+              "extra_key": "text"
+            },
+            "headersHelper": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": true,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "strictKnownMarketplaces": [
+        {
+          "source": "url",
+          "url": "text",
+          "headers": {
+            "extra_key": "text"
+          },
+          "headersHelper": "text"
+        }
+      ],
+      "allowedMarketplaces": [
+        {
+          "source": "url",
+          "url": "text",
+          "headers": {
+            "extra_key": "text"
+          },
+          "headersHelper": "text"
+        }
+      ],
+      "blockedMarketplaces": [
+        {
+          "source": "url",
+          "url": "text",
+          "headers": {
+            "extra_key": "text"
+          },
+          "headersHelper": "text"
+        }
+      ],
+      "disableCommandPluginSources": true,
+      "disableSideloadFlags": true,
+      "pluginSuggestionMarketplaces": [
+        "text"
+      ],
+      "pluginConfigs": {
+        "extra_key": {
+          "mcpServers": {
+            "extra_key": {
+              "extra_key": "text"
+            }
+          },
+          "options": {
+            "extra_key": "text"
+          }
+        }
+      },
+      "channelsEnabled": true,
+      "allowedChannelPlugins": [
+        {
+          "marketplace": "text",
+          "plugin": "text"
+        }
+      ],
+      "pluginTrustMessage": "text"
+    },
+    {
+      "syncClaudeAiPlugins": false,
+      "strictPluginOnlyCustomization": [
+        "agents"
+      ],
+      "enabledPlugins": {
+        "extra_key": false
+      },
+      "prependPlugins": [
+        "text"
+      ],
+      "appendPlugins": [
+        "text"
+      ],
+      "extraKnownMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "github",
+            "repo": "text",
+            "ref": "text",
+            "path": "text",
+            "sparsePaths": [
+              "text"
+            ],
+            "skipLfs": false
+          },
+          "installLocation": "text",
+          "autoUpdate": false,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "additionalMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "github",
+            "repo": "text",
+            "ref": "text",
+            "path": "text",
+            "sparsePaths": [
+              "text"
+            ],
+            "skipLfs": false
+          },
+          "installLocation": "text",
+          "autoUpdate": false,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "strictKnownMarketplaces": [
+        {
+          "source": "github",
+          "repo": "text",
+          "ref": "text",
+          "path": "text",
+          "sparsePaths": [
+            "text"
+          ],
+          "skipLfs": false
+        }
+      ],
+      "allowedMarketplaces": [
+        {
+          "source": "github",
+          "repo": "text",
+          "ref": "text",
+          "path": "text",
+          "sparsePaths": [
+            "text"
+          ],
+          "skipLfs": false
+        }
+      ],
+      "blockedMarketplaces": [
+        {
+          "source": "github",
+          "repo": "text",
+          "ref": "text",
+          "path": "text",
+          "sparsePaths": [
+            "text"
+          ],
+          "skipLfs": false
+        }
+      ],
+      "disableCommandPluginSources": false,
+      "disableSideloadFlags": false,
+      "pluginSuggestionMarketplaces": [
+        "text"
+      ],
+      "pluginConfigs": {
+        "extra_key": {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "channelsEnabled": false,
+      "allowedChannelPlugins": [
+        {
+          "marketplace": "text",
+          "plugin": "text"
+        }
+      ],
+      "pluginTrustMessage": "text"
+    },
+    {
+      "syncClaudeAiPlugins": true,
+      "strictPluginOnlyCustomization": true,
+      "enabledPlugins": {
+        "extra_key": {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "prependPlugins": [
+        "text"
+      ],
+      "appendPlugins": [
+        "text"
+      ],
+      "extraKnownMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "git",
+            "url": "text",
+            "ref": "text",
+            "path": "text",
+            "sparsePaths": [
+              "text"
+            ],
+            "skipLfs": true
+          },
+          "installLocation": "text",
+          "autoUpdate": true,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "additionalMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "git",
+            "url": "text",
+            "ref": "text",
+            "path": "text",
+            "sparsePaths": [
+              "text"
+            ],
+            "skipLfs": true
+          },
+          "installLocation": "text",
+          "autoUpdate": true,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "strictKnownMarketplaces": [
+        {
+          "source": "git",
+          "url": "text",
+          "ref": "text",
+          "path": "text",
+          "sparsePaths": [
+            "text"
+          ],
+          "skipLfs": true
+        }
+      ],
+      "allowedMarketplaces": [
+        {
+          "source": "git",
+          "url": "text",
+          "ref": "text",
+          "path": "text",
+          "sparsePaths": [
+            "text"
+          ],
+          "skipLfs": true
+        }
+      ],
+      "blockedMarketplaces": [
+        {
+          "source": "git",
+          "url": "text",
+          "ref": "text",
+          "path": "text",
+          "sparsePaths": [
+            "text"
+          ],
+          "skipLfs": true
+        }
+      ],
+      "disableCommandPluginSources": true,
+      "disableSideloadFlags": true,
+      "pluginSuggestionMarketplaces": [
+        "text"
+      ],
+      "pluginConfigs": {
+        "extra_key": {
+          "mcpServers": {
+            "extra_key": {
+              "extra_key": true
+            }
+          },
+          "options": {
+            "extra_key": true
+          }
+        }
+      },
+      "channelsEnabled": true,
+      "allowedChannelPlugins": [
+        {
+          "marketplace": "text",
+          "plugin": "text"
+        }
+      ],
+      "pluginTrustMessage": "text"
+    },
+    {
+      "syncClaudeAiPlugins": false,
+      "strictPluginOnlyCustomization": [
+        "mcp"
+      ],
+      "enabledPlugins": {
+        "extra_key": [
+          "text"
+        ]
+      },
+      "prependPlugins": [
+        "text"
+      ],
+      "appendPlugins": [
+        "text"
+      ],
+      "extraKnownMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "npm",
+            "package": "text",
+            "version": "text",
+            "registry": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": false,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "additionalMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "npm",
+            "package": "text",
+            "version": "text",
+            "registry": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": false,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "strictKnownMarketplaces": [
+        {
+          "source": "npm",
+          "package": "text",
+          "version": "text",
+          "registry": "text"
+        }
+      ],
+      "allowedMarketplaces": [
+        {
+          "source": "npm",
+          "package": "text",
+          "version": "text",
+          "registry": "text"
+        }
+      ],
+      "blockedMarketplaces": [
+        {
+          "source": "npm",
+          "package": "text",
+          "version": "text",
+          "registry": "text"
+        }
+      ],
+      "disableCommandPluginSources": false,
+      "disableSideloadFlags": false,
+      "pluginSuggestionMarketplaces": [
+        "text"
+      ],
+      "pluginConfigs": {
+        "extra_key": {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "channelsEnabled": false,
+      "allowedChannelPlugins": [
+        {
+          "marketplace": "text",
+          "plugin": "text"
+        }
+      ],
+      "pluginTrustMessage": "text"
+    },
+    {
+      "syncClaudeAiPlugins": true,
+      "strictPluginOnlyCustomization": true,
+      "enabledPlugins": {
+        "extra_key": true
+      },
+      "prependPlugins": [
+        "text"
+      ],
+      "appendPlugins": [
+        "text"
+      ],
+      "extraKnownMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "file",
+            "path": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": true,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "additionalMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "file",
+            "path": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": true,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "strictKnownMarketplaces": [
+        {
+          "source": "file",
+          "path": "text"
+        }
+      ],
+      "allowedMarketplaces": [
+        {
+          "source": "file",
+          "path": "text"
+        }
+      ],
+      "blockedMarketplaces": [
+        {
+          "source": "file",
+          "path": "text"
+        }
+      ],
+      "disableCommandPluginSources": true,
+      "disableSideloadFlags": true,
+      "pluginSuggestionMarketplaces": [
+        "text"
+      ],
+      "pluginConfigs": {
+        "extra_key": {
+          "mcpServers": {
+            "extra_key": {
+              "extra_key": "text"
+            }
+          },
+          "options": {
+            "extra_key": "text"
+          }
+        }
+      },
+      "channelsEnabled": true,
+      "allowedChannelPlugins": [
+        {
+          "marketplace": "text",
+          "plugin": "text"
+        }
+      ],
+      "pluginTrustMessage": "text"
+    },
+    {
+      "syncClaudeAiPlugins": false,
+      "strictPluginOnlyCustomization": [
+        "agents"
+      ],
+      "enabledPlugins": {
+        "extra_key": {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "prependPlugins": [
+        "text"
+      ],
+      "appendPlugins": [
+        "text"
+      ],
+      "extraKnownMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "directory",
+            "path": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": false,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "additionalMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "directory",
+            "path": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": false,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "strictKnownMarketplaces": [
+        {
+          "source": "directory",
+          "path": "text"
+        }
+      ],
+      "allowedMarketplaces": [
+        {
+          "source": "directory",
+          "path": "text"
+        }
+      ],
+      "blockedMarketplaces": [
+        {
+          "source": "directory",
+          "path": "text"
+        }
+      ],
+      "disableCommandPluginSources": false,
+      "disableSideloadFlags": false,
+      "pluginSuggestionMarketplaces": [
+        "text"
+      ],
+      "pluginConfigs": {
+        "extra_key": {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "channelsEnabled": false,
+      "allowedChannelPlugins": [
+        {
+          "marketplace": "text",
+          "plugin": "text"
+        }
+      ],
+      "pluginTrustMessage": "text"
+    },
+    {
+      "syncClaudeAiPlugins": true,
+      "strictPluginOnlyCustomization": true,
+      "enabledPlugins": {
+        "extra_key": [
+          "text"
+        ]
+      },
+      "prependPlugins": [
+        "text"
+      ],
+      "appendPlugins": [
+        "text"
+      ],
+      "extraKnownMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "skills-dir"
+          },
+          "installLocation": "text",
+          "autoUpdate": true,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "additionalMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "skills-dir"
+          },
+          "installLocation": "text",
+          "autoUpdate": true,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "strictKnownMarketplaces": [
+        {
+          "source": "skills-dir"
+        }
+      ],
+      "allowedMarketplaces": [
+        {
+          "source": "skills-dir"
+        }
+      ],
+      "blockedMarketplaces": [
+        {
+          "source": "skills-dir"
+        }
+      ],
+      "disableCommandPluginSources": true,
+      "disableSideloadFlags": true,
+      "pluginSuggestionMarketplaces": [
+        "text"
+      ],
+      "pluginConfigs": {
+        "extra_key": {
+          "mcpServers": {
+            "extra_key": {
+              "extra_key": true
+            }
+          },
+          "options": {
+            "extra_key": true
+          }
+        }
+      },
+      "channelsEnabled": true,
+      "allowedChannelPlugins": [
+        {
+          "marketplace": "text",
+          "plugin": "text"
+        }
+      ],
+      "pluginTrustMessage": "text"
+    },
+    {
+      "syncClaudeAiPlugins": false,
+      "strictPluginOnlyCustomization": [
+        "mcp"
+      ],
+      "enabledPlugins": {
+        "extra_key": false
+      },
+      "prependPlugins": [
+        "text"
+      ],
+      "appendPlugins": [
+        "text"
+      ],
+      "extraKnownMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "hostPattern",
+            "hostPattern": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": false,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "additionalMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "hostPattern",
+            "hostPattern": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": false,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "strictKnownMarketplaces": [
+        {
+          "source": "hostPattern",
+          "hostPattern": "text"
+        }
+      ],
+      "allowedMarketplaces": [
+        {
+          "source": "hostPattern",
+          "hostPattern": "text"
+        }
+      ],
+      "blockedMarketplaces": [
+        {
+          "source": "hostPattern",
+          "hostPattern": "text"
+        }
+      ],
+      "disableCommandPluginSources": false,
+      "disableSideloadFlags": false,
+      "pluginSuggestionMarketplaces": [
+        "text"
+      ],
+      "pluginConfigs": {
+        "extra_key": {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "channelsEnabled": false,
+      "allowedChannelPlugins": [
+        {
+          "marketplace": "text",
+          "plugin": "text"
+        }
+      ],
+      "pluginTrustMessage": "text"
+    },
+    {
+      "syncClaudeAiPlugins": true,
+      "strictPluginOnlyCustomization": true,
+      "enabledPlugins": {
+        "extra_key": {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "prependPlugins": [
+        "text"
+      ],
+      "appendPlugins": [
+        "text"
+      ],
+      "extraKnownMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "pathPattern",
+            "pathPattern": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": true,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "additionalMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "pathPattern",
+            "pathPattern": "text"
+          },
+          "installLocation": "text",
+          "autoUpdate": true,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "strictKnownMarketplaces": [
+        {
+          "source": "pathPattern",
+          "pathPattern": "text"
+        }
+      ],
+      "allowedMarketplaces": [
+        {
+          "source": "pathPattern",
+          "pathPattern": "text"
+        }
+      ],
+      "blockedMarketplaces": [
+        {
+          "source": "pathPattern",
+          "pathPattern": "text"
+        }
+      ],
+      "disableCommandPluginSources": true,
+      "disableSideloadFlags": true,
+      "pluginSuggestionMarketplaces": [
+        "text"
+      ],
+      "pluginConfigs": {
+        "extra_key": {
+          "mcpServers": {
+            "extra_key": {
+              "extra_key": "text"
+            }
+          },
+          "options": {
+            "extra_key": "text"
+          }
+        }
+      },
+      "channelsEnabled": true,
+      "allowedChannelPlugins": [
+        {
+          "marketplace": "text",
+          "plugin": "text"
+        }
+      ],
+      "pluginTrustMessage": "text"
+    },
+    {
+      "syncClaudeAiPlugins": false,
+      "strictPluginOnlyCustomization": [
+        "agents"
+      ],
+      "enabledPlugins": {
+        "extra_key": [
+          "text"
+        ]
+      },
+      "prependPlugins": [
+        "text"
+      ],
+      "appendPlugins": [
+        "text"
+      ],
+      "extraKnownMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "settings",
+            "name": "text",
+            "plugins": [
+              {
+                "name": "text",
+                "source": {
+                  "source": "npm",
+                  "package": "text",
+                  "version": "text",
+                  "registry": "text"
+                },
+                "description": "text",
+                "version": "text",
+                "strict": false,
+                "engines": {
+                  "extra_key": {
+                    "any": [
+                      "thing",
+                      null
+                    ]
+                  }
+                },
+                "headers": {
+                  "extra_key": "text"
+                },
+                "headersHelper": "text"
+              }
+            ],
+            "owner": {
+              "name": "text",
+              "email": "text",
+              "url": "text"
+            }
+          },
+          "installLocation": "text",
+          "autoUpdate": false,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "additionalMarketplaces": {
+        "extra_key": {
+          "source": {
+            "source": "settings",
+            "name": "text",
+            "plugins": [
+              {
+                "name": "text",
+                "source": {
+                  "source": "npm",
+                  "package": "text",
+                  "version": "text",
+                  "registry": "text"
+                },
+                "description": "text",
+                "version": "text",
+                "strict": false,
+                "engines": {
+                  "extra_key": {
+                    "any": [
+                      "thing",
+                      null
+                    ]
+                  }
+                },
+                "headers": {
+                  "extra_key": "text"
+                },
+                "headersHelper": "text"
+              }
+            ],
+            "owner": {
+              "name": "text",
+              "email": "text",
+              "url": "text"
+            }
+          },
+          "installLocation": "text",
+          "autoUpdate": false,
+          "pluginDigests": {
+            "extra_key": [
+              "text"
+            ]
+          }
+        }
+      },
+      "strictKnownMarketplaces": [
+        {
+          "source": "settings",
+          "name": "text",
+          "plugins": [
+            {
+              "name": "text",
+              "source": {
+                "source": "npm",
+                "package": "text",
+                "version": "text",
+                "registry": "text"
+              },
+              "description": "text",
+              "version": "text",
+              "strict": false,
+              "engines": {
+                "extra_key": {
+                  "any": [
+                    "thing",
+                    null
+                  ]
+                }
+              },
+              "headers": {
+                "extra_key": "text"
+              },
+              "headersHelper": "text"
+            }
+          ],
+          "owner": {
+            "name": "text",
+            "email": "text",
+            "url": "text"
+          }
+        }
+      ],
+      "allowedMarketplaces": [
+        {
+          "source": "settings",
+          "name": "text",
+          "plugins": [
+            {
+              "name": "text",
+              "source": {
+                "source": "npm",
+                "package": "text",
+                "version": "text",
+                "registry": "text"
+              },
+              "description": "text",
+              "version": "text",
+              "strict": false,
+              "engines": {
+                "extra_key": {
+                  "any": [
+                    "thing",
+                    null
+                  ]
+                }
+              },
+              "headers": {
+                "extra_key": "text"
+              },
+              "headersHelper": "text"
+            }
+          ],
+          "owner": {
+            "name": "text",
+            "email": "text",
+            "url": "text"
+          }
+        }
+      ],
+      "blockedMarketplaces": [
+        {
+          "source": "settings",
+          "name": "text",
+          "plugins": [
+            {
+              "name": "text",
+              "source": {
+                "source": "npm",
+                "package": "text",
+                "version": "text",
+                "registry": "text"
+              },
+              "description": "text",
+              "version": "text",
+              "strict": false,
+              "engines": {
+                "extra_key": {
+                  "any": [
+                    "thing",
+                    null
+                  ]
+                }
+              },
+              "headers": {
+                "extra_key": "text"
+              },
+              "headersHelper": "text"
+            }
+          ],
+          "owner": {
+            "name": "text",
+            "email": "text",
+            "url": "text"
+          }
+        }
+      ],
+      "disableCommandPluginSources": false,
+      "disableSideloadFlags": false,
+      "pluginSuggestionMarketplaces": [
+        "text"
+      ],
+      "pluginConfigs": {
+        "extra_key": {
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      },
+      "channelsEnabled": false,
+      "allowedChannelPlugins": [
+        {
+          "marketplace": "text",
+          "plugin": "text"
+        }
+      ],
+      "pluginTrustMessage": "text"
+    }
+  ],
+  "skills_and_workflows": [
+    {
+      "syncClaudeAiSkills": true,
+      "skillListingMaxDescChars": 3,
+      "skillListingBudgetFraction": 3,
+      "skillOverrides": {
+        "extra_key": "on"
+      },
+      "disableBundledSkills": true,
+      "disableWorkflows": true,
+      "disableArtifact": true,
+      "enableArtifact": true,
+      "enableWorkflows": true,
+      "workflowSizeGuideline": "unrestricted",
+      "workflowKeywordTriggerEnabled": true,
+      "disableSkillShellExecution": true,
+      "agent": "text"
+    },
+    {
+      "syncClaudeAiSkills": false,
+      "skillListingMaxDescChars": 2.5,
+      "skillListingBudgetFraction": 2.5,
+      "skillOverrides": {
+        "extra_key": "name-only"
+      },
+      "disableBundledSkills": false,
+      "disableWorkflows": false,
+      "disableArtifact": false,
+      "enableArtifact": false,
+      "enableWorkflows": false,
+      "workflowSizeGuideline": "small",
+      "workflowKeywordTriggerEnabled": false,
+      "disableSkillShellExecution": false,
+      "agent": "text"
+    },
+    {
+      "syncClaudeAiSkills": true,
+      "skillListingMaxDescChars": 3,
+      "skillListingBudgetFraction": 3,
+      "skillOverrides": {
+        "extra_key": "user-invocable-only"
+      },
+      "disableBundledSkills": true,
+      "disableWorkflows": true,
+      "disableArtifact": true,
+      "enableArtifact": true,
+      "enableWorkflows": true,
+      "workflowSizeGuideline": "medium",
+      "workflowKeywordTriggerEnabled": true,
+      "disableSkillShellExecution": true,
+      "agent": "text"
+    },
+    {
+      "syncClaudeAiSkills": false,
+      "skillListingMaxDescChars": 2.5,
+      "skillListingBudgetFraction": 2.5,
+      "skillOverrides": {
+        "extra_key": "off"
+      },
+      "disableBundledSkills": false,
+      "disableWorkflows": false,
+      "disableArtifact": false,
+      "enableArtifact": false,
+      "enableWorkflows": false,
+      "workflowSizeGuideline": "large",
+      "workflowKeywordTriggerEnabled": false,
+      "disableSkillShellExecution": false,
+      "agent": "text"
+    }
+  ],
+  "shell_and_files": [
+    {
+      "fileSuggestion": {
+        "type": "command",
+        "command": "text"
+      },
+      "respectGitignore": true,
+      "wslInheritsWindowsSettings": true,
+      "env": {
+        "extra_key": "text"
+      },
+      "worktree": {
+        "symlinkDirectories": [
+          "text"
+        ],
+        "sparsePaths": [
+          "text"
+        ],
+        "baseRef": "fresh",
+        "bgIsolation": "worktree",
+        "location": "text"
+      },
+      "disableWindowsBashCommandSplit": true,
+      "defaultShell": "bash",
+      "bashEditDiffEnabled": true,
+      "bashOutputMaxChars": 3,
+      "taskOutputMaxChars": 3,
+      "respondToBashCommands": true,
+      "skipWebFetchPreflight": true,
+      "fileCheckpointingEnabled": true
+    },
+    {
+      "fileSuggestion": {
+        "type": "command",
+        "command": "text"
+      },
+      "respectGitignore": false,
+      "wslInheritsWindowsSettings": false,
+      "env": {
+        "extra_key": "text"
+      },
+      "worktree": {
+        "symlinkDirectories": [
+          "text"
+        ],
+        "sparsePaths": [
+          "text"
+        ],
+        "baseRef": "head",
+        "bgIsolation": "none",
+        "location": "text"
+      },
+      "disableWindowsBashCommandSplit": false,
+      "defaultShell": "powershell",
+      "bashEditDiffEnabled": false,
+      "bashOutputMaxChars": 2.5,
+      "taskOutputMaxChars": 2.5,
+      "respondToBashCommands": false,
+      "skipWebFetchPreflight": false,
+      "fileCheckpointingEnabled": false
+    }
+  ],
+  "attribution": [
+    {
+      "attribution": true,
+      "attributionProject": "text",
+      "attributionProjectPolicy": {
+        "default": "text"
+      },
+      "includeCoAuthoredBy": true,
+      "includeGitInstructions": true,
+      "prUrlTemplate": "text"
+    },
+    {
+      "attribution": {
+        "commit": "text",
+        "pr": "text",
+        "sessionUrl": false,
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "attributionProject": "text",
+      "attributionProjectPolicy": {
+        "default": "text"
+      },
+      "includeCoAuthoredBy": false,
+      "includeGitInstructions": false,
+      "prUrlTemplate": "text"
+    }
+  ],
+  "remote_and_ssh": [
+    {
+      "disableReplyCheck": true,
+      "disableRemoteControl": true,
+      "remote": {
+        "defaultEnvironmentId": "text"
+      },
+      "sshConfigs": [
+        {
+          "id": "text",
+          "name": "text",
+          "sshHost": "text",
+          "sshPort": 3,
+          "sshIdentityFile": "text",
+          "startDirectory": "text"
+        }
+      ],
+      "sshHostCommands": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "teammateMode": "auto",
+      "remoteControlAtStartup": true,
+      "isolatePeerMachines": true,
+      "daemonColdStart": "transient",
+      "crossSessionInbound": "accept",
+      "autoUploadSessions": true,
+      "inputNeededNotifEnabled": true,
+      "agentPushNotifEnabled": true,
+      "disableDeepLinkRegistration": "disable"
+    },
+    {
+      "disableReplyCheck": false,
+      "disableRemoteControl": false,
+      "remote": {
+        "defaultEnvironmentId": "text"
+      },
+      "sshConfigs": [
+        {
+          "id": "text",
+          "name": "text",
+          "sshHost": "text",
+          "sshPort": 2.5,
+          "sshIdentityFile": "text",
+          "startDirectory": "text"
+        }
+      ],
+      "sshHostCommands": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "teammateMode": "tmux",
+      "remoteControlAtStartup": false,
+      "isolatePeerMachines": false,
+      "daemonColdStart": "ask",
+      "crossSessionInbound": "hold",
+      "autoUploadSessions": false,
+      "inputNeededNotifEnabled": false,
+      "agentPushNotifEnabled": false,
+      "disableDeepLinkRegistration": "disable"
+    },
+    {
+      "disableReplyCheck": true,
+      "disableRemoteControl": true,
+      "remote": {
+        "defaultEnvironmentId": "text"
+      },
+      "sshConfigs": [
+        {
+          "id": "text",
+          "name": "text",
+          "sshHost": "text",
+          "sshPort": 3,
+          "sshIdentityFile": "text",
+          "startDirectory": "text"
+        }
+      ],
+      "sshHostCommands": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "teammateMode": "iterm2",
+      "remoteControlAtStartup": true,
+      "isolatePeerMachines": true,
+      "daemonColdStart": "transient",
+      "crossSessionInbound": "refuse",
+      "autoUploadSessions": true,
+      "inputNeededNotifEnabled": true,
+      "agentPushNotifEnabled": true,
+      "disableDeepLinkRegistration": "disable"
+    },
+    {
+      "disableReplyCheck": false,
+      "disableRemoteControl": false,
+      "remote": {
+        "defaultEnvironmentId": "text"
+      },
+      "sshConfigs": [
+        {
+          "id": "text",
+          "name": "text",
+          "sshHost": "text",
+          "sshPort": 2.5,
+          "sshIdentityFile": "text",
+          "startDirectory": "text"
+        }
+      ],
+      "sshHostCommands": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "teammateMode": "in-process",
+      "remoteControlAtStartup": false,
+      "isolatePeerMachines": false,
+      "daemonColdStart": "ask",
+      "crossSessionInbound": "accept",
+      "autoUploadSessions": false,
+      "inputNeededNotifEnabled": false,
+      "agentPushNotifEnabled": false,
+      "disableDeepLinkRegistration": "disable"
+    },
+    {
+      "disableReplyCheck": true,
+      "disableRemoteControl": true,
+      "remote": {
+        "defaultEnvironmentId": "text"
+      },
+      "sshConfigs": [
+        {
+          "id": "text",
+          "name": "text",
+          "sshHost": "text",
+          "sshPort": 3,
+          "sshIdentityFile": "text",
+          "startDirectory": "text"
+        }
+      ],
+      "sshHostCommands": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "teammateMode": "auto",
+      "remoteControlAtStartup": true,
+      "isolatePeerMachines": true,
+      "daemonColdStart": "transient",
+      "crossSessionInbound": "hold",
+      "autoUploadSessions": true,
+      "inputNeededNotifEnabled": true,
+      "agentPushNotifEnabled": true,
+      "disableDeepLinkRegistration": "disable"
+    },
+    {
+      "disableReplyCheck": false,
+      "disableRemoteControl": false,
+      "remote": {
+        "defaultEnvironmentId": "text"
+      },
+      "sshConfigs": [
+        {
+          "id": "text",
+          "name": "text",
+          "sshHost": "text",
+          "sshPort": 2.5,
+          "sshIdentityFile": "text",
+          "startDirectory": "text"
+        }
+      ],
+      "sshHostCommands": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "teammateMode": "tmux",
+      "remoteControlAtStartup": false,
+      "isolatePeerMachines": false,
+      "daemonColdStart": "ask",
+      "crossSessionInbound": "refuse",
+      "autoUploadSessions": false,
+      "inputNeededNotifEnabled": false,
+      "agentPushNotifEnabled": false,
+      "disableDeepLinkRegistration": "disable"
+    },
+    {
+      "disableReplyCheck": true,
+      "disableRemoteControl": true,
+      "remote": {
+        "defaultEnvironmentId": "text"
+      },
+      "sshConfigs": [
+        {
+          "id": "text",
+          "name": "text",
+          "sshHost": "text",
+          "sshPort": 3,
+          "sshIdentityFile": "text",
+          "startDirectory": "text"
+        }
+      ],
+      "sshHostCommands": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "teammateMode": "iterm2",
+      "remoteControlAtStartup": true,
+      "isolatePeerMachines": true,
+      "daemonColdStart": "transient",
+      "crossSessionInbound": "accept",
+      "autoUploadSessions": true,
+      "inputNeededNotifEnabled": true,
+      "agentPushNotifEnabled": true,
+      "disableDeepLinkRegistration": "disable"
+    },
+    {
+      "disableReplyCheck": false,
+      "disableRemoteControl": false,
+      "remote": {
+        "defaultEnvironmentId": "text"
+      },
+      "sshConfigs": [
+        {
+          "id": "text",
+          "name": "text",
+          "sshHost": "text",
+          "sshPort": 2.5,
+          "sshIdentityFile": "text",
+          "startDirectory": "text"
+        }
+      ],
+      "sshHostCommands": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "teammateMode": "in-process",
+      "remoteControlAtStartup": false,
+      "isolatePeerMachines": false,
+      "daemonColdStart": "ask",
+      "crossSessionInbound": "hold",
+      "autoUploadSessions": false,
+      "inputNeededNotifEnabled": false,
+      "agentPushNotifEnabled": false,
+      "disableDeepLinkRegistration": "disable"
+    },
+    {
+      "disableReplyCheck": true,
+      "disableRemoteControl": true,
+      "remote": {
+        "defaultEnvironmentId": "text"
+      },
+      "sshConfigs": [
+        {
+          "id": "text",
+          "name": "text",
+          "sshHost": "text",
+          "sshPort": 3,
+          "sshIdentityFile": "text",
+          "startDirectory": "text"
+        }
+      ],
+      "sshHostCommands": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "teammateMode": "auto",
+      "remoteControlAtStartup": true,
+      "isolatePeerMachines": true,
+      "daemonColdStart": "transient",
+      "crossSessionInbound": "refuse",
+      "autoUploadSessions": true,
+      "inputNeededNotifEnabled": true,
+      "agentPushNotifEnabled": true,
+      "disableDeepLinkRegistration": "disable"
+    },
+    {
+      "disableReplyCheck": false,
+      "disableRemoteControl": false,
+      "remote": {
+        "defaultEnvironmentId": "text"
+      },
+      "sshConfigs": [
+        {
+          "id": "text",
+          "name": "text",
+          "sshHost": "text",
+          "sshPort": 2.5,
+          "sshIdentityFile": "text",
+          "startDirectory": "text"
+        }
+      ],
+      "sshHostCommands": [
+        {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      ],
+      "teammateMode": "tmux",
+      "remoteControlAtStartup": false,
+      "isolatePeerMachines": false,
+      "daemonColdStart": "ask",
+      "crossSessionInbound": "accept",
+      "autoUploadSessions": false,
+      "inputNeededNotifEnabled": false,
+      "agentPushNotifEnabled": false,
+      "disableDeepLinkRegistration": "disable"
+    }
+  ],
+  "lifecycle": [
+    {
+      "cleanupPeriodDays": 3,
+      "desktopSessionCleanupPeriodDays": 3,
+      "parentSettingsBehavior": "first-wins",
+      "managedSourcesBehavior": "first-wins",
+      "autoCompactWindow": 3,
+      "autoUpdatesChannel": "latest",
+      "minimumVersion": "text",
+      "requiredMinimumVersion": "text",
+      "requiredMaximumVersion": "text",
+      "plansDirectory": "text",
+      "autoMemoryEnabled": true,
+      "autoMemoryDirectory": "text",
+      "autoDreamEnabled": true,
+      "claudeMd": "text",
+      "claudeMdExcludes": [
+        "text"
+      ],
+      "autoCompactEnabled": true,
+      "precomputeCompactionEnabled": true,
+      "idleCompaction": true,
+      "autoContinueAtUsageLimit": true
+    },
+    {
+      "cleanupPeriodDays": 2.5,
+      "desktopSessionCleanupPeriodDays": 2.5,
+      "parentSettingsBehavior": "merge",
+      "managedSourcesBehavior": "merge",
+      "autoCompactWindow": 2.5,
+      "autoUpdatesChannel": "stable",
+      "minimumVersion": "text",
+      "requiredMinimumVersion": "text",
+      "requiredMaximumVersion": "text",
+      "plansDirectory": "text",
+      "autoMemoryEnabled": false,
+      "autoMemoryDirectory": "text",
+      "autoDreamEnabled": false,
+      "claudeMd": "text",
+      "claudeMdExcludes": [
+        "text"
+      ],
+      "autoCompactEnabled": false,
+      "precomputeCompactionEnabled": false,
+      "idleCompaction": false,
+      "autoContinueAtUsageLimit": false
+    },
+    {
+      "cleanupPeriodDays": 3,
+      "desktopSessionCleanupPeriodDays": 3,
+      "parentSettingsBehavior": "first-wins",
+      "managedSourcesBehavior": "first-wins",
+      "autoCompactWindow": 3,
+      "autoUpdatesChannel": "rc",
+      "minimumVersion": "text",
+      "requiredMinimumVersion": "text",
+      "requiredMaximumVersion": "text",
+      "plansDirectory": "text",
+      "autoMemoryEnabled": true,
+      "autoMemoryDirectory": "text",
+      "autoDreamEnabled": true,
+      "claudeMd": "text",
+      "claudeMdExcludes": [
+        "text"
+      ],
+      "autoCompactEnabled": true,
+      "precomputeCompactionEnabled": true,
+      "idleCompaction": true,
+      "autoContinueAtUsageLimit": true
+    },
+    {
+      "cleanupPeriodDays": 2.5,
+      "desktopSessionCleanupPeriodDays": 2.5,
+      "parentSettingsBehavior": "merge",
+      "managedSourcesBehavior": "merge",
+      "autoCompactWindow": 2.5,
+      "autoUpdatesChannel": "latest",
+      "minimumVersion": "text",
+      "requiredMinimumVersion": "text",
+      "requiredMaximumVersion": "text",
+      "plansDirectory": "text",
+      "autoMemoryEnabled": false,
+      "autoMemoryDirectory": "text",
+      "autoDreamEnabled": false,
+      "claudeMd": "text",
+      "claudeMdExcludes": [
+        "text"
+      ],
+      "autoCompactEnabled": false,
+      "precomputeCompactionEnabled": false,
+      "idleCompaction": false,
+      "autoContinueAtUsageLimit": false
+    },
+    {
+      "cleanupPeriodDays": 3,
+      "desktopSessionCleanupPeriodDays": 3,
+      "parentSettingsBehavior": "first-wins",
+      "managedSourcesBehavior": "first-wins",
+      "autoCompactWindow": 3,
+      "autoUpdatesChannel": "stable",
+      "minimumVersion": "text",
+      "requiredMinimumVersion": "text",
+      "requiredMaximumVersion": "text",
+      "plansDirectory": "text",
+      "autoMemoryEnabled": true,
+      "autoMemoryDirectory": "text",
+      "autoDreamEnabled": true,
+      "claudeMd": "text",
+      "claudeMdExcludes": [
+        "text"
+      ],
+      "autoCompactEnabled": true,
+      "precomputeCompactionEnabled": true,
+      "idleCompaction": true,
+      "autoContinueAtUsageLimit": true
+    },
+    {
+      "cleanupPeriodDays": 2.5,
+      "desktopSessionCleanupPeriodDays": 2.5,
+      "parentSettingsBehavior": "merge",
+      "managedSourcesBehavior": "merge",
+      "autoCompactWindow": 2.5,
+      "autoUpdatesChannel": "rc",
+      "minimumVersion": "text",
+      "requiredMinimumVersion": "text",
+      "requiredMaximumVersion": "text",
+      "plansDirectory": "text",
+      "autoMemoryEnabled": false,
+      "autoMemoryDirectory": "text",
+      "autoDreamEnabled": false,
+      "claudeMd": "text",
+      "claudeMdExcludes": [
+        "text"
+      ],
+      "autoCompactEnabled": false,
+      "precomputeCompactionEnabled": false,
+      "idleCompaction": false,
+      "autoContinueAtUsageLimit": false
+    }
+  ],
+  "status_line": [
+    {
+      "statusLine": {
+        "type": "command",
+        "command": "text",
+        "padding": 3,
+        "refreshInterval": 3,
+        "hideVimModeIndicator": true
+      },
+      "footerLinksRegexes": [
+        {
+          "type": "regex",
+          "pattern": "text",
+          "url": "text",
+          "label": "text",
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      ],
+      "subagentStatusLine": {
+        "type": "command",
+        "command": "text"
+      }
+    },
+    {
+      "statusLine": {
+        "type": "command",
+        "command": "text",
+        "padding": 2.5,
+        "refreshInterval": 2.5,
+        "hideVimModeIndicator": false
+      },
+      "footerLinksRegexes": [
+        {
+          "type": "text",
+          "extra_key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      ],
+      "subagentStatusLine": {
+        "type": "command",
+        "command": "text"
+      }
+    }
+  ],
+  "other": [
+    {
+      "disableAgentView": true,
+      "outputStyle": "text",
+      "viewMode": "default",
+      "language": "text",
+      "feedbackSurveyRate": 3,
+      "feedbackDrafts": "notify",
+      "spinnerTipsEnabled": true,
+      "spinnerVerbs": {
+        "mode": "append",
+        "verbs": [
+          "text"
+        ]
+      },
+      "spinnerTipsOverride": {
+        "excludeDefault": true,
+        "tips": [
+          "text"
+        ],
+        "tipsFile": "text",
+        "label": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "syntaxHighlightingDisabled": true,
+      "maxProseWidth": 3,
+      "spellcheck": {
+        "enabled": true,
+        "checker": "text",
+        "language": "text",
+        "color": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "terminalTitleFromRename": true,
+      "promptSuggestionEnabled": true,
+      "emojiCompletionEnabled": true,
+      "showClearContextOnPlanAccept": true,
+      "askUserQuestionTimeout": "60s",
+      "dialogExpiry": "60s",
+      "companyAnnouncements": [
+        "text"
+      ],
+      "tui": "default",
+      "voice": {
+        "enabled": true,
+        "mode": "hold",
+        "autoSubmit": true
+      },
+      "prefersReducedMotion": true,
+      "timeFormat": "auto",
+      "timeZone": "text",
+      "showThinkingSummaries": true,
+      "theme": "auto",
+      "editorMode": "normal",
+      "keybindingFlavor": "classic",
+      "vimInsertModeRemaps": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "verbose": true,
+      "preferredNotifChannel": "auto",
+      "autoScrollEnabled": true,
+      "wheelScrollAccelerationEnabled": true,
+      "showTurnDuration": true,
+      "showMessageTimestamps": true,
+      "terminalProgressBarEnabled": true,
+      "todoFeatureEnabled": true,
+      "voiceEnabled": true,
+      "defaultView": "chat"
+    },
+    {
+      "disableAgentView": false,
+      "outputStyle": "text",
+      "viewMode": "verbose",
+      "language": "text",
+      "feedbackSurveyRate": 2.5,
+      "feedbackDrafts": "quiet",
+      "spinnerTipsEnabled": false,
+      "spinnerVerbs": {
+        "mode": "replace",
+        "verbs": [
+          "text"
+        ]
+      },
+      "spinnerTipsOverride": {
+        "excludeDefault": false,
+        "tips": [
+          {
+            "extra_key": {
+              "any": [
+                "thing",
+                null
+              ]
+            }
+          }
+        ],
+        "tipsFile": "text",
+        "label": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "syntaxHighlightingDisabled": false,
+      "maxProseWidth": 2.5,
+      "spellcheck": {
+        "enabled": false,
+        "checker": "text",
+        "language": "text",
+        "color": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "terminalTitleFromRename": false,
+      "promptSuggestionEnabled": false,
+      "emojiCompletionEnabled": false,
+      "showClearContextOnPlanAccept": false,
+      "askUserQuestionTimeout": "5m",
+      "dialogExpiry": "5m",
+      "companyAnnouncements": [
+        "text"
+      ],
+      "tui": "fullscreen",
+      "voice": {
+        "enabled": false,
+        "mode": "tap",
+        "autoSubmit": false
+      },
+      "prefersReducedMotion": false,
+      "timeFormat": "text",
+      "timeZone": "text",
+      "showThinkingSummaries": false,
+      "theme": "text",
+      "editorMode": "vim",
+      "keybindingFlavor": "readline",
+      "vimInsertModeRemaps": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "verbose": false,
+      "preferredNotifChannel": "iterm2",
+      "autoScrollEnabled": false,
+      "wheelScrollAccelerationEnabled": false,
+      "showTurnDuration": false,
+      "showMessageTimestamps": false,
+      "terminalProgressBarEnabled": false,
+      "todoFeatureEnabled": false,
+      "voiceEnabled": false,
+      "defaultView": "transcript"
+    },
+    {
+      "disableAgentView": true,
+      "outputStyle": "text",
+      "viewMode": "focus",
+      "language": "text",
+      "feedbackSurveyRate": 3,
+      "feedbackDrafts": "off",
+      "spinnerTipsEnabled": true,
+      "spinnerVerbs": {
+        "mode": "append",
+        "verbs": [
+          "text"
+        ]
+      },
+      "spinnerTipsOverride": {
+        "excludeDefault": true,
+        "tips": [
+          "text"
+        ],
+        "tipsFile": "text",
+        "label": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "syntaxHighlightingDisabled": true,
+      "maxProseWidth": 3,
+      "spellcheck": {
+        "enabled": true,
+        "checker": "text",
+        "language": "text",
+        "color": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "terminalTitleFromRename": true,
+      "promptSuggestionEnabled": true,
+      "emojiCompletionEnabled": true,
+      "showClearContextOnPlanAccept": true,
+      "askUserQuestionTimeout": "10m",
+      "dialogExpiry": "10m",
+      "companyAnnouncements": [
+        "text"
+      ],
+      "tui": "default",
+      "voice": {
+        "enabled": true,
+        "mode": "hold",
+        "autoSubmit": true
+      },
+      "prefersReducedMotion": true,
+      "timeFormat": "24-hour",
+      "timeZone": "text",
+      "showThinkingSummaries": true,
+      "theme": "light",
+      "editorMode": "normal",
+      "keybindingFlavor": "classic",
+      "vimInsertModeRemaps": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "verbose": true,
+      "preferredNotifChannel": "terminal_bell",
+      "autoScrollEnabled": true,
+      "wheelScrollAccelerationEnabled": true,
+      "showTurnDuration": true,
+      "showMessageTimestamps": true,
+      "terminalProgressBarEnabled": true,
+      "todoFeatureEnabled": true,
+      "voiceEnabled": true,
+      "defaultView": "chat"
+    },
+    {
+      "disableAgentView": false,
+      "outputStyle": "text",
+      "viewMode": "default",
+      "language": "text",
+      "feedbackSurveyRate": 2.5,
+      "feedbackDrafts": "notify",
+      "spinnerTipsEnabled": false,
+      "spinnerVerbs": {
+        "mode": "replace",
+        "verbs": [
+          "text"
+        ]
+      },
+      "spinnerTipsOverride": {
+        "excludeDefault": false,
+        "tips": [
+          {
+            "extra_key": {
+              "any": [
+                "thing",
+                null
+              ]
+            }
+          }
+        ],
+        "tipsFile": "text",
+        "label": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "syntaxHighlightingDisabled": false,
+      "maxProseWidth": 2.5,
+      "spellcheck": {
+        "enabled": false,
+        "checker": "text",
+        "language": "text",
+        "color": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "terminalTitleFromRename": false,
+      "promptSuggestionEnabled": false,
+      "emojiCompletionEnabled": false,
+      "showClearContextOnPlanAccept": false,
+      "askUserQuestionTimeout": "never",
+      "dialogExpiry": "never",
+      "companyAnnouncements": [
+        "text"
+      ],
+      "tui": "fullscreen",
+      "voice": {
+        "enabled": false,
+        "mode": "tap",
+        "autoSubmit": false
+      },
+      "prefersReducedMotion": false,
+      "timeFormat": "text",
+      "timeZone": "text",
+      "showThinkingSummaries": false,
+      "theme": "text",
+      "editorMode": "vim",
+      "keybindingFlavor": "readline",
+      "vimInsertModeRemaps": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "verbose": false,
+      "preferredNotifChannel": "iterm2_with_bell",
+      "autoScrollEnabled": false,
+      "wheelScrollAccelerationEnabled": false,
+      "showTurnDuration": false,
+      "showMessageTimestamps": false,
+      "terminalProgressBarEnabled": false,
+      "todoFeatureEnabled": false,
+      "voiceEnabled": false,
+      "defaultView": "transcript"
+    },
+    {
+      "disableAgentView": true,
+      "outputStyle": "text",
+      "viewMode": "verbose",
+      "language": "text",
+      "feedbackSurveyRate": 3,
+      "feedbackDrafts": "quiet",
+      "spinnerTipsEnabled": true,
+      "spinnerVerbs": {
+        "mode": "append",
+        "verbs": [
+          "text"
+        ]
+      },
+      "spinnerTipsOverride": {
+        "excludeDefault": true,
+        "tips": [
+          "text"
+        ],
+        "tipsFile": "text",
+        "label": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "syntaxHighlightingDisabled": true,
+      "maxProseWidth": 3,
+      "spellcheck": {
+        "enabled": true,
+        "checker": "text",
+        "language": "text",
+        "color": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "terminalTitleFromRename": true,
+      "promptSuggestionEnabled": true,
+      "emojiCompletionEnabled": true,
+      "showClearContextOnPlanAccept": true,
+      "askUserQuestionTimeout": "60s",
+      "dialogExpiry": "60s",
+      "companyAnnouncements": [
+        "text"
+      ],
+      "tui": "default",
+      "voice": {
+        "enabled": true,
+        "mode": "hold",
+        "autoSubmit": true
+      },
+      "prefersReducedMotion": true,
+      "timeFormat": "auto",
+      "timeZone": "text",
+      "showThinkingSummaries": true,
+      "theme": "dark-daltonized",
+      "editorMode": "normal",
+      "keybindingFlavor": "classic",
+      "vimInsertModeRemaps": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "verbose": true,
+      "preferredNotifChannel": "kitty",
+      "autoScrollEnabled": true,
+      "wheelScrollAccelerationEnabled": true,
+      "showTurnDuration": true,
+      "showMessageTimestamps": true,
+      "terminalProgressBarEnabled": true,
+      "todoFeatureEnabled": true,
+      "voiceEnabled": true,
+      "defaultView": "chat"
+    },
+    {
+      "disableAgentView": false,
+      "outputStyle": "text",
+      "viewMode": "focus",
+      "language": "text",
+      "feedbackSurveyRate": 2.5,
+      "feedbackDrafts": "off",
+      "spinnerTipsEnabled": false,
+      "spinnerVerbs": {
+        "mode": "replace",
+        "verbs": [
+          "text"
+        ]
+      },
+      "spinnerTipsOverride": {
+        "excludeDefault": false,
+        "tips": [
+          {
+            "extra_key": {
+              "any": [
+                "thing",
+                null
+              ]
+            }
+          }
+        ],
+        "tipsFile": "text",
+        "label": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "syntaxHighlightingDisabled": false,
+      "maxProseWidth": 2.5,
+      "spellcheck": {
+        "enabled": false,
+        "checker": "text",
+        "language": "text",
+        "color": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "terminalTitleFromRename": false,
+      "promptSuggestionEnabled": false,
+      "emojiCompletionEnabled": false,
+      "showClearContextOnPlanAccept": false,
+      "askUserQuestionTimeout": "5m",
+      "dialogExpiry": "5m",
+      "companyAnnouncements": [
+        "text"
+      ],
+      "tui": "fullscreen",
+      "voice": {
+        "enabled": false,
+        "mode": "tap",
+        "autoSubmit": false
+      },
+      "prefersReducedMotion": false,
+      "timeFormat": "text",
+      "timeZone": "text",
+      "showThinkingSummaries": false,
+      "theme": "text",
+      "editorMode": "vim",
+      "keybindingFlavor": "readline",
+      "vimInsertModeRemaps": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "verbose": false,
+      "preferredNotifChannel": "ghostty",
+      "autoScrollEnabled": false,
+      "wheelScrollAccelerationEnabled": false,
+      "showTurnDuration": false,
+      "showMessageTimestamps": false,
+      "terminalProgressBarEnabled": false,
+      "todoFeatureEnabled": false,
+      "voiceEnabled": false,
+      "defaultView": "transcript"
+    },
+    {
+      "disableAgentView": true,
+      "outputStyle": "text",
+      "viewMode": "default",
+      "language": "text",
+      "feedbackSurveyRate": 3,
+      "feedbackDrafts": "notify",
+      "spinnerTipsEnabled": true,
+      "spinnerVerbs": {
+        "mode": "append",
+        "verbs": [
+          "text"
+        ]
+      },
+      "spinnerTipsOverride": {
+        "excludeDefault": true,
+        "tips": [
+          "text"
+        ],
+        "tipsFile": "text",
+        "label": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "syntaxHighlightingDisabled": true,
+      "maxProseWidth": 3,
+      "spellcheck": {
+        "enabled": true,
+        "checker": "text",
+        "language": "text",
+        "color": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "terminalTitleFromRename": true,
+      "promptSuggestionEnabled": true,
+      "emojiCompletionEnabled": true,
+      "showClearContextOnPlanAccept": true,
+      "askUserQuestionTimeout": "10m",
+      "dialogExpiry": "10m",
+      "companyAnnouncements": [
+        "text"
+      ],
+      "tui": "default",
+      "voice": {
+        "enabled": true,
+        "mode": "hold",
+        "autoSubmit": true
+      },
+      "prefersReducedMotion": true,
+      "timeFormat": "24-hour",
+      "timeZone": "text",
+      "showThinkingSummaries": true,
+      "theme": "dark-ansi",
+      "editorMode": "normal",
+      "keybindingFlavor": "classic",
+      "vimInsertModeRemaps": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "verbose": true,
+      "preferredNotifChannel": "notifications_disabled",
+      "autoScrollEnabled": true,
+      "wheelScrollAccelerationEnabled": true,
+      "showTurnDuration": true,
+      "showMessageTimestamps": true,
+      "terminalProgressBarEnabled": true,
+      "todoFeatureEnabled": true,
+      "voiceEnabled": true,
+      "defaultView": "chat"
+    },
+    {
+      "disableAgentView": false,
+      "outputStyle": "text",
+      "viewMode": "verbose",
+      "language": "text",
+      "feedbackSurveyRate": 2.5,
+      "feedbackDrafts": "quiet",
+      "spinnerTipsEnabled": false,
+      "spinnerVerbs": {
+        "mode": "replace",
+        "verbs": [
+          "text"
+        ]
+      },
+      "spinnerTipsOverride": {
+        "excludeDefault": false,
+        "tips": [
+          {
+            "extra_key": {
+              "any": [
+                "thing",
+                null
+              ]
+            }
+          }
+        ],
+        "tipsFile": "text",
+        "label": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "syntaxHighlightingDisabled": false,
+      "maxProseWidth": 2.5,
+      "spellcheck": {
+        "enabled": false,
+        "checker": "text",
+        "language": "text",
+        "color": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "terminalTitleFromRename": false,
+      "promptSuggestionEnabled": false,
+      "emojiCompletionEnabled": false,
+      "showClearContextOnPlanAccept": false,
+      "askUserQuestionTimeout": "never",
+      "dialogExpiry": "never",
+      "companyAnnouncements": [
+        "text"
+      ],
+      "tui": "fullscreen",
+      "voice": {
+        "enabled": false,
+        "mode": "tap",
+        "autoSubmit": false
+      },
+      "prefersReducedMotion": false,
+      "timeFormat": "text",
+      "timeZone": "text",
+      "showThinkingSummaries": false,
+      "theme": "text",
+      "editorMode": "vim",
+      "keybindingFlavor": "readline",
+      "vimInsertModeRemaps": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "verbose": false,
+      "preferredNotifChannel": "auto",
+      "autoScrollEnabled": false,
+      "wheelScrollAccelerationEnabled": false,
+      "showTurnDuration": false,
+      "showMessageTimestamps": false,
+      "terminalProgressBarEnabled": false,
+      "todoFeatureEnabled": false,
+      "voiceEnabled": false,
+      "defaultView": "transcript"
+    },
+    {
+      "disableAgentView": true,
+      "outputStyle": "text",
+      "viewMode": "focus",
+      "language": "text",
+      "feedbackSurveyRate": 3,
+      "feedbackDrafts": "off",
+      "spinnerTipsEnabled": true,
+      "spinnerVerbs": {
+        "mode": "append",
+        "verbs": [
+          "text"
+        ]
+      },
+      "spinnerTipsOverride": {
+        "excludeDefault": true,
+        "tips": [
+          "text"
+        ],
+        "tipsFile": "text",
+        "label": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "syntaxHighlightingDisabled": true,
+      "maxProseWidth": 3,
+      "spellcheck": {
+        "enabled": true,
+        "checker": "text",
+        "language": "text",
+        "color": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "terminalTitleFromRename": true,
+      "promptSuggestionEnabled": true,
+      "emojiCompletionEnabled": true,
+      "showClearContextOnPlanAccept": true,
+      "askUserQuestionTimeout": "60s",
+      "dialogExpiry": "60s",
+      "companyAnnouncements": [
+        "text"
+      ],
+      "tui": "default",
+      "voice": {
+        "enabled": true,
+        "mode": "hold",
+        "autoSubmit": true
+      },
+      "prefersReducedMotion": true,
+      "timeFormat": "auto",
+      "timeZone": "text",
+      "showThinkingSummaries": true,
+      "theme": "dark",
+      "editorMode": "normal",
+      "keybindingFlavor": "classic",
+      "vimInsertModeRemaps": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "verbose": true,
+      "preferredNotifChannel": "iterm2",
+      "autoScrollEnabled": true,
+      "wheelScrollAccelerationEnabled": true,
+      "showTurnDuration": true,
+      "showMessageTimestamps": true,
+      "terminalProgressBarEnabled": true,
+      "todoFeatureEnabled": true,
+      "voiceEnabled": true,
+      "defaultView": "chat"
+    },
+    {
+      "disableAgentView": false,
+      "outputStyle": "text",
+      "viewMode": "default",
+      "language": "text",
+      "feedbackSurveyRate": 2.5,
+      "feedbackDrafts": "notify",
+      "spinnerTipsEnabled": false,
+      "spinnerVerbs": {
+        "mode": "replace",
+        "verbs": [
+          "text"
+        ]
+      },
+      "spinnerTipsOverride": {
+        "excludeDefault": false,
+        "tips": [
+          {
+            "extra_key": {
+              "any": [
+                "thing",
+                null
+              ]
+            }
+          }
+        ],
+        "tipsFile": "text",
+        "label": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "syntaxHighlightingDisabled": false,
+      "maxProseWidth": 2.5,
+      "spellcheck": {
+        "enabled": false,
+        "checker": "text",
+        "language": "text",
+        "color": "text",
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "terminalTitleFromRename": false,
+      "promptSuggestionEnabled": false,
+      "emojiCompletionEnabled": false,
+      "showClearContextOnPlanAccept": false,
+      "askUserQuestionTimeout": "5m",
+      "dialogExpiry": "5m",
+      "companyAnnouncements": [
+        "text"
+      ],
+      "tui": "fullscreen",
+      "voice": {
+        "enabled": false,
+        "mode": "tap",
+        "autoSubmit": false
+      },
+      "prefersReducedMotion": false,
+      "timeFormat": "text",
+      "timeZone": "text",
+      "showThinkingSummaries": false,
+      "theme": "text",
+      "editorMode": "vim",
+      "keybindingFlavor": "readline",
+      "vimInsertModeRemaps": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "verbose": false,
+      "preferredNotifChannel": "terminal_bell",
+      "autoScrollEnabled": false,
+      "wheelScrollAccelerationEnabled": false,
+      "showTurnDuration": false,
+      "showMessageTimestamps": false,
+      "terminalProgressBarEnabled": false,
+      "todoFeatureEnabled": false,
+      "voiceEnabled": false,
+      "defaultView": "transcript"
+    }
+  ]
+}

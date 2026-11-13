@@ -156,6 +156,7 @@ function parseType(node, source) {
   if (ts.isLiteralTypeNode(node)) {
     const literal = node.literal;
     if (ts.isStringLiteral(literal)) return { k: 'strenum', values: [literal.text] };
+    if (ts.isNumericLiteral(literal)) return { k: 'number' };
     if (literal.kind === ts.SyntaxKind.TrueKeyword || literal.kind === ts.SyntaxKind.FalseKeyword) return { k: 'bool' };
     if (literal.kind === ts.SyntaxKind.NullKeyword) return { k: 'null' };
     fail(`Unsupported literal type ${node.getText(source)}`);
