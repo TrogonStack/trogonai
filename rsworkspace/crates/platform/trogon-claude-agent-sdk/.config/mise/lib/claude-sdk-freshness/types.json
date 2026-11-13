@@ -106,6 +106,190 @@
         "PushNotificationOutput",
         "ClaudeDesignOutput"
       ]
+    },
+    {
+      "source": "sdk.d.ts",
+      "output": "src/upstream/settings.rs",
+      "roots": [
+        "Settings"
+      ],
+      "fixtures": {
+        "output": "tests/fixtures/upstream_settings.json",
+        "roots": [
+          "Settings"
+        ],
+        "families": {
+          "auth": [
+            "$schema",
+            "apiKeyHelper",
+            "proxyAuthHelper",
+            "awsCredentialExport",
+            "awsAuthRefresh",
+            "gcpAuthRefresh",
+            "processWrapper",
+            "policyHelper",
+            "otelHeadersHelper",
+            "forceLoginMethod",
+            "forceLoginGatewayUrl",
+            "forceLoginOrgUUID",
+            "gatewayInternalNetworks",
+            "allowedProviders",
+            "forceRemoteSettingsRefresh"
+          ],
+          "permissions": [
+            "permissions",
+            "skipDangerousModePermissionPrompt",
+            "disableAutoMode",
+            "skipAutoPermissionPrompt",
+            "useAutoModeDuringPlan",
+            "autoMode",
+            "allowManagedPermissionRulesOnly"
+          ],
+          "models": [
+            "model",
+            "fallbackModel",
+            "availableModels",
+            "enforceAvailableModels",
+            "availableModelsMatch",
+            "deniedModels",
+            "modelOverrides",
+            "modelPicker",
+            "modelPricing",
+            "advisorModel",
+            "modelSettings",
+            "effortLevel",
+            "maxEffortLevel",
+            "fastMode",
+            "fastModePerSessionOptIn",
+            "ultracode",
+            "alwaysThinkingEnabled",
+            "promptCacheTtl",
+            "subagentPromptCacheTtl",
+            "switchModelsOnFlag"
+          ],
+          "mcp": [
+            "enableAllProjectMcpServers",
+            "enabledMcpjsonServers",
+            "disabledMcpjsonServers",
+            "disableClaudeAiConnectors",
+            "managedMcpServers",
+            "allowedMcpServers",
+            "deniedMcpServers",
+            "allowManagedMcpServersOnly",
+            "allowAllClaudeAiMcps",
+            "allowClaudeInChromeWithManagedMcp"
+          ],
+          "hooks": [
+            "hooks",
+            "disableAllHooks",
+            "allowManagedHooksOnly",
+            "allowedHttpHookUrls",
+            "httpHookAllowedEnvVars"
+          ],
+          "sandbox": [
+            "sandbox"
+          ],
+          "plugins": [
+            "enabledPlugins",
+            "prependPlugins",
+            "appendPlugins",
+            "extraKnownMarketplaces",
+            "additionalMarketplaces",
+            "strictKnownMarketplaces",
+            "allowedMarketplaces",
+            "blockedMarketplaces",
+            "disableCommandPluginSources",
+            "disableSideloadFlags",
+            "pluginSuggestionMarketplaces",
+            "pluginConfigs",
+            "pluginTrustMessage",
+            "strictPluginOnlyCustomization",
+            "syncClaudeAiPlugins",
+            "allowedChannelPlugins",
+            "channelsEnabled"
+          ],
+          "skills_and_workflows": [
+            "skillOverrides",
+            "disableBundledSkills",
+            "syncClaudeAiSkills",
+            "skillListingMaxDescChars",
+            "skillListingBudgetFraction",
+            "disableSkillShellExecution",
+            "disableWorkflows",
+            "enableWorkflows",
+            "workflowSizeGuideline",
+            "workflowKeywordTriggerEnabled",
+            "disableArtifact",
+            "enableArtifact",
+            "agent"
+          ],
+          "shell_and_files": [
+            "defaultShell",
+            "bashEditDiffEnabled",
+            "bashOutputMaxChars",
+            "taskOutputMaxChars",
+            "respondToBashCommands",
+            "disableWindowsBashCommandSplit",
+            "fileSuggestion",
+            "respectGitignore",
+            "worktree",
+            "skipWebFetchPreflight",
+            "wslInheritsWindowsSettings",
+            "env",
+            "fileCheckpointingEnabled"
+          ],
+          "attribution": [
+            "attribution",
+            "attributionProject",
+            "attributionProjectPolicy",
+            "includeCoAuthoredBy",
+            "includeGitInstructions",
+            "prUrlTemplate"
+          ],
+          "remote_and_ssh": [
+            "remote",
+            "sshConfigs",
+            "sshHostCommands",
+            "remoteControlAtStartup",
+            "isolatePeerMachines",
+            "daemonColdStart",
+            "crossSessionInbound",
+            "autoUploadSessions",
+            "inputNeededNotifEnabled",
+            "agentPushNotifEnabled",
+            "disableRemoteControl",
+            "disableReplyCheck",
+            "disableDeepLinkRegistration",
+            "teammateMode"
+          ],
+          "lifecycle": [
+            "cleanupPeriodDays",
+            "desktopSessionCleanupPeriodDays",
+            "autoCompactWindow",
+            "autoCompactEnabled",
+            "precomputeCompactionEnabled",
+            "idleCompaction",
+            "autoContinueAtUsageLimit",
+            "autoMemoryEnabled",
+            "autoMemoryDirectory",
+            "autoDreamEnabled",
+            "plansDirectory",
+            "claudeMd",
+            "claudeMdExcludes",
+            "autoUpdatesChannel",
+            "minimumVersion",
+            "requiredMinimumVersion",
+            "requiredMaximumVersion",
+            "parentSettingsBehavior",
+            "managedSourcesBehavior"
+          ],
+          "status_line": [
+            "statusLine",
+            "footerLinksRegexes",
+            "subagentStatusLine"
+          ]
+        }
+      }
     }
   ]
 }

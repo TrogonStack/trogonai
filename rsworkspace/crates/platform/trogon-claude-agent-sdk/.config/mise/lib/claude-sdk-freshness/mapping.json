@@ -1982,6 +1982,51 @@
       ],
       "status": "partial",
       "rationale": "Timing, user-message correlation, resume reason and future envelope metadata survive Rust wire decoding in additional_fields, separately from event. Values remain raw JSON rather than typed upstream fields; retention does not implement their behavior or prove native runtime parity."
+    },
+    {
+      "id": "settings-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "Settings",
+            "core.Settings"
+          ]
+        }
+      },
+      "rust_api": [
+        "Settings",
+        "SettingsInput",
+        "upstream::settings"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "every_field_family_round_trips_its_upstream_shaped_fixtures"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "every_field_family_re_encodes_byte_identically_in_original_and_reversed_key_order"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "fixtures_cover_every_top_level_key_upstream_declares"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "unknown_top_level_keys_survive_in_place_and_in_order"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "the_permissions_object_keeps_undeclared_keys_and_unlisted_modes"
+        },
+        {
+          "path": "tests/upstream_settings.rs",
+          "name": "settings_input_names_the_three_upstream_forms"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Settings is generated from the pinned declarations: all 182 declared top-level keys, every nested object, string-literal union and object union, the $schema key and the open index signature. Unknown keys and key order survive a decode then encode byte for byte, and a string-literal value upstream does not list is kept. Nothing is validated. Python has no Settings type; its settings option is a path or JSON string, which SettingsInput distinguishes explicitly. Wiring Settings into Options.settings is mapped separately."
     }
   ]
 }

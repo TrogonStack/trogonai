@@ -145,6 +145,11 @@ upstream wire shape and validates nothing:
   otherwise its own `Unknown` variant holds the raw JSON value;
 - numbers use `serde_json::Number`, so integers and floats round-trip exactly.
 
+The `Settings` target also lists `fixtures` in `types.json`. `synthesize_fixtures.mjs` writes
+upstream-shaped samples from the same declarations (every field set, every union member
+visited, one undeclared key in each open object) split into per-family groups, and
+`claude-sdk:types-check` fails when the checked-in fixture file drifts.
+
 A target may also list `extern` types (`{"Name": "rust::path"}`) that live in another
 generated module instead of being generated again.
 
