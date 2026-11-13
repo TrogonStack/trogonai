@@ -1486,11 +1486,13 @@ where
                         signal: signal.clone(),
                     };
                     let response_id = id.clone();
-                    let fallback = wire::callback_error_response(&id, "getOAuthToken callback timed out");
+                    let fallback = wire::callback_error_response(&id, "getOAuthToken callback timed out").map(Some);
                     self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
                         match handler.call(request).await {
-                            Ok(response) => wire::success_response(&response_id, response.to_wire_json()),
-                            Err(error) => wire::callback_error_response(&response_id, &callback_failure(&error)),
+                            Ok(response) => wire::success_response(&response_id, response.to_wire_json()).map(Some),
+                            Err(error) => {
+                                wire::callback_error_response(&response_id, &callback_failure(&error)).map(Some)
+                            }
                         }
                     });
                 }
@@ -1509,13 +1511,16 @@ where
                         signal: signal.clone(),
                     };
                     let response_id = id.clone();
-                    let fallback = wire::callback_error_response(&id, "getHostAuthToken callback timed out");
+                    let fallback = wire::callback_error_response(&id, "getHostAuthToken callback timed out").map(Some);
                     self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
                         match handler.call(request).await {
                             Ok(token) => {
                                 wire::success_response(&response_id, crate::auth_token::host_auth_wire_json(&token))
+                                    .map(Some)
                             }
-                            Err(error) => wire::callback_error_response(&response_id, &callback_failure(&error)),
+                            Err(error) => {
+                                wire::callback_error_response(&response_id, &callback_failure(&error)).map(Some)
+                            }
                         }
                     });
                 }
