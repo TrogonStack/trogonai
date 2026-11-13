@@ -20,7 +20,10 @@ use crate::{
     ArgvStyle, ClaudeAgentOptions, Error, JsonObject, StderrTail, Transport,
     adapters::SpawnProcess,
     argv,
-    constants::{CLIENT_APP_ENV, DERIVED_CLIENT_APP_ENV, SCRIPT_EXTENSIONS},
+    constants::{
+        CLIENT_APP_ENV, DERIVED_CLIENT_APP_ENV, PYTHON_CLOSE_WAIT, SCRIPT_EXTENSIONS, STDERR_SETTLE,
+        TYPESCRIPT_CLOSE_GRACE, TYPESCRIPT_KILL_DELAY,
+    },
     environment_plan::{self, Inherited},
     framing::{FrameReader, SharedTail, drain_stderr_with},
     process_options::EnvironmentMode,
@@ -342,15 +345,6 @@ impl ProcessTransport {
         self.stderr_tail.snapshot()
     }
 }
-
-/// TypeScript `qet`: the wait for the process to exit on its own after stdin closes.
-const TYPESCRIPT_CLOSE_GRACE: Duration = Duration::from_millis(2000);
-/// TypeScript: the wait between SIGTERM and SIGKILL.
-const TYPESCRIPT_KILL_DELAY: Duration = Duration::from_millis(5000);
-/// TypeScript `Yet`: how long stderr may stay open after the exit.
-const STDERR_SETTLE: Duration = Duration::from_millis(200);
-/// Python: each wait of its close sequence.
-const PYTHON_CLOSE_WAIT: Duration = Duration::from_secs(5);
 
 impl Transport for ProcessTransport {
     async fn connect(&mut self) -> Result<(), Error> {
