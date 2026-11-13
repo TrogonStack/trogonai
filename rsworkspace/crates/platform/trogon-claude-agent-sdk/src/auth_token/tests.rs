@@ -55,8 +55,28 @@ fn only_known_token_states_are_forwarded() {
 
 #[test]
 fn the_host_token_is_wrapped_or_null() {
-    assert_eq!(host_auth_wire_json(&Some("h".into())), json!({"authToken": "h"}));
-    assert_eq!(host_auth_wire_json(&None), json!({"authToken": null}));
+    assert_eq!(
+        host_auth_wire_json(&HostAuthToken::Token("h".into())),
+        json!({"authToken": "h"})
+    );
+    assert_eq!(host_auth_wire_json(&HostAuthToken::Null), json!({"authToken": null}));
+}
+
+#[test]
+fn a_raw_host_answer_is_wrapped_only_when_it_is_a_string_or_null() {
+    assert_eq!(
+        host_auth_wire_json(&HostAuthToken::Raw(json!("h"))),
+        json!({"authToken": "h"})
+    );
+    assert_eq!(
+        host_auth_wire_json(&HostAuthToken::Raw(Value::Null)),
+        json!({"authToken": null})
+    );
+    assert_eq!(host_auth_wire_json(&HostAuthToken::Raw(json!(42))), json!(42));
+    assert_eq!(
+        host_auth_wire_json(&HostAuthToken::Raw(json!({"authToken": "x", "extra": true}))),
+        json!({"authToken": "x", "extra": true})
+    );
 }
 
 #[test]

@@ -27,8 +27,8 @@ use tokio::{
 };
 use trogon_claude_agent_sdk::{
     ArgvStyle, AskUserQuestionConfig, CallbackError, ClaudeAgentOptions, ClaudeSdkClient, ConfigValue, Environment,
-    EnvironmentMode, ExtraArgument, HostAuthTokenRequest, OAuthDeclineReason, OAuthTokenRequest, OAuthTokenResponse,
-    QuestionPreviewFormat, ScriptRuntime, ToolConfig,
+    EnvironmentMode, ExtraArgument, HostAuthToken, HostAuthTokenRequest, OAuthDeclineReason, OAuthTokenRequest,
+    OAuthTokenResponse, QuestionPreviewFormat, ScriptRuntime, ToolConfig,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -255,7 +255,9 @@ async fn tool_config_and_callbacks_set_the_environment_the_bundle_sets() -> Test
         ..base()
     };
     all.oauth_token_handler = Some(oauth_handler(|_| Ok(OAuthTokenResponse::token("t")), Arc::default()));
-    all.host_auth_token_handler = Some(Arc::new(|_: HostAuthTokenRequest| async { Ok(Some("h".to_owned())) }));
+    all.host_auth_token_handler = Some(Arc::new(|_: HostAuthTokenRequest| async {
+        Ok(HostAuthToken::Token("h".to_owned()))
+    }));
     let session = run(all, &odd, Vec::new()).await?;
     assert_eq!(
         child_view(&session, &odd, false),
@@ -461,14 +463,15 @@ async fn host_auth_token_responses_match_the_bundle() -> TestResult {
         }
         async move {
             match call {
-                1 => Ok(Some("h".to_owned())),
-                2..=4 => Ok(None),
+                1 => Ok(HostAuthToken::Token("h".to_owned())),
+                2 => Ok(HostAuthToken::Null),
+                3 => Ok(HostAuthToken::Raw(Value::Null)),
+                4 => Ok(HostAuthToken::Raw(json!(42))),
                 _ => Err(CallbackError::Failed("hboom".into())),
             }
         }
     }));
     let mut collected = Vec::new();
-    // Upstream also forwards a non-string return unchanged; a typed handler cannot return one, so r3 is skipped.
     for (index, request) in [
         json!({"subtype": "host_auth_token_refresh", "status": "expired"}),
         json!({"subtype": "host_auth_token_refresh"}),
@@ -491,9 +494,7 @@ async fn host_auth_token_responses_match_the_bundle() -> TestResult {
         collected.extend(session.responses);
     }
     let expected = golden["host_responses"].as_array().cloned().unwrap_or_default();
-    for index in [0, 1, 2, 4] {
-        assert_eq!(collected[index], expected[index], "r{index}");
-    }
+    assert_eq!(collected, expected);
     let seen = statuses.lock().map_err(|_| "poisoned")?.clone();
     assert_eq!(seen[0], Some(json!("expired")));
     assert_eq!(seen[3], Some(json!({"a": 1})));
@@ -603,7 +604,7 @@ async fn a_repeated_delivery_of_an_in_flight_token_request_is_dropped() -> TestR
         host_counter.fetch_add(1, Ordering::SeqCst);
         async {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            Ok(Some("h".to_owned()))
+            Ok(HostAuthToken::Token("h".to_owned()))
         }
     }));
     let oauth = json!({"request_id": "o", "request": {"subtype": "oauth_token_refresh"}});

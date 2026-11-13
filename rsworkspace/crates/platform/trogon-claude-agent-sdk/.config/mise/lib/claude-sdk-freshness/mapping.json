@@ -3986,6 +3986,7 @@
         "ToolConfig",
         "OAuthTokenHandler",
         "HostAuthTokenHandler",
+        "HostAuthToken",
         "SessionLoadTimeout"
       ],
       "tests": [
@@ -4022,6 +4023,10 @@
           "name": "a_non_string_token_state_reaches_the_oauth_handler_as_no_hint"
         },
         {
+          "path": "tests/golden_initialize_ordering.rs",
+          "name": "refresh_requests_are_answered_around_the_initialize_answer_like_sdk_mjs"
+        },
+        {
           "path": "tests/session_store.rs",
           "name": "python_dialect_reports_the_resume_materialization_text"
         },
@@ -4031,7 +4036,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; ArgvStyle::Python answers both token refreshes with the Python unsupported-subtype error even when a handler is set, and the Python timeout wording is selected by argv_style. debug_stderr is an upstream no-op, so the Rust field is accepted and ignored. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. Known limits: a host token handler returns a string or none, never the bare number the bundle would forward, and token callbacks use the opt-in callback_timeout limit."
+      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; ArgvStyle::Python answers both token refreshes with the Python unsupported-subtype error even when a handler is set, and the Python timeout wording is selected by argv_style. debug_stderr is an upstream no-op, so the Rust field is accepted and ignored. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. A host token handler can return any JSON value through HostAuthToken::Raw, which is sent whole unless it is a string or null, like the bundle. Known limit: token callbacks use the opt-in callback_timeout limit."
     },
     {
       "id": "core-options",

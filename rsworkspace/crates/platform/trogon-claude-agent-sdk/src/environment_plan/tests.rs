@@ -307,7 +307,7 @@ fn token_callbacks_announce_themselves_in_every_typescript_mode() {
     let handler: std::sync::Arc<dyn crate::OAuthTokenHandler> =
         std::sync::Arc::new(|_request: crate::OAuthTokenRequest| async { Ok(crate::OAuthTokenResponse::default()) });
     let host: std::sync::Arc<dyn crate::HostAuthTokenHandler> =
-        std::sync::Arc::new(|_request: crate::HostAuthTokenRequest| async { Ok(None) });
+        std::sync::Arc::new(|_request: crate::HostAuthTokenRequest| async { Ok(crate::HostAuthToken::Null) });
     for mode in [
         EnvironmentMode::TypeScript,
         EnvironmentMode::Overlay,

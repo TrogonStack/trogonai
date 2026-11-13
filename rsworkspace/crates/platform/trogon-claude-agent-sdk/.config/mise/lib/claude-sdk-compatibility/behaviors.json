@@ -3234,7 +3234,7 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "TypeScript answers oauth_token_refresh and host_auth_token_refresh with the callback result, forwards the decline reason and the cancel signal, and fails with 'getOAuthToken callback is not provided.' or 'getHostAuthToken callback is not provided.' when no callback is set."
+        "behavior": "TypeScript answers oauth_token_refresh and host_auth_token_refresh with the callback result as soon as they arrive, even before the CLI answers initialize, forwards the decline reason and the cancel signal, sends a host callback result that is neither a string nor null as the whole response, and fails with 'getOAuthToken callback is not provided.' or 'getHostAuthToken callback is not provided.' when no callback is set."
       },
       "decision": {
         "kind": "upstream"
@@ -3246,7 +3246,8 @@
         "callback_options::missing_callbacks_answer_with_the_bundle_errors",
         "callback_options::a_cancel_request_cancels_the_token_callback_signal",
         "golden_inbound_control::python_answers_token_refreshes_as_unsupported_even_with_handlers",
-        "golden_inbound_control::a_non_string_token_state_reaches_the_oauth_handler_as_no_hint"
+        "golden_inbound_control::a_non_string_token_state_reaches_the_oauth_handler_as_no_hint",
+        "golden_initialize_ordering::refresh_requests_are_answered_around_the_initialize_answer_like_sdk_mjs"
       ],
       "rust": [
         "src/auth_token.rs",

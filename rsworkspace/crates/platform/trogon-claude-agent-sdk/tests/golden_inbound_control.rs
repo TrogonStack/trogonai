@@ -24,7 +24,7 @@ use tokio::{
 };
 use trogon_claude_agent_sdk::{
     ArgvStyle, CallbackError, ClaudeAgentOptions, ClaudeSdkClient, ComputerFolder, DenialDisposition, DialogKind,
-    DuplicateControlRequests, ElicitationMode, ElicitationRequest, ElicitationResponse, FeatureSupport,
+    DuplicateControlRequests, ElicitationMode, ElicitationRequest, ElicitationResponse, FeatureSupport, HostAuthToken,
     HostAuthTokenRequest, JsonObject, MatchedAskRule, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
     PermissionDecision, PermissionDecisionClassification, PermissionMode, PermissionUpdate,
     PermissionUpdateDestination, ToolPermissionRequest, ToolUseId, UserDialogRequest, UserDialogResponse,
@@ -467,7 +467,7 @@ async fn python_answers_token_refreshes_as_unsupported_even_with_handlers() -> T
         if let Ok(mut calls) = host_calls.lock() {
             calls.push("host");
         }
-        async { Ok::<_, CallbackError>(Some("h".to_owned())) }
+        async { Ok::<_, CallbackError>(HostAuthToken::Token("h".to_owned())) }
     }));
     let steps = vec![
         request("a8", json!({"subtype":"oauth_token_refresh"})),
