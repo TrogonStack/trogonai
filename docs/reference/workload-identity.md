@@ -94,6 +94,34 @@ cannot enable this profile until that support is implemented and verified.
 Governed registration/root withdrawal and bounded credential expiry remain
 separate enforced controls.
 
+## Original registration artifacts
+
+`RegistrationArchive` preserves bounded original approval wrappers and public
+bootstrap manifest bytes in separate digest-addressed native streams. Deployment
+configuration supplies finite record and byte capacities. The immutable profile
+uses replicated file storage, rejects new records at capacity and retains existing
+records without expiry or eviction. Its connection requires authenticated TLS and
+preprovisioned archive streams with separate archive permissions.
+
+Artifact input becomes immutable original bytes and their SHA-256 digest. Its
+kind selects bounds and storage scope; it does not validate protobuf structure,
+an approval signature, a contract definition or manifest lineage.
+These artifacts are public bootstrap/control metadata. Private seeds and
+credentials remain under canonical sealing.
+
+`create_once` returns either a receipt for the exact submitted bytes and actual
+native ACK revision, or a separate observation of an existing exact record. The
+latter does not manufacture another ACK. A later read cannot replace a missing
+ACK. Uncertain writes return no create receipt and are not retried automatically;
+an ACK followed by failed source checks is reported as acknowledged but unusable.
+
+`observe_exact` reads the digest-addressed original bytes. Its observation's
+`revalidate_original` checks the same retained connection, stream creation,
+immutable profile and exact original revision. These are bounded observations,
+not continuous authority. Configured scopes and recovery fences do not verify an
+approved account/JWT mapping or independently governed restore fence. Storage
+evidence cannot construct a live approval, grant or execution capability.
+
 ## Governed registration publication
 
 The `trogon-workload-registration` service accepts independently signed,
