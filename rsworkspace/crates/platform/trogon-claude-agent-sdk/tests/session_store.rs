@@ -77,13 +77,13 @@ async fn empty_append_does_not_create_a_session() -> TestResult {
 }
 
 #[tokio::test]
-async fn stable_entry_uuids_make_retries_idempotent() -> TestResult {
+async fn repeated_stable_uuids_are_stored_again_like_upstream_reference_stores() -> TestResult {
     let store = InMemorySessionStore::new();
     let key = key("project", SESSION)?;
     let value = SessionEntry::try_from(json!({"type":"user","uuid":"stable","nested":{"items":[1,2]}}))?;
     store.append(&key, std::slice::from_ref(&value)).await?;
     store.append(&key, std::slice::from_ref(&value)).await?;
-    assert_eq!(store.load(&key).await?, Some(vec![value]));
+    assert_eq!(store.load(&key).await?, Some(vec![value.clone(), value]));
     Ok(())
 }
 
@@ -354,7 +354,7 @@ impl SessionStore for PendingLoadStore {
 async fn resume_load_timeout_does_not_install_any_files() -> TestResult {
     let root = tempfile::tempdir()?;
     let mut options = options(Arc::new(PendingLoadStore), root.path())?;
-    options.limits.load_timeout = Timeout::new(Duration::from_millis(20))?;
+    options.limits.load_timeout = Timeout::new(Duration::from_millis(20));
     let outcome = SessionRuntime::prepare(
         &options,
         StoreResume::Session(SessionId::from(SESSION)),
@@ -408,8 +408,8 @@ async fn timed_out_mirror_append_is_reported_and_never_retried() -> TestResult {
     let root = memory_mirror_root();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut options = options(Arc::new(PendingStore { calls: calls.clone() }), &root)?;
-    options.limits.append_timeout = Timeout::new(Duration::from_millis(20))?;
-    options.limits.flush_timeout = Timeout::new(Duration::from_secs(1))?;
+    options.limits.append_timeout = Timeout::new(Duration::from_millis(20));
+    options.limits.flush_timeout = Timeout::new(Duration::from_secs(1));
     let mirror = TranscriptMirror::new(&options, root.join("projects"));
     mirror.enqueue(
         &root.join("projects/project").join(format!("{SESSION}.jsonl")),
@@ -491,7 +491,7 @@ async fn delayed_flush_wait_keeps_the_original_deadline() -> TestResult {
         }),
         &root,
     )?;
-    options.limits.flush_timeout = Timeout::new(Duration::from_millis(50))?;
+    options.limits.flush_timeout = Timeout::new(Duration::from_millis(50));
     let mirror = TranscriptMirror::new(&options, root.join("projects"));
     mirror.enqueue(
         &root.join("projects/project").join(format!("{SESSION}.jsonl")),
