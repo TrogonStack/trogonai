@@ -264,7 +264,7 @@ fn read_registry<H: SettingsHost>(host: &H, tool: &OsStr) -> MdmRead {
         ];
         run(host, tool, &args, Some(POLICY_READ_MAX_BUFFER))
     };
-    let mut runs = together(&[REGISTRY_MACHINE_KEY, REGISTRY_USER_KEY], &query).into_iter();
+    let mut runs = together(&[REGISTRY_MACHINE_KEY, REGISTRY_USER_KEY], query).into_iter();
     let machine = runs.next().unwrap_or_else(|| query(&REGISTRY_MACHINE_KEY));
     let user = runs.next().unwrap_or_else(|| query(&REGISTRY_USER_KEY));
     MdmRead {

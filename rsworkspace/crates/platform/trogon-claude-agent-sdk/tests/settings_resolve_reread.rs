@@ -7,7 +7,11 @@
 //! takes the `duration_ms` it reports, so only a test of a read held on its own thread waits, for at most a second
 //! of steady time per call.
 
-use std::{thread, time::Duration};
+use std::{
+    panic::{self, AssertUnwindSafe},
+    thread,
+    time::Duration,
+};
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{PolicyRereads, ResolveSettingsOptions, ResolverState, resolve_settings_with_state};
@@ -267,5 +271,19 @@ fn a_read_whose_thread_goes_away_counts_as_unanswered_and_is_retried_at_once() {
     host.throws = false;
     answers(&mut host, "B");
     assert_eq!(model(&resolve(&host, &state, HALF_HOUR + 1)), Some("B"));
+    assert_eq!(machine_reads(&host), 3);
+}
+
+#[test]
+fn a_read_that_throws_while_the_state_is_held_leaves_every_later_call_reading_afresh() {
+    let mut host = host();
+    let state = inline_state();
+    answers(&mut host, "A");
+    host.throws = true;
+    let thrown = panic::catch_unwind(AssertUnwindSafe(|| resolve(&host, &state, 0)));
+    assert!(thrown.is_err());
+    host.throws = false;
+    assert_eq!(model(&resolve(&host, &state, 1)), Some("A"));
+    assert_eq!(model(&resolve(&host, &state, 2)), Some("A"));
     assert_eq!(machine_reads(&host), 3);
 }
