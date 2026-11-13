@@ -21,7 +21,7 @@ fn tool(name: &str) -> Result<SdkTool, Box<dyn std::error::Error>> {
     Ok(SdkTool::from(SdkToolOptions {
         name: McpToolName::from(name),
         description: format!("Tool {name}"),
-        input_schema: McpToolInputSchema::new(serde_json::from_value(json!({"type":"object"}))?)?,
+        input_schema: McpToolInputSchema::new(serde_json::from_value(json!({"type":"object"}))?),
         handler: Arc::new(move |_: McpToolRequest| {
             let response = response.clone();
             async move { Ok(McpToolOutput::text(response)) }
