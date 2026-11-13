@@ -1568,7 +1568,9 @@
         "adapters::SessionFileSystem",
         "SessionStoreFlush",
         "MirrorSizeEstimate",
-        "Error::ContinueRequiresListSessions"
+        "Error::ContinueRequiresListSessions",
+        "SummaryDialect",
+        "SessionStoreOperation"
       ],
       "tests": [
         {
@@ -1602,10 +1604,38 @@
         {
           "path": "tests/subprocess.rs",
           "name": "st06_continue_conversation_requires_a_store_that_lists_sessions"
+        },
+        {
+          "path": "tests/session_filesystem.rs",
+          "name": "w3_ts_resume_permission_bits_follow_the_bundle"
+        },
+        {
+          "path": "tests/session_filesystem.rs",
+          "name": "w3_ts_unreadable_credentials_fail_the_resume"
+        },
+        {
+          "path": "tests/session_filesystem.rs",
+          "name": "w3_ts_a_relative_home_directory_is_used_as_given"
+        },
+        {
+          "path": "tests/session_filesystem.rs",
+          "name": "s26_ts_latest_resume_takes_only_the_newest_listed_session"
+        },
+        {
+          "path": "tests/session_filesystem.rs",
+          "name": "w3_resume_copies_auth_and_settings_without_refresh_tokens_or_plugins"
+        },
+        {
+          "path": "tests/session_failure_contracts.rs",
+          "name": "ts_resume_accepts_relative_configuration_and_requires_listing_for_latest"
+        },
+        {
+          "path": "tests/session_failure_contracts.rs",
+          "name": "resume_rejects_relative_configuration_and_requires_listing_for_latest"
         }
       ],
-      "status": "partial",
-      "rationale": "Store resume materialization is Unix-only; long project paths can need project_key override. Per-result mirrors are bounded and retry only explicit definite noncommit failures."
+      "status": "supported",
+      "rationale": "Store-backed resume follows both upstream SDKs, selected by SessionStoreOptions.dialect with TypeScript as the default: TypeScript continue takes only the newest listed session, preserves source modes on copied auth files, writes settings at 0600, fails on unreadable credentials, accepts a relative home directory, derives the project key from options.env or the process environment as Wn does, and sets CLAUDE_SECURESTORAGE_CONFIG_DIR on Windows; Python walks newest first past sidechains and unusable candidates and skips unreadable optional files. Materialization runs on every platform, and project keys over 200 characters are truncated with the upstream hash suffix. Resume entry, byte and subkey limits are opt-in and unlimited by default; custom stores declare optional operations through SessionStore::supports."
     },
     {
       "id": "structured-input",

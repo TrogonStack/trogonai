@@ -12,6 +12,20 @@ pub(crate) const KEYCHAIN_FALLBACK_ACCOUNT: &str = "claude-code-user";
 /// Settings keys removed from the copied `settings.json` of a resumed session.
 pub(crate) const RESUME_SETTINGS_STRIPPED_KEYS: [&str; 2] = ["enabledPlugins", "extraKnownMarketplaces"];
 
+/// The settings keys the TypeScript SDK strips from a resumed session's settings files.
+pub(crate) const RESUME_SETTINGS_STRIPPED_KEYS_TS: [&str; 3] =
+    ["enabledPlugins", "extraKnownMarketplaces", "additionalMarketplaces"];
+
+/// The TypeScript SDK's per-environment OAuth file name suffixes beyond the default `.claude.json`.
+pub(crate) const OAUTH_FILE_SUFFIXES_TS: [&str; 3] = ["-staging-oauth", "-local-oauth", "-custom-oauth"];
+
+/// The custom OAuth endpoints the TypeScript SDK approves for `CLAUDE_CODE_CUSTOM_OAUTH_URL`.
+pub(crate) const APPROVED_OAUTH_ENDPOINTS_TS: [&str; 3] = [
+    "https://beacon.claude-ai.staging.ant.dev",
+    "https://claude.fedstart.com",
+    "https://claude-staging.fedstart.com",
+];
+
 /// Attempts to remove a materialized resume directory before giving up.
 pub(crate) const CLEANUP_ATTEMPTS: usize = 4;
 

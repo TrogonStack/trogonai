@@ -29,10 +29,10 @@ use recording_filesystem::RecordingFileSystem;
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 use trogon_claude_agent_sdk::{
-    Environment, InMemorySessionStore, Message, MirrorEnqueueError, MirrorFailureError, QueueCapacity, SessionEntry,
-    SessionEntryError, SessionError, SessionId, SessionKey, SessionKeyError, SessionPreparationOptions,
+    Environment, EnvironmentMode, InMemorySessionStore, Message, MirrorEnqueueError, MirrorFailureError, QueueCapacity,
+    SessionEntry, SessionEntryError, SessionError, SessionId, SessionKey, SessionKeyError, SessionPreparationOptions,
     SessionProjectKey, SessionProjectKeyError, SessionRuntime, SessionStore, SessionStoreError, SessionStoreFuture,
-    SessionStoreOperation, SessionStoreOptions, SessionSubpath, StoreResume, TranscriptMirror,
+    SessionStoreOperation, SessionStoreOptions, SessionSubpath, StoreResume, SummaryDialect, TranscriptMirror,
     adapters::{CanonicalizePath, SpawnProcess},
     test_support::FixedEnvironment,
 };
@@ -463,6 +463,7 @@ async fn prepare(
         resume,
         cwd: &environment.directory,
         subprocess_environment: &Environment::default(),
+        environment_mode: EnvironmentMode::default(),
         environment: &environment,
         process: &NoProcess,
         filesystem,
@@ -490,6 +491,7 @@ async fn resume_rejects_relative_configuration_and_requires_listing_for_latest()
     let filesystem = RecordingFileSystem::new()?;
     let config = filesystem.path("config");
     let mut options = resume_options(store, &config)?;
+    options.dialect = SummaryDialect::Python;
     for path in ["", "relative"] {
         options.config_directory = Some(path.into());
         assert!(matches!(
@@ -497,12 +499,32 @@ async fn resume_rejects_relative_configuration_and_requires_listing_for_latest()
             Err(SessionError::UnsafeConfigPath)
         ));
     }
-    options.config_directory = Some(config);
+    options.config_directory = Some(config.clone());
     assert!(matches!(
         prepare(&options, StoreResume::Latest, filesystem.clone()).await,
         Err(SessionError::Store(SessionStoreError::Unsupported(
             SessionStoreOperation::List
         )))
+    ));
+    assert!(resume_directories(&filesystem)?.is_empty());
+    Ok(())
+}
+
+/// TypeScript joins whatever configuration directory it is given and checks for `listSessions` before continuing.
+#[tokio::test(start_paused = true)]
+async fn ts_resume_accepts_relative_configuration_and_requires_listing_for_latest() -> TestResult {
+    let filesystem = RecordingFileSystem::new()?;
+    let config = filesystem.path("config");
+    let mut options = resume_options(Arc::new(BasicStore), &config)?;
+    for path in ["", "relative"] {
+        options.config_directory = Some(path.into());
+        let runtime = prepare(&options, StoreResume::None, filesystem.clone()).await?;
+        assert!(runtime.materialized.is_none());
+    }
+    options.config_directory = Some(config);
+    assert!(matches!(
+        prepare(&options, StoreResume::Latest, filesystem.clone()).await,
+        Err(SessionError::ContinueRequiresList)
     ));
     assert!(resume_directories(&filesystem)?.is_empty());
     Ok(())
@@ -574,7 +596,7 @@ async fn latest_resume_limits_the_candidate_listing_before_materialization() -> 
     let filesystem = RecordingFileSystem::new()?;
     let config = filesystem.path("config");
     let mut options = resume_options(store, &config)?;
-    options.limits.max_resume_entries = NonZeroUsize::new(1).ok_or("zero limit")?;
+    options.limits.max_resume_entries = Some(NonZeroUsize::new(1).ok_or("zero limit")?);
     assert!(matches!(
         prepare(&options, StoreResume::Latest, filesystem.clone()).await,
         Err(SessionError::EntryLimit)
@@ -592,7 +614,7 @@ async fn resume_counts_transcript_newlines_and_metadata_against_budgets() -> Tes
     store.append(&main, std::slice::from_ref(&transcript)).await?;
     let filesystem = RecordingFileSystem::new()?;
     let mut options = resume_options(store.clone(), &filesystem.path("config"))?;
-    options.limits.max_resume_bytes = NonZeroUsize::new(encoded_length).ok_or("zero limit")?;
+    options.limits.max_resume_bytes = Some(NonZeroUsize::new(encoded_length).ok_or("zero limit")?);
     assert!(matches!(
         prepare(&options, StoreResume::Session(SessionId::from(SESSION)), filesystem).await,
         Err(SessionError::ByteLimit)
@@ -609,9 +631,9 @@ async fn resume_counts_transcript_newlines_and_metadata_against_budgets() -> Tes
         let config = filesystem.path("config");
         let mut options = resume_options(store.clone(), &config)?;
         if entry_limit {
-            options.limits.max_resume_entries = NonZeroUsize::new(1).ok_or("zero limit")?;
+            options.limits.max_resume_entries = Some(NonZeroUsize::new(1).ok_or("zero limit")?);
         } else {
-            options.limits.max_resume_bytes = NonZeroUsize::new(encoded_length + 2).ok_or("zero limit")?;
+            options.limits.max_resume_bytes = Some(NonZeroUsize::new(encoded_length + 2).ok_or("zero limit")?);
         }
         let outcome = prepare(
             &options,

@@ -45,6 +45,22 @@ impl SessionProjectKey {
         Self::new(sanitize_path(&normalized, crate::SummaryDialect::TypeScript))
     }
 
+    /// Upstream TypeScript `Wn(directory, env)` through a filesystem adapter: the path is resolved lexically, its real
+    /// path is taken when that succeeds (the lexical path stays otherwise), and `CLAUDE_CODE_PROJECT_DIR_NAME` names the
+    /// project while `config_dir` is set.
+    pub(crate) fn for_directory_ts_with_filesystem<F: crate::adapters::CanonicalizePath<Error = std::io::Error>>(
+        directory: &Path,
+        filesystem: &F,
+        config_dir: Option<&str>,
+        name_override: Option<&str>,
+    ) -> Result<Self, SessionProjectKeyError> {
+        let lexical = lexical_resolve(directory);
+        let resolved = filesystem.canonicalize(&lexical).unwrap_or(lexical);
+        let text = resolved.to_string_lossy();
+        let canonical = platform_nfc(&without_verbatim_prefix(&text), crate::SummaryDialect::TypeScript);
+        Self::new(project_name_with(&canonical, config_dir, name_override))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }

@@ -12,8 +12,14 @@ pub enum SessionError {
     MissingConfigDirectory,
     #[error("session configuration path is unsafe")]
     UnsafeConfigPath,
-    #[error("session store load timed out")]
-    LoadTimeout,
+    /// A store call exceeded the load timeout. The text is upstream's, e.g. `SessionStore.load() timed out after 60000ms
+    /// for session <id>`.
+    #[error("{0}")]
+    LoadTimeout(String),
+    #[error("CLAUDE_CODE_CUSTOM_OAUTH_URL is not an approved endpoint.")]
+    UnapprovedOauthEndpoint,
+    #[error("Options.continue with sessionStore requires store.listSessions to be implemented")]
+    ContinueRequiresList,
     #[error("session resume exceeds the configured entry limit")]
     EntryLimit,
     #[error("session resume exceeds the configured byte limit")]
