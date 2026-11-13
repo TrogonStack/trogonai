@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod adapters;
+pub mod upstream;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
