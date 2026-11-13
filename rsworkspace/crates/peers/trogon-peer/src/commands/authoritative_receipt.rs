@@ -1,9 +1,10 @@
-use super::domain::{MessageId, TenantId};
+use super::domain::{MessageId, PeerId, TenantId};
 use super::{evolve_error::EvolveError, message_error::MessageError, message_values, state_values};
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
 #[derive(Debug, Clone)]
 pub struct AuthoritativeReceipt {
     pub(crate) tenant: TenantId,
+    pub(crate) sender: PeerId,
     pub(crate) receipt: proto::RecipientReceipt,
 }
 impl AuthoritativeReceipt {
@@ -24,7 +25,8 @@ impl AuthoritativeReceipt {
         if receipt.recipient_peer_id != enrollment.peer_id || receipt.recipient_revision != Some(position as u64 + 1) {
             return Err(MessageError::InvalidTransition);
         }
-        if let Some(entry) = state.inbox.iter().find(|e| e.message.message_id == receipt.message_id) {
+        let entry = state.inbox.iter().find(|e| e.message.message_id == receipt.message_id);
+        if let Some(entry) = entry {
             if entry.disposition.as_option() != Some(receipt) {
                 return Err(MessageError::InvalidTransition);
             }
@@ -48,9 +50,18 @@ impl AuthoritativeReceipt {
                 return Err(MessageError::InvalidTransition);
             }
         }
+        let sender = receipt
+            .sender_peer_id
+            .as_deref()
+            .or_else(|| entry.and_then(|entry| entry.message.sender_peer_id.as_deref()))
+            .ok_or(MessageError::InvalidTransition)?;
+        let sender = PeerId::parse(sender)?;
+        let mut receipt = receipt.clone();
+        receipt.sender_peer_id = Some(sender.to_string());
         Ok(Self {
             tenant: TenantId::new(state.enrollment.tenant_id.clone().unwrap_or_default())?,
-            receipt: receipt.clone(),
+            sender,
+            receipt,
         })
     }
     pub fn tenant(&self) -> &TenantId {

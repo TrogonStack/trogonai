@@ -67,14 +67,11 @@ where
             "peer_acknowledge_batch" => ModelOperation::Acknowledge,
             _ => return Err(PeerMcpError::UnsupportedTool),
         };
-        let attachment = self
-            .binding
-            .lock()
-            .await
-            .as_ref()
-            .and_then(NativeBinding::attachment)
-            .cloned()
-            .ok_or(PeerMcpError::Unbound)?;
+        let attachment = {
+            let binding = self.binding.lock().await;
+            let current = binding.as_ref().ok_or(PeerMcpError::Unbound)?;
+            current.attachment().cloned().ok_or(PeerMcpError::EnrollmentUncertain)?
+        };
         match operation {
             ModelOperation::Roster => model_tools::roster(&self.backend, request, &attachment).await,
             ModelOperation::Send => model_tools::send(&self.backend, request, &attachment, &self.config).await,
