@@ -1,3 +1,5 @@
+//! The error, options and key helpers that the store-backed session helpers share with their TypeScript port.
+
 use std::path::PathBuf;
 
 use crate::{
@@ -39,7 +41,7 @@ pub enum SessionStoreHelperError {
     NotObject,
 }
 
-/// Arguments of [`crate::list_sessions_from_store`].
+/// Arguments of [`list_sessions_from_store`](crate::list_sessions_from_store).
 #[derive(Clone, Debug, Default)]
 pub struct StoreListOptions {
     /// Project directory the key is derived from; the current directory when empty.
@@ -50,7 +52,7 @@ pub struct StoreListOptions {
     pub summary_dialect: SummaryDialect,
 }
 
-/// Arguments of [`crate::import_session_to_store`].
+/// Arguments of [`import_session_to_store`](crate::import_session_to_store).
 #[derive(Clone, Debug)]
 pub struct ImportOptions {
     pub directory: Option<PathBuf>,
