@@ -48,7 +48,8 @@ fn fractions_and_exact_integers_stay() {
     assert_eq!(typescript("-1.5"), "-1.5");
     assert_eq!(typescript("9007199254740991"), "9007199254740991");
     assert_eq!(typescript("9007199254740992"), "9007199254740992");
-    assert_eq!(typescript("1e21"), "1e21");
+    assert_eq!(typescript("1e21"), "1e+21");
+    assert_eq!(printed("1e21", SettingsDialect::Python), "1e+21");
 }
 
 #[test]
