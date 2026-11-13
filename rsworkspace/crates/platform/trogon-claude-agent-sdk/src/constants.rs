@@ -30,3 +30,7 @@ pub(crate) const KNOWN_UPDATE_TYPES: [&str; 6] = [
     "addDirectories",
     "removeDirectories",
 ];
+
+/// Protocol versions the pinned TypeScript SDK negotiates, newest first.
+pub(crate) const SUPPORTED_PROTOCOL_VERSIONS: [&str; 5] =
+    ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];

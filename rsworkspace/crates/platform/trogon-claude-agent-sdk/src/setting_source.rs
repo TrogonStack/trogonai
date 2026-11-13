@@ -8,3 +8,13 @@ pub enum SettingSource {
     Project,
     Local,
 }
+
+impl SettingSource {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Project => "project",
+            Self::Local => "local",
+        }
+    }
+}
