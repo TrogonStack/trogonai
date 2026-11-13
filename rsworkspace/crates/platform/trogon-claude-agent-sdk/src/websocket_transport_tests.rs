@@ -59,10 +59,10 @@ where
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let url = format!("ws://{}/", listener.local_addr()?);
     tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            if let Ok(socket) = accept_async(stream).await {
-                script(socket).await;
-            }
+        if let Ok((stream, _)) = listener.accept().await
+            && let Ok(socket) = accept_async(stream).await
+        {
+            script(socket).await;
         }
     });
     Ok(url)
@@ -377,7 +377,10 @@ async fn a_refused_connection_matches_the_recorded_browser_transport() -> TestRe
 }
 
 #[tokio::test]
-async fn the_keep_alive_is_sent_every_fifty_seconds_while_reading() -> TestResult {
+async fn the_keep_alive_is_sent_on_its_interval_while_reading() -> TestResult {
+    // The 50 second interval itself is pinned above; a short one drives the same timer on the real clock, since a
+    // paused clock jumps ahead while the server end is still waiting on the socket.
+    let interval = Duration::from_millis(200);
     let (seen_tx, mut seen_rx) = mpsc::unbounded_channel::<(Instant, String)>();
     let url = serve(move |mut socket| async move {
         while let Some(Ok(frame)) = socket.next().await {
@@ -387,25 +390,18 @@ async fn the_keep_alive_is_sent_every_fifty_seconds_while_reading() -> TestResul
         }
     })
     .await?;
-    let mut transport = connected(WebSocketOptions::new(url)).await?;
-    tokio::time::pause();
+    let mut transport = WebSocketTransport::new(WebSocketOptions::new(url));
+    transport.keep_alive_interval = interval;
     let started = Instant::now();
+    transport.connect().await?;
     let reading = tokio::spawn(async move { transport.read_message().await });
-    let (first_at, first) = seen_rx.recv().await.ok_or("no first keep-alive")?;
-    let (second_at, second) = seen_rx.recv().await.ok_or("no second keep-alive")?;
+    let (first_at, first) = within(seen_rx.recv()).await?.ok_or("no first keep-alive")?;
+    let (second_at, second) = within(seen_rx.recv()).await?.ok_or("no second keep-alive")?;
     reading.abort();
     assert_eq!(first, KEEP_ALIVE_LINE);
     assert_eq!(second, KEEP_ALIVE_LINE);
-    let first_after = first_at - started;
-    assert!(
-        first_after > Duration::from_secs(49) && first_after <= Duration::from_secs(50),
-        "{first_after:?}"
-    );
-    let gap = second_at - first_at;
-    assert!(
-        gap >= Duration::from_secs(50) && gap < Duration::from_secs(51),
-        "{gap:?}"
-    );
+    assert!(first_at - started >= interval, "{:?}", first_at - started);
+    assert!(second_at - first_at >= interval / 2, "{:?}", second_at - first_at);
     Ok(())
 }
 
@@ -433,6 +429,8 @@ async fn a_read_dropped_midway_loses_neither_a_message_nor_a_partial_line() -> T
     Ok(())
 }
 
+// The handshake callback's signature is tungstenite's, large error response included.
+#[allow(clippy::result_large_err)]
 async fn handshake_header(
     options: impl FnOnce(String) -> WebSocketOptions,
 ) -> Result<Option<String>, Box<dyn StdError>> {

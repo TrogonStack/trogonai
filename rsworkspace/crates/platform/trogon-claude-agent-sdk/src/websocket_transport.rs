@@ -151,6 +151,7 @@ pub struct WebSocketTransport {
     partial_line: String,
     exit_error: Option<WebSocketError>,
     ended: bool,
+    keep_alive_interval: Duration,
 }
 
 impl WebSocketTransport {
@@ -165,6 +166,7 @@ impl WebSocketTransport {
             partial_line: String::new(),
             exit_error: None,
             ended: false,
+            keep_alive_interval: KEEP_ALIVE_INTERVAL,
         }
     }
 
@@ -195,14 +197,14 @@ impl WebSocketTransport {
     /// TypeScript `close()`: a close frame with code 1000 when the socket is open, without waiting for the peer.
     fn close_socket(&mut self) {
         self.ready = false;
-        if let Some(mut connection) = self.connection.take() {
-            if !self.peer_closed {
-                let close = Message::Close(Some(CloseFrame {
-                    code: CloseCode::Normal,
-                    reason: CLOSE_REASON.into(),
-                }));
-                let _ = connection.socket.send(close).now_or_never();
-            }
+        if let Some(mut connection) = self.connection.take()
+            && !self.peer_closed
+        {
+            let close = Message::Close(Some(CloseFrame {
+                code: CloseCode::Normal,
+                reason: CLOSE_REASON.into(),
+            }));
+            let _ = connection.socket.send(close).now_or_never();
         }
     }
 
@@ -309,7 +311,7 @@ impl Transport for WebSocketTransport {
         if let Some(auth) = &self.options.auth_message {
             let _ = socket.send(Message::text(auth.line())).await;
         }
-        let mut keep_alive = interval_at(Instant::now() + KEEP_ALIVE_INTERVAL, KEEP_ALIVE_INTERVAL);
+        let mut keep_alive = interval_at(Instant::now() + self.keep_alive_interval, self.keep_alive_interval);
         keep_alive.set_missed_tick_behavior(MissedTickBehavior::Delay);
         self.connection = Some(Connection { socket, keep_alive });
         Ok(())
