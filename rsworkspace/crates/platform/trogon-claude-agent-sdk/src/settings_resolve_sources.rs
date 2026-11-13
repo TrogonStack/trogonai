@@ -86,11 +86,16 @@ pub(crate) fn resolve_cwd<H: CurrentDirectory<Error = io::Error>>(
 pub(crate) fn read_settings_file<H: ReadFile<Error = io::Error>>(host: &H, path: &Path) -> Option<SettingsMap> {
     let bytes = host.read_file(path).ok()?;
     let text = String::from_utf8_lossy(&bytes);
-    if text.trim().is_empty() {
+    if is_blank(&text) {
         return Some(SettingsMap::new());
     }
-    match serde_json::from_str::<Value>(&text).ok()? {
+    match serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(&text)).ok()? {
         Value::Object(map) => Some(map),
         _ => None,
     }
+}
+
+/// `String.prototype.trim() === ""`: JavaScript counts the byte order mark as white space.
+fn is_blank(text: &str) -> bool {
+    text.chars().all(|c| c.is_whitespace() || c == '\u{feff}')
 }
