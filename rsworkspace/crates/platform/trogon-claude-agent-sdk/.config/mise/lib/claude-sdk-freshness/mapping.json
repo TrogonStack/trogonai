@@ -3277,6 +3277,102 @@
       "rationale": "The public Transport trait is Python's Transport (connect, write, read_message in place of read_messages, close, is_ready, end_input) with a provided kill for TypeScript's abort. ClaudeSdkClient::connect_with_transport, query_with_transport and query_turn_with_transport inject one; the subprocess implementation is the default and the SpawnProcess adapter stays TypeScript's spawnClaudeCodeProcess. A custom transport gets no CLI discovery, argument list or store-backed resume materialization (the mirror still runs), as upstream."
     },
     {
+      "id": "browser-websocket-transport",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "browser.WebSocketOptions",
+            "browser.WebSocketOptions.url",
+            "browser.WebSocketOptions.headers",
+            "browser.WebSocketOptions.authMessage",
+            "browser.AuthMessage",
+            "browser.AuthMessage.credential",
+            "browser.AuthMessage.type",
+            "browser.OAuthCredential",
+            "browser.OAuthCredential.token",
+            "browser.OAuthCredential.type"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "WebSocketTransport",
+        "WebSocketOptions",
+        "HeaderDelivery",
+        "AuthMessage",
+        "OAuthCredential",
+        "WebSocketError"
+      ],
+      "tests": [
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "a_session_matches_the_recorded_browser_transport"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "the_peer_closing_matches_the_recorded_browser_transport"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "a_dropped_connection_matches_the_recorded_browser_transport"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "closing_sends_a_normal_closure_and_ends_the_stream"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "aborting_matches_the_recorded_browser_transport"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "aborting_before_connecting_matches_the_recorded_browser_transport"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "an_unusable_url_is_refused_with_the_recorded_text"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "a_connection_that_never_opens_times_out_after_fifteen_seconds"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "a_refused_connection_matches_the_recorded_browser_transport"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "the_keep_alive_is_sent_every_fifty_seconds_while_reading"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "a_read_dropped_midway_loses_neither_a_message_nor_a_partial_line"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "headers_are_ignored_by_default_like_the_browser_transport"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "headers_reach_the_handshake_when_asked"
+        },
+        {
+          "path": "src/websocket_transport_tests.rs",
+          "name": "the_auth_line_is_the_recorded_one_and_the_debug_output_hides_credentials"
+        },
+        {
+          "path": "tests/websocket_remote_store.rs",
+          "name": "a_remote_session_mirrors_its_transcript_into_an_external_store"
+        }
+      ],
+      "status": "supported",
+      "rationale": "WebSocketTransport is the browser SDK's WebSocket transport as a Transport implementation, replayed against goldens recorded by running the real class in node (websocket_transport_goldens.mjs): the auth line is sent first, a keep_alive line every 50000ms while the driver reads, inbound text frames are split on newlines with partial lines kept, bad JSON dropped and ccr_event removed, writes go out verbatim, close sends 1000 Normal closure, close codes other than 1000 and 1001 fail with the upstream text, the connect timeout is 15000ms, abort and a not-ready write carry the upstream messages. headers is accepted and ignored by default like the browser class; HeaderDelivery::Handshake opts into sending them on the upgrade request. JSON values that are not objects are dropped because Transport yields objects. The query-level browser options (websocket, sse), SSE and the rest of the browser entrypoint stay out of scope."
+    },
+    {
       "id": "browser-entrypoint",
       "upstream": {
         "python": {
