@@ -13,6 +13,12 @@ From the repository root:
 mise run verification:hydro
 ```
 
+The experiment also has an explicit local Bazel launcher:
+
+```sh
+mise exec bazel -- bazel run //projects/hydro-verification:verify
+```
+
 The task selects the verification project’s Rust 1.98.1 compiler and runs its
 locked integration tests. Install the compiler with `mise install rust@1.98.1`
 if needed. The first run compiles Hydro and its generated simulation libraries.
@@ -23,6 +29,36 @@ To select a test, pass its name:
 ```sh
 mise run verification:hydro removal_stays_terminal_across_client_interleavings
 ```
+
+The Bazel launcher forwards the same filter after `--`:
+
+```sh
+mise exec bazel -- bazel run //projects/hydro-verification:verify -- removal_stays_terminal_across_client_interleavings
+```
+
+## Keep the experiment local
+
+Hydro verification is experimental and excluded from CI. The Bazel target is
+tagged `manual`, which omits it from `bazel build //...` and `bazel test //...`.
+Both supported entrypoints reject a nonempty `CI` or `GITHUB_ACTIONS` variable
+before starting mise or Cargo for the experiment. Standard repository PR checks
+continue independently.
+
+Bazel stages and runs a local launcher. The launcher uses the pinned mise/Cargo
+workflow because Hydro generates and compiles simulation libraries through
+Cargo at runtime. These are not native Bazel Rust actions or Bazel-cached test
+results. Invoke the explicit target whenever you want fresh verification.
+
+## Check the launcher
+
+The launcher tests use a fake mise executable to check CI refusal, workspace
+selection, and argument forwarding without running Hydro:
+
+```sh
+mise exec python -- python -m unittest discover -s projects/hydro-verification/tests -p test_launcher.py
+```
+
+## Check formatting and lints
 
 Run formatting and lint checks from `projects/hydro-verification`:
 
