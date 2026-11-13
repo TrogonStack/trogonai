@@ -377,7 +377,8 @@ impl ExecuteFile for NativeHost {
     }
 }
 
-/// Everything the settings resolver needs from its host.
+/// Everything the settings resolver needs from its host. It is `Clone` so a machine policy re-read can take the
+/// host to a thread of its own.
 pub trait SettingsHost:
     ReadFile<Error = io::Error>
     + CheckReadable<Error = io::Error>
@@ -389,6 +390,7 @@ pub trait SettingsHost:
     + super::EnvironmentVariable
     + super::CurrentDirectory<Error = io::Error>
     + super::WallClock<Time = SystemTime>
+    + Clone
     + Send
     + Sync
     + 'static
@@ -406,6 +408,7 @@ impl<T> SettingsHost for T where
         + super::EnvironmentVariable
         + super::CurrentDirectory<Error = io::Error>
         + super::WallClock<Time = SystemTime>
+        + Clone
         + Send
         + Sync
         + 'static

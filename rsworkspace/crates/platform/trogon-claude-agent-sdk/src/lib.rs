@@ -260,6 +260,7 @@ pub use settings_resolve::{
     resolve_settings_in_dialect_with, resolve_settings_in_dialect_with_state, resolve_settings_with,
     resolve_settings_with_state,
 };
+pub use settings_resolve_reread::PolicyRereads;
 pub use settings_resolve_state::ResolverState;
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,

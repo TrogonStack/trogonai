@@ -6,7 +6,7 @@ use std::{
     io,
     path::{Path, PathBuf},
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -29,9 +29,31 @@ pub struct FakeHost {
     pub unreadable: BTreeSet<PathBuf>,
     pub links: BTreeMap<PathBuf, PathBuf>,
     pub commands: BTreeMap<String, ExecuteFileOutcome>,
-    pub runs: Mutex<Vec<String>>,
-    /// Milliseconds since the epoch the host's clock shows; a command moves it by the time the command took.
+    /// Every command line run, shared with the copies a background read takes.
+    pub runs: Arc<Mutex<Vec<String>>>,
+    /// Milliseconds since the epoch the host's clock shows. Commands leave it alone: the resolver counts the
+    /// `duration_ms` they report, the way the oracle's fake clock counts a fixture's `durations`.
     pub clock_ms: AtomicU64,
+}
+
+/// A copy sees the files and commands as they are now and the clock where it stands now, and records its runs
+/// with the original.
+impl Clone for FakeHost {
+    fn clone(&self) -> Self {
+        Self {
+            system: self.system.clone(),
+            user: self.user.clone(),
+            cwd: self.cwd.clone(),
+            env: self.env.clone(),
+            files: self.files.clone(),
+            directories: self.directories.clone(),
+            unreadable: self.unreadable.clone(),
+            links: self.links.clone(),
+            commands: self.commands.clone(),
+            runs: Arc::clone(&self.runs),
+            clock_ms: AtomicU64::new(self.clock_ms.load(Ordering::SeqCst)),
+        }
+    }
 }
 
 impl FakeHost {
@@ -46,7 +68,7 @@ impl FakeHost {
             unreadable: BTreeSet::new(),
             links: BTreeMap::new(),
             commands: BTreeMap::new(),
-            runs: Mutex::new(Vec::new()),
+            runs: Arc::new(Mutex::new(Vec::new())),
             clock_ms: AtomicU64::new(0),
         }
     }
@@ -250,14 +272,10 @@ impl ExecuteFile for FakeHost {
             line.push_str(&argument.to_string_lossy());
         }
         self.runs.lock().expect("runs").push(line.clone());
-        let outcome = self
-            .commands
+        self.commands
             .get(&line)
             .cloned()
-            .unwrap_or_else(|| spawn_error("ENOENT"));
-        self.clock_ms
-            .fetch_add(u64::try_from(outcome.duration_ms).unwrap_or(u64::MAX), Ordering::SeqCst);
-        outcome
+            .unwrap_or_else(|| spawn_error("ENOENT"))
     }
 }
 

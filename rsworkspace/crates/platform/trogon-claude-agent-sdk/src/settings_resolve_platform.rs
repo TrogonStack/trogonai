@@ -2,6 +2,7 @@ use std::{
     ffi::OsStr,
     io,
     path::{Path, PathBuf},
+    thread,
 };
 
 use serde_json::Value;
@@ -161,6 +162,28 @@ pub(crate) struct MdmRead {
     pub(crate) hkcu_stdout: Option<String>,
     pub(crate) hklm_outcome: Option<CommandOutcome>,
     pub(crate) hkcu_outcome: Option<CommandOutcome>,
+    /// Milliseconds the programs kept the read waiting: the slowest of the reads that ran at once, each one the
+    /// sum of the programs it ran one after the other.
+    pub(crate) elapsed_ms: u128,
+}
+
+/// Runs one read per input at once, as `Promise.all` upstream does, so the slowest read sets how long they take.
+/// A read whose thread cannot start runs on the calling thread instead.
+fn together<I: Sync, T: Send>(inputs: &[I], read: impl Fn(&I) -> T + Sync) -> Vec<T> {
+    let read = &read;
+    thread::scope(|scope| {
+        let others: Vec<_> = inputs
+            .iter()
+            .skip(1)
+            .map(|input| thread::Builder::new().spawn_scoped(scope, move || read(input)))
+            .collect();
+        let mut results: Vec<T> = inputs.first().map(read).into_iter().collect();
+        for (input, other) in inputs.iter().skip(1).zip(others) {
+            let result = other.ok().and_then(|handle| handle.join().ok());
+            results.push(result.unwrap_or_else(|| read(input)));
+        }
+        results
+    })
 }
 
 fn run<H: ExecuteFile>(host: &H, program: &OsStr, args: &[&OsStr], max_buffer: Option<usize>) -> ExecuteFileOutcome {
@@ -180,7 +203,8 @@ fn is_absent_error(error: &io::Error) -> bool {
     matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
 }
 
-fn read_plist<H: SettingsHost>(host: &H, path: &Path, per_user: bool) -> Option<PlistDocument> {
+/// One plist candidate, with the milliseconds its `plutil` runs took one after the other.
+fn read_plist<H: SettingsHost>(host: &H, path: &Path, per_user: bool) -> (Option<PlistDocument>, u128) {
     let unreadable = |errno_known: bool| {
         Some(PlistDocument {
             stdout: None,
@@ -190,31 +214,34 @@ fn read_plist<H: SettingsHost>(host: &H, path: &Path, per_user: bool) -> Option<
     };
     if let Err(error) = host.check_readable(path) {
         if is_absent_error(&error) {
-            return None;
+            return (None, 0);
         }
-        return unreadable(true);
+        return (unreadable(true), 0);
     }
     let program = OsStr::new(PLUTIL_PATH);
     let mut convert: Vec<&OsStr> = PLUTIL_CONVERT_ARGS.iter().map(OsStr::new).collect();
     convert.push(path.as_os_str());
     let converted = run(host, program, &convert, Some(POLICY_READ_MAX_BUFFER));
+    let mut elapsed = converted.duration_ms;
     if !finished(&converted) {
-        return unreadable(false);
+        return (unreadable(false), elapsed);
     }
     if converted.status == ExecuteFileStatus::Ok {
-        return Some(PlistDocument {
+        let document = PlistDocument {
             stdout: Some(converted.stdout),
             per_user,
             errno_known: false,
-        });
+        };
+        return (Some(document), elapsed);
     }
     let mut lint: Vec<&OsStr> = PLUTIL_LINT_ARGS.iter().map(OsStr::new).collect();
     lint.push(path.as_os_str());
     let linted = run(host, program, &lint, None);
+    elapsed = elapsed.saturating_add(linted.duration_ms);
     if !finished(&linted) || linted.status == ExecuteFileStatus::Ok {
-        return unreadable(false);
+        return (unreadable(false), elapsed);
     }
-    match host.check_readable(path) {
+    let document = match host.check_readable(path) {
         Ok(()) => Some(PlistDocument {
             stdout: Some(String::new()),
             per_user,
@@ -222,21 +249,25 @@ fn read_plist<H: SettingsHost>(host: &H, path: &Path, per_user: bool) -> Option<
         }),
         Err(error) if is_absent_error(&error) => None,
         Err(_) => unreadable(true),
-    }
+    };
+    (document, elapsed)
 }
 
+/// `Aq` upstream: both keys are queried at once.
 fn read_registry<H: SettingsHost>(host: &H, tool: &OsStr) -> MdmRead {
-    let query = |key: &str| {
+    let query = |key: &&str| {
         let args = [
             OsStr::new("query"),
-            OsStr::new(key),
+            OsStr::new(*key),
             OsStr::new("/v"),
             OsStr::new(REGISTRY_VALUE_NAME),
         ];
         run(host, tool, &args, Some(POLICY_READ_MAX_BUFFER))
     };
-    let machine = query(REGISTRY_MACHINE_KEY);
-    let user = query(REGISTRY_USER_KEY);
+    let mut runs = together(&[REGISTRY_MACHINE_KEY, REGISTRY_USER_KEY], query).into_iter();
+    let (Some(machine), Some(user)) = (runs.next(), runs.next()) else {
+        return MdmRead::default();
+    };
     MdmRead {
         plists: None,
         hklm_stdout: (machine.status == ExecuteFileStatus::Ok).then(|| machine.stdout.clone()),
@@ -245,6 +276,7 @@ fn read_registry<H: SettingsHost>(host: &H, tool: &OsStr) -> MdmRead {
         hkcu_stdout: (user.status == ExecuteFileStatus::Ok).then(|| user.stdout.clone()),
         hklm_outcome: Some(CommandOutcome::from_run(&machine)),
         hkcu_outcome: Some(CommandOutcome::from_run(&user)),
+        elapsed_ms: machine.duration_ms.max(user.duration_ms),
     }
 }
 
@@ -262,17 +294,15 @@ pub(crate) fn read_policy<H: SettingsHost>(host: &H) -> MdmRead {
                 ));
             }
             candidates.push((Path::new(PLIST_DIRECTORY).join(format!("{PLIST_DOMAIN}.plist")), false));
-            let mut documents: Vec<PlistDocument> = Vec::new();
-            for (path, per_user) in candidates {
-                if let Some(document) = read_plist(host, &path, per_user) {
-                    documents.push(document);
-                }
-            }
+            let reads = together(&candidates, |(path, per_user)| read_plist(host, path, *per_user));
+            let elapsed_ms = reads.iter().map(|(_, elapsed)| *elapsed).max().unwrap_or(0);
+            let mut documents: Vec<PlistDocument> = reads.into_iter().filter_map(|(document, _)| document).collect();
             if let Some(first) = documents.iter().position(|document| document.stdout.is_some()) {
                 documents.truncate(first + 1);
             }
             MdmRead {
                 plists: Some(documents),
+                elapsed_ms,
                 ..MdmRead::default()
             }
         }
