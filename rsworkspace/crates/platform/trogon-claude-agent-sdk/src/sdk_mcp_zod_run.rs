@@ -6,6 +6,7 @@ use crate::{
         float_safe_remainder, forgiving_base64, js_string, ordered, ordered_keys, prototype_function_length, to_number,
         trim, utf16_length,
     },
+    sdk_mcp_regexp,
     sdk_mcp_zod::{Affix, ArrayNode, Bound, Node, NumberNode, ObjectMode, ObjectNode, StringCheck, StringNode},
     sdk_mcp_zod_issue::{Issue, aborted},
 };
@@ -348,17 +349,18 @@ fn string(node: &StringNode, input: Input<'_>) -> Outcome {
                 StringCheck::Pattern {
                     source,
                     format,
+                    flags,
                     matcher,
                 } => {
                     if let Some(matcher) = matcher
-                        && !matcher.is_valid(&Value::from(text))
+                        && !sdk_mcp_regexp::test(matcher, text, flags)
                     {
                         issues.push(Issue::new(
                             [
                                 ("origin", "string".into()),
                                 ("code", "invalid_format".into()),
                                 ("format", format.as_str().into()),
-                                ("pattern", format!("/{source}/").into()),
+                                ("pattern", format!("/{source}/{flags}").into()),
                             ],
                             true,
                         ));
@@ -614,6 +616,7 @@ fn object(node: &ObjectNode, input: Input<'_>) -> Outcome {
             continue;
         }
         match &node.mode {
+            ObjectMode::Catchall(_) if key == "__proto__" => {}
             ObjectMode::Catchall(catchall) => {
                 let result = run(catchall, lookup(map, key));
                 issues.extend(prefixed(result.issues, &Value::from(key.as_str())));

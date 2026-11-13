@@ -12,7 +12,7 @@
 //! `length(n)` is `min(n).max(n)`, regular expression flags are lost, and transforms and refinements are
 //! invisible. The Rust regular expression and URL engines stand in for the JavaScript ones.
 
-use crate::{JsonObject, constants, sdk_mcp_js::ordered_keys, sdk_mcp_zod_issue::Issue};
+use crate::{JsonObject, constants, sdk_mcp_js::ordered_keys, sdk_mcp_regexp, sdk_mcp_zod_issue::Issue};
 use serde_json::{Number, Value};
 
 pub(crate) use crate::sdk_mcp_zod_run::{Input, run};
@@ -67,7 +67,9 @@ pub(crate) enum StringCheck {
     Pattern {
         source: String,
         format: String,
-        matcher: Option<jsonschema::Validator>,
+        /// The flags of the `RegExp`, which the listed JSON Schema does not carry (`x-flags`).
+        flags: String,
+        matcher: Option<regress::Regex>,
     },
 }
 
@@ -270,16 +272,20 @@ fn string(schema: &JsonObject) -> Node {
                 kind: Affix::Includes,
                 text: unescape(pattern.unwrap_or_default()),
             },
-            (format, Some(pattern)) => StringCheck::Pattern {
-                source: pattern.to_owned(),
-                format: match format {
-                    None => "regex",
-                    Some("date-time") => "datetime",
-                    Some(other) => other,
+            (format, Some(pattern)) => {
+                let flags = regexp_flags(schema, format);
+                StringCheck::Pattern {
+                    matcher: sdk_mcp_regexp::compile(pattern, &flags).ok(),
+                    flags,
+                    source: pattern.to_owned(),
+                    format: match format {
+                        None => "regex",
+                        Some("date-time") => "datetime",
+                        Some(other) => other,
+                    }
+                    .to_owned(),
                 }
-                .to_owned(),
-                matcher: matcher(pattern),
-            },
+            }
             _ => StringCheck::None,
         };
     }
@@ -292,10 +298,14 @@ fn string(schema: &JsonObject) -> Node {
     })
 }
 
-/// `new RegExp(source).test`, through the ECMA 262 pattern engine of the JSON Schema validator.
-fn matcher(source: &str) -> Option<jsonschema::Validator> {
-    let schema = JsonObject::from_iter([("pattern".to_owned(), Value::from(source))]);
-    jsonschema::validator_for(&Value::Object(schema)).ok()
+/// The flags of the `RegExp` behind a pattern. The JSON Schema zod lists drops them, so the `x-flags`
+/// keyword names them; without it only the flags zod itself gives a format's regex apply (`u` for emoji).
+fn regexp_flags(schema: &JsonObject, format: Option<&str>) -> String {
+    match schema.get("x-flags").and_then(Value::as_str) {
+        Some(flags) => flags.to_owned(),
+        None if format == Some("emoji") => "u".to_owned(),
+        None => String::new(),
+    }
 }
 
 fn number(schema: &JsonObject, integer: bool) -> Node {
@@ -438,6 +448,21 @@ pub(crate) fn call_tool_result() -> &'static Node {
 /// The schema of `params._meta`: a loose object with a `progressToken` and the related task.
 pub(crate) fn meta() -> &'static Node {
     &META_NODE
+}
+
+/// The `SyntaxError` text of the first `pattern` anywhere in the schema that `new RegExp` rejects.
+pub(crate) fn pattern_error(schema: &Value) -> Option<String> {
+    match schema {
+        Value::Object(object) => {
+            let own = object.get("pattern").and_then(Value::as_str).and_then(|pattern| {
+                let format = object.get("format").and_then(Value::as_str);
+                sdk_mcp_regexp::compile(pattern, &regexp_flags(object, format)).err()
+            });
+            own.or_else(|| object.values().find_map(pattern_error))
+        }
+        Value::Array(items) => items.iter().find_map(pattern_error),
+        _ => None,
+    }
 }
 
 /// Whether a tool schema uses a keyword a zod schema cannot express, so only the JSON Schema validator
