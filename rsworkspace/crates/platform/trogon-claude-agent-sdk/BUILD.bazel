@@ -29,6 +29,7 @@ workspace_crate(
         "tests/fixtures/connector_vetting/probes.json",
         "tests/fixtures/usd_budget/goldens.json",
     ] + glob([
+        "tests/fixtures/extract_from_bunfs/*.json",
         "tests/fixtures/fork_ts/*.jsonl",
         "tests/fixtures/oracle_ts/*.json",
         "tests/fixtures/initialize_options.json",
