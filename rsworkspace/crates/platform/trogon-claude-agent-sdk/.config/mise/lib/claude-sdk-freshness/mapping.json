@@ -199,6 +199,7 @@
         "typescript": {
           "symbols": [
             "PermissionMode",
+            "sdk.coreTypes.PermissionMode",
             "Options.permissionMode",
             "core.PermissionMode",
             "core.Options.permissionMode"
@@ -244,6 +245,7 @@
         "typescript": {
           "symbols": [
             "SettingSource",
+            "sdk.coreTypes.SettingSource",
             "Options.settingSources",
             "core.SettingSource",
             "core.Options.settingSources"
@@ -1049,6 +1051,7 @@
           "symbols": [],
           "prefixes": [
             "AgentDefinition",
+            "sdk.coreTypes.AgentDefinition",
             "core.AgentDefinition"
           ]
         }
@@ -1130,9 +1133,13 @@
           "symbols": [],
           "prefixes": [
             "PermissionResult",
+            "sdk.coreTypes.PermissionResult",
             "PermissionUpdate",
+            "sdk.coreTypes.PermissionUpdate",
             "PermissionRuleValue",
+            "sdk.coreTypes.PermissionRuleValue",
             "McpServerProvenance",
+            "sdk.coreTypes.McpServerProvenance",
             "core.PermissionResult",
             "core.PermissionUpdate",
             "core.PermissionRuleValue",
@@ -1198,7 +1205,9 @@
             "Options.hooks",
             "HookCallback",
             "HookInput",
+            "sdk.coreTypes.HookInput",
             "HookJSONOutput",
+            "sdk.coreTypes.HookJSONOutput",
             "core.Options.hooks",
             "core.HookCallback",
             "core.HookInput",
@@ -1206,7 +1215,9 @@
           ],
           "prefixes": [
             "HookCallbackMatcher",
-            "core.HookCallbackMatcher"
+            "core.HookCallbackMatcher",
+            "sdk.SDKHookCallbackMatcher",
+            "sdk.SDKHookCallbackRequest"
           ]
         }
       },
@@ -1256,6 +1267,10 @@
         {
           "path": "tests/upstream_hooks.rs",
           "name": "an_output_no_member_declares_is_sent_unchanged"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "typescript_initialize_matches_sdk_mjs_bytes"
         }
       ],
       "status": "supported",
@@ -1273,10 +1288,14 @@
         "typescript": {
           "symbols": [
             "HookEvent",
+            "sdk.coreTypes.HookEvent",
             "core.HookEvent",
             "HOOK_EVENTS",
+            "sdk.coreTypes.HOOK_EVENTS",
             "EXIT_REASONS",
+            "sdk.coreTypes.EXIT_REASONS",
             "ExitReason",
+            "sdk.coreTypes.ExitReason",
             "core.HOOK_EVENTS",
             "core.EXIT_REASONS",
             "core.ExitReason"
@@ -1827,6 +1846,7 @@
             "Options.mcpServers",
             "McpServerConfig",
             "McpServerConfigForProcessTransport",
+            "sdk.coreTypes.McpServerConfigForProcessTransport",
             "core.Options.mcpServers",
             "core.McpServerConfig",
             "core.McpServerConfigForProcessTransport"
@@ -2115,6 +2135,7 @@
         "typescript": {
           "symbols": [
             "SDKUserMessage",
+            "sdk.coreTypes.SDKUserMessage",
             "core.SDKUserMessage"
           ],
           "prefixes": []
@@ -2149,9 +2170,13 @@
           "symbols": [],
           "prefixes": [
             "SDKAssistantMessage",
+            "sdk.coreTypes.SDKAssistantMessage",
             "SDKResultMessage",
+            "sdk.coreTypes.SDKResultMessage",
             "SDKResultSuccess",
+            "sdk.coreTypes.SDKResultSuccess",
             "SDKResultError",
+            "sdk.coreTypes.SDKResultError",
             "core.SDKAssistantMessage",
             "core.SDKResultMessage",
             "core.SDKResultSuccess",
@@ -2200,13 +2225,19 @@
         "typescript": {
           "symbols": [
             "SDKMessage",
+            "sdk.coreTypes.SDKMessage",
             "SDKSystemMessage",
+            "sdk.coreTypes.SDKSystemMessage",
             "SDKPartialAssistantMessage",
+            "sdk.coreTypes.SDKPartialAssistantMessage",
             "core.SDKMessage",
             "core.SDKSystemMessage",
-            "core.SDKPartialAssistantMessage"
+            "core.SDKPartialAssistantMessage",
+            "sdk.StdoutMessage"
           ],
-          "prefixes": []
+          "prefixes": [
+            "sdk.SDKKeepAliveMessage"
+          ]
         }
       },
       "rust_api": [
@@ -2237,6 +2268,10 @@
         {
           "path": "tests/message_decoding.rs",
           "name": "python_decoding_yields_what_the_pinned_python_query_yields"
+        },
+        {
+          "path": "src/message_decode/tests.rs",
+          "name": "typescript_consumes_keep_alive_and_python_counts_it_without_yielding_it"
         }
       ],
       "status": "supported",
@@ -2419,7 +2454,10 @@
             "sdk.coreTypes.SlashCommand",
             "TerminalReason",
             "core.TerminalReason",
-            "sdk.coreTypes.TerminalReason"
+            "sdk.coreTypes.TerminalReason",
+            "SDKUserMessage",
+            "core.SDKUserMessage",
+            "sdk.coreTypes.SDKUserMessage"
           ]
         }
       },
@@ -3209,6 +3247,7 @@
         "typescript": {
           "symbols": [
             "SDKUserMessage.tool_use_result",
+            "sdk.coreTypes.SDKUserMessage.tool_use_result",
             "core.SDKUserMessage.tool_use_result"
           ],
           "prefixes": []
@@ -3246,9 +3285,13 @@
         "typescript": {
           "symbols": [
             "SDKPartialAssistantMessage.ttft_ms",
+            "sdk.coreTypes.SDKPartialAssistantMessage.ttft_ms",
             "SDKPartialAssistantMessage.user_message_uuid",
+            "sdk.coreTypes.SDKPartialAssistantMessage.user_message_uuid",
             "SDKPartialAssistantMessage.user_message_uuids",
+            "sdk.coreTypes.SDKPartialAssistantMessage.user_message_uuids",
             "SDKPartialAssistantMessage.resume_reason",
+            "sdk.coreTypes.SDKPartialAssistantMessage.resume_reason",
             "core.SDKPartialAssistantMessage.ttft_ms",
             "core.SDKPartialAssistantMessage.user_message_uuid",
             "core.SDKPartialAssistantMessage.user_message_uuids",
@@ -3348,14 +3391,19 @@
           "symbols": [],
           "prefixes": [
             "SandboxSettings",
+            "sdk.coreTypes.SandboxSettings",
             "core.SandboxSettings",
             "SandboxNetworkConfig",
+            "sdk.coreTypes.SandboxNetworkConfig",
             "core.SandboxNetworkConfig",
             "SandboxFilesystemConfig",
+            "sdk.coreTypes.SandboxFilesystemConfig",
             "core.SandboxFilesystemConfig",
             "SandboxCredentialsConfig",
+            "sdk.coreTypes.SandboxCredentialsConfig",
             "core.SandboxCredentialsConfig",
             "SandboxIgnoreViolations",
+            "sdk.coreTypes.SandboxIgnoreViolations",
             "core.SandboxIgnoreViolations"
           ]
         }
@@ -3397,6 +3445,7 @@
             "ResolveSettingsOptions",
             "core.ResolveSettingsOptions",
             "SDKSettingsParseError",
+            "sdk.coreTypes.SDKSettingsParseError",
             "core.SDKSettingsParseError"
           ]
         }
