@@ -56,6 +56,7 @@ mod session_project_key;
 mod session_prompt;
 mod session_resume;
 mod session_store;
+mod session_store_helpers;
 mod session_subpath;
 mod session_summary;
 mod session_transcript;
@@ -146,6 +147,12 @@ pub use session_resume::{MaterializedSession, SessionPreparationOptions, Session
 pub use session_store::{
     InMemorySessionStore, MirrorSizeEstimate, SessionListEntry, SessionStore, SessionStoreError, SessionStoreFlush,
     SessionStoreFuture, SessionStoreLimits, SessionStoreOperation, SessionStoreOptions,
+};
+pub use session_store_helpers::{
+    ImportOptions, SessionStoreHelperError, StoreListOptions, delete_session_via_store, fork_session_via_store,
+    get_session_info_from_store, get_session_messages_from_store, get_subagent_messages_from_store,
+    import_session_to_store, list_sessions_from_store, list_subagents_from_store, rename_session_via_store,
+    tag_session_via_store,
 };
 pub use session_subpath::{SessionSubpath, SessionSubpathError};
 pub use session_summary::{SessionSummaryEntry, SummaryDialect, fold_session_summary, summary_entry_to_sdk_info};

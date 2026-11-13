@@ -49,6 +49,15 @@ impl MessagePage {
 
 const TRANSCRIPT_TYPES: [&str; 5] = ["user", "assistant", "progress", "system", "attachment"];
 
+/// Whether an entry is a transcript message: a known type and a string uuid.
+pub(crate) fn is_transcript_entry(entry: &JsonObject) -> bool {
+    entry
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| TRANSCRIPT_TYPES.contains(&kind))
+        && entry.get("uuid").is_some_and(Value::is_string)
+}
+
 /// Parses JSONL into the entries that carry a `uuid` and a transcript message type, skipping corrupt lines.
 pub(crate) fn parse_transcript_entries(content: &str) -> Vec<JsonObject> {
     content
@@ -59,15 +68,7 @@ pub(crate) fn parse_transcript_entries(content: &str) -> Vec<JsonObject> {
                 return None;
             }
             match serde_json::from_str::<Value>(line).ok()? {
-                Value::Object(entry)
-                    if entry
-                        .get("type")
-                        .and_then(Value::as_str)
-                        .is_some_and(|kind| TRANSCRIPT_TYPES.contains(&kind))
-                        && entry.get("uuid").is_some_and(Value::is_string) =>
-                {
-                    Some(entry)
-                }
+                Value::Object(entry) if is_transcript_entry(&entry) => Some(entry),
                 _ => None,
             }
         })
