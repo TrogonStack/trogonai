@@ -15,6 +15,10 @@ impl EnvironmentVariable for FixedEnvironment {
     fn var_os(&self, key: &OsStr) -> Option<OsString> {
         self.variables.get(key).cloned()
     }
+
+    fn vars_os(&self) -> Vec<(OsString, OsString)> {
+        self.variables.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
 }
 
 impl CurrentDirectory for FixedEnvironment {

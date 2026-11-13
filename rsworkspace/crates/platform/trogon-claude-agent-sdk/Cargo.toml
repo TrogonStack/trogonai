@@ -15,16 +15,23 @@ test-support = []
 
 [dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["float_roundtrip", "preserve_order"] }
+indexmap = { version = "=2.14.0", features = ["serde"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "process", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 jsonschema = { workspace = true }
 url = { workspace = true }
+regex = "=1.12.3"
 uuid = { workspace = true }
+icu_collator = "=2.4.0"
 unicode-normalization = "=0.1.26"
+unicode-general-category = "=1.1.0"
 futures-util = { workspace = true }
 tracing = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.186"
 
 [dev-dependencies]
 tempfile = { workspace = true }

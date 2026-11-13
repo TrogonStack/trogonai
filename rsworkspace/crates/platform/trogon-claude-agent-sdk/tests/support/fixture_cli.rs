@@ -63,22 +63,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     assert!(args.windows(2).any(|pair| pair == ["--output-format", "stream-json"]));
     assert!(args.windows(2).any(|pair| pair == ["--input-format", "stream-json"]));
-    assert!(
-        args.windows(2)
-            .any(|pair| pair == ["--permission-prompt-tool", "stdio"])
-    );
     assert!(args.iter().any(|arg| arg == "--verbose"));
     let mode = args
         .iter()
         .find_map(|arg| arg.strip_prefix("--model=fixture:"))
+        .or_else(|| {
+            args.windows(2).find_map(|pair| {
+                (pair[0] == "--model")
+                    .then(|| pair[1].strip_prefix("fixture:"))
+                    .flatten()
+            })
+        })
         .unwrap_or("normal");
-    let custom_prompt = args.iter().find_map(|arg| arg.strip_prefix("--system-prompt="));
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
     let first = lines
         .next()
         .ok_or_else(|| io::Error::other("fixture missing initialize"))??;
     let initialize: Value = serde_json::from_str(&first)?;
+    // The TypeScript argv shape delivers the system prompt inside `initialize`.
+    let custom_prompt = initialize["request"]["systemPrompt"][0]
+        .as_str()
+        .filter(|prompt| !prompt.is_empty());
     assert_eq!(initialize["type"], "control_request");
     assert_eq!(initialize["request"]["subtype"], "initialize");
     if !mode.starts_with("hook") {
@@ -102,17 +108,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::thread::sleep(Duration::from_secs(30));
         return Ok(());
     }
-    if mode == "init-malformed" {
-        emit(
-            json!({"type":"control_response","response":{"subtype":"success","request_id":initialize_id,"response":42}}),
-        )?;
-        std::thread::sleep(Duration::from_secs(30));
-        return Ok(());
-    }
     let initialization = if mode == "hook" {
         json!({"hooks_applied":true,"hook_on_failure_supported":true,"claude_code_version":"2.1.319"})
     } else if mode == "hook-not-applied" {
         json!({"hooks_applied":false,"hook_on_failure_supported":true})
+    } else if mode == "init-malformed" {
+        json!(42)
     } else if mode == "init-malformed-known" {
         json!({"models":"invalid"})
     } else if mode == "connection-info" {
@@ -369,6 +370,34 @@ fn main() -> Result<(), Box<dyn Error>> {
                         io::stderr().write_all(&vec![b'Z'; 128 * 1024])?;
                         io::stderr().write_all(b"diagnostic-tail")?;
                         std::process::exit(7);
+                    }
+                    "error-result-exit" => {
+                        emit(
+                            json!({"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"fixture-session","errors":["  boom  ", "", "second"],"api_error_status":529}),
+                        )?;
+                        std::process::exit(1);
+                    }
+                    "error-result-success-subtype-exit" => {
+                        emit(
+                            json!({"type":"result","subtype":"success","is_error":true,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"fixture-session","result":"rate limited"}),
+                        )?;
+                        std::process::exit(1);
+                    }
+                    "error-result-blank-exit" => {
+                        emit(
+                            json!({"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"fixture-session"}),
+                        )?;
+                        std::process::exit(1);
+                    }
+                    "corrupt-line" => {
+                        io::stdout().write_all(b"{\"type\": oops\n")?;
+                        emit(assistant(prompt))?;
+                        emit(result(prompt))?;
+                    }
+                    "corrupt-tail" => {
+                        emit(result(prompt))?;
+                        io::stdout().write_all(b"{\"type\":\"resu")?;
+                        io::stdout().flush()?;
                     }
                     "no-result" => return Ok(()),
                     "unknown-control" => emit(

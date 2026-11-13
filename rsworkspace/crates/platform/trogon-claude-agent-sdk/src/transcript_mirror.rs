@@ -11,7 +11,9 @@ use tokio::{
 
 use crate::{
     JsonObject, Message, SessionEntry, SessionKey, SessionKeyError, SessionStore, SessionStoreError,
-    SessionStoreLimits, SessionStoreOptions, SystemMessage, constants::APPEND_BACKOFF_MS,
+    SessionStoreLimits, SessionStoreOptions, SystemMessage,
+    constants::APPEND_BACKOFF_MS,
+    session_store::{MirrorSizeEstimate, SessionStoreFlush},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -31,7 +33,12 @@ pub enum MirrorFailureError {
         source: SessionStoreError,
     },
     #[error("session store transcript append timed out; it was not retried")]
-    Timeout { key: SessionKey },
+    Timeout {
+        key: SessionKey,
+        /// Transcript path the frame was mirrored from.
+        path: PathBuf,
+        after_ms: u128,
+    },
     #[error("additional session store failures were suppressed")]
     Suppressed { count: u64 },
 }
@@ -39,40 +46,64 @@ pub enum MirrorFailureError {
 impl MirrorFailureError {
     pub fn key(&self) -> Option<&SessionKey> {
         match self {
-            Self::Append { key, .. } | Self::Timeout { key } => Some(key),
+            Self::Append { key, .. } | Self::Timeout { key, .. } => Some(key),
             Self::Suppressed { .. } => None,
+        }
+    }
+
+    /// Text upstream reports in the `error` field of the `mirror_error` system message.
+    fn error_text(&self) -> String {
+        match self {
+            Self::Append { source, .. } => {
+                let mut text = source.to_string();
+                let mut current = std::error::Error::source(source);
+                while let Some(next) = current {
+                    text.push_str(": ");
+                    text.push_str(&next.to_string());
+                    current = next.source();
+                }
+                text
+            }
+            Self::Timeout { path, after_ms, .. } => {
+                format!(
+                    "SessionStore.append() timed out after {after_ms}ms for {}",
+                    path.display()
+                )
+            }
+            Self::Suppressed { count } => format!("{count} additional session store failures were suppressed"),
         }
     }
 
     pub fn into_message(self) -> Result<Message, serde_json::Error> {
         let mut data = JsonObject::new();
-        let error = match &self {
-            Self::Append { .. } => "Session store append failed",
-            Self::Timeout { .. } => "Session store append timed out; no retry was attempted",
-            Self::Suppressed { .. } => "Additional session store failures were suppressed",
-        };
-        data.insert("error".into(), error.into());
+        data.insert("error".into(), self.error_text().into());
+        data.insert("uuid".into(), uuid::Uuid::new_v4().to_string().into());
         let session_id = self.key().map(|key| key.session_id().clone());
         if let Some(key) = self.key() {
             let mut fields = JsonObject::new();
             fields.insert("project_key".into(), key.project_key().as_str().into());
             fields.insert("session_id".into(), key.session_id().as_str().into());
-            fields.insert(
-                "subpath".into(),
-                match key.subpath() {
-                    Some(path) => path.as_str().into(),
-                    None => serde_json::Value::Null,
-                },
-            );
+            if let Some(path) = key.subpath() {
+                fields.insert("subpath".into(), path.as_str().into());
+            }
             data.insert("key".into(), fields.into());
         }
         if let Self::Suppressed { count } = self {
             data.insert("suppressed_count".into(), count.into());
         }
+        let mut raw = JsonObject::new();
+        raw.insert("type".into(), "system".into());
+        raw.insert("subtype".into(), "mirror_error".into());
+        raw.extend(data.clone());
         Ok(Message::System(SystemMessage {
             subtype: "mirror_error".into(),
             session_id,
             data,
+            event: crate::SystemEvent::MirrorError(crate::MirrorErrorMessage {
+                key: raw.get("key").cloned(),
+                error: self.error_text(),
+            }),
+            raw,
         }))
     }
 }
@@ -80,6 +111,7 @@ impl MirrorFailureError {
 enum MirrorCommand {
     Append {
         key: SessionKey,
+        path: PathBuf,
         entries: Vec<SessionEntry>,
     },
     Flush(oneshot::Sender<Vec<MirrorFailureError>>),
@@ -130,7 +162,13 @@ impl std::fmt::Debug for TranscriptMirror {
 impl TranscriptMirror {
     pub fn new(options: &SessionStoreOptions, projects_dir: PathBuf) -> Self {
         let (commands, receiver) = mpsc::unbounded_channel();
-        let worker = tokio::spawn(run_worker(options.store.clone(), receiver, options.limits.clone()));
+        let worker = tokio::spawn(run_worker(
+            options.store.clone(),
+            receiver,
+            options.limits.clone(),
+            options.flush,
+            options.size_estimate,
+        ));
         Self {
             projects_dir,
             commands,
@@ -149,7 +187,11 @@ impl TranscriptMirror {
             return Ok(());
         }
         self.commands
-            .send(MirrorCommand::Append { key, entries })
+            .send(MirrorCommand::Append {
+                key,
+                path: file_path.to_owned(),
+                entries,
+            })
             .map_err(|_| MirrorEnqueueError::Closed)
     }
 
@@ -162,9 +204,13 @@ impl TranscriptMirror {
         self.commands
             .send(MirrorCommand::Flush(reply))
             .map_err(|_| crate::SessionError::MirrorStopped)?;
+        let now = tokio::time::Instant::now();
         Ok(MirrorFlush {
             receiver,
-            deadline: tokio::time::Instant::now() + self.flush_timeout,
+            // A timeout too long for an instant waits as long as tokio's own "never" (about 30 years).
+            deadline: now
+                .checked_add(self.flush_timeout)
+                .unwrap_or_else(|| now + std::time::Duration::from_secs(86_400 * 365 * 30)),
             owner: self.owner.clone(),
         })
     }
@@ -172,18 +218,18 @@ impl TranscriptMirror {
 
 #[derive(Default)]
 struct Pending {
-    batches: Vec<(SessionKey, Vec<SessionEntry>)>,
+    batches: Vec<(SessionKey, PathBuf, Vec<SessionEntry>)>,
     entries: usize,
     bytes: usize,
 }
 
 impl Pending {
-    fn push(&mut self, key: SessionKey, entries: Vec<SessionEntry>) {
+    fn push(&mut self, key: SessionKey, path: PathBuf, entries: Vec<SessionEntry>, estimate: MirrorSizeEstimate) {
         self.entries = self.entries.saturating_add(entries.len());
-        self.bytes = self.bytes.saturating_add(encoded_len(&entries));
-        match self.batches.iter_mut().find(|(candidate, _)| *candidate == key) {
-            Some((_, batch)) => batch.extend(entries),
-            None => self.batches.push((key, entries)),
+        self.bytes = self.bytes.saturating_add(encoded_len(&entries, estimate));
+        match self.batches.iter_mut().find(|(_, candidate, _)| *candidate == path) {
+            Some((_, _, batch)) => batch.extend(entries),
+            None => self.batches.push((key, path, entries)),
         }
     }
 
@@ -192,9 +238,21 @@ impl Pending {
     }
 }
 
-fn encoded_len(entries: &[SessionEntry]) -> usize {
+/// Estimated wire size of one frame: UTF-16 length of the compact JSON (TypeScript) or the character count of
+/// Python's `json.dumps` with default separators and ASCII escaping.
+fn encoded_len(entries: &[SessionEntry], estimate: MirrorSizeEstimate) -> usize {
     let objects: Vec<_> = entries.iter().map(SessionEntry::as_object).collect();
-    serde_json::to_vec(&objects).map_or(0, |bytes| bytes.len())
+    match estimate {
+        MirrorSizeEstimate::TypeScript => serde_json::to_string(&objects).map_or(0, |text| text.encode_utf16().count()),
+        MirrorSizeEstimate::Python => {
+            let mut out = Vec::new();
+            let mut serializer = serde_json::Serializer::with_formatter(&mut out, crate::python_json::PythonFormatter);
+            match serde::Serialize::serialize(&objects, &mut serializer) {
+                Ok(()) => out.len(),
+                Err(_) => 0,
+            }
+        }
+    }
 }
 
 struct Failures {
@@ -226,6 +284,8 @@ async fn run_worker(
     store: Arc<dyn SessionStore>,
     mut receiver: mpsc::UnboundedReceiver<MirrorCommand>,
     limits: SessionStoreLimits,
+    flush: SessionStoreFlush,
+    estimate: MirrorSizeEstimate,
 ) {
     let mut pending = Pending::default();
     let mut failures = Failures {
@@ -235,9 +295,9 @@ async fn run_worker(
     };
     while let Some(command) = receiver.recv().await {
         match command {
-            MirrorCommand::Append { key, entries } => {
-                pending.push(key, entries);
-                if pending.exceeds(&limits) {
+            MirrorCommand::Append { key, path, entries } => {
+                pending.push(key, path, entries, estimate);
+                if flush == SessionStoreFlush::Eager || pending.exceeds(&limits) {
                     drain(store.as_ref(), std::mem::take(&mut pending), &limits, &mut failures).await;
                 }
             }
@@ -250,8 +310,8 @@ async fn run_worker(
 }
 
 async fn drain(store: &dyn SessionStore, pending: Pending, limits: &SessionStoreLimits, failures: &mut Failures) {
-    for (key, entries) in pending.batches {
-        if let Some(failure) = append_with_retry(store, &key, &entries, limits).await {
+    for (key, path, entries) in pending.batches {
+        if let Some(failure) = append_with_retry(store, &key, &path, &entries, limits).await {
             tracing::error!(error = %failure, "transcript mirror append failed");
             failures.record(failure);
         }
@@ -261,6 +321,7 @@ async fn drain(store: &dyn SessionStore, pending: Pending, limits: &SessionStore
 async fn append_with_retry(
     store: &dyn SessionStore,
     key: &SessionKey,
+    path: &Path,
     entries: &[SessionEntry],
     limits: &SessionStoreLimits,
 ) -> Option<MirrorFailureError> {
@@ -280,7 +341,13 @@ async fn append_with_retry(
                 sleep(std::time::Duration::from_millis(delay)).await;
                 attempt = attempt.saturating_add(1);
             }
-            Err(_) => return Some(MirrorFailureError::Timeout { key: key.clone() }),
+            Err(_) => {
+                return Some(MirrorFailureError::Timeout {
+                    key: key.clone(),
+                    path: path.to_owned(),
+                    after_ms: limits.append_timeout.as_duration().as_millis(),
+                });
+            }
         }
     }
 }
