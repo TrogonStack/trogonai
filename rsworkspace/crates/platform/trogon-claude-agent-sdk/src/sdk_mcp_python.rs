@@ -487,27 +487,23 @@ fn collect(schema: &JsonObject, instance: &Value, at: &mut Vec<Segment>, failure
                     fail(failures, format!("{} {message}", py_repr(instance)), at.as_slice());
                 }
             }
-            ("minimum", Value::Number(limit), Value::Number(number)) => {
-                if number.as_f64() < limit.as_f64() {
-                    fail(
-                        failures,
-                        format!("{} is less than the minimum of {}", py_repr(instance), py_repr(value)),
-                        at.as_slice(),
-                    );
-                }
+            ("minimum", Value::Number(limit), Value::Number(number)) if number.as_f64() < limit.as_f64() => {
+                fail(
+                    failures,
+                    format!("{} is less than the minimum of {}", py_repr(instance), py_repr(value)),
+                    at.as_slice(),
+                );
             }
-            ("maximum", Value::Number(limit), Value::Number(number)) => {
-                if number.as_f64() > limit.as_f64() {
-                    fail(
-                        failures,
-                        format!(
-                            "{} is greater than the maximum of {}",
-                            py_repr(instance),
-                            py_repr(value)
-                        ),
-                        at.as_slice(),
-                    );
-                }
+            ("maximum", Value::Number(limit), Value::Number(number)) if number.as_f64() > limit.as_f64() => {
+                fail(
+                    failures,
+                    format!(
+                        "{} is greater than the maximum of {}",
+                        py_repr(instance),
+                        py_repr(value)
+                    ),
+                    at.as_slice(),
+                );
             }
             _ => {}
         }
