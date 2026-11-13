@@ -1,0 +1,17 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "trogon-nats",
+    crate_features = ["test-support"],
+    deps = [
+        "//rsworkspace/crates/platform/trogon-semconv",
+        "//rsworkspace/crates/platform/trogon-std",
+    ],
+    # subject_literal_policy scans the sources of sibling crates, so it runs only
+    # under Cargo.
+    integration_tests = {
+        "tls_handshake": {"tags": ["requires-network"]},
+    },
+    # Some tests start a NATS server in a container through Docker.
+    unit_test_tags = ["requires-network"],
+)

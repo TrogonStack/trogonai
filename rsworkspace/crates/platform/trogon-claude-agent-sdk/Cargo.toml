@@ -3,14 +3,43 @@ name = "trogon-claude-agent-sdk"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "Initial public Rust API for Claude Code"
+description = "Async Rust library for the Claude Code subprocess protocol"
+exclude = [".config/**"]
 
 [lints]
 workspace = true
 
+[features]
+default = []
+test-support = []
+
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "process", "rt", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+jsonschema = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+unicode-normalization = "=0.1.26"
+futures-util = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt-multi-thread", "test-util"] }
+
+[[bin]]
+name = "claude-sdk-fixture"
+path = "tests/support/fixture_cli.rs"
+required-features = ["test-support"]
+test = false
+bench = false
+
+[[bin]]
+name = "claude-sdk-relay"
+path = "tests/support/relay.rs"
+required-features = ["test-support"]
+test = false
+bench = false
