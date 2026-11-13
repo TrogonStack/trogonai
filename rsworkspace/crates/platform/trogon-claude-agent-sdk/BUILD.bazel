@@ -112,6 +112,14 @@ workspace_crate(
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
+        "golden_initialize_hold": {
+            "compile_data": glob([
+                "tests/fixtures/auth_callbacks/*.json",
+                "tests/support/*.rs",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "golden_initialize_ordering": {
             "compile_data": glob([
                 "tests/fixtures/auth_callbacks/*.json",

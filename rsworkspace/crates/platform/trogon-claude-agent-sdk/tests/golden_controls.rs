@@ -304,17 +304,20 @@ async fn typescript_controls_match_sdk_mjs_bytes_and_returns() -> TestResult {
     let servers = handle.mcp_server_status().await?;
     assert_eq!(servers.as_json(), Some(&json!([{"name":"s","status":"connected"}])));
     assert_eq!(servers.decode()?[0].name, "s");
-    let commands = handle.supported_commands()?;
+    let commands = handle.supported_commands().await?;
     assert_eq!(
         commands.as_json(),
         Some(&json!([{"name":"a","description":"d","argumentHint":""}]))
     );
-    assert_eq!(handle.account_info()?.as_json(), Some(&json!({"email":"x"})));
-    assert_eq!(handle.supported_models()?.as_json(), Some(&json!([])));
-    assert_eq!(handle.supported_agents()?.as_json(), Some(&json!([])));
+    assert_eq!(handle.account_info().await?.as_json(), Some(&json!({"email":"x"})));
+    assert_eq!(handle.supported_models().await?.as_json(), Some(&json!([])));
+    assert_eq!(handle.supported_agents().await?.as_json(), Some(&json!([])));
     let reinitialized = handle.reinitialize().await?;
     assert_eq!(reinitialized.as_json(), Some(&json!({})));
-    assert_eq!(handle.initialization_result()?.as_json(), Some(&first_initialize()));
+    assert_eq!(
+        handle.initialization_result().await?.as_json(),
+        Some(&first_initialize())
+    );
     client.disconnect().await?;
     let lines: Vec<String> = server.await??.iter().map(|line| typescript_line(line)).collect();
     assert_eq!(lines, TYPESCRIPT_REQUESTS);
@@ -406,10 +409,9 @@ async fn an_absent_response_stays_undefined_and_a_null_one_stays_null_like_types
     )
     .await?;
     let handle = client.handle();
-    assert_eq!(client.connection_info().as_json(), None);
-    assert_eq!(handle.initialization_result()?.as_json(), None);
-    assert!(matches!(handle.supported_models(), Err(Error::Protocol(_))));
-    assert!(matches!(handle.supported_commands(), Err(Error::Protocol(_))));
+    assert_eq!(handle.initialization_result().await?.as_json(), None);
+    assert!(matches!(handle.supported_models().await, Err(Error::Protocol(_))));
+    assert!(matches!(handle.supported_commands().await, Err(Error::Protocol(_))));
     assert_eq!(handle.reload_skills().await?.as_json(), None);
     assert_eq!(handle.reload_skills().await?.as_json(), Some(&Value::Null));
     assert_eq!(handle.context_usage(None).await?.as_json(), None);
@@ -499,9 +501,9 @@ async fn supported_commands_follow_commands_changed() -> TestResult {
     let handle = client.handle();
     handle.reload_skills().await?;
     let expected = json!([{"name":"b","description":"e","argumentHint":"<x>"}]);
-    assert_eq!(handle.supported_commands()?.as_json(), Some(&expected));
+    assert_eq!(handle.supported_commands().await?.as_json(), Some(&expected));
     handle.reload_skills().await?;
-    assert_eq!(handle.supported_commands()?.as_json(), Some(&expected));
+    assert_eq!(handle.supported_commands().await?.as_json(), Some(&expected));
     client.disconnect().await?;
     server.await??;
     Ok(())
@@ -676,5 +678,87 @@ async fn an_undefined_remote_control_response_follows_sdk_mjs() -> TestResult {
             }
         }
     }
+    Ok(())
+}
+
+/// Answers neither request until both the initialize and the `remote_control` request were written, the way the
+/// captured `sdk.mjs` run delays its initialize answer, so a request written only after the initialize response
+/// would never arrive.
+async fn serve_after_both(process: ScriptedProcessHarness) -> Result<Vec<String>, std::io::Error> {
+    let mut lines = BufReader::new(process.stdin).lines();
+    let mut stdout = process.stdout;
+    let stderr = process.stderr;
+    let mut written = Vec::new();
+    let mut ids = Vec::new();
+    while written.len() < 2 {
+        let Some(line) = lines.next_line().await? else {
+            break;
+        };
+        let request: Value = serde_json::from_str(&line)?;
+        ids.push(request["request_id"].clone());
+        written.push(line);
+    }
+    let answers = [first_initialize(), json!({})];
+    for (id, response) in ids.iter().zip(answers) {
+        let mut frame = serde_json::to_vec(&json!({"type":"control_response","response":{
+            "subtype":"success","request_id":id,"response":response}}))?;
+        frame.push(b'\n');
+        stdout.write_all(&frame).await?;
+    }
+    while let Some(line) = lines.next_line().await? {
+        written.push(line);
+    }
+    drop(stdout);
+    drop(stderr);
+    process.observer.complete(0);
+    Ok(written)
+}
+
+#[tokio::test]
+async fn connect_returns_before_initialize_is_answered_like_sdk_mjs() -> TestResult {
+    let captured = Captured::parse(CAPTURED)?;
+    let scenario = "order_remote_control_before_init";
+    let (process, harness) = ScriptedProcessSpawner::new();
+    let server = tokio::spawn(serve_after_both(harness));
+    let options = ClaudeAgentOptions {
+        cli_path: Some("claude".into()),
+        ..ClaudeAgentOptions::default()
+    };
+    // No options: like `query()` in `sdk.mjs`, `connect` returns once the initialize request is queued, so the
+    // server, which answers nothing before both requests were written, is still waiting here.
+    let client = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        ClaudeSdkClient::connect_with_adapters(
+            options,
+            RuntimeAdapters {
+                environment: FixedEnvironment {
+                    directory: PathBuf::from("unused-directory"),
+                    variables: BTreeMap::new(),
+                },
+                process,
+                filesystem: NativeFileSystem,
+            },
+        ),
+    )
+    .await??;
+    let handle = client.handle();
+    let remote = RemoteControlOptions {
+        work_secret: Some("s".into()),
+        reattach_session_id: Some("cse_early".into()),
+        ..RemoteControlOptions::default()
+    };
+    let reply = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        handle.enable_remote_control(true, Some("early"), Some(remote)),
+    )
+    .await??;
+    assert_eq!(reply, Some(json!({})));
+    client.disconnect().await?;
+    let lines: Vec<String> = server.await??.iter().map(|line| typescript_line(line)).collect();
+    assert_eq!(lines, captured.strings(scenario, "requests")?);
+    assert_eq!(
+        captured.strings(scenario, "order")?,
+        ["sdk writes initialize request", "sdk writes remote_control request"]
+    );
     Ok(())
 }

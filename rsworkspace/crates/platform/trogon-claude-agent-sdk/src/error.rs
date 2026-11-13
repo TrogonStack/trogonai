@@ -274,6 +274,10 @@ pub enum Error {
     QueryClosed,
     #[error("the client is not initialized")]
     NotInitialized,
+    /// The first initialize failed. TypeScript rejects `initializationResult()` with the same error that ended
+    /// the run, so the text is the inner error's.
+    #[error(transparent)]
+    InitializationFailed(std::sync::Arc<Error>),
     #[error("control request counter exhausted")]
     RequestIdExhausted,
     #[error("SDK driver task failed")]
@@ -329,6 +333,7 @@ impl Error {
     /// `Claude Code process terminated by signal SIG<NAME>`, with the stderr tail appended when it is not blank.
     pub fn typescript_message(&self) -> Option<String> {
         match self {
+            Self::InitializationFailed(inner) => return inner.typescript_message(),
             Self::WriteToTerminatedProcess { .. } => return Some("Cannot write to terminated process".to_owned()),
             Self::BlockingHooksUnsupported => {
                 return Some(

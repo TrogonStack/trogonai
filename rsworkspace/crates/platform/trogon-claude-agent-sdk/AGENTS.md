@@ -4,9 +4,10 @@ Read [the lifecycle decision](docs/explanation/lifecycle.md) before changing
 client ownership, startup, query completion, hooks or shutdown.
 
 - Keep one bidirectional protocol runtime behind the interactive client and
-  query helpers. Return a usable owner only after asynchronous initialization.
-  Decode connection metadata once at that boundary and expose it through the
-  non-fallible cached `connection_info()` getter.
+  query helpers. Under the TypeScript dialect return the owner as soon as the
+  initialize request is queued, as `sdk.mjs` does; only the Python dialect
+  waits for the response. Expose the first initialize response through the
+  awaitable `initialization_result()` and the getters built on it.
 - Use named configuration structs for constructors that assemble several
   independent settings. Name SDK-owned public constructor and input settings
   types `*Options`, whether fields are required or have defaults. Keep required

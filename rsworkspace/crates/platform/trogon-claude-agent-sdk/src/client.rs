@@ -23,7 +23,6 @@ struct StartInput<T, F: crate::adapters::SessionFileSystem> {
 /// Owns one Claude Code subprocess. Keep consuming messages while a turn runs.
 pub struct ClaudeSdkClient {
     runtime: ClientRuntime,
-    connection_info: crate::ConnectionInfo,
 }
 
 struct ClientRuntime {
@@ -34,6 +33,10 @@ struct ClientRuntime {
     process_id: Option<u32>,
 }
 
+/// What the first initialize came to: its response, or the error it failed with, shared by every reader the way a
+/// settled `sdk.mjs` promise is.
+type InitializationOutcome = Result<Option<serde_json::Value>, std::sync::Arc<Error>>;
+
 /// A cloneable command handle that does not extend the subprocess owner's life.
 #[derive(Clone)]
 pub struct ClientHandle {
@@ -43,8 +46,8 @@ pub struct ClientHandle {
     abort: crate::CancellationToken,
     close: CloseSignal,
     closed: Closed,
-    /// The first initialize response, which `reinitialize` does not replace; `None` when the reply had none.
-    initialization: std::sync::Arc<std::sync::OnceLock<Option<serde_json::Value>>>,
+    /// The first initialize response, which `reinitialize` does not replace; `None` inside when the reply had none.
+    initialization: std::sync::Arc<tokio::sync::watch::Sender<Option<InitializationOutcome>>>,
     latest_commands: driver::LatestCommands,
     host: crate::remote_control::HostState,
     style: crate::ArgvStyle,
@@ -391,7 +394,7 @@ impl ClaudeSdkClient {
             abort: abort.clone(),
             close: CloseSignal::new(shutdown_tx),
             closed,
-            initialization: std::sync::Arc::default(),
+            initialization: std::sync::Arc::new(tokio::sync::watch::channel(None).0),
             latest_commands: driver::LatestCommands::default(),
             host: crate::remote_control::HostState::default(),
             style: options.argv_style,
@@ -413,33 +416,60 @@ impl ClaudeSdkClient {
             host,
         })
         .await?;
-        let mut runtime = ClientRuntime {
+        let runtime = ClientRuntime {
             handle,
             messages: message_rx,
             terminal: Some(terminal_rx),
             driver: Some(driver),
             process_id,
         };
-        match runtime.handle.initialize(true).await {
-            Ok(response) => {
-                let connection_info = crate::ConnectionInfo::from_response(response.clone());
-                let _ = runtime.handle.initialization.set(response);
-                Ok(Self {
-                    runtime,
-                    connection_info,
-                })
+        let receiver = match runtime.handle.start_initialize().await {
+            Ok(receiver) => receiver,
+            Err(error) => return Err(Self::failed_start(runtime, error).await),
+        };
+        match runtime.handle.style {
+            // `sdk.mjs` hands back the Query as soon as the initialize request is queued. Whatever the caller
+            // sends next is written behind it, and a failed initialize surfaces where the initialization result
+            // is read, and through the run when something depended on it.
+            crate::ArgvStyle::TypeScript => {
+                let outcome = runtime.handle.initialization.clone();
+                tokio::spawn(async move {
+                    let result = match receiver.await {
+                        Ok(result) => result,
+                        Err(_) => Err(Error::DriverStopped),
+                    };
+                    outcome.send_replace(Some(result.map_err(std::sync::Arc::new)));
+                });
+                Ok(Self { runtime })
             }
-            // TypeScript: a process spawned under an aborted signal ends with "Claude Code process aborted by user".
-            Err(error) if runtime.handle.abort.is_cancelled() => Err(runtime.finish().await.err().unwrap_or(error)),
-            Err(error) => {
-                let cleanup = if matches!(error, Error::DriverStopped) {
-                    runtime.finish().await
-                } else {
-                    runtime.close().await
-                };
-                Err(connection_failure(error, cleanup))
+            // Python `connect()` and `query()` wait for the initialize response.
+            crate::ArgvStyle::Python => {
+                let initialized = receiver
+                    .await
+                    .map_err(|_| Error::DriverStopped)
+                    .and_then(|response| response);
+                match initialized {
+                    Ok(response) => {
+                        runtime.handle.initialization.send_replace(Some(Ok(response)));
+                        Ok(Self { runtime })
+                    }
+                    Err(error) => Err(Self::failed_start(runtime, error).await),
+                }
             }
         }
+    }
+
+    async fn failed_start(mut runtime: ClientRuntime, error: Error) -> Error {
+        // TypeScript: a process spawned under an aborted signal ends with "Claude Code process aborted by user".
+        if runtime.handle.abort.is_cancelled() {
+            return runtime.finish().await.err().unwrap_or(error);
+        }
+        let cleanup = if matches!(error, Error::DriverStopped) {
+            runtime.finish().await
+        } else {
+            runtime.close().await
+        };
+        connection_failure(error, cleanup)
     }
 
     pub fn handle(&self) -> ClientHandle {
@@ -448,11 +478,6 @@ impl ClaudeSdkClient {
 
     pub fn process_id(&self) -> Option<u32> {
         self.runtime.process_id
-    }
-
-    /// Metadata reported during connection, without another protocol exchange.
-    pub fn connection_info(&self) -> &crate::ConnectionInfo {
-        &self.connection_info
     }
 
     pub async fn send_prompt(&self, prompt: Prompt) -> Result<(), Error> {
@@ -563,19 +588,38 @@ impl ClientHandle {
         receiver.await.map_err(|_| Error::DriverStopped)?
     }
 
-    /// TypeScript `initializationResult()`, Python `get_server_info()`: the first initialize response.
-    pub fn initialization_result(&self) -> Result<crate::ConnectionInfo, Error> {
-        self.initialization_value().map(crate::ConnectionInfo::from_response)
+    /// Queues the connect-time initialize request and returns where its response arrives.
+    async fn start_initialize(&self) -> Result<oneshot::Receiver<Result<Option<serde_json::Value>, Error>>, Error> {
+        let (response, receiver) = oneshot::channel();
+        self.enqueue(Command::Initialize { first: true, response }).await?;
+        Ok(receiver)
     }
 
-    fn initialization_value(&self) -> Result<Option<serde_json::Value>, Error> {
-        self.initialization.get().cloned().ok_or(Error::NotInitialized)
+    /// TypeScript `initializationResult()`, Python `get_server_info()`: the first initialize response. TypeScript
+    /// hands the client out before the response arrives, so this waits for it; a failed initialize fails here with
+    /// `Error::InitializationFailed`.
+    pub async fn initialization_result(&self) -> Result<crate::ConnectionInfo, Error> {
+        self.initialization_value()
+            .await
+            .map(crate::ConnectionInfo::from_response)
+    }
+
+    async fn initialization_value(&self) -> Result<Option<serde_json::Value>, Error> {
+        let mut receiver = self.initialization.subscribe();
+        loop {
+            if let Some(outcome) = receiver.borrow_and_update().clone() {
+                return outcome.map_err(Error::InitializationFailed);
+            }
+            if receiver.changed().await.is_err() {
+                return Err(Error::DriverStopped);
+            }
+        }
     }
 
     /// A field of the first initialize response, `None` when it is missing (TypeScript `undefined`). TypeScript
     /// reads it off the response, which throws when the CLI sent none or `null`.
-    fn initialization_field<T>(&self, key: &str) -> Result<ControlReply<T>, Error> {
-        match self.initialization_value()? {
+    async fn initialization_field<T>(&self, key: &str) -> Result<ControlReply<T>, Error> {
+        match self.initialization_value().await? {
             None | Some(serde_json::Value::Null) => Err(missing_response(ControlOperation::Initialize)),
             Some(value) => Ok(ControlReply::new(value.get(key).cloned())),
         }
@@ -590,7 +634,7 @@ impl ClientHandle {
 
     /// TypeScript `supportedCommands()`: the list from the last `commands_changed` message, else the initialize
     /// one.
-    pub fn supported_commands(&self) -> Result<ControlReply<Vec<wire_types::SlashCommand>>, Error> {
+    pub async fn supported_commands(&self) -> Result<ControlReply<Vec<wire_types::SlashCommand>>, Error> {
         let latest = self
             .latest_commands
             .lock()
@@ -598,23 +642,23 @@ impl ClientHandle {
             .clone();
         match latest {
             Some(commands) => Ok(ControlReply::new(Some(commands))),
-            None => self.initialization_field("commands"),
+            None => self.initialization_field("commands").await,
         }
     }
 
     /// TypeScript `supportedModels()`.
-    pub fn supported_models(&self) -> Result<ControlReply<Vec<wire_types::ModelInfo>>, Error> {
-        self.initialization_field("models")
+    pub async fn supported_models(&self) -> Result<ControlReply<Vec<wire_types::ModelInfo>>, Error> {
+        self.initialization_field("models").await
     }
 
     /// TypeScript `supportedAgents()`.
-    pub fn supported_agents(&self) -> Result<ControlReply<Vec<wire_types::AgentInfo>>, Error> {
-        self.initialization_field("agents")
+    pub async fn supported_agents(&self) -> Result<ControlReply<Vec<wire_types::AgentInfo>>, Error> {
+        self.initialization_field("agents").await
     }
 
     /// TypeScript `accountInfo()`.
-    pub fn account_info(&self) -> Result<ControlReply<wire_types::AccountInfo>, Error> {
-        self.initialization_field("account")
+    pub async fn account_info(&self) -> Result<ControlReply<wire_types::AccountInfo>, Error> {
+        self.initialization_field("account").await
     }
 
     /// TypeScript `setMcpServers`: the reply's `response` field is returned as sent, `None` when the reply has
@@ -1086,6 +1130,22 @@ impl ClientHandle {
         self.close.fire();
     }
 
+    /// Queues a prompt without waiting for the driver to write it.
+    async fn queue_input(&self, input: crate::UserInput) -> Result<(), Error> {
+        let (response, _receiver) = oneshot::channel();
+        self.enqueue(Command::Prompt { input, response }).await
+    }
+
+    /// Queues the end of the input without waiting for the driver to apply it.
+    async fn queue_finish(&self, completion: Completion) -> Result<(), Error> {
+        let (response, _receiver) = oneshot::channel();
+        match self.send_command(Command::FinishInput { completion, response }).await {
+            Err(_) => Err(Error::CommandQueueTimeout),
+            // A stopped driver makes ending the input a no-op, as in `finish_with`.
+            Ok(_) => Ok(()),
+        }
+    }
+
     async fn finish_with(&self, completion: Completion) -> Result<(), Error> {
         let (response, receiver) = oneshot::channel();
         let command = Command::FinishInput { completion, response };
@@ -1275,11 +1335,24 @@ async fn start_query(
         (Completion::Run, crate::ArgvStyle::TypeScript) => Completion::Turn,
         (completion, _) => completion,
     };
-    let startup = async {
-        client.send_input(prompt).await?;
-        client.runtime.handle.finish_with(settle).await
-    }
-    .await;
+    let startup = match client.runtime.handle.style {
+        // `sdk.mjs` writes the prompt and ends the input without waiting for the initialize response, which a
+        // blocking hook or managed settings can delay. Both are queued, so they follow the initialize request.
+        crate::ArgvStyle::TypeScript => {
+            async {
+                client.runtime.handle.queue_input(prompt).await?;
+                client.runtime.handle.queue_finish(settle).await
+            }
+            .await
+        }
+        crate::ArgvStyle::Python => {
+            async {
+                client.send_input(prompt).await?;
+                client.runtime.handle.finish_with(settle).await
+            }
+            .await
+        }
+    };
     if let Err(error) = startup {
         return match client.disconnect().await {
             Ok(()) => Err(error),

@@ -3869,6 +3869,79 @@
         "src/run_end.rs",
         "src/driver.rs"
       ]
+    },
+    {
+      "id": "c31-controls-before-initialize-completes",
+      "concept": "Under the TypeScript style connect returns once the initialize request is queued, and a control request issued then is written right behind it",
+      "python": {
+        "file": "src/claude_agent_sdk/client.py",
+        "line_start": 243,
+        "line_end": 244,
+        "sha256": "6e3dff9cfe7e8790dfb7e8650a8675d62e41838286e973c72393ef172416c77d"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "this.initializeHasBeenWritten||this.writingFirstInitialize?Promise.resolve(m())",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 120,
+        "sha256": "30601c1518c8884c0f477db85aa9f58d84dbf59be5562fbdd47bf760b6558852"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript request() writes at once when the initialize request is already written or being written, so enableRemoteControl called before initialize resolves lands on the wire after the initialize bytes and before the initialize response is read. The TypeScript style of connect and query returns as soon as the initialize request is queued, so the same bytes land at the same point by default. Python awaits start and initialize inside connect, so the Python style returns only after the initialize response."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_controls::connect_returns_before_initialize_is_answered_like_sdk_mjs",
+        "public_api::python_connect_waits_for_initialization_and_disconnect_closes_input"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c32-initialize-failure-and-prompt-hold",
+      "concept": "An initialize failure surfaces through the stream and getters, and prompts wait behind initialize when blocking hooks or managed settings are set",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources wait for the initialize response inside connect, so a failure is raised by connect and no prompt can be written earlier."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "this.promptHold=this.initialization.then(",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 260,
+        "sha256": "3c8dccb4532defaedca08cc2b2b6ee8848cbe8213110ae49390b04fad7a83fb6"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript holds prompts, interrupts and settings-bearing controls behind the initialization promise and releases them in order once it resolves. A rejection, or the 660 second timer that fires when initialize never answers, cleans the query up: nothing held is written, every held and pending request is rejected with the initialize error, and the stream ends with it. Rust holds the same commands in the driver under the TypeScript style when blocking hooks or managed settings are set, releases them in order on success, rejects them with the initialize error on failure or timeout, and reports the failure through the stream and the async initialization getters as InitializationFailed. The goldens were captured from sdk.mjs for the success, error and timer paths."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_initialize::blocking_hooks_need_on_failure_support",
+        "golden_initialize::hooks_that_were_not_applied_are_refused",
+        "golden_initialize_hold::a_blocking_hook_holds_the_prompt_and_an_interrupt_behind_initialize_like_sdk_mjs",
+        "golden_initialize_hold::managed_settings_hold_every_request_behind_initialize_like_sdk_mjs",
+        "golden_initialize_hold::a_failed_initialize_writes_no_prompt_and_rejects_what_waited_like_sdk_mjs",
+        "golden_initialize_hold::a_failed_initialize_with_managed_settings_writes_nothing_after_it_like_sdk_mjs",
+        "golden_initialize_hold::the_captured_timer_matches_the_duration_and_messages_the_driver_uses",
+        "driver_tests::an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects_what_was_held"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/error.rs"
+      ]
     }
   ]
 }

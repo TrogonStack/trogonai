@@ -321,7 +321,7 @@
       "tests": [
         {
           "path": "tests/public_api.rs",
-          "name": "connect_waits_for_initialization_and_disconnect_closes_input"
+          "name": "python_connect_waits_for_initialization_and_disconnect_closes_input"
         },
         {
           "path": "tests/runtime_adapters.rs",
@@ -337,7 +337,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "connect is Python's connect as an async factory that returns only after initialization is answered. close(&self) on the client or any handle is TypeScript Query.close: idempotent, it closes the transport without aborting the caller's abort controller, already received messages stay readable and the stream then ends cleanly, and a control request still waiting for its answer fails with Query closed before response received under the TypeScript style while the Python style leaves it to run out its own control timeout as Python's close does. disconnect(self) is Python's awaitable disconnect: it closes and waits for the process to stop; consuming the owner makes a second disconnect unrepresentable instead of a no-op."
+      "rationale": "connect is an async factory: under the TypeScript style it returns once the initialize request is queued, as the Query constructor does, and the initialize outcome is read through the async metadata getters; under the Python style it returns only after initialization is answered, as Python's connect does. close(&self) on the client or any handle is TypeScript Query.close: idempotent, it closes the transport without aborting the caller's abort controller, already received messages stay readable and the stream then ends cleanly, and a control request still waiting for its answer fails with Query closed before response received under the TypeScript style while the Python style leaves it to run out its own control timeout as Python's close does. disconnect(self) is Python's awaitable disconnect: it closes and waits for the process to stop; consuming the owner makes a second disconnect unrepresentable instead of a no-op."
     },
     {
       "id": "interactive-client",
@@ -844,7 +844,6 @@
         }
       },
       "rust_api": [
-        "ClaudeSdkClient.connection_info",
         "ConnectionInfo",
         "ConnectionInfo.from_json",
         "ConnectionInfo.as_json",
@@ -917,7 +916,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning. initializationResult, supportedModels, supportedAgents and accountInfo read the cached response like sdk.mjs; supportedCommands prefers the latest commands_changed list; reinitialize sends a non-first initialize and replaces the cache."
+      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning. initializationResult, supportedModels, supportedAgents and accountInfo read the cached response like sdk.mjs; supportedCommands prefers the latest commands_changed list; reinitialize sends a non-first initialize and replaces the cache. With the TypeScript dialect connect and query return once the initialize request is queued, as sdk.mjs does, and the metadata getters (initialization_result, supported_commands, supported_models, supported_agents, account_info) are async and wait for the response; a failed initialize is raised by them and by the message stream as InitializationFailed carrying the same error. Prompts, interrupts, and settings-bearing controls written before initialize resolves are held behind it when blocking hooks or managed settings are set, as sdk.mjs holds them, and are released in order on success or answered as closed on failure. The Python dialect waits for the initialize response inside connect, as claude_agent_sdk 0.2.181 does."
     },
     {
       "id": "budget",
@@ -1739,6 +1738,26 @@
         {
           "path": "tests/golden_inbound_control.rs",
           "name": "ui_requests_reach_the_matching_host_method"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "a_blocking_hook_holds_the_prompt_and_an_interrupt_behind_initialize_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "managed_settings_hold_every_request_behind_initialize_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "a_failed_initialize_writes_no_prompt_and_rejects_what_waited_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "a_failed_initialize_with_managed_settings_writes_nothing_after_it_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "the_captured_timer_matches_the_duration_and_messages_the_driver_uses"
         },
         {
           "path": "tests/golden_run_end.rs",
@@ -3297,11 +3316,15 @@
         },
         {
           "path": "tests/golden_controls.rs",
+          "name": "connect_returns_before_initialize_is_answered_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_controls.rs",
           "name": "an_undefined_remote_control_response_follows_sdk_mjs"
         }
       ],
       "status": "supported",
-      "rationale": "Every request matches sdk.mjs 0.3.323 byte for byte, captured from the published package with JSON.stringify number spelling, optional fields omitted when unset and the same request ids. Replies keep the value the CLI sent (ControlReply::as_json), None when the reply has no response where TypeScript returns undefined, with the generated upstream type available through decode, and each method returns what the TypeScript method returns: readFile is None on any failure, setMcpPermissionModeOverride is {} for an absent response, backgroundTasks is true for an absent backgrounded. A rejection keeps its error_code when it matches the TypeScript pattern. backgroundTasks refuses a non-boolean backgrounded where TypeScript returns it untyped. Python 0.2.181 has none of these methods. enableRemoteControl writes the remote_control request with the optional name, reattach_session_id, keep_session_on_exit and work_secret fields in the TypeScript order, returns the response as sdk.mjs does, and while it is still the latest call, enabling with an absent or null response fails as sdk.mjs does reading bridge_session_id. It installs the work secret answerer only for the attached session, cleared by a failed or superseded call; it can be called only after connect, so sdk.mjs's call before initialize completes has no Rust counterpart. enableRemoteControl is not published in the upstream declaration files."
+      "rationale": "Every request matches sdk.mjs 0.3.323 byte for byte, captured from the published package with JSON.stringify number spelling, optional fields omitted when unset and the same request ids. Replies keep the value the CLI sent (ControlReply::as_json), None when the reply has no response where TypeScript returns undefined, with the generated upstream type available through decode, and each method returns what the TypeScript method returns: readFile is None on any failure, setMcpPermissionModeOverride is {} for an absent response, backgroundTasks is true for an absent backgrounded. A rejection keeps its error_code when it matches the TypeScript pattern. backgroundTasks refuses a non-boolean backgrounded where TypeScript returns it untyped. Python 0.2.181 has none of these methods. enableRemoteControl writes the remote_control request with the optional name, reattach_session_id, keep_session_on_exit and work_secret fields in the TypeScript order, returns the response as sdk.mjs does, and while it is still the latest call, enabling with an absent or null response fails as sdk.mjs does reading bridge_session_id. It installs the work secret answerer only for the attached session, cleared by a failed or superseded call; connect returns once the initialize request is queued for the TypeScript dialect, so a call made right after connect is written right behind the initialize request and before its response, as sdk.mjs writes it. enableRemoteControl is not published in the upstream declaration files."
     },
     {
       "id": "custom-transport",

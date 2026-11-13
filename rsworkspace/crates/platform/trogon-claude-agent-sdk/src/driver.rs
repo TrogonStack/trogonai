@@ -307,6 +307,10 @@ where
     /// handle a result, so the machine sees a result, and every frame after it, only once that flush finished. The flag
     /// marks a result that starts a flush.
     held_observations: VecDeque<(Message, bool)>,
+    /// TypeScript `promptHold`: while the first initialize is unanswered and a blocking hook or managed settings
+    /// need its confirmation, prompts and most controls wait behind it.
+    initialize_hold: bool,
+    held_commands: VecDeque<Command>,
     next_id: u64,
     /// The `mcp_message` ids of the line just read, until the Python `mcp_message` handler takes them.
     wire_ids: Option<crate::McpWireIds>,
@@ -683,6 +687,9 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         mirror_flush: None,
         deferred_messages: VecDeque::new(),
         held_observations: VecDeque::new(),
+        initialize_hold: options.argv_style == crate::ArgvStyle::TypeScript
+            && (initialization.expectations.blocking_hooks || initialization.expectations.managed_settings),
+        held_commands: VecDeque::new(),
         next_id: 0,
         wire_ids: None,
         state: State::Initializing,
@@ -951,7 +958,12 @@ where
                 Error::ControlTimeout { operation }
             }
         };
+        let first_initialize = matches!(request.response, ControlResponder::Initialize { first: true, .. });
         request.response.send_error(error());
+        // The timer calls `cleanup(error)`, which ends the run.
+        if first_initialize && self.initialize_hold {
+            self.abandon_initialize(&std::sync::Arc::new(error()));
+        }
         Some(error())
     }
 
@@ -1315,7 +1327,65 @@ where
         Ok(())
     }
 
+    /// `sdk.mjs` `writeBehindPromptHold`: what waits for the first initialize to be confirmed. A prompt always
+    /// does, `interrupt` and `cancel_async_message` do, and with managed settings every request but `initialize`
+    /// and `get_binary_version` does. Ending the input waits behind a held prompt, since the stream writes in
+    /// order.
+    fn held_by_initialize(&self, command: &Command) -> bool {
+        if !self.initialize_hold {
+            return false;
+        }
+        let managed = self.initialize_expectations.managed_settings;
+        match command {
+            Command::Prompt { .. } => true,
+            Command::Control { request, .. } | Command::RawControl { request, .. } => {
+                let subtype = request.get("subtype").and_then(serde_json::Value::as_str);
+                matches!(subtype, Some("interrupt" | "cancel_async_message"))
+                    || (managed && !matches!(subtype, Some("initialize" | "get_binary_version")))
+            }
+            Command::SetMcpServers { .. } => managed,
+            Command::FinishInput { .. } => !self.held_commands.is_empty(),
+            Command::Initialize { .. } => false,
+        }
+    }
+
+    /// The first initialize was confirmed: what waited behind it goes out in order.
+    async fn release_held_commands(&mut self) -> Result<(), Error> {
+        self.initialize_hold = false;
+        while let Some(command) = self.held_commands.pop_front() {
+            self.command(command).await?;
+        }
+        Ok(())
+    }
+
+    /// The first initialize failed. `sdk.mjs` `cleanup(error)` rejects every request still unanswered with that
+    /// error, and what waited behind the hold is never written: a prompt resolves quietly, the way the hold
+    /// resolves `false`, and a held request rejects with the same error.
+    fn abandon_initialize(&mut self, error: &std::sync::Arc<Error>) {
+        self.initialize_hold = false;
+        for command in self.held_commands.drain(..) {
+            match command {
+                Command::Prompt { response, .. } | Command::FinishInput { response, .. } => {
+                    let _ = response.send(Ok(()));
+                }
+                Command::Control { response, .. }
+                | Command::RawControl { response, .. }
+                | Command::SetMcpServers { response, .. }
+                | Command::Initialize { response, .. } => {
+                    let _ = response.send(Err(Error::InitializationFailed(error.clone())));
+                }
+            }
+        }
+        for (_, pending) in self.pending.drain() {
+            pending.response.send_error(Error::InitializationFailed(error.clone()));
+        }
+    }
+
     async fn command(&mut self, command: Command) -> Result<(), Error> {
+        if self.held_by_initialize(&command) {
+            self.held_commands.push_back(command);
+            return Ok(());
+        }
         match command {
             Command::Initialize { first, response } => {
                 let mut request = self.initialize_request.clone();
@@ -1407,11 +1477,13 @@ where
                     return Ok(());
                 }
                 match self.state {
-                    State::Initializing => {
+                    // TypeScript writes a prompt right behind the initialize request; only Python waits for the
+                    // response before it lets one through.
+                    State::Initializing if self.argv_style == crate::ArgvStyle::Python => {
                         let _ = response.send(Err(Error::NotInitialized));
                         return Ok(());
                     }
-                    State::Idle | State::Running => {}
+                    State::Initializing | State::Idle | State::Running => {}
                 }
                 if self
                     .limits
@@ -1461,7 +1533,7 @@ where
 
     /// Applies the initialize checks of `sdk.mjs` `Query.initialize({first})`, in its order. A refusal ends the
     /// session, after a `reinitialize()` too.
-    fn finish_initialize(
+    async fn finish_initialize(
         &mut self,
         first: bool,
         sender: ControlSender,
@@ -1487,6 +1559,9 @@ where
             None
         };
         if let Some(error) = refusal {
+            if self.argv_style == crate::ArgvStyle::TypeScript {
+                self.abandon_initialize(&std::sync::Arc::new(error()));
+            }
             let _ = sender.send(Err(error()));
             return Err(error());
         }
@@ -1497,10 +1572,13 @@ where
                 "[Query.initialize] Claude Code did not apply the plugins sent with pluginDelivery 'initialize'; the process is running with the plugins it was launched with."
             );
         }
-        if first {
+        if first && matches!(self.state, State::Initializing) {
             self.state = State::Idle;
         }
         let _ = sender.send(Ok(response));
+        if first {
+            self.release_held_commands().await?;
+        }
         Ok(())
     }
 
@@ -1621,7 +1699,7 @@ where
                                 first,
                                 response: sender,
                             } => {
-                                return self.finish_initialize(first, sender, response);
+                                return self.finish_initialize(first, sender, response).await;
                             }
                             ControlResponder::Raw { response: sender, .. } => {
                                 let _ = sender.send(Ok(response));
@@ -1645,10 +1723,27 @@ where
                         let _ = sender.send(Ok(response));
                     }
                     ControlResponse::Error { message, error_code } => {
+                        let first_initialize =
+                            matches!(pending.response, ControlResponder::Initialize { first: true, .. });
                         pending.response.send_error(Error::ControlRejected {
                             operation,
-                            rejection: ControlRejectionError::new(message, error_code, self.argv_style),
+                            rejection: ControlRejectionError::new(message.clone(), error_code.clone(), self.argv_style),
                         });
+                        // The hold turns a failed first initialize into the end of the run, with that error.
+                        if first_initialize && self.initialize_hold {
+                            self.abandon_initialize(&std::sync::Arc::new(Error::ControlRejected {
+                                operation,
+                                rejection: ControlRejectionError::new(
+                                    message.clone(),
+                                    error_code.clone(),
+                                    self.argv_style,
+                                ),
+                            }));
+                            return Err(Error::ControlRejected {
+                                operation,
+                                rejection: ControlRejectionError::new(message, error_code, self.argv_style),
+                            });
+                        }
                     }
                 }
             }

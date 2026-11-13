@@ -88,9 +88,14 @@ message missing a key. Goldens from both pinned SDKs pin the two modes; see
 compact when another dependency enables `serde_json`'s `preserve_order` feature.
 Pattern matching exposes the same fields through the box.
 
-`connect().await` completes the CLI initialization handshake before returning.
-`connection_info()` borrows the cached `ConnectionInfo` from that handshake,
-including support flags and additional metadata. Reading it is non-fallible and
+Under the default TypeScript dialect `connect().await` and `query()` return as soon as the initialize
+request is queued, the way `sdk.mjs` hands back its `Query`; anything sent next is written right behind
+the initialize bytes. Under `ArgvStyle::Python`, `connect()` and `query()` wait for the initialize
+response, as `claude_agent_sdk` does. `ClientHandle::initialization_result().await` returns the
+`ConnectionInfo` of the first initialize response, including support flags and additional metadata, and
+waits for it when it has not arrived. A failed initialize rejects it with `Error::InitializationFailed`,
+which prints the underlying error; the run ends with that error too when a blocking hook or managed
+settings made the prompt wait for the confirmation, and otherwise it carries on, as `sdk.mjs` does. It
 sends no protocol messages; `ConnectionInfo::as_json()` retains the original
 response, including omitted or explicitly null fields, or `None` when the reply
 has no `response` field, where TypeScript `initializationResult()` resolves to
@@ -166,8 +171,11 @@ the default TypeScript dialect, answers `remote_control_work_secret` for the
 session it attached, matched as `sdk.mjs` does. It returns the `response` as
 sent: `None` is `undefined` and `Some(null)` is `null`. Enabling with either one
 fails with `Error::Protocol` while it is still the latest call, as `sdk.mjs`
-throws reading `bridge_session_id`. Under `ArgvStyle::Python` a work secret
-request gets the unsupported subtype error.
+throws reading `bridge_session_id`. `sdk.mjs` can call `enableRemoteControl`
+before `initialize` resolves, which writes it right behind the initialize
+request. The TypeScript dialect's `connect` returns at that point, so a call
+made on the returned client lands at the same place on the wire. Under
+`ArgvStyle::Python` a work secret request gets the unsupported subtype error.
 
 The run ends as `hasBidirectionalNeeds` decides. When nothing needs the CLI to keep
 asking (no embedded MCP server, hook or permission handler, and under TypeScript

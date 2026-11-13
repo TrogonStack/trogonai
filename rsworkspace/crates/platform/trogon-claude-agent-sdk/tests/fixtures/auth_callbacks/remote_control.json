@@ -249,6 +249,25 @@
         "sdk writes remote_control request"
       ]
     },
+    "order_remote_control_before_init": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":true,\"name\":\"early\",\"reattach_session_id\":\"cse_early\",\"work_secret\":\"s\"}}"
+      ],
+      "responses": [],
+      "order": [
+        "sdk writes initialize request",
+        "sdk writes remote_control request"
+      ]
+    },
     "python_unsupported_work_secret": {
       "argv": [
         "--output-format",

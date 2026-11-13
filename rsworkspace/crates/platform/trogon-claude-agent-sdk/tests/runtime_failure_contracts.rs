@@ -1976,11 +1976,11 @@ async fn a_stderr_pipe_that_stays_open_is_reported_beside_the_error_that_ended_t
 async fn startup_fails_before_a_healthy_shutdown() -> Result<bool, Box<dyn std::error::Error>> {
     let (process, harness) = ScriptedProcessSpawner::new();
     let mut cli = ScriptedCli::from(harness);
-    let querying = tokio::spawn(query_with_adapters(
-        Prompt::from("prompt"),
-        options()?,
-        adapters(process),
-    ));
+    // Python style: TypeScript hands the query back without waiting for the prompt to be written, so only Python
+    // reports a startup failure from `query`.
+    let mut python = options()?;
+    python.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    let querying = tokio::spawn(query_with_adapters(Prompt::from("prompt"), python, adapters(process)));
     let request = cli.read().await?;
     cli.success(&request, json!({"hooks_applied":true,"hook_on_failure_supported":true}))
         .await?;

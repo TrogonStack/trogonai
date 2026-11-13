@@ -1,0 +1,168 @@
+{
+  "captured_from": {
+    "typescript": "sdk.mjs 0.3.323"
+  },
+  "scenarios": {
+    "hold_hooks_success": {
+      "order": [
+        "sdk writes initialize",
+        "sdk writes set_model",
+        "cli answers initialize",
+        "sdk writes user",
+        "sdk writes interrupt",
+        "stdin closed"
+      ],
+      "lines": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hookCallbackIds\":[\"hook_0\"],\"onFailure\":\"block\"}]},\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"set_model\",\"model\":\"m\"}}",
+        "{\"type\":\"user\",\"session_id\":\"\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]},\"parent_tool_use_id\":null}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"interrupt\"}}"
+      ],
+      "seen": {
+        "stream": [
+          "assistant:",
+          "result"
+        ],
+        "acts": {
+          "set_model": {
+            "settled": "resolved"
+          },
+          "interrupt": {
+            "settled": "resolved"
+          }
+        }
+      }
+    },
+    "hold_managed_success": {
+      "order": [
+        "sdk writes initialize",
+        "cli answers initialize",
+        "sdk writes user",
+        "sdk writes set_model",
+        "sdk writes interrupt",
+        "stdin closed"
+      ],
+      "lines": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"managedSettings\":{\"permissions\":{\"allow\":[\"Read\"]}}}}",
+        "{\"type\":\"user\",\"session_id\":\"\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]},\"parent_tool_use_id\":null}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"set_model\",\"model\":\"m\"}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"interrupt\"}}"
+      ],
+      "seen": {
+        "stream": [
+          "assistant:",
+          "result"
+        ],
+        "acts": {
+          "set_model": {
+            "settled": "resolved"
+          },
+          "interrupt": {
+            "settled": "resolved"
+          }
+        }
+      }
+    },
+    "hold_hooks_init_error": {
+      "order": [
+        "sdk writes initialize",
+        "sdk writes set_model",
+        "cli answers initialize",
+        "stdin closed"
+      ],
+      "lines": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hookCallbackIds\":[\"hook_0\"],\"onFailure\":\"block\"}]},\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"set_model\",\"model\":\"m\"}}"
+      ],
+      "seen": {
+        "stream": [
+          "error:boom"
+        ],
+        "acts": {
+          "set_model": {
+            "settled": "resolved"
+          },
+          "initialization_result": {
+            "settled": "rejected",
+            "message": "boom"
+          },
+          "interrupt": {
+            "settled": "rejected",
+            "message": "boom"
+          }
+        },
+        "stream_error": "boom"
+      }
+    },
+    "hold_managed_init_error": {
+      "order": [
+        "sdk writes initialize",
+        "cli answers initialize",
+        "stdin closed"
+      ],
+      "lines": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"managedSettings\":{\"permissions\":{\"allow\":[\"Read\"]}}}}"
+      ],
+      "seen": {
+        "stream": [
+          "error:boom"
+        ],
+        "acts": {
+          "initialization_result": {
+            "settled": "rejected",
+            "message": "boom"
+          },
+          "set_model": {
+            "settled": "rejected",
+            "message": "boom"
+          }
+        },
+        "stream_error": "boom"
+      }
+    },
+    "hold_timer_hooks": {
+      "order": [
+        "sdk writes initialize",
+        "stdin closed"
+      ],
+      "lines": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hookCallbackIds\":[\"hook_0\"],\"onFailure\":\"block\"}]},\"systemPrompt\":[\"\"]}}"
+      ],
+      "seen": {
+        "stream": [
+          "error:Claude Code did not answer initialize, so a hook set to onFailure: \"block\" could not be confirmed and the prompt was not sent. Check the connection and start a new session."
+        ],
+        "acts": {
+          "interrupt": {
+            "settled": "rejected",
+            "message": "Claude Code did not answer initialize, so a hook set to onFailure: \"block\" could not be confirmed and the prompt was not sent. Check the connection and start a new session."
+          }
+        },
+        "stream_error": "Claude Code did not answer initialize, so a hook set to onFailure: \"block\" could not be confirmed and the prompt was not sent. Check the connection and start a new session.",
+        "ended_after_ms": 662013
+      }
+    },
+    "hold_timer_managed": {
+      "order": [
+        "sdk writes initialize",
+        "stdin closed"
+      ],
+      "lines": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"managedSettings\":{\"permissions\":{\"allow\":[\"Read\"]}}}}"
+      ],
+      "seen": {
+        "stream": [
+          "error:Claude Code did not answer initialize, so the managed settings could not be confirmed and the prompt was not sent. Start a new session."
+        ],
+        "acts": {
+          "set_model": {
+            "settled": "rejected",
+            "message": "Claude Code did not answer initialize, so the managed settings could not be confirmed and the prompt was not sent. Start a new session."
+          }
+        },
+        "stream_error": "Claude Code did not answer initialize, so the managed settings could not be confirmed and the prompt was not sent. Start a new session.",
+        "ended_after_ms": 662009
+      }
+    }
+  }
+}

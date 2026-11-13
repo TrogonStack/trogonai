@@ -114,6 +114,8 @@ impl DriverFixture {
             mirror_flush: None,
             deferred_messages: VecDeque::new(),
             held_observations: VecDeque::new(),
+            initialize_hold: false,
+            held_commands: VecDeque::new(),
             next_id: 0,
             wire_ids: None,
             state: State::Idle,
@@ -218,6 +220,7 @@ async fn stale_permission_completion_cannot_remove_replacement() -> Result<(), B
 async fn initialization_owns_admission_until_the_handshake_completes() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
     fixture.driver.state = State::Initializing;
+    fixture.driver.argv_style = crate::ArgvStyle::Python;
     let (response, receiver) = oneshot::channel();
     fixture
         .driver
@@ -573,6 +576,69 @@ async fn an_initialize_armed_only_by_managed_settings_expires_with_their_message
     ));
     assert!(matches!(receiver.await?, Err(Error::ManagedSettingsNotConfirmed)));
     fixture.finish().await
+}
+
+/// What the TypeScript SDK shows for a request that waited behind an initialize that never answered: the
+/// timer's own message, and nothing held was ever written.
+#[tokio::test(start_paused = true)]
+async fn an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects_what_was_held()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(TYPESCRIPT_INITIALIZE_TIMEOUT, Duration::from_secs(660));
+    for (blocking_hooks, expected) in [
+        (
+            true,
+            "Claude Code did not answer initialize, so a hook set to onFailure: \"block\" could not be confirmed and the prompt was not sent. Check the connection and start a new session.",
+        ),
+        (
+            false,
+            "Claude Code did not answer initialize, so the managed settings could not be confirmed and the prompt was not sent. Start a new session.",
+        ),
+    ] {
+        let mut fixture = DriverFixture::new()?;
+        fixture.driver.initialize_hold = true;
+        fixture.driver.initialize_expectations.blocking_hooks = blocking_hooks;
+        fixture.driver.initialize_expectations.managed_settings = !blocking_hooks;
+        fixture.driver.initialize_timeout = Some(TYPESCRIPT_INITIALIZE_TIMEOUT);
+        let (initialize, initialized) = oneshot::channel();
+        let (prompt, prompted) = oneshot::channel();
+        let (control, controlled) = oneshot::channel();
+        let started = Instant::now();
+        fixture.driver.pending.insert(
+            ControlRequestId::from("initialize"),
+            PendingControl {
+                response: ControlResponder::Initialize {
+                    first: true,
+                    response: initialize,
+                },
+                deadline: fixture.driver.control_deadline(ControlOperation::Initialize),
+            },
+        );
+        fixture.driver.held_commands.push_back(Command::Prompt {
+            input: crate::Prompt::from("hi").into(),
+            response: prompt,
+        });
+        fixture.driver.held_commands.push_back(Command::Control {
+            operation: ControlOperation::Interrupt,
+            request: serde_json::json!({"subtype": "interrupt"}),
+            response: control,
+        });
+        let outcome = fixture.driver.event_loop().await;
+        assert_eq!(started.elapsed(), TYPESCRIPT_INITIALIZE_TIMEOUT);
+        assert_eq!(outcome.err().map(|error| error.to_string()).as_deref(), Some(expected));
+        assert_eq!(
+            initialized.await?.err().map(|error| error.to_string()).as_deref(),
+            Some(expected)
+        );
+        // The prompt is dropped unsent, and the held control fails with the same message.
+        assert!(matches!(prompted.await?, Ok(())));
+        assert!(matches!(
+            controlled.await?,
+            Err(Error::InitializationFailed(inner)) if inner.to_string() == expected
+        ));
+        assert!(fixture.driver.held_commands.is_empty());
+        fixture.finish().await?;
+    }
+    Ok(())
 }
 
 #[tokio::test(start_paused = true)]

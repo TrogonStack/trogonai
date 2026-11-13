@@ -232,7 +232,7 @@ async fn known_message_metadata_survives_decoding() -> TestResult {
 #[tokio::test]
 async fn connected_client_exposes_cached_lossless_metadata() -> TestResult {
     let mut client = ClaudeSdkClient::connect(options("connection-info")?).await?;
-    let info = client.connection_info();
+    let info = client.handle().initialization_result().await?;
     assert_eq!(info.commands[0]["name"], "review");
     assert_eq!(info.models[0]["value"], "fixture-model");
     assert_eq!(info.agents[0]["name"], "reviewer");
@@ -258,19 +258,20 @@ async fn connected_client_exposes_cached_lossless_metadata() -> TestResult {
         "future_metadata":{"nested":[1,null]},
     });
     assert_eq!(serde_json::to_value(info.as_json())?, raw);
-    assert!(std::ptr::eq(info, client.connection_info()));
+    assert_eq!(client.handle().initialization_result().await?.as_json(), info.as_json());
     client.send_prompt(Prompt::from("after metadata")).await?;
     assert_eq!(read_result(&mut client).await?, "after metadata");
-    assert_eq!(serde_json::to_value(client.connection_info().as_json())?, raw);
+    assert_eq!(
+        serde_json::to_value(client.handle().initialization_result().await?.as_json())?,
+        raw
+    );
     client.disconnect().await?;
 
     let client = ClaudeSdkClient::connect(options("normal")?).await?;
-    assert_eq!(client.connection_info().hooks_applied, FeatureSupport::NotReported);
-    assert_eq!(
-        client.connection_info().hook_on_failure_supported,
-        FeatureSupport::NotReported
-    );
-    assert_eq!(client.connection_info().as_json(), Some(&serde_json::json!({})));
+    let info = client.handle().initialization_result().await?;
+    assert_eq!(info.hooks_applied, FeatureSupport::NotReported);
+    assert_eq!(info.hook_on_failure_supported, FeatureSupport::NotReported);
+    assert_eq!(info.as_json(), Some(&serde_json::json!({})));
     client.disconnect().await?;
     Ok(())
 }
@@ -590,8 +591,9 @@ async fn malformed_initialization_is_accepted_like_upstream() -> TestResult {
         ("init-malformed-known", serde_json::json!({"models":"invalid"})),
     ] {
         let client = ClaudeSdkClient::connect(options(mode)?).await?;
-        assert!(client.connection_info().models.is_empty());
-        assert_eq!(client.connection_info().as_json(), Some(&raw));
+        let info = client.handle().initialization_result().await?;
+        assert!(info.models.is_empty());
+        assert_eq!(info.as_json(), Some(&raw));
         client.disconnect().await?;
     }
     Ok(())
@@ -728,8 +730,17 @@ async fn initialization_timeout_reaps_process() -> TestResult {
     options.system_prompt = SystemPrompt::Custom(marker.to_string_lossy().into_owned());
     options.limits.initialize_timeout =
         trogon_claude_agent_sdk::InitializeTimeout::Fixed(Timeout::new(Duration::from_millis(100)));
+    // TypeScript hands the client out before initialize is answered, so the timeout rejects the initialization
+    // result and ends the run.
+    let client = ClaudeSdkClient::connect(options).await?;
+    let rejected = client.handle().initialization_result().await;
     assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
+        &rejected,
+        Err(Error::InitializationFailed(inner))
+            if matches!(**inner, Error::ControlTimeout { operation: ControlOperation::Initialize })
+    ));
+    assert!(matches!(
+        client.disconnect().await,
         Err(Error::ControlTimeout {
             operation: ControlOperation::Initialize
         })
@@ -746,6 +757,8 @@ async fn cancelling_connect_reaps_the_started_process() -> TestResult {
     let marker = directory.path().join("pid");
     let mut options = options("init-timeout")?;
     options.system_prompt = SystemPrompt::Custom(marker.to_string_lossy().into_owned());
+    // Only Python waits for the initialize response inside `connect`, so only there is there something to cancel.
+    options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
     let connect = tokio::spawn(ClaudeSdkClient::connect(options));
     timeout(Duration::from_secs(3), async {
         while !marker.exists() {
