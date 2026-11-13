@@ -1548,15 +1548,19 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "The budget is passed to the CLI without validation."
+        "behavior": "The budget is passed to the CLI without validation: TypeScript as --max-budget-usd=${String(f)} and Python as str(value) after --max-budget-usd."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A non-finite or negative budget cannot be rendered as a meaningful CLI argument."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "golden_argv_env::r03_budgets_reach_argv_unvalidated_in_each_sdk_spelling",
+        "usd_budget::budget_keeps_any_amount_like_both_upstream_sdks",
+        "usd_budget::checked_budget_rejects_negative_and_non_finite_amounts_with_a_typed_error"
+      ],
       "rust": [
-        "src/usd_budget.rs"
+        "src/usd_budget.rs",
+        "src/argv.rs"
       ]
     },
     {
@@ -1577,14 +1581,17 @@
         "behavior": "Python refuses .bat and .cmd CLI paths on Windows. TypeScript spawns them."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "cmd.exe re-parses batch script arguments and has no reliable escaping, so runtime arguments can inject commands."
+        "kind": "follow-typescript",
+        "reason": "WindowsBatchCli::Run is the default, so a .bat or .cmd path starts as in TypeScript; WindowsBatchCli::Refuse selects Python's refusal with its message as CliPathError::WindowsBatchScript."
       },
       "contracts": [
+        "windows_batch_cli::windows_batch_cli_is_spawned_by_default",
         "windows_batch_cli::windows_batch_cli_is_refused_before_spawn"
       ],
       "rust": [
-        "src/cli_path.rs"
+        "src/cli_path.rs",
+        "src/options.rs",
+        "src/process_transport.rs"
       ]
     },
     {
@@ -2038,15 +2045,18 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "The MCP tool schema declares inputSchema with type 'object'."
+        "behavior": "The declared input schema is listed as given. Python's run_tool reports a schema error as the tool result text; neither SDK requires type 'object' before the server starts."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Checked at construction so an invalid schema fails before the server starts."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "mcp_tool_values::validated_mcp_tool_input_schema_rejects_non_object_declarations",
+        "mcp_tool_values::mcp_tool_input_schema_preserves_json_and_validates_arguments"
+      ],
       "rust": [
-        "src/mcp_tool_input_schema.rs"
+        "src/mcp_tool_input_schema.rs",
+        "src/sdk_mcp_server.rs"
       ]
     },
     {
@@ -2065,10 +2075,12 @@
         "behavior": "Output schemas are passed through upstream."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Prevents remote schema resolution from a caller-supplied document."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "mcp_tool_values::output_schemas_with_external_references_are_kept_like_both_upstream_sdks",
+        "mcp_tool_values::validated_mcp_tool_input_schema_rejects_external_references"
+      ],
       "rust": [
         "src/output_schema.rs"
       ]
@@ -2112,10 +2124,12 @@
         "behavior": "Origins are passed through upstream."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "The kind field is the serde tag; a caller value would collide with it."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "message_origin::message_origins_round_trip_future_kinds_and_extension_values",
+        "message_origin::message_origins_reject_missing_nonstring_kinds_and_reserved_extension_keys"
+      ],
       "rust": [
         "src/message_origin.rs"
       ]

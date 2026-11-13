@@ -4,7 +4,7 @@ use crate::{
     AgentDefinition, AgentName, BuiltinToolName, DialogKind, EffortLevel, ElicitationHandler, Environment,
     HookRegistration, McpServerName, McpServerOptions, ModelName, OutputSchema, PermissionMode, QueueCapacity,
     SdkMcpServer, SessionId, SessionStoreOptions, SettingSource, Timeout, ToolPermissionHandler, ToolRule, UsdBudget,
-    UserDialogHandler,
+    UserDialogHandler, WindowsBatchCli,
     process_options::{
         ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, ScriptRuntime, StderrHandler, TraceContext,
     },
@@ -396,4 +396,6 @@ pub struct ClaudeAgentOptions {
     /// `captureSdkMcpManifests`. `None` derives it from the process environment, see
     /// [`ClaudeAgentOptions::captures_sdk_mcp_manifests`].
     pub capture_sdk_mcp_manifests: Option<bool>,
+    /// Whether a Windows `.bat` or `.cmd` CLI path may start. Defaults to the TypeScript SDK, which runs it.
+    pub windows_batch_cli: WindowsBatchCli,
 }

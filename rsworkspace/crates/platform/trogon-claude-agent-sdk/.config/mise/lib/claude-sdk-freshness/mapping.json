@@ -1686,12 +1686,16 @@
       ],
       "tests": [
         {
-          "path": "tests/subprocess.rs",
-          "name": "argv_binds_values_and_forwards_cwd"
+          "path": "tests/golden_argv_env.rs",
+          "name": "typescript_default_argv_has_no_strict_mcp_or_permission_tool_and_sends_prompt_in_initialize"
+        },
+        {
+          "path": "tests/golden_argv_env.rs",
+          "name": "typescript_flags_use_equals_and_follow_upstream_order"
         }
       ],
-      "status": "rust_difference",
-      "rationale": "Rust disables MCP discovery unless McpDiscovery::CliDefault is selected. This intentional discovery default differs from upstream; filesystem setting sources separately inherit CLI defaults when omitted."
+      "status": "supported",
+      "rationale": "McpDiscovery::CliDefault is the default, so MCP discovery follows the CLI as in both upstream SDKs; --strict-mcp-config is sent only when McpDiscovery::Disabled is selected, as upstream sends it only for strictMcpConfig / strict_mcp_config."
     },
     {
       "id": "environment",
