@@ -7887,6 +7887,7 @@ name = "trogon-secrets-service"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "axum",
  "buffa",
  "buffa-types",
  "bytes",

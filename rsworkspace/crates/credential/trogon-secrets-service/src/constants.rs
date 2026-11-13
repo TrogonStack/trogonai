@@ -59,3 +59,8 @@ pub(crate) const AUDIT_COMPONENT: &str = "secrets_service";
 /// What the audit writer id of one member of the queue group starts with; the
 /// instance the operator names follows it.
 pub(crate) const AUDIT_WRITER_PREFIX: &str = "secrets-service:";
+
+/// How long one attempt to reach a NATS server may take. The connection keeps
+/// dialing in the background after it, and the service refuses to start if
+/// the credential stream cannot be read over it.
+pub(crate) const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);

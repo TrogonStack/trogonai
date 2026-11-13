@@ -38,6 +38,12 @@
 //! one canonical name, a [`ConfigSetting`], and every refusal names it without
 //! quoting a secret: the file holds references to secrets, never the secrets.
 //!
+//! [`ReleaseSources`] reads what the configuration points at once, at startup:
+//! the tenant owners, the release policies, the sealing key, and the AppRole.
+//! [`SecretsService`] wires them to NATS, the credential stream, OpenBao, and
+//! the audit stream, and serves releases until it is told to stop. It refuses
+//! to start, with a [`SecretsServiceError`], when it cannot reach any of them.
+//!
 //! # Features
 //!
 //! - `test-support`: adds `InMemoryCredentialStates` and
@@ -101,6 +107,8 @@ mod seal_error;
 mod sealed_release;
 mod sealed_value;
 mod sealer;
+mod secrets_service;
+mod secrets_service_error;
 mod service_args;
 mod service_config;
 mod service_config_error;
@@ -160,6 +168,8 @@ pub use seal_error::SealError;
 pub use sealed_release::SealedRelease;
 pub use sealed_value::{SealedValue, SealedValueError};
 pub use sealer::Sealer;
+pub use secrets_service::SecretsService;
+pub use secrets_service_error::SecretsServiceError;
 pub use service_args::ServiceArgs;
 pub use service_config::ServiceConfig;
 pub use service_config_error::ServiceConfigError;
