@@ -164,6 +164,10 @@ pub enum MirrorSizeEstimate {
 pub struct SessionStoreOptions {
     pub store: Arc<dyn SessionStore>,
     pub config_directory: Option<PathBuf>,
+    /// Opt-in hardening for a store-backed resume: refuse a relative configuration or home directory with
+    /// [`SessionError::UnsafeConfigPath`](crate::SessionError::UnsafeConfigPath). Both upstream SDKs join a relative
+    /// path as given, so the default accepts it.
+    pub require_absolute_config_paths: bool,
     pub project_key: Option<SessionProjectKey>,
     pub limits: SessionStoreLimits,
     pub flush: SessionStoreFlush,
@@ -183,6 +187,7 @@ impl From<Arc<dyn SessionStore>> for SessionStoreOptions {
         Self {
             store,
             config_directory: None,
+            require_absolute_config_paths: false,
             project_key: None,
             limits: SessionStoreLimits::default(),
             flush: SessionStoreFlush::default(),

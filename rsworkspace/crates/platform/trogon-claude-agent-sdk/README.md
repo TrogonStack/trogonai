@@ -467,7 +467,10 @@ directory is removed after the process is reaped, retrying briefly while it is
 busy. A non-UUID, missing or empty session skips materialization and leaves
 `--resume` to the CLI. Latest-session resume walks newest to oldest and skips
 non-UUID, empty and sidechain sessions. File checkpointing cannot be combined
-with a session store.
+with a session store. As upstream, a relative configuration or home directory
+is used as given and store loads are unbounded;
+`SessionStoreOptions::require_absolute_config_paths` and the resume limits in
+`SessionStoreLimits` opt into typed errors instead.
 
 Project-key sanitization uses the pinned TypeScript SDK’s UTF-16 replacement
 behavior. Native hashing can differ for long project paths; use an explicit

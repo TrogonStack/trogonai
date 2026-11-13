@@ -487,13 +487,17 @@ async fn w3_cleanup_reports_a_permanent_failure_without_failing() -> TestResult 
 }
 
 #[tokio::test]
-async fn w3_a_relative_home_directory_is_rejected() -> TestResult {
+async fn w3_a_relative_home_directory_is_used_as_given_unless_absolute_paths_are_required() -> TestResult {
     let mut fixture = Fixture::new().await?.python();
     fixture.environment.variables.remove(OsStr::new("CLAUDE_CONFIG_DIR"));
     fixture
         .environment
         .variables
         .insert(OsString::from("HOME"), OsString::from("relative/home"));
+    let runtime = fixture.resume().await?;
+    assert!(runtime.materialized.is_some());
+    drop(runtime);
+    fixture.options.require_absolute_config_paths = true;
     assert!(matches!(fixture.resume().await, Err(SessionError::UnsafeConfigPath)));
     Ok(())
 }
@@ -665,6 +669,60 @@ async fn s24_unsafe_subkeys_from_the_store_are_skipped() -> TestResult {
     let created = fixture.filesystem.paths(Operation::CreateDirectory)?;
     assert!(created.iter().all(|path| path.starts_with(&config)));
     assert!(!fixture.filesystem.exists(&project_dir.join("escape")));
+    Ok(())
+}
+
+/// Lists one subkey with a `.` component and serves the same transcript for it.
+struct DotSubkeyStore {
+    inner: Arc<InMemorySessionStore<FrozenClock>>,
+    transcript: Vec<SessionEntry>,
+}
+
+impl SessionStore for DotSubkeyStore {
+    fn supports(&self, operation: SessionStoreOperation) -> bool {
+        matches!(
+            operation,
+            SessionStoreOperation::Append | SessionStoreOperation::Load | SessionStoreOperation::ListSubkeys
+        )
+    }
+    fn append<'a>(&'a self, key: &'a SessionKey, entries: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
+        self.inner.append(key, entries)
+    }
+    fn load<'a>(&'a self, key: &'a SessionKey) -> SessionStoreFuture<'a, Option<Vec<SessionEntry>>> {
+        if key.subpath().is_some() {
+            let transcript = self.transcript.clone();
+            return Box::pin(async move { Ok(Some(transcript)) });
+        }
+        self.inner.load(key)
+    }
+    fn list_subkeys<'a>(&'a self, _: &'a SessionKey) -> SessionStoreFuture<'a, Vec<String>> {
+        Box::pin(async { Ok(vec!["./subagents/agent-dot".to_owned()]) })
+    }
+}
+
+/// TypeScript `Jtt` keeps a subpath with a `.` component because its transcript still lands inside the session
+/// directory, and writes it where Node's `path.join` puts it. Python's `_is_safe_subpath` skips it.
+#[tokio::test]
+async fn s24_ts_a_dot_component_subpath_is_written_where_typescript_writes_it() -> TestResult {
+    for python in [false, true] {
+        let mut fixture = Fixture::new().await?;
+        fixture.options = SessionStoreOptions::from(Arc::new(DotSubkeyStore {
+            inner: fixture.store.clone(),
+            transcript: vec![entry(json!({"type":"user","message":"from the dot subkey"}))?],
+        }) as Arc<dyn SessionStore>);
+        if python {
+            fixture = fixture.python();
+        }
+        let runtime = fixture.resume().await?;
+        let config = runtime.config_dir.clone().ok_or("missing config directory")?;
+        let session_dir = config.join("projects").join(fixture.project.as_str()).join(SESSION);
+        assert_eq!(
+            fixture
+                .filesystem
+                .exists(&session_dir.join("subagents/agent-dot.jsonl")),
+            !python
+        );
+    }
     Ok(())
 }
 

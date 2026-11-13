@@ -193,6 +193,7 @@ fn options_wrap_shared_stores_with_default_limits() {
     let erased = SessionStoreOptions::from(Arc::new(AppendOnlyStore) as Arc<dyn SessionStore>);
     for options in [concrete, erased] {
         assert!(options.config_directory.is_none());
+        assert!(!options.require_absolute_config_paths);
         assert!(options.project_key.is_none());
         assert_eq!(
             options.limits.max_pending_entries,
@@ -201,6 +202,7 @@ fn options_wrap_shared_stores_with_default_limits() {
         assert_eq!(options.limits.max_pending_bytes.get(), 1024 * 1024);
         assert_eq!(options.limits.max_resume_entries, None);
         assert_eq!(options.limits.max_resume_bytes, None);
+        assert_eq!(options.limits.max_subkeys, None);
         assert!(format!("{options:?}").starts_with("SessionStoreOptions { limits: SessionStoreLimits"));
     }
 }
