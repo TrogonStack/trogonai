@@ -4,7 +4,11 @@ use std::{
     sync::Mutex,
 };
 
-use crate::constants::CONNECTOR_CACHE_LIMIT;
+use crate::{
+    adapters::SettingsHost,
+    constants::CONNECTOR_CACHE_LIMIT,
+    settings_resolve_reread::{PolicyState, Reading},
+};
 
 /// What upstream keeps in module state between `resolveSettings` calls of one process.
 ///
@@ -13,11 +17,20 @@ use crate::constants::CONNECTOR_CACHE_LIMIT;
 #[derive(Debug, Default)]
 pub struct ResolverState {
     connector_folders: Mutex<HashMap<PathBuf, bool>>,
+    policy: Mutex<PolicyState>,
 }
 
 impl ResolverState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The machine policy reading this call goes on with, re-reading the host when upstream would.
+    pub(crate) fn policy_reading<H: SettingsHost>(&self, host: &H) -> Reading {
+        match self.policy.lock() {
+            Ok(mut policy) => policy.current(host),
+            Err(_) => PolicyState::default().current(host),
+        }
     }
 
     pub(crate) fn connector_folder(&self, directory: &Path) -> Option<bool> {

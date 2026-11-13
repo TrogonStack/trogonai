@@ -5,12 +5,13 @@ use std::{
     ffi::{OsStr, OsString},
     io,
     path::{Path, PathBuf},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use trogon_claude_agent_sdk::adapters::{
     CheckReadable, CurrentDirectory, DirectoryEntry, EnvironmentVariable, ExecuteFile, ExecuteFileOutcome,
     ExecuteFileRequest, HostIdentity, LinkMetadata, NativeHost, OperatingSystem, ReadDirectory, ReadFile, ReadLink,
-    ReadSymlinkMetadata,
+    ReadSymlinkMetadata, WallClock,
 };
 
 /// Machine-wide locations the resolver reads, which the host moves under a sandbox root.
@@ -29,6 +30,8 @@ pub struct RemapHost {
     pub system: OperatingSystem,
     /// `None` hides an inherited variable.
     pub env: BTreeMap<String, Option<String>>,
+    /// Milliseconds since the epoch the host's clock shows.
+    pub now_ms: u64,
 }
 
 impl RemapHost {
@@ -124,5 +127,13 @@ impl ExecuteFile for RemapHost {
             timeout: request.timeout,
             max_buffer: request.max_buffer,
         })
+    }
+}
+
+impl WallClock for RemapHost {
+    type Time = SystemTime;
+
+    fn now(&self) -> SystemTime {
+        UNIX_EPOCH + Duration::from_millis(self.now_ms)
     }
 }

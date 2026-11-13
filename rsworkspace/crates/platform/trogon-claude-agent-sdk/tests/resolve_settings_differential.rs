@@ -17,9 +17,9 @@ use std::{
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    ResolveSettingsOptions,
+    ResolveSettingsOptions, ResolverState,
     adapters::{EnvironmentVariable, ExecuteFile, ExecuteFileRequest, NativeHost, OperatingSystem},
-    filter_escalating_default_mode, resolve_settings_with,
+    filter_escalating_default_mode, resolve_settings_with_state,
 };
 
 #[path = "support/remap_settings_host.rs"]
@@ -127,28 +127,69 @@ fn environment(spec: &Value, root: &str) -> BTreeMap<String, Option<String>> {
     env
 }
 
-fn rust_result(spec: &Value, root: &Path) -> (Value, Value) {
+/// The calls a case makes: one without `steps`, otherwise one per step, each at its own time and after the
+/// step's file changes (`files`: path under the root to new text, or null to delete it).
+fn steps(spec: &Value) -> Vec<Value> {
+    match spec["steps"].as_array() {
+        Some(steps) => steps.clone(),
+        None => vec![json!({})],
+    }
+}
+
+fn apply_files(step: &Value, root: &Path) {
+    for (file, text) in step["files"].as_object().into_iter().flatten() {
+        let location = root.join(file);
+        match text.as_str() {
+            Some(text) => {
+                fs::create_dir_all(location.parent().expect("parent")).expect("directory");
+                fs::write(&location, text).expect("write");
+            }
+            None => {
+                let _ = fs::remove_file(&location);
+            }
+        }
+    }
+}
+
+/// What the Rust port prints for each call, in the oracle's shape, sharing one resolver state across the calls.
+fn rust_results(name: &str, spec: &Value, root: &Path) -> Vec<String> {
     let root_text = root.to_string_lossy().into_owned();
-    let host = RemapHost {
-        root: root.to_path_buf(),
-        system: OperatingSystem::Linux,
-        env: environment(spec, &root_text),
-    };
+    let state = ResolverState::new();
     let options: ResolveSettingsOptions =
         serde_json::from_value(substitute(&spec["options"], &root_text)).expect("options");
-    let resolved = resolve_settings_with(&host, &options).expect("resolve");
-    let filtered = filter_escalating_default_mode(&resolved);
-    (
-        serde_json::to_value(&resolved).expect("encode"),
-        serde_json::to_value(filtered).expect("encode"),
-    )
+    let mut printed = Vec::new();
+    for (index, step) in steps(spec).iter().enumerate() {
+        apply_files(step, root);
+        let host = RemapHost {
+            root: root.to_path_buf(),
+            system: OperatingSystem::Linux,
+            env: environment(spec, &root_text),
+            now_ms: step["at"].as_u64().unwrap_or(0),
+        };
+        let resolved = resolve_settings_with_state(&host, &options, &state).expect("resolve");
+        let filtered = filter_escalating_default_mode(&resolved);
+        let label = if spec["steps"].is_array() {
+            format!("{name}/{index}")
+        } else {
+            name.to_owned()
+        };
+        printed.push(
+            json!({
+                "name": label,
+                "result": serde_json::to_value(&resolved).expect("encode"),
+                "filtered": serde_json::to_value(filtered).expect("encode"),
+            })
+            .to_string(),
+        );
+    }
+    printed
 }
 
 /// The oracle's stdout for each case, untouched: parsing it would hide how the numbers are printed.
-fn oracle_results(package: &str, cases: &[(String, Value, PathBuf)]) -> Vec<String> {
+fn oracle_results(package: &str, cases: &[(String, PathBuf, Value, PathBuf)]) -> Vec<String> {
     let scratch = tempfile::tempdir().expect("scratch");
     let mut specs = Vec::new();
-    for (name, spec, root) in cases {
+    for (name, _, spec, root) in cases {
         let root_text = root.to_string_lossy().into_owned();
         specs.push((name.clone(), spec.clone(), root_text));
     }
@@ -159,7 +200,15 @@ fn oracle_results(package: &str, cases: &[(String, Value, PathBuf)]) -> Vec<Stri
             "root": root_text,
             "platform": spec["platform"],
             "env": environment(&spec, &root_text),
-            "cases": [{"name": name, "options": substitute(&spec["options"], &root_text)}],
+            "cases": steps(&spec).iter().enumerate().map(|(index, step)| {
+                let label = if spec["steps"].is_array() { format!("{name}/{index}") } else { name.clone() };
+                json!({
+                    "name": label,
+                    "at": step["at"],
+                    "files": step["files"],
+                    "options": substitute(&spec["options"], &root_text),
+                })
+            }).collect::<Vec<_>>(),
         });
         fs::write(&file, serde_json::to_vec(&document).expect("spec")).expect("write spec");
         let script = crate_dir().join(".config/mise/lib/claude-sdk-freshness/resolve_settings_oracle.mjs");
@@ -179,6 +228,13 @@ fn oracle_results(package: &str, cases: &[(String, Value, PathBuf)]) -> Vec<Stri
         results.push(outcome.stdout);
     }
     results
+}
+
+fn prepare(tree: &Path, spec: &Value, root: &Path) {
+    copy_tree(tree, root);
+    fs::create_dir_all(root.join("work")).expect("work");
+    fs::create_dir_all(root.join("home")).expect("home");
+    make_links(spec, root);
 }
 
 #[test]
@@ -202,21 +258,21 @@ fn rust_matches_the_pinned_typescript_resolver_byte_for_byte() {
     let mut expected_names = Vec::new();
     for case in cases() {
         let root = scratch.path().join(&case.name);
-        copy_tree(&case.tree, &root);
-        fs::create_dir_all(root.join("work")).expect("work");
-        fs::create_dir_all(root.join("home")).expect("home");
-        make_links(&case.spec, &root);
+        prepare(&case.tree, &case.spec, &root);
         expected_names.push(case.name.clone());
-        prepared.push((case.name, case.spec, root));
+        prepared.push((case.name, case.tree, case.spec, root));
     }
     let oracle = oracle_results(&package, &prepared);
     let mut mismatches = Vec::new();
-    for ((name, spec, root), upstream) in prepared.iter().zip(&oracle) {
-        let (resolved, filtered) = rust_result(spec, root);
-        let ours = json!({"name": name, "result": resolved, "filtered": filtered});
+    for ((name, tree, spec, root), upstream) in prepared.iter().zip(&oracle) {
+        if spec["steps"].is_array() {
+            // The oracle changed the files its steps name, so the Rust run starts from a fresh tree.
+            fs::remove_dir_all(root).expect("reset");
+            prepare(tree, spec, root);
+        }
+        let ours = format!("[{}]", rust_results(name, spec, root).join(","));
         let theirs = upstream.as_str();
-        let rendered = format!("[{ours}]");
-        if rendered != theirs {
+        if ours != theirs {
             mismatches.push(format!("{name}\n  rust:     {ours}\n  upstream: {theirs}"));
         }
     }

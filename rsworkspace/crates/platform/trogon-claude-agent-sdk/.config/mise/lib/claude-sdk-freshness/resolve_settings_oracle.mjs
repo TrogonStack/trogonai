@@ -3,7 +3,7 @@
 //
 // usage: node resolve_settings_oracle.mjs <package-dir> <spec.json>
 //
-// The spec holds {root, platform, env, cases: [{name, options}]}. Machine-wide locations that the SDK reads
+// The spec holds {root, platform, env, cases: [{name, options, at?, files?}]}. Machine-wide locations that the SDK reads
 // (managed settings, managed preferences, /proc/version, plutil) are remapped under `root`, and
 // `process.platform` is replaced by `platform`, so every case runs the same way on any host.
 import fs from 'node:fs';
@@ -60,8 +60,27 @@ for (const [name, value] of Object.entries(spec.env || {})) {
   else process.env[name] = value;
 }
 const sdk = await import(pathToFileURL(path.join(pkg, 'sdk.mjs')).href);
+// A case may move the clock (`at`, milliseconds since the epoch) and change files under the root before it runs
+// (`files`: path under the root to new text, or null to delete), so one process sees the host change between calls
+// the way a long-lived SDK process does.
+let now = 0;
+Date.now = () => now;
 const out = [];
 for (const entry of spec.cases) {
+  // A re-read the previous call left running in the background settles before the next call starts.
+  if (typeof entry.at === 'number') {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    now = entry.at;
+  }
+  for (const [file, text] of Object.entries(entry.files || {})) {
+    const location = path.join(root, file);
+    if (text === null) fs.rmSync(location, { force: true });
+    else {
+      fs.mkdirSync(path.dirname(location), { recursive: true });
+      fs.writeFileSync(location, text);
+      if (entry.executable?.includes(file)) fs.chmodSync(location, 0o755);
+    }
+  }
   const result = await sdk.resolveSettings(entry.options);
   out.push({ name: entry.name, result, filtered: sdk.filterEscalatingDefaultMode(result) });
 }

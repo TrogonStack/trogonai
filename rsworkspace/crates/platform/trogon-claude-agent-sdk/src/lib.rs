@@ -102,6 +102,7 @@ mod settings_resolve_env;
 mod settings_resolve_parent;
 mod settings_resolve_platform;
 mod settings_resolve_policy;
+mod settings_resolve_reread;
 mod settings_resolve_sources;
 mod settings_resolve_state;
 mod settings_resolve_tier;
