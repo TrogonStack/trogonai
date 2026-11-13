@@ -54,6 +54,7 @@ mod session_entry;
 mod session_error;
 mod session_files;
 mod session_files_ts;
+mod session_fork_ts;
 mod session_id;
 mod session_info;
 mod session_key;
@@ -163,7 +164,8 @@ pub use session_info::SdkSessionInfo;
 pub use session_key::{SessionKey, SessionKeyError};
 pub use session_messages_ts::{ChainAlgorithm, MessageOptions, MessagesError};
 pub use session_mutations::{
-    ForkSessionResult, JsonEscaping, SessionMutationError, delete_session, fork_session, rename_session, tag_session,
+    ForkAlgorithm, ForkSessionResult, JsonEscaping, SessionMutationError, delete_session, fork_session, rename_session,
+    tag_session,
 };
 pub use session_project_key::{
     SessionProjectKey, SessionProjectKeyError, project_key_for_directory, project_key_for_directory_in,
