@@ -182,3 +182,27 @@ jobs:
 
       - name: Assert TypeScript key custody bindings match proto sources
         run: mise run --skip-tools github-actions:assert-key-custody-proto-generated
+
+  result:
+    # Job names like lint and build repeat across workflows, and a skipped job
+    # passes a required check even when a cancelled run skipped it, so branch
+    # rules require this job instead of each Proto job.
+    name: Proto result
+    needs: [changes, format, lint, build, breaking, contract-validation, generate]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Proto jobs
+        env:
+          SELECTION_RESULT: ${{ needs.changes.result }}
+          SELECTED: ${{ needs.changes.outputs.proto }}
+          JOB_RESULTS: ${{ needs.format.result }} ${{ needs.lint.result }} ${{ needs.build.result }} ${{ needs.contract-validation.result }} ${{ needs.generate.result }} ${{ github.event_name == 'pull_request' && needs.breaking.result || '' }}
+        # A cancelled run also skips jobs, so a skip only passes when selection
+        # succeeded and found nothing to check.
+        run: |
+          for result in $JOB_RESULTS; do
+            if [ "$result" = success ]; then continue; fi
+            if [ "$result" = skipped ] && [ "$SELECTION_RESULT" = success ] && [ "$SELECTED" != true ]; then continue; fi
+            echo "::error::Proto jobs ended with $JOB_RESULTS after selection ended with $SELECTION_RESULT"
+            exit 1
+          done
