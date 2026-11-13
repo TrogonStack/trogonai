@@ -106,3 +106,14 @@ body {
     max-width: 220px;
   }
 }
+
+@media (min-width: 960px) {
+  .wide-page .VPDoc .container,
+  .wide-page .VPDoc .content {
+    max-width: none;
+  }
+
+  .wide-page .VPDoc .content-container {
+    max-width: 1040px;
+  }
+}
