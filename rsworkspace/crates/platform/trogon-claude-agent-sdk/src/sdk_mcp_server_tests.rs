@@ -30,7 +30,7 @@ async fn server_retains_initialize_and_runs_typed_tool() -> Result<(), Box<dyn s
         tools: tool.into(),
     });
     let server = registry.open_session();
-    let request = |value| serde_json::from_value::<JsonObject>(value);
+    let request = serde_json::from_value::<JsonObject>;
     let initialized = server.request(request(json!({"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}))?,CancellationToken::new()).await?.ok_or("missing initialize response")?;
     assert_eq!(initialized["result"]["serverInfo"]["name"], "local");
     assert_eq!(initialized["result"]["serverInfo"]["version"], "1");
@@ -104,7 +104,7 @@ async fn tool_listing_keeps_names_the_mcp_protocol_discourages() -> Result<(), B
             tools: tool.into(),
         });
         let server = registry.open_session();
-        let request = |value| serde_json::from_value::<JsonObject>(value);
+        let request = serde_json::from_value::<JsonObject>;
         let listed = server
             .request(
                 request(json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}))?,
@@ -136,7 +136,7 @@ async fn a_schema_that_does_not_compile_is_listed_verbatim_and_fails_each_call()
         tools: tool.into(),
     });
     let server = registry.open_session();
-    let request = |value| serde_json::from_value::<JsonObject>(value);
+    let request = serde_json::from_value::<JsonObject>;
     let listed = server
         .request(
             request(json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}))?,

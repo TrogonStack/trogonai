@@ -27,14 +27,14 @@ use crate::{
     session_mutations::{build_fork_lines, iso_now, partition_fork_entry, py_strip, sanitize_unicode},
     session_project_key::canonicalize_lenient_in,
     session_prompt::iso_to_epoch_ms,
-    session_store_common::{invalid_session, jsonl_to_lite, main_key, not_found},
+    session_store_shared::{
+        ImportOptions, SessionStoreHelperError, StoreListOptions, invalid_session, jsonl_to_lite, main_key, not_found,
+    },
     session_summary::summary_entry_to_sdk_info,
     session_transcript::{
         entries_to_session_messages, entries_to_subagent_messages, is_transcript_entry, parent_ids_from_agent_metadata,
     },
 };
-
-pub use crate::session_store_common::{ImportOptions, SessionStoreHelperError, StoreListOptions};
 
 fn project_key(directory: Option<&Path>) -> Result<SessionProjectKey, SessionStoreHelperError> {
     Ok(project_key_for_directory_in(
