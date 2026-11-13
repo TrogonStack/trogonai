@@ -94,9 +94,10 @@ impl SecretsService {
             sources.sealer,
             SystemClock,
         );
+        let admission_limit = config.admission_limit.get();
         info!(
             credential_stream = %config.credential_stream,
-            admission_limit = config.admission_limit.get(),
+            admission_limit,
             "the secrets service is serving releases"
         );
         let served = ReleaseServer::new(client, Arc::new(release), config.admission_limit)
