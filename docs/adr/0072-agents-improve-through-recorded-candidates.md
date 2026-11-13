@@ -151,6 +151,8 @@ verdict field names its own author.
   budget and model ceiling apply through the ordinary agent policies.
   Recurrence across runs, by category and target, is a projection over these
   results, not stored state.
+  `GetFindingRecurrence` (`evaluation/queries`) reads that projection for one
+  rubric version, ranked by distinct runs.
 - `evaluation/comparisons`: `OpenComparison` fixes a base revision and a task by
   `ClaimCheck task_ref`; `EnrollComparisonRun` assigns a `CandidateLabel` to a
   session and optionally a `CandidateRef`; `CloseComparison` ends enrollment. A

@@ -1,0 +1,45 @@
+edition = "2024";
+
+package trogonai.evaluation.queries.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/evaluation/bindings/v1alpha1/finding.proto";
+import "trogonai/evaluation/rubrics/v1alpha1/rubric_version_ref.proto";
+
+// Reads how often a finding recurs across judged runs. Recurrence is a
+// projection over recorded evaluation results grouped by category and target,
+// never stored state, so it is recomputed from the streams (ADR#0024).
+// Evaluation-side only: never readable through an agent, proposal, or session
+// query.
+message GetFindingRecurrenceRequest {
+  // Scopes the count to one pinned rubric version, because a category is
+  // meaningful only against the rubric that defined it.
+  trogonai.evaluation.rubrics.v1alpha1.RubricVersionRef rubric_version_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 page_size = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gt: 0
+      lte: 200
+    }
+  ];
+  bytes page_token = 3;
+}
+
+message GetFindingRecurrenceResponse {
+  // Ranked by distinct_run_count, highest first.
+  repeated FindingRecurrence items = 1;
+  bytes next_page_token = 2;
+}
+
+message FindingRecurrence {
+  string category = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.evaluation.bindings.v1alpha1.FindingTarget target = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Distinct evaluated sessions the finding appeared in.
+  uint32 distinct_run_count = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Recorded results carrying the finding; a rejudged run raises this and not
+  // the run count.
+  uint32 result_count = 4 [features.field_presence = LEGACY_REQUIRED];
+}
