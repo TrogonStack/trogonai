@@ -7,6 +7,8 @@
 )]
 
 use serde_json::{Value, json};
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::{
     collections::BTreeMap,
     num::NonZeroUsize,
@@ -436,7 +438,6 @@ fn mcp_extra_fields_and_raw_config_stay_out_of_debug_output() -> TestResult {
 #[cfg(unix)]
 #[test]
 fn mcp_stdio_command_that_is_not_utf8_is_rejected() {
-    use std::os::unix::ffi::OsStrExt;
     let server = McpServerOptions::Stdio(McpStdioServerOptions {
         command: PathBuf::from(std::ffi::OsStr::from_bytes(b"/srv/fixture-\xff")),
         ..McpStdioServerOptions::default()
