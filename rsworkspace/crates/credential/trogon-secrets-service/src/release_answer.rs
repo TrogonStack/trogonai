@@ -48,9 +48,10 @@ impl<R: ReleaseCredential> ReleaseAnswer<'_, R> {
         )
         .await
         .unwrap_or_else(|_| {
+            let deadline_ms = RELEASE_DEADLINE.as_millis();
             tracing::error!(
                 subject = self.subject,
-                deadline_ms = RELEASE_DEADLINE.as_millis(),
+                deadline_ms,
                 "release did not finish within its deadline; answered unavailable"
             );
             Err(CredentialReleaseError::Unavailable)

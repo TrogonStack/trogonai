@@ -7893,6 +7893,7 @@ dependencies = [
  "futures",
  "grpc-nats-micro",
  "nkeys",
+ "serde_json",
  "thiserror 2.0.21",
  "time",
  "tokio",

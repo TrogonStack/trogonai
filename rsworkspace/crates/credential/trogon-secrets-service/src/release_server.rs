@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_nats::{Message, Subject};
 use futures::StreamExt as _;
 use grpc_nats_micro::constants::DEFAULT_QUEUE_GROUP;
+use grpc_nats_micro::content_type::EncodeError;
 use grpc_nats_micro::{EndpointHandler, answer};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
@@ -119,16 +120,18 @@ async fn respond<C: PublishClient>(
     message: &Message,
     handler: &dyn EndpointHandler,
 ) {
-    let encoded = match answer(message.headers.as_ref(), &message.payload, options, handler).await {
-        Ok(encoded) => encoded,
-        Err(error) => {
-            tracing::error!(subject = %message.subject, error = %error, "release reply did not encode; dropped");
-            return;
-        }
-    };
-    if let Err(error) = client.publish_with_headers(reply, encoded.headers, encoded.body).await {
+    let answered = answer(message.headers.as_ref(), &message.payload, options, handler).await;
+    if let Ok(encoded) = answered.inspect_err(|error| report_unencodable(&message.subject, error))
+        && let Err(error) = client.publish_with_headers(reply, encoded.headers, encoded.body).await
+    {
         tracing::error!(subject = %message.subject, error = %error, "release reply was not published");
     }
+}
+
+/// A reply that will not encode leaves nothing to send: ADR#0016 makes an
+/// error body one complete `Status`, and half of one is not that.
+fn report_unencodable(subject: &Subject, error: &EncodeError) {
+    tracing::error!(subject = %subject, error = %error, "release reply did not encode; dropped");
 }
 
 #[cfg(test)]

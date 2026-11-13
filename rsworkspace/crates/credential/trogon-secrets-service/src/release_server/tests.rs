@@ -8,6 +8,7 @@ use nkeys::XKey;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
+use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 use trogonai_proto::secrets::exchange::v1alpha1::resolve_for_release_response::Result as Outcome;
 use trogonai_proto::secrets::exchange::v1alpha1::{
     ResolveFailure, ResolveFailureCategory, ResolveForReleaseResponse, SealedAccess,
@@ -118,6 +119,24 @@ async fn a_call_beyond_the_admission_limit_is_throttled_with_its_retry_delay() {
         Some(ResolveFailureCategory::RESOLVE_FAILURE_CATEGORY_UNAVAILABLE)
     );
     assert_eq!(release.calls().len(), 1);
+}
+
+#[test]
+fn a_reply_that_will_not_encode_is_reported_with_the_call_it_answered() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::ERROR);
+    let subject = Subject::from(release_subject(&tenant()));
+    let source = serde_json::from_str::<u8>("not a number").unwrap_err();
+
+    report_unencodable(&subject, &EncodeError::Json(source));
+
+    let event = events
+        .events()
+        .into_iter()
+        .find(|event| event.message() == Some("release reply did not encode; dropped"))
+        .expect("the unencodable reply is reported");
+    assert_eq!(event.field("subject"), Some(subject.as_str()));
+    assert!(event.field("error").is_some());
 }
 
 #[tokio::test]

@@ -3,6 +3,7 @@ use grpc_nats_micro::status_codec::decode_reply;
 use grpc_nats_micro::{ContentType, ReplyError, ServiceErrorCode, answer};
 use nkeys::{KeyPair, XKey};
 use tokio::time::Instant;
+use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 use trogonai_proto::nats::micro::v1alpha1::{ContentType as ProtoContentType, ServiceOptions};
 use trogonai_proto::secrets::exchange::v1alpha1::resolve_for_release_response::Result as Outcome;
 use trogonai_proto::secrets::exchange::v1alpha1::{ResolveFailureCategory, ResolveForReleaseResponse};
@@ -95,6 +96,25 @@ async fn a_release_past_the_deadline_is_unavailable() {
         Some(ResolveFailureCategory::RESOLVE_FAILURE_CATEGORY_UNAVAILABLE)
     );
     assert_eq!(started.elapsed(), RELEASE_DEADLINE);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_release_past_the_deadline_is_logged_with_the_deadline_it_missed() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::ERROR);
+    let subject = release_subject(&tenant());
+    let payload = release_wire(&XKey::new().public_key()).encode_to_vec();
+
+    ask(&subject, &payload, &ScriptedRelease::hanging()).await.unwrap();
+
+    let event = events
+        .events()
+        .into_iter()
+        .find(|event| event.message() == Some("release did not finish within its deadline; answered unavailable"))
+        .expect("the missed deadline is logged");
+    assert_eq!(event.field("subject"), Some(subject.as_str()));
+    let deadline_ms = RELEASE_DEADLINE.as_millis().to_string();
+    assert_eq!(event.field("deadline_ms"), Some(deadline_ms.as_str()));
 }
 
 #[tokio::test]
