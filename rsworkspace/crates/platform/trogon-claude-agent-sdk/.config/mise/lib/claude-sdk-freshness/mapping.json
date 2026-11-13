@@ -2067,6 +2067,8 @@
         "SessionStore",
         "InMemorySessionStore",
         "SessionKey",
+        "SessionKey::checked",
+        "SessionSubpath::checked",
         "SessionEntry",
         "InMemorySessionStore::with_clock",
         "adapters::WallClock",
@@ -2121,6 +2123,18 @@
         {
           "path": "tests/session_project_key.rs",
           "name": "project_key_matches_upstream_utf16_replacement"
+        },
+        {
+          "path": "tests/session_key_upstream.rs",
+          "name": "transcript_path_keys_match_the_typescript_and_python_sdks"
+        },
+        {
+          "path": "tests/session_values.rs",
+          "name": "session_keys_take_any_identifier_as_upstream_does_and_checked_rejects_unsafe_ones"
+        },
+        {
+          "path": "tests/session_values.rs",
+          "name": "subpaths_take_any_text_and_checked_keeps_them_inside_the_session_directory"
         },
         {
           "path": "tests/session_store_conformance.rs",

@@ -18,7 +18,7 @@ fn key(session: &str) -> Result<SessionKey, Box<dyn std::error::Error>> {
     Ok(SessionKey::new(
         SessionProjectKey::new("project")?,
         SessionId::from(session),
-    )?)
+    ))
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn session_keys_accept_safe_identifiers_and_expose_their_parts() -> TestResult {
     assert_eq!(main.project_key().as_str(), "project");
     assert_eq!(main.session_id().as_str(), "123e4567-e89b-42d3-a456-426614174000");
     assert!(main.subpath().is_none());
-    let nested = main.clone().with_subpath(SessionSubpath::new("subagents/agent-1")?);
+    let nested = main.clone().with_subpath(SessionSubpath::new("subagents/agent-1"));
     assert_eq!(nested.subpath().map(SessionSubpath::as_str), Some("subagents/agent-1"));
     assert_ne!(nested, main);
     assert_eq!(nested.main(), main);
@@ -71,29 +71,36 @@ fn session_keys_accept_safe_identifiers_and_expose_their_parts() -> TestResult {
 }
 
 #[test]
-fn session_keys_reject_unsafe_identifiers() -> TestResult {
+fn session_keys_take_any_identifier_as_upstream_does_and_checked_rejects_unsafe_ones() -> TestResult {
     for value in [
         "", ".", "..", "a/b", "a\\b", "a:b", "a<b", "a>b", "a\"b", "a|b", "a?b", "a*b", "a.", "a ", "a\nb", "con",
         "PRN", "Aux.log", "nul", "COM1", "com9.txt", "LPT1", "lpt9",
     ] {
-        let error = SessionKey::new(SessionProjectKey::new("project")?, SessionId::from(value))
+        let unchecked = SessionKey::new(SessionProjectKey::new("project")?, SessionId::from(value));
+        assert_eq!(unchecked.session_id().as_str(), value);
+        let error = SessionKey::checked(SessionProjectKey::new("project")?, SessionId::from(value))
             .err()
             .ok_or("accepted an unsafe session id")?;
         assert!(matches!(error, SessionKeyError::UnsafeSessionId), "{value:?}");
         assert_eq!(error.to_string(), "session id is not a safe file component");
     }
+    let checked = SessionKey::checked(SessionProjectKey::new("project")?, SessionId::from("session-1"))?;
+    assert_eq!(checked.session_id().as_str(), "session-1");
     Ok(())
 }
 
 #[test]
-fn subpaths_stay_inside_the_session_directory() -> TestResult {
+fn subpaths_take_any_text_and_checked_keeps_them_inside_the_session_directory() -> TestResult {
     for value in ["a", "a/b", "subagents/agent-1", "a\\b", "weird name", ".hidden"] {
-        let subpath = SessionSubpath::new(value)?;
+        let subpath = SessionSubpath::checked(value)?;
         assert_eq!(subpath.as_str(), value);
         assert_eq!(subpath.to_string(), value);
     }
     for value in ["", "/a", "\\a", "a/../b", "..", ".", "a/./b", "a\0b", "C:evil", "z:/x"] {
-        let error = SessionSubpath::new(value).err().ok_or("accepted an unsafe subpath")?;
+        assert_eq!(SessionSubpath::new(value).as_str(), value);
+        let error = SessionSubpath::checked(value)
+            .err()
+            .ok_or("accepted an unsafe subpath")?;
         assert_eq!(error, SessionSubpathError);
         assert_eq!(
             error.to_string(),
@@ -128,6 +135,7 @@ fn transcript_paths_outside_the_projects_directory_are_rejected() {
         "relative/proj/abc.jsonl",
         "/home/user/.claude/projects/proj/../abc.jsonl",
         "/home/user/.claude/projects",
+        "/home/user/.claude/projects/..",
     ] {
         let result = SessionKey::from_transcript_path(Path::new(path), root);
         assert!(
@@ -138,23 +146,24 @@ fn transcript_paths_outside_the_projects_directory_are_rejected() {
             "{path}"
         );
     }
-    let relative_root = SessionKey::from_transcript_path(Path::new("/a/b/c.jsonl"), Path::new("a"));
-    assert!(matches!(relative_root, Err(SessionKeyError::OutsideProjects)));
 }
 
 #[test]
-fn unrecognized_or_unsafe_transcript_paths_report_typed_errors() -> TestResult {
+fn unrecognized_transcript_paths_report_typed_errors_and_unsafe_names_are_kept() -> TestResult {
     let root = Path::new("/home/user/.claude/projects");
     let no_extension = SessionKey::from_transcript_path(&root.join("proj/abc.txt"), root);
     assert!(matches!(no_extension, Err(SessionKeyError::UnrecognizedPath)));
     let too_short = SessionKey::from_transcript_path(&root.join("proj/abc/only.jsonl"), root);
     assert!(matches!(too_short, Err(SessionKeyError::UnrecognizedPath)));
-    let unsafe_project = SessionKey::from_transcript_path(&root.join("con/abc.jsonl"), root);
-    assert!(matches!(unsafe_project, Err(SessionKeyError::Project(_))));
-    let unsafe_session = SessionKey::from_transcript_path(&root.join("proj/con.jsonl"), root);
-    assert!(matches!(unsafe_session, Err(SessionKeyError::UnsafeSessionId)));
-    let unsafe_subpath = SessionKey::from_transcript_path(&root.join("proj/abc/a/\\..\\x.jsonl"), root);
-    assert!(matches!(unsafe_subpath, Err(SessionKeyError::Subpath(_))));
+    let reserved_project = SessionKey::from_transcript_path(&root.join("con/abc.jsonl"), root)?;
+    assert_eq!(reserved_project.project_key().as_str(), "con");
+    let reserved_session = SessionKey::from_transcript_path(&root.join("proj/con.jsonl"), root)?;
+    assert_eq!(reserved_session.session_id().as_str(), "con");
+    let backslash_subpath = SessionKey::from_transcript_path(&root.join("proj/abc/a/\\..\\x.jsonl"), root)?;
+    assert_eq!(
+        backslash_subpath.subpath().map(SessionSubpath::as_str),
+        Some("a/\\..\\x")
+    );
     for error in [
         SessionKeyError::UnsafeSessionId,
         SessionKeyError::OutsideProjects,

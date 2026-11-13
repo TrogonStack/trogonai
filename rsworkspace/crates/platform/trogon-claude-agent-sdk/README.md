@@ -555,6 +555,15 @@ backend or use `InMemorySessionStore`. Entries are keyed by project/session and
 optional subagent path; the in-memory backend deduplicates stable UUIDs.
 [The store example](examples/session_store.rs) needs no Claude or network.
 
+As upstream, `SessionKey::new` and `SessionSubpath::new` take any text, and
+`SessionKey::from_transcript_path` resolves a relative path or projects
+directory against the working directory and validates nothing in the path
+beyond its shape. Upstream checks a subpath only where resume turns it into a
+file, and each SDK checks it its own way, so resume applies the rule of the
+selected dialect. `SessionKey::checked` and `SessionSubpath::checked` are the
+opt-in constructors that reject an id or subpath that is not a safe file name
+component, with typed errors.
+
 Mirroring follows CLI local writes. Each result waits for its own store barrier
 while controls remain serviceable. Failures appear as `mirror_error` messages
 and never fail the run; a transcript path outside the projects directory is

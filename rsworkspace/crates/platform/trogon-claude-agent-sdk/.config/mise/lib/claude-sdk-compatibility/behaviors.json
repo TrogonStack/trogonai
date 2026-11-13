@@ -799,7 +799,8 @@
         "kind": "upstream"
       },
       "contracts": [
-        "session_filesystem::s24_unsafe_subkeys_from_the_store_are_skipped"
+        "session_filesystem::s24_unsafe_subkeys_from_the_store_are_skipped",
+        "session_filesystem::s24_listed_subpaths_are_written_or_skipped_as_each_upstream_sdk_does"
       ],
       "rust": [
         "src/session_path_component.rs",
@@ -812,27 +813,29 @@
       "concept": "Transcript path to session key",
       "python": {
         "file": "src/claude_agent_sdk/_internal/session_store.py",
-        "line_start": 177,
+        "line_start": 149,
         "line_end": 194,
-        "sha256": "d2a7a9aa61aac994557799225ac7baf69a756c27903670906f24c1fa61f87664"
+        "sha256": "0f12fa0e56aa1b1ebeef47da485a61f0e14d1dbbc8aa83b33fd1e5e2fa9be061"
       },
       "typescript": {
         "file": "package/sdk.mjs",
-        "anchor": "\"agent_metadata\"",
+        "anchor": "function AD(e,t){",
         "occurrence": 0,
-        "occurrences": 3,
+        "occurrences": 1,
         "span_before": 0,
         "span_after": 420,
-        "sha256": "9782fb65800bea8a8496a1a4c9406602fe6fcebba2b841396be7563872f34fd4"
+        "sha256": "fb1f08daca5723ff729638b84f636eb0e33e0c1956d45f30ad11702d9895bfe4"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Two parts ending in .jsonl give a main key; four or more parts give a subpath key with .jsonl stripped."
+        "behavior": "Both paths are resolved against the working directory first, so relative paths work; two parts ending in .jsonl give a main key and four or more parts give a subpath key with .jsonl stripped. Nothing is validated."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
+        "session_key_upstream::transcript_path_keys_match_the_typescript_and_python_sdks",
+        "session_key_upstream::relative_paths_resolve_against_the_working_directory_like_absolute_ones",
         "session_failure_contracts::s25_transcript_paths_below_a_session_map_to_subpaths"
       ],
       "rust": [
@@ -1491,7 +1494,8 @@
         "kind": "upstream"
       },
       "contracts": [
-        "runtime_failure_contracts::m13_s19_unmappable_and_oversized_mirror_frames_are_never_rejected"
+        "runtime_failure_contracts::m13_s19_unmappable_and_oversized_mirror_frames_are_never_rejected",
+        "session_key_upstream::transcript_path_keys_match_the_typescript_and_python_sdks"
       ],
       "rust": [
         "src/driver.rs",
@@ -2229,16 +2233,20 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream skips a non-UUID resume id and, with a warning, every listSubkeys subpath that is empty, absolute, has a .. segment or resolves outside the session directory, and writes the rest; Python also skips . segments, drive prefixes and NUL bytes. Rust follows the selected dialect's rule, so the TypeScript default writes ./agent where TypeScript does."
+        "behavior": "SessionKey::new and SessionSubpath::new accept any text, as upstream does. Upstream skips a non-UUID resume id and, with a warning, every listSubkeys subpath its own dialect rejects; Rust applies that dialect's rule at the resume site, and SessionKey::checked and SessionSubpath::checked are the opt-in Rust-only safety checks."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
         "session_filesystem::s22_a_non_uuid_resume_id_skips_materialization",
+        "session_filesystem::s22_resume_ids_are_checked_as_each_upstream_sdk_checks_them",
         "session_filesystem::s24_unsafe_subkeys_from_the_store_are_skipped",
+        "session_filesystem::s24_listed_subpaths_are_written_or_skipped_as_each_upstream_sdk_does",
         "session_filesystem::s24_ts_a_dot_component_subpath_is_written_where_typescript_writes_it",
-        "session_store::store_paths_reject_traversal_and_windows_aliases"
+        "session_store::store_paths_reject_traversal_and_windows_aliases",
+        "session_values::session_keys_take_any_identifier_as_upstream_does_and_checked_rejects_unsafe_ones",
+        "session_values::subpaths_take_any_text_and_checked_keeps_them_inside_the_session_directory"
       ],
       "rust": [
         "src/session_key.rs",

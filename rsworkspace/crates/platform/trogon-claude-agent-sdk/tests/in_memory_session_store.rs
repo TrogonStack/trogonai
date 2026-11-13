@@ -18,7 +18,7 @@ fn key(project: &str, session: &str) -> Result<SessionKey, Box<dyn Error>> {
     Ok(SessionKey::new(
         SessionProjectKey::new(project)?,
         SessionId::from(session),
-    )?)
+    ))
 }
 
 fn entry(text: &str) -> Result<SessionEntry, Box<dyn Error>> {
@@ -94,7 +94,7 @@ async fn sessions_list_newest_first_and_exclude_subpaths_and_other_projects() ->
     let older = key("project", "older")?;
     let newer = key("project", "newer")?;
     let other = key("other", "elsewhere")?;
-    let nested = newer.clone().with_subpath(SessionSubpath::new("subagents/agent-1")?);
+    let nested = newer.clone().with_subpath(SessionSubpath::new("subagents/agent-1"));
     for target in [&older, &newer, &other, &nested] {
         store.append(target, &[entry(r#"{"type":"user"}"#)?]).await?;
     }
@@ -110,8 +110,8 @@ async fn sessions_list_newest_first_and_exclude_subpaths_and_other_projects() ->
 async fn deleting_a_main_key_cascades_but_deleting_a_subpath_is_exact() -> TestResult {
     let store = InMemorySessionStore::new();
     let main = key("project", "session")?;
-    let first = main.clone().with_subpath(SessionSubpath::new("subagents/a")?);
-    let second = main.clone().with_subpath(SessionSubpath::new("subagents/b")?);
+    let first = main.clone().with_subpath(SessionSubpath::new("subagents/a"));
+    let second = main.clone().with_subpath(SessionSubpath::new("subagents/b"));
     let unrelated = key("project", "unrelated")?;
     for target in [&main, &first, &second, &unrelated] {
         store.append(target, &[entry(r#"{"type":"user"}"#)?]).await?;

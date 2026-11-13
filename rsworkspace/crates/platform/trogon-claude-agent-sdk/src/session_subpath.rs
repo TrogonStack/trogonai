@@ -1,9 +1,9 @@
 /// A store subkey below a session, such as `subagents/agent-1`.
 ///
-/// Subpaths come from external stores and become file paths during resume, so a subpath must stay inside the
-/// session directory: it is relative, never empty, and has no `.` or `..` component on either separator. A subpath
-/// listed during a TypeScript-dialect resume follows upstream's check instead: relative, never empty, no `..`
-/// component, and its transcript file resolves inside the session directory, so `.` components can remain.
+/// [`SessionSubpath::new`] takes any text, as upstream does: a store key is whatever the store holds. Upstream checks
+/// a subpath only where it becomes a file during resume, and the two SDKs check it differently, so that guard lives
+/// at the resume site of each dialect. [`SessionSubpath::checked`] is the opt-in constructor for callers that want
+/// Rust's own rule: relative, never empty, no `.` or `..` component on either separator, no drive prefix or NUL.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SessionSubpath(String);
 
@@ -12,17 +12,17 @@ pub struct SessionSubpath(String);
 pub struct SessionSubpathError;
 
 impl SessionSubpath {
-    pub fn new(value: impl Into<String>) -> Result<Self, SessionSubpathError> {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// A subpath that stays inside the session directory when joined to it.
+    pub fn checked(value: impl Into<String>) -> Result<Self, SessionSubpathError> {
         let value = value.into();
         if !is_safe(&value) {
             return Err(SessionSubpathError);
         }
         Ok(Self(value))
-    }
-
-    /// A subpath that already passed upstream TypeScript's `listSubkeys` check during resume.
-    pub(crate) fn listed_by_typescript(value: String) -> Self {
-        Self(value)
     }
 
     pub fn as_str(&self) -> &str {

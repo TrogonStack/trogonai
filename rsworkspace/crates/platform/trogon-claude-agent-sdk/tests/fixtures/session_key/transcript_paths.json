@@ -1,0 +1,753 @@
+{
+ "note": "Captured by running the real TypeScript sdk.mjs transcript path function (AD) and the real Python 0.2.181 claude_agent_sdk._internal.session_store.file_path_to_session_key over every case on POSIX, with the process working directory as CWD. Both dialects returned identical keys for every case. $CWD in a path stands for the working directory.",
+ "cases": [
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/agent-1.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/workflows/run-1/agent-2.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/workflows/run-1/agent-2"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/agent-3",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-3"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/tasks/notes",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "tasks/notes"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/x.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.txt",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/a/b.txt",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a/b.txt"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": ""
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000.jsonl"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/a/b.jsonl.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a/b.jsonl"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/a/.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a/"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/a/b/c/d/e.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a/b/c/d/e"
+   }
+  },
+  {
+   "file_path": "/other/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects2/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/../escape.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/../../escape/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/p1/../p2/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "p2",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/./proj/./123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/./subagents/./agent-1.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/../subagents/agent-1.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/../../x/agent-1.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects//proj//123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents//agent-1.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl/",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/agent-1.jsonl/",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/..",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/..",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/..",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/../..",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/../../agent-1.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "agent-1"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects/",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects//",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects/.",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/./projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/other/../projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects/..",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects/proj",
+   "key": null
+  },
+  {
+   "file_path": "/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/proj/123e4567-e89b-42d3-a456-426614174000/subagents/agent-1.jsonl",
+   "projects_dir": "/",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "/a/b/c.jsonl",
+   "projects_dir": "/a",
+   "key": {
+    "project_key": "b",
+    "session_id": "c"
+   }
+  },
+  {
+   "file_path": "rel/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/agent-1.jsonl",
+   "projects_dir": "rel/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "./rel/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "./rel/./projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel/other/../projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel/projects/",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "$CWD/rel/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "$CWD/rel/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/agent-1.jsonl",
+   "projects_dir": "$CWD/rel/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "$CWD/rel/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "$CWD/rel/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel/other/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel/projects",
+   "key": null
+  },
+  {
+   "file_path": "../x/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "../x",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "../x/proj/123e4567-e89b-42d3-a456-426614174000/subagents/agent-1.jsonl",
+   "projects_dir": "../x",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "../x/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "../y",
+   "key": null
+  },
+  {
+   "file_path": "proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": ".",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "proj/123e4567-e89b-42d3-a456-426614174000/subagents/agent-1.jsonl",
+   "projects_dir": ".",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "./proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": ".",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "",
+   "key": null
+  },
+  {
+   "file_path": "",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "",
+   "projects_dir": "",
+   "key": null
+  },
+  {
+   "file_path": "proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "$CWD",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "$CWD/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": ".",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "$CWD/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "$CWD/.",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel",
+   "key": null
+  },
+  {
+   "file_path": "rel/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "./rel",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects\\proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents\\agent-1.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/a/b\\c.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a/b\\c"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/a\\..\\x/y.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a\\..\\x/y"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/a/..\\x/y.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a/..\\x/y"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/.\\a/b.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": ".\\a/b"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000\\a/b/c.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000\\a",
+    "subpath": "b/c"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\sessions\\projects",
+   "key": null
+  },
+  {
+   "file_path": "\\sessions\\projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\sessions\\projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel\\projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel\\projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/..\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "..\\123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/con/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "con",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/con.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "con"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/line\nbreak.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "line\nbreak"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/nul.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/nul"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/con/aux.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "con/aux"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj /123e4567-e89b-42d3-a456-426614174000 .jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj ",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000 "
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj./123e4567-e89b-42d3-a456-426614174000./a./b.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj.",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000.",
+    "subpath": "a./b"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/pro:j/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "pro:j",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/a:b/c?d.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a:b/c?d"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/%2e%2e/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": null
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/é中.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/é中"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/é/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "é",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/not-a-uuid.jsonl",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "not-a-uuid"
+   }
+  },
+  {
+   "file_path": "/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/agent-1.JSONL",
+   "projects_dir": "/sessions/projects",
+   "key": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1.JSONL"
+   }
+  }
+ ]
+}

@@ -1,0 +1,424 @@
+{
+ "note": "Captured by driving the real upstream resume code with an in-memory store whose list_subkeys returns one subpath and whose load returns one transcript entry, in a throwaway directory on POSIX. TypeScript: the real sdk.mjs Jtt (listSubkeys materialization and its unsafe subpath guard) and Qe (session id check). Python 0.2.181: the real claude_agent_sdk._internal.session_resume._materialize_subkeys (with _is_safe_subpath) and _validate_uuid. Each file list is the transcript files written, relative to the session directory; an empty list means the subpath was skipped. For session ids, true means accepted.",
+ "session_ids": [
+  {
+   "session_id": "123e4567-e89b-42d3-a456-426614174000",
+   "typescript": true,
+   "python": true
+  },
+  {
+   "session_id": "123E4567-E89B-42D3-A456-426614174000",
+   "typescript": true,
+   "python": true
+  },
+  {
+   "session_id": "123e4567-e89b-42d3-a456-426614174000\n",
+   "typescript": false,
+   "python": true
+  },
+  {
+   "session_id": "123e4567-e89b-42d3-a456-42661417400",
+   "typescript": false,
+   "python": false
+  },
+  {
+   "session_id": "123e4567-e89b-42d3-a456-4266141740000",
+   "typescript": false,
+   "python": false
+  },
+  {
+   "session_id": " 123e4567-e89b-42d3-a456-426614174000",
+   "typescript": false,
+   "python": false
+  },
+  {
+   "session_id": "123e4567-e89b-42d3-a456-426614174000 ",
+   "typescript": false,
+   "python": false
+  },
+  {
+   "session_id": "../123e4567-e89b-42d3-a456-426614174000",
+   "typescript": false,
+   "python": false
+  },
+  {
+   "session_id": "123e4567-e89b-42d3-a456-426614174000/..",
+   "typescript": false,
+   "python": false
+  },
+  {
+   "session_id": "not-a-uuid",
+   "typescript": false,
+   "python": false
+  },
+  {
+   "session_id": "",
+   "typescript": false,
+   "python": false
+  },
+  {
+   "session_id": "123e4567e89b42d3a456426614174000",
+   "typescript": false,
+   "python": false
+  },
+  {
+   "session_id": "123e4567-e89b-42d3-a456-42661417400g",
+   "typescript": false,
+   "python": false
+  },
+  {
+   "session_id": "123e4567-e89b-42d3-a456-426614174000\u0000",
+   "typescript": false,
+   "python": false
+  }
+ ],
+ "subpaths": [
+  {
+   "subpath": "subagents/agent-1",
+   "typescript": [
+    "subagents/agent-1.jsonl"
+   ],
+   "python": [
+    "subagents/agent-1.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "subagents/workflows/run-1/agent-2",
+   "typescript": [
+    "subagents/workflows/run-1/agent-2.jsonl"
+   ],
+   "python": [
+    "subagents/workflows/run-1/agent-2.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "agent",
+   "typescript": [
+    "agent.jsonl"
+   ],
+   "python": [
+    "agent.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "a b/c d",
+   "typescript": [
+    "a b/c d.jsonl"
+   ],
+   "python": [
+    "a b/c d.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "",
+   "typescript": [],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "/abs",
+   "typescript": [],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "\\abs",
+   "typescript": [
+    "\\abs.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "\\\\server\\share\\x",
+   "typescript": [
+    "\\\\server\\share\\x.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "C:agent",
+   "typescript": [
+    "C:agent.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "C:\\agent",
+   "typescript": [
+    "C:\\agent.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "c:/agent",
+   "typescript": [
+    "c:/agent.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "./agent",
+   "typescript": [
+    "agent.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "subagents/./agent",
+   "typescript": [
+    "subagents/agent.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "subagents/.",
+   "typescript": [
+    "subagents/..jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": ".",
+   "typescript": [
+    "..jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "..",
+   "typescript": [],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "../escape",
+   "typescript": [],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "subagents/../agent",
+   "typescript": [],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "subagents/../../escape",
+   "typescript": [],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "subagents\\..\\agent",
+   "typescript": [],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "..\\escape",
+   "typescript": [],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "subagents/..",
+   "typescript": [],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "a//b",
+   "typescript": [
+    "a/b.jsonl"
+   ],
+   "python": [
+    "a/b.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "a/",
+   "typescript": [
+    "a/.jsonl"
+   ],
+   "python": [
+    "a.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "a\\b",
+   "typescript": [
+    "a\\b.jsonl"
+   ],
+   "python": [
+    "a\\b.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "a/b/",
+   "typescript": [
+    "a/b/.jsonl"
+   ],
+   "python": [
+    "a/b.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": ".hidden",
+   "typescript": [
+    ".hidden.jsonl"
+   ],
+   "python": [
+    ".hidden.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "...",
+   "typescript": [
+    "....jsonl"
+   ],
+   "python": [
+    "....jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "a/.../b",
+   "typescript": [
+    "a/.../b.jsonl"
+   ],
+   "python": [
+    "a/.../b.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "x\u0000y",
+   "typescript": [],
+   "python": [],
+   "typescript_write_fails": true,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "con/aux",
+   "typescript": [
+    "con/aux.jsonl"
+   ],
+   "python": [
+    "con/aux.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "a:b",
+   "typescript": [
+    "a:b.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "%2e%2e/x",
+   "typescript": [
+    "%2e%2e/x.jsonl"
+   ],
+   "python": [
+    "%2e%2e/x.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "é/中",
+   "typescript": [
+    "é/中.jsonl"
+   ],
+   "python": [
+    "é/中.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "a\nb",
+   "typescript": [
+    "a\nb.jsonl"
+   ],
+   "python": [
+    "a\nb.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": " ",
+   "typescript": [
+    " .jsonl"
+   ],
+   "python": [
+    " .jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "a/ /b",
+   "typescript": [
+    "a/ /b.jsonl"
+   ],
+   "python": [
+    "a/ /b.jsonl"
+   ],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  }
+ ]
+}

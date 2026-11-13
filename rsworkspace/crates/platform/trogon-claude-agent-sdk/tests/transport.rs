@@ -375,7 +375,7 @@ async fn t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirro
     store
         .inner
         .append(
-            &SessionKey::new(project.clone(), resumed.clone())?,
+            &SessionKey::new(project.clone(), resumed.clone()),
             &[SessionEntry::new(earlier)],
         )
         .await?;
@@ -415,7 +415,7 @@ async fn t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirro
     }
     let mirrored = store
         .inner
-        .load(&SessionKey::new(project, SessionId::from("scripted-session"))?)
+        .load(&SessionKey::new(project, SessionId::from("scripted-session")))
         .await?;
     assert_eq!(mirrored.map(|entries| entries.len()), Some(1));
     client.disconnect().await?;

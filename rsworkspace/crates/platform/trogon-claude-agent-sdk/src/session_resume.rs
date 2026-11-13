@@ -179,7 +179,7 @@ impl<F: SessionFileSystem> SessionRuntime<F> {
         let resolved = match resume {
             StoreResume::None => None,
             StoreResume::Session(id) => {
-                if is_uuid(&id) {
+                if is_uuid(&id, ts) {
                     load_candidate(options, &project, id).await?
                 } else {
                     tracing::debug!("resume id is not a UUID; passing it to the CLI without materializing");
@@ -252,7 +252,7 @@ async fn load_candidate(
     project: &SessionProjectKey,
     id: SessionId,
 ) -> Result<Option<(SessionId, Vec<SessionEntry>)>, SessionError> {
-    let key = SessionKey::new(project.clone(), id.clone())?;
+    let key = SessionKey::new(project.clone(), id.clone());
     let entries = timeout(options.limits.load_timeout.as_duration(), options.store.load(&key))
         .await
         .map_err(|_| {
@@ -288,7 +288,7 @@ async fn latest_candidate(
     }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.modified_at_ms));
     for session in sessions {
-        if !is_uuid(&session.session_id) {
+        if !is_uuid(&session.session_id, false) {
             continue;
         }
         let Some((id, entries)) = load_candidate(options, project, session.session_id).await? else {
@@ -330,7 +330,7 @@ async fn latest_candidate_ts(
     let Some(first) = sessions.into_iter().next() else {
         return Ok(None);
     };
-    if !is_uuid(&first.session_id) {
+    if !is_uuid(&first.session_id, true) {
         return Ok(None);
     }
     load_candidate(options, project, first.session_id).await
@@ -361,8 +361,16 @@ fn byte_budget(options: &SessionStoreOptions, used: usize) -> usize {
         .map_or(usize::MAX, |limit| limit.get().saturating_sub(used))
 }
 
-fn is_uuid(id: &SessionId) -> bool {
-    id.as_str().len() == 36 && uuid::Uuid::parse_str(id.as_str()).is_ok()
+/// Upstream's session id check: TypeScript `Qe` tests `^...$` with a JavaScript regex, where `$` ends the text.
+/// Python's `_validate_uuid` uses `re.match` with the same pattern, where `$` also matches before a final newline.
+fn is_uuid(id: &SessionId, ts: bool) -> bool {
+    let text = id.as_str();
+    let text = if ts {
+        text
+    } else {
+        text.strip_suffix('\n').unwrap_or(text)
+    };
+    text.len() == 36 && uuid::Uuid::parse_str(text).is_ok()
 }
 
 fn caller_config_dir<E: EnvironmentVariable>(
@@ -515,7 +523,7 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
 
     async fn materialize_subkeys(&mut self, project_dir: &Path) -> Result<(), SessionError> {
         let options = self.store_options;
-        let key = SessionKey::new(self.project.clone(), self.id.clone())?;
+        let key = SessionKey::new(self.project.clone(), self.id.clone());
         let subpaths = timeout(
             options.limits.load_timeout.as_duration(),
             options.store.list_subkeys(&key),
@@ -546,9 +554,9 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
             }
             let subpath = if self.ts {
                 // `Jtt` writes every subpath its check above lets through, `./agent` and `C:agent` included.
-                SessionSubpath::listed_by_typescript(subpath)
+                SessionSubpath::new(subpath)
             } else {
-                match SessionSubpath::new(subpath) {
+                match SessionSubpath::checked(subpath) {
                     Ok(subpath) => subpath,
                     Err(error) => {
                         tracing::warn!(%error, "skipping unsafe subpath from list_subkeys");
@@ -657,12 +665,12 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
     }
 }
 
-/// Upstream TypeScript `Jtt` safety check: a subpath must be non-empty, relative, free of `..` segments and resolve
-/// inside the session directory.
+/// Upstream TypeScript `Jtt` safety check: a subpath must be non-empty, not absolute on the host (so a leading
+/// backslash is an ordinary character on POSIX), free of `..` segments and resolve inside the session directory.
 fn unsafe_subpath_ts(subpath: &str, session_dir: &Path) -> bool {
     if subpath.is_empty()
         || Path::new(subpath).is_absolute()
-        || subpath.starts_with(['/', '\\'])
+        || (cfg!(windows) && subpath.starts_with(['/', '\\']))
         || subpath.split(['/', '\\']).any(|segment| segment == "..")
     {
         return true;

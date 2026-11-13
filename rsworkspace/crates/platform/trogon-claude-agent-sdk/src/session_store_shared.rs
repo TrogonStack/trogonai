@@ -75,8 +75,8 @@ impl Default for ImportOptions {
     }
 }
 
-pub(crate) fn main_key(project: SessionProjectKey, session_id: &str) -> Result<SessionKey, SessionStoreHelperError> {
-    Ok(SessionKey::new(project, SessionId::from(session_id))?)
+pub(crate) fn main_key(project: SessionProjectKey, session_id: &str) -> SessionKey {
+    SessionKey::new(project, SessionId::from(session_id))
 }
 
 pub(crate) fn invalid_session(session_id: &str) -> SessionStoreHelperError {
