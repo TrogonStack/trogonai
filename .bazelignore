@@ -3,4 +3,5 @@
 .trogonai
 docs/node_modules
 rsworkspace/target
+projects/hydro-verification/target
 tsworkspace/node_modules
