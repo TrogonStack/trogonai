@@ -87,6 +87,7 @@ mod static_tenant_owners;
 mod tenant_account;
 mod tenant_owners;
 mod throttled_answer;
+mod toml_syntax;
 mod writer_release_audit;
 mod xkey_sealer;
 
@@ -131,5 +132,6 @@ pub use static_release_policies::StaticReleasePolicies;
 pub use static_tenant_owners::StaticTenantOwners;
 pub use tenant_account::{TenantAccount, TenantAccountError};
 pub use tenant_owners::TenantOwners;
+pub use toml_syntax::TomlSyntax;
 pub use writer_release_audit::WriterReleaseAudit;
 pub use xkey_sealer::{XkeySealer, XkeySealerError};
