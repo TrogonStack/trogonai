@@ -1,8 +1,10 @@
+use std::num::NonZeroU16;
+
 use buffa::EnumValue;
 use trogon_audit::{Obligation, Stamper};
 use trogon_credential_domain::{
     AuditCorrelationId, CredentialIdentity, CredentialKey, CredentialKind, CredentialOwnerId, CredentialScope,
-    InjectionLocation, RuntimeReleaseDeniedError, RuntimeServiceId, SourceKind,
+    InjectionLocation, ReleaseHost, RuntimeReleaseDeniedError, RuntimeServiceId, SourceKind,
 };
 use trogon_std::time::SystemClock;
 use trogon_std::uuid::UuidV7Generator;
@@ -12,7 +14,7 @@ use trogonai_proto::platform::audit::v1::{AuditDecision, CredentialUseKind, Gate
 
 use super::*;
 use crate::fixtures::{CORRELATION_ID, OWNER, RUNTIME_SERVICE, identity, request, tenant};
-use crate::{DenialReason, ReleaseRequest, RequesterXkey};
+use crate::{DenialReason, ReleaseDestination, ReleaseRequest, RequesterXkey};
 
 fn stamp() -> Stamp {
     Stamper::new(SystemClock, UuidV7Generator).stamp()
@@ -84,6 +86,29 @@ fn the_widest_names_a_release_request_holds_are_recordable_as_a_release_and_a_de
             assert_eq!(record.message().request_id.as_deref(), Some(correlation_id.as_str()));
         }
     }
+}
+
+#[test]
+fn a_destination_too_long_to_name_is_recorded_as_the_egress_proxy_records_it() {
+    let labels = ["a", "b", "c"].map(|label| label.repeat(63));
+    let host = ReleaseHost::new(format!("{}.{}", labels.join("."), "d".repeat(61))).unwrap();
+    assert_eq!(host.as_str().len(), 253);
+    let base = request(&tenant());
+    let request = ReleaseRequest::new(
+        base.tenant().clone(),
+        base.runtime_service().clone(),
+        base.credential().clone(),
+        ReleaseDestination::new(host, NonZeroU16::MAX),
+        base.location().clone(),
+        base.correlation_id().clone(),
+    );
+
+    let release = release_record(&release_of(request), stamp()).unwrap();
+
+    let Some(Detail::CredentialUse(usage)) = release.message().detail.as_ref() else {
+        panic!("not a credential use: {:?}", release.message().detail);
+    };
+    assert_eq!(usage.destination.as_deref(), Some("destination_too_long"));
 }
 
 #[test]

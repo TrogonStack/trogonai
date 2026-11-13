@@ -8,6 +8,7 @@ use trogon_audit::{
 use trogon_credential_aggregate::credential_project_token;
 use trogon_credential_domain::CredentialKey;
 
+use super::constants::DESTINATION_TOO_LONG_NAME;
 use super::{DenialRecord, ReleaseAuditRecordError, ReleaseRecord, ReleaseRequest};
 
 /// The must-audit credential use of a release, written before the value is
@@ -19,7 +20,10 @@ pub(crate) fn release_record(record: &ReleaseRecord, stamp: Stamp) -> Result<Rec
     // policy binds it to the runtime service, destination and location, so the
     // credential's name is the binding.
     let mut facts = CredentialFacts::new(CredentialTerminal::Release, credential.clone(), credential);
-    facts.destination = Some(name("destination", request.destination().to_string())?);
+    facts.destination = Some(
+        AuditName::new(request.destination().to_string())
+            .or_else(|_| name("destination", DESTINATION_TOO_LONG_NAME))?,
+    );
     facts.location = Some(name("location", request.location().to_string())?);
     Ok(Record::credential_use(scope(request)?, facts, stamp))
 }
