@@ -47,16 +47,65 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
     }
 }
 
-pub(crate) async fn drain_stderr<R: AsyncRead + Unpin>(
+#[cfg(test)]
+pub(crate) async fn drain_stderr<R: AsyncRead + Unpin>(reader: R, limit: usize) -> Result<StderrTail, std::io::Error> {
+    drain_stderr_with(reader, limit, None).await
+}
+
+fn deliver(handler: &crate::StderrHandler, text: &str) {
+    // A failing callback must not break the stream, as in both upstream SDKs.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (handler.callback)(text)));
+}
+
+fn deliver_lines(handler: &crate::StderrHandler, pending: &mut Vec<u8>, flush: bool) {
+    while let Some(position) = pending.iter().position(|byte| *byte == b'\n') {
+        let line: Vec<u8> = pending.drain(..=position).collect();
+        deliver_line(handler, &line);
+    }
+    if flush && !pending.is_empty() {
+        let line = std::mem::take(pending);
+        deliver_line(handler, &line);
+    }
+}
+
+fn deliver_line(handler: &crate::StderrHandler, line: &[u8]) {
+    let text = String::from_utf8_lossy(line);
+    let trimmed = text.trim_end();
+    if !trimmed.is_empty() {
+        deliver(handler, trimmed);
+    }
+}
+
+pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
     mut reader: R,
     limit: usize,
+    handler: Option<crate::StderrHandler>,
 ) -> Result<StderrTail, std::io::Error> {
     let mut tail = Vec::with_capacity(limit.min(8192));
+    let mut pending = Vec::new();
     let mut chunk = [0_u8; 8192];
     loop {
         let count = reader.read(&mut chunk).await?;
         if count == 0 {
+            if let Some(handler) = &handler
+                && handler.delivery == crate::StderrDelivery::Lines
+            {
+                deliver_lines(handler, &mut pending, true);
+            }
             return Ok(StderrTail(tail));
+        }
+        if let Some(handler) = &handler {
+            match handler.delivery {
+                crate::StderrDelivery::Chunks => deliver(handler, &String::from_utf8_lossy(&chunk[..count])),
+                crate::StderrDelivery::Lines => {
+                    pending.extend_from_slice(&chunk[..count]);
+                    deliver_lines(handler, &mut pending, false);
+                    // Python flushes a partial line once it exceeds the buffer limit.
+                    if pending.len() > limit {
+                        deliver_lines(handler, &mut pending, true);
+                    }
+                }
+            }
         }
         if count >= limit {
             tail.clear();

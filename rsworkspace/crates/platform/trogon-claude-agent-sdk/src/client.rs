@@ -51,6 +51,17 @@ impl ClaudeSdkClient {
         P: crate::adapters::SpawnProcess<Error = std::io::Error>,
         F: crate::adapters::SessionFileSystem,
     {
+        let inherited: crate::environment_plan::Inherited = crate::environment_plan::INHERITED_KEYS
+            .iter()
+            .filter_map(|key| {
+                let key = std::ffi::OsString::from(*key);
+                adapters.environment.var_os(&key).map(|value| (key, value))
+            })
+            .collect();
+        let cli_path = match options.cli_path.clone() {
+            Some(path) => path,
+            None => crate::cli_discovery::discover(&inherited, &adapters.filesystem, cfg!(windows))?,
+        };
         let session = if let Some(store_options) = &options.session_store {
             let mut store_options = store_options.clone();
             if let Some((_, directory)) = options
@@ -120,6 +131,8 @@ impl ClaudeSdkClient {
             shutdown: shutdown_rx,
             terminal: terminal_tx,
             process: &adapters.process,
+            cli_path,
+            inherited,
         })?;
         let mut runtime = ClientRuntime {
             handle,

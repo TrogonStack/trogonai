@@ -83,7 +83,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path selects the native CLI command at startup; Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity."
+      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity."
     },
     {
       "id": "permission-modes",

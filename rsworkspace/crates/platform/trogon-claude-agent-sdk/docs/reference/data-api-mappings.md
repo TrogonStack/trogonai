@@ -57,3 +57,18 @@ integrity-verified published `0.3.319` declaration archive.
 | `SessionStoreHelperError` | Python `ValueError` / `FileNotFoundError` plus store failures | Wraps `SessionMutationError`, `SessionStoreError`, key errors, unsupported-store capability and import I/O or JSON failures. |
 | `SessionStoreFlush` | Python `session_store_flush` / TypeScript `sessionStoreFlush` | `Batched` (default) flushes on a result or past the pending limits; `Eager` appends every frame as it is read. |
 | `MirrorSizeEstimate` | Pending-frame size heuristic of each upstream batcher | `TypeScript` (default) counts UTF-16 units of compact JSON; `Python` counts `json.dumps` characters with ASCII escaping. |
+
+## Process launch options
+
+| Rust field | Python equivalent | TypeScript equivalent |
+| --- | --- | --- |
+| `argv_style: ArgvStyle` | `subprocess_cli.py` argv shape | `sdk.mjs` argv shape (default) |
+| `environment_mode: EnvironmentMode` | env overlay (default) | `env` replace/inherit |
+| `claude_code_marker: ClaudeCodeMarker` | removes `CLAUDECODE` | keeps inherited value |
+| `entrypoint: Option<String>` | `CLAUDE_CODE_ENTRYPOINT` | `CLAUDE_CODE_ENTRYPOINT` |
+| `client_app: Option<String>` | `CLAUDE_AGENT_SDK_CLIENT_APP` | `CLAUDE_AGENT_SDK_CLIENT_APP` |
+| `trace_context: Option<TraceContext>` | `TRACEPARENT`, `TRACESTATE` | `TRACEPARENT`, `TRACESTATE` |
+| `stderr_handler: Option<StderrHandler>` | `stderr` callback (lines) | `stderr` callback (chunks) |
+| `extra_args: Vec<ExtraArgument>` | `extra_args` | `extraArgs` |
+| `script_runtime: ScriptRuntime` | not applicable | `executable`, `executableArgs` |
+| `run_as_uid: Option<u32>` | not applicable | `spawn` `uid` |

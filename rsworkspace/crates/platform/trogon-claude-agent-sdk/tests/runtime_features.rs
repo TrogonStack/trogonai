@@ -131,7 +131,7 @@ fn blocking_hook() -> HookRegistration {
             })))
         })],
         timeout: None,
-        on_failure: HookFailureMode::Block,
+        on_failure: Some(HookFailureMode::Block),
     }
 }
 
@@ -449,7 +449,7 @@ async fn duplicate_id_does_not_settle_undeclared_dialog() -> TestResult {
 async fn s06_continue_hooks_tolerate_a_session_that_did_not_apply_them() -> TestResult {
     let mut options = options("hook-not-applied")?;
     let mut hook = blocking_hook();
-    hook.on_failure = HookFailureMode::Continue;
+    hook.on_failure = Some(HookFailureMode::Continue);
     options.hooks = vec![hook];
     let client = ClaudeSdkClient::connect(options).await?;
     client.disconnect().await?;
@@ -460,7 +460,7 @@ async fn s06_continue_hooks_tolerate_a_session_that_did_not_apply_them() -> Test
 async fn continue_hook_does_not_require_blocking_failure_capability() -> TestResult {
     let mut options = options("hook-unsupported")?;
     let mut hook = blocking_hook();
-    hook.on_failure = HookFailureMode::Continue;
+    hook.on_failure = Some(HookFailureMode::Continue);
     options.hooks = vec![hook];
     let client = ClaudeSdkClient::connect(options).await?;
     client.disconnect().await?;

@@ -27,7 +27,7 @@ fn matcher_seconds_and_async_milliseconds_are_distinct() -> Result<(), Box<dyn s
         matcher: None,
         callbacks: Vec::new(),
         timeout: Some(timeout),
-        on_failure: HookFailureMode::Block,
+        on_failure: Some(HookFailureMode::Block),
     };
     assert_eq!(registration.to_wire_json(&[])?["timeout"], 1.5);
     assert_eq!(

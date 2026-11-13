@@ -297,7 +297,7 @@ fn callback_configuration_debug_reports_structure_without_callback_or_input_deta
         matcher: Some("fixture-private-matcher".into()),
         callbacks: Vec::new(),
         timeout: None,
-        on_failure: HookFailureMode::Continue,
+        on_failure: Some(HookFailureMode::Continue),
     };
     assert_eq!(
         registration.to_wire_json(&["callback-one".into()])?,

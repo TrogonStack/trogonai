@@ -258,7 +258,7 @@ async fn s13_empty_hooks_are_ignored_and_hook_callback_count_is_unbounded() -> T
         matcher: None,
         callbacks: vec![],
         timeout: None,
-        on_failure: HookFailureMode::Continue,
+        on_failure: Some(HookFailureMode::Continue),
     };
     let mut configured = options()?;
     configured.hooks = vec![registration.clone()];
@@ -397,7 +397,7 @@ async fn callback_failures_return_bounded_protocol_fallbacks_without_stopping_co
                     matcher: None,
                     callbacks: vec![Arc::new(|_: HookRequest| async { Err(CallbackError::Cancelled) })],
                     timeout: None,
-                    on_failure: HookFailureMode::Continue,
+                    on_failure: Some(HookFailureMode::Continue),
                 }];
                 (
                     json!({"subtype":"hook_callback","callback_id":"hook_0","input":{}}),

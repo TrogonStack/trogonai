@@ -15,16 +15,15 @@ use tokio::{
 };
 
 use crate::{
-    ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Customizations, Error, JsonObject,
-    Limits, McpDiscovery, Message, PartialMessages, PermissionDecision, ProtocolError, SessionPersistence, StderrTail,
-    SystemPrompt, ToolPermissionHandler, ToolSet,
+    ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
+    PermissionDecision, ProtocolError, StderrTail, SystemPrompt, ToolPermissionHandler,
     adapters::SpawnProcess,
-    framing::{FrameReader, drain_stderr},
+    argv,
+    environment_plan::{self, Inherited},
+    framing::{FrameReader, drain_stderr_with},
     wire::{
         self, ControlResponse, Frame, IncomingControl,
-        runtime_payload::{
-            EmbeddedMcpPayload, HookMatcherPayload, McpConfigPayload, McpResponsePayload, RequestPayload,
-        },
+        runtime_payload::{EmbeddedMcpPayload, HookMatcherPayload, McpResponsePayload, RequestPayload},
     },
 };
 
@@ -258,6 +257,8 @@ where
     next_id: u64,
     state: State,
     run_state: RunState,
+    /// The CLI path until the first `system`/`init` message has been checked, then `None`.
+    version_check: Option<String>,
 }
 
 type MirrorBarrier =
@@ -307,10 +308,10 @@ fn initialize_config(
             .push(HookMatcherPayload {
                 matcher: registration.matcher.as_deref(),
                 callback_ids: ids,
-                on_failure: registration.on_failure.as_str(),
+                on_failure: registration.on_failure.map(crate::HookFailureMode::as_str),
                 timeout: registration.timeout.map(|timeout| timeout.as_duration().as_secs_f64()),
             });
-        blocking |= registration.on_failure == crate::HookFailureMode::Block;
+        blocking |= registration.on_failure == Some(crate::HookFailureMode::Block);
     }
     let agents = if options.agents.is_empty() {
         None
@@ -336,171 +337,72 @@ fn initialize_config(
     } else {
         None
     };
+    // TypeScript delivers the system prompt in the initialize request, Python on the command line.
+    let (system_prompt, append_system_prompt) = match (options.argv_style, &options.system_prompt) {
+        (crate::ArgvStyle::Python, _) => (None, None),
+        (_, SystemPrompt::Empty) => (Some(vec![""]), None),
+        (_, SystemPrompt::Custom(prompt)) => (Some(vec![prompt.as_str()]), None),
+        (_, SystemPrompt::ClaudeCode) => (None, None),
+        (_, SystemPrompt::ClaudeCodeWithAppend(append)) => (None, Some(append.as_str())),
+    };
     let request = RequestPayload::Initialize {
         hooks: (!hooks.is_empty()).then_some(hooks),
         agents,
         supported_dialog_kinds,
+        system_prompt,
+        append_system_prompt,
     }
     .to_value()?;
     Ok((request, callbacks, blocking))
 }
 
-fn command(options: &ClaudeAgentOptions) -> Result<ProcessCommand, Error> {
-    let mut command = ProcessCommand::new(
-        options
-            .cli_path
+const SCRIPT_EXTENSIONS: [&str; 5] = ["js", "mjs", "ts", "tsx", "jsx"];
+
+fn is_script(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|extension| SCRIPT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
+}
+
+/// Builds the child command. A script path runs under `script_runtime.executable` (default `node`), as the
+/// TypeScript SDK does; any other path is the program itself.
+fn command(
+    options: &ClaudeAgentOptions,
+    cli_path: &std::path::Path,
+    inherited: &Inherited,
+) -> Result<ProcessCommand, Error> {
+    let arguments = argv::build(options)?;
+    let mut command = if is_script(cli_path) {
+        let runtime = options
+            .script_runtime
+            .executable
             .as_deref()
-            .unwrap_or_else(|| std::path::Path::new(if cfg!(windows) { "claude.exe" } else { "claude" })),
-    );
-    command.args([
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--input-format",
-        "stream-json",
-        "--permission-prompt-tool",
-        "stdio",
-    ]);
-    match &options.system_prompt {
-        SystemPrompt::Empty => {
-            command.arg("--system-prompt=");
-        }
-        SystemPrompt::Custom(prompt) => {
-            command.arg(format!("--system-prompt={prompt}"));
-        }
-        SystemPrompt::ClaudeCode => {}
-        SystemPrompt::ClaudeCodeWithAppend(prompt) => {
-            command.arg(format!("--append-system-prompt={prompt}"));
-        }
-    }
-    if let Some(model) = &options.model {
-        command.arg(format!("--model={}", model.as_str()));
-    }
-    if let Some(agent) = &options.agent {
-        command.arg(format!("--agent={}", agent.as_str()));
-    }
-    if let Some(budget) = &options.max_budget_usd {
-        command.arg(format!("--max-budget-usd={}", budget.get()));
-    }
-    if let Some(effort) = options.effort {
-        command.arg(format!("--effort={}", effort.as_str()));
-    }
-    if let Some(schema) = &options.output_schema {
-        command.arg(format!(
-            "--json-schema={}",
-            serde_json::Value::Object(schema.as_json().clone())
-        ));
-    }
-    if options.continue_conversation == crate::ContinueConversation::Yes {
-        command.arg("--continue");
-    }
-    if options.fork_session == crate::SessionFork::Fork {
-        command.arg("--fork-session");
-    }
-    for directory in &options.additional_directories {
-        let mut argument = std::ffi::OsString::from("--add-dir=");
-        argument.push(directory);
-        command.arg(argument);
-    }
-    let mut mcp_servers = serde_json::Map::new();
-    for (name, config) in &options.mcp_servers {
-        mcp_servers.insert(
-            name.as_str().to_owned(),
-            config.to_wire_json().map_err(ProtocolError::from)?,
-        );
-    }
-    for name in options.sdk_mcp_servers.keys() {
-        mcp_servers.insert(
-            name.as_str().to_owned(),
-            EmbeddedMcpPayload::Sdk { name: name.as_str() }.to_value()?,
-        );
-    }
-    if !mcp_servers.is_empty() {
-        command.arg(format!(
-            "--mcp-config={}",
-            serde_json::to_string(&McpConfigPayload { servers: mcp_servers }).map_err(ProtocolError::from)?
-        ));
-    }
-    if let Some(turns) = options.max_turns {
-        command.arg(format!("--max-turns={turns}"));
-    }
-    if let ToolSet::Only(tools) = &options.tools {
-        command.arg(format!(
-            "--tools={}",
-            tools.iter().map(|tool| tool.as_str()).collect::<Vec<_>>().join(",")
-        ));
-    }
-    if options.mcp_discovery == McpDiscovery::Disabled {
-        command.arg("--strict-mcp-config");
-    }
-    if options.session_persistence == SessionPersistence::Disabled {
-        command.arg("--no-session-persistence");
-    }
-    if options.customizations == Customizations::Bare {
-        command.arg("--bare");
-    }
-    if !options.allowed_tools.is_empty() {
-        command.arg(format!(
-            "--allowedTools={}",
-            options
-                .allowed_tools
-                .iter()
-                .map(|rule| rule.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        ));
-    }
-    if !options.disallowed_tools.is_empty() {
-        command.arg(format!(
-            "--disallowedTools={}",
-            options
-                .disallowed_tools
-                .iter()
-                .map(|rule| rule.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        ));
-    }
-    if let Some(mode) = options.permission_mode.as_ref().map(crate::PermissionMode::as_str) {
-        command.arg(format!("--permission-mode={mode}"));
-    }
-    if let Some(session) = &options.resume {
-        command.arg(format!("--resume={session}"));
-    }
-    if options.partial_messages == PartialMessages::Include {
-        command.arg("--include-partial-messages");
-    }
-    if let Some(sources) = &options.setting_sources {
-        command.arg(format!(
-            "--setting-sources={}",
-            sources
-                .iter()
-                .map(|source| source.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        ));
-    }
+            .unwrap_or_else(|| std::path::Path::new("node"));
+        let mut command = ProcessCommand::new(runtime);
+        command.args(&options.script_runtime.arguments);
+        command.arg(cli_path);
+        command
+    } else {
+        ProcessCommand::new(cli_path)
+    };
+    command.args(arguments);
     if let Some(cwd) = &options.cwd {
         command.current_dir(cwd);
     }
-    command
-        .envs(options.env.iter().map(|(key, value)| (key, value.expose())))
-        .env_remove("CLAUDECODE");
-    if !options
-        .env
-        .iter()
-        .any(|(key, _)| key.eq_ignore_ascii_case("CLAUDE_CODE_SDK_READS_SESSION_STATE"))
-    {
-        command.env("CLAUDE_CODE_SDK_READS_SESSION_STATE", "1");
+    let plan = environment_plan::plan(options, inherited);
+    if plan.clear {
+        command.env_clear();
     }
-    if options.file_checkpointing == crate::FileCheckpointing::Enabled {
-        if options.session_store.is_some() {
-            return Err(Error::FileCheckpointingWithSessionStore);
-        }
-        command.env("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "true");
+    for name in &plan.remove {
+        command.env_remove(name);
     }
-    if options.session_store.is_some() {
-        command.arg("--session-mirror");
+    command.envs(&plan.set);
+    if options.file_checkpointing == crate::FileCheckpointing::Enabled && options.session_store.is_some() {
+        return Err(Error::FileCheckpointingWithSessionStore);
+    }
+    #[cfg(unix)]
+    if let Some(uid) = options.run_as_uid {
+        command.uid(uid);
     }
     command
         .stdin(Stdio::piped())
@@ -518,6 +420,8 @@ pub(crate) struct SpawnOptions<'a, P, F: crate::adapters::SessionFileSystem> {
     pub shutdown: oneshot::Receiver<()>,
     pub terminal: oneshot::Sender<Result<(), Error>>,
     pub process: &'a P,
+    pub cli_path: std::path::PathBuf,
+    pub inherited: Inherited,
 }
 
 pub(crate) fn spawn<P: SpawnProcess<Error = std::io::Error>, F: crate::adapters::SessionFileSystem>(
@@ -531,19 +435,25 @@ pub(crate) fn spawn<P: SpawnProcess<Error = std::io::Error>, F: crate::adapters:
         shutdown,
         terminal,
         process: process_provider,
+        cli_path,
+        inherited,
     } = input;
     let (initialize_request, hook_callbacks, blocking_hooks) = initialize_config(&options)?;
-    let mut process = command(&options)?;
+    let mut process = command(&options, &cli_path, &inherited)?;
     if let Some(config_dir) = session.as_ref().and_then(|session| session.config_dir.as_ref()) {
         process.env("CLAUDE_CONFIG_DIR", config_dir);
     }
-    crate::cli_path::reject_windows_batch_cli(process.as_std().get_program())?;
+    crate::cli_path::reject_windows_batch_cli(cli_path.as_os_str())?;
     let mut child = process_provider.spawn(&mut process).map_err(Error::Spawn)?;
     let process_id = child.id();
     let stdin = child.stdin.take().ok_or(Error::PipeUnavailable)?;
     let stdout = child.stdout.take().ok_or(Error::PipeUnavailable)?;
     let stderr = child.stderr.take().ok_or(Error::PipeUnavailable)?;
-    let stderr = tokio::spawn(drain_stderr(stderr, options.limits.max_stderr_bytes.get()));
+    let stderr = tokio::spawn(drain_stderr_with(
+        stderr,
+        options.limits.max_stderr_bytes.get(),
+        options.stderr_handler.clone(),
+    ));
     let driver = Driver {
         child,
         stdin: Some(stdin),
@@ -580,6 +490,12 @@ pub(crate) fn spawn<P: SpawnProcess<Error = std::io::Error>, F: crate::adapters:
         next_id: 0,
         state: State::Initializing,
         run_state: RunState::default(),
+        version_check: (!crate::version_check::skip_requested(
+            inherited
+                .get(std::ffi::OsStr::new("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"))
+                .map(|v| v.as_os_str()),
+        ))
+        .then(|| cli_path.display().to_string()),
     };
     Ok((process_id, tokio::spawn(driver.run(terminal))))
 }
@@ -866,6 +782,19 @@ where
                     self.limits.command_queue_capacity.get(),
                     self.limits.message_queue_capacity.get(),
                 );
+                if let Message::System(system) = &message
+                    && system.subtype == "init"
+                    && let Some(cli_path) = self.version_check.take()
+                    && let Some(warning) = crate::version_check::unreported_version_warning(
+                        system
+                            .data
+                            .get("claude_code_version")
+                            .and_then(serde_json::Value::as_str),
+                        &cli_path,
+                    )
+                {
+                    tracing::warn!("{warning}");
+                }
                 self.run_state.observe(&message, queued_limit, task_limit)?;
                 if matches!(message, Message::Result(_)) {
                     self.state = State::Idle;

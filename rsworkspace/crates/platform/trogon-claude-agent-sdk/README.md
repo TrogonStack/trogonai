@@ -169,6 +169,33 @@ docs both describe omission as loading all CLI sources and an empty list as
 disabling filesystem settings. Rust preserves `None`, `Some(vec![])`, and caller
 order when building CLI arguments.
 
+### Process launch
+
+The launch contract is pinned by `tests/golden_argv_env.rs` (argv, environment and
+the stdin `initialize` bytes).
+
+- `ArgvStyle::TypeScript` (default) emits TypeScript `0.3.323` argv: `--flag=value`
+  spelling, upstream flag order, and the system prompt inside the `initialize`
+  request (`systemPrompt` defaults to `[""]`; a preset with an append sends
+  `appendSystemPrompt`). `ArgvStyle::Python` emits Python `0.2.181` argv. The two
+  upstream SDKs disagree, so both are exposed and TypeScript is the default.
+- `EnvironmentMode::Overlay` (default, Python): inherited environment, then
+  `options.env`. `Replace` (TypeScript with `options.env`): only `options.env`
+  plus the SDK defaults. `Inherit` (TypeScript without `options.env`).
+  `CLAUDECODE` is removed unless `ClaudeCodeMarker::Keep` is chosen.
+  `CLAUDE_CODE_ENTRYPOINT` defaults to `sdk-trogon-rs` and is configurable.
+  `CLAUDE_CODE_SDK_READS_SESSION_STATE=1` is added unless a case-insensitive match
+  exists; the inherited check covers only the variable names the SDK captures.
+- `McpDiscovery` defaults to `CliDefault`; `--strict-mcp-config` is emitted only for
+  the explicit `Disabled` opt-in. `--permission-prompt-tool stdio` is sent only
+  when a tool permission handler exists. `HookRegistration::on_failure` is an
+  `Option` and the wire field is omitted when unset.
+- Without `cli_path`, the CLI is discovered in Python's order (no bundled binary
+  exists in this crate); a miss is `CliNotFoundError` with Python's hint text.
+- Not yet supported: `--await-initialize`, remote `--sdk-url` transports, the
+  bundled/musl binary lookup, run-as by user name (only `run_as_uid`), and
+  `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` derivation.
+
 Model strings and paths are stored without extra identifier restrictions.
 `env` values are `ConfigValue`s, which convert from strings as `Sensitive`;
 debug output lists every variable name, shows values the caller marks `Plain`,
