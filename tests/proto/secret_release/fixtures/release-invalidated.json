@@ -1,0 +1,128 @@
+{
+  "templates": {
+    "notice": {
+      "type": "trogonai.secrets.exchange.v1alpha1.ReleaseInvalidated",
+      "payload": {
+        "credential": {
+          "credentialId": "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b",
+          "ownerId": "project-alpha"
+        },
+        "reason": "RELEASE_INVALIDATION_REASON_ROTATED",
+        "occurredAt": "2026-11-13T00:00:00Z",
+        "sourceSequence": "42"
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "notice rejects an unspecified reason",
+      "template": "notice",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reason",
+          "value": "RELEASE_INVALIDATION_REASON_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "notice rejects an undefined reason",
+      "template": "notice",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reason",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "must be one of the defined enum values"
+      ]
+    },
+    {
+      "name": "notice rejects source sequence zero",
+      "template": "notice",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/sourceSequence",
+          "value": "0"
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
+      ]
+    },
+    {
+      "name": "notice rejects an occurrence at the epoch",
+      "template": "notice",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/occurredAt",
+          "value": "1970-01-01T00:00:00Z"
+        }
+      ],
+      "violations": [
+        "must be greater than"
+      ]
+    },
+    {
+      "name": "notice rejects an uppercase credential id",
+      "template": "notice",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/credentialId",
+          "value": "3F2B8C1E-5D4A-4E6F-9A7B-1C2D3E4F5A6B"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "notice rejects a dot owner id",
+      "template": "notice",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/ownerId",
+          "value": "."
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "notice reports a rotation",
+      "template": "notice"
+    },
+    {
+      "name": "notice reports a revocation",
+      "template": "notice",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reason",
+          "value": "RELEASE_INVALIDATION_REASON_REVOKED"
+        }
+      ]
+    },
+    {
+      "name": "notice reports a destruction",
+      "template": "notice",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reason",
+          "value": "RELEASE_INVALIDATION_REASON_DESTROYED"
+        }
+      ]
+    }
+  ]
+}

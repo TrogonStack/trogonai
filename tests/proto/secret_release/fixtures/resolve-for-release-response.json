@@ -1,0 +1,133 @@
+{
+  "templates": {
+    "access": {
+      "type": "trogonai.secrets.exchange.v1alpha1.ResolveForReleaseResponse",
+      "payload": {
+        "access": {
+          "xkeySealedValue": "AQID",
+          "bundleGeneration": "0",
+          "validUntil": "2026-11-13T00:05:00Z"
+        }
+      }
+    },
+    "failure": {
+      "type": "trogonai.secrets.exchange.v1alpha1.ResolveForReleaseResponse",
+      "payload": {
+        "failure": {
+          "category": "RESOLVE_FAILURE_CATEGORY_DENIED"
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "response rejects a reply with no result",
+      "template": "failure",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/failure"
+        }
+      ],
+      "violations": [
+        "exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "response rejects reconnect required",
+      "template": "failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/failure/category",
+          "value": "RESOLVE_FAILURE_CATEGORY_RECONNECT_REQUIRED"
+        }
+      ],
+      "violations": [
+        "a release never asks for a reconnect or reports a pending refresh"
+      ]
+    },
+    {
+      "name": "response rejects refresh pending",
+      "template": "failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/failure/category",
+          "value": "RESOLVE_FAILURE_CATEGORY_REFRESH_PENDING"
+        }
+      ],
+      "violations": [
+        "a release never asks for a reconnect or reports a pending refresh"
+      ]
+    },
+    {
+      "name": "response carries sealed access",
+      "template": "access"
+    },
+    {
+      "name": "response carries a uniform denial",
+      "template": "failure"
+    },
+    {
+      "name": "response carries key denied",
+      "template": "failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/failure/category",
+          "value": "RESOLVE_FAILURE_CATEGORY_KEY_DENIED"
+        }
+      ]
+    },
+    {
+      "name": "response carries unavailable",
+      "template": "failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/failure/category",
+          "value": "RESOLVE_FAILURE_CATEGORY_UNAVAILABLE"
+        }
+      ]
+    },
+    {
+      "name": "response carries an integrity failure",
+      "template": "failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/failure/category",
+          "value": "RESOLVE_FAILURE_CATEGORY_INTEGRITY_FAILURE"
+        }
+      ]
+    },
+    {
+      "name": "response carries throttled with a retry delay",
+      "template": "failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/failure/category",
+          "value": "RESOLVE_FAILURE_CATEGORY_THROTTLED"
+        },
+        {
+          "op": "add",
+          "path": "/failure/retryAfter",
+          "value": "2s"
+        }
+      ]
+    },
+    {
+      "name": "response carries internal",
+      "template": "failure",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/failure/category",
+          "value": "RESOLVE_FAILURE_CATEGORY_INTERNAL"
+        }
+      ]
+    }
+  ]
+}
