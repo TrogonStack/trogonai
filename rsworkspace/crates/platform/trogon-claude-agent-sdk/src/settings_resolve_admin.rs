@@ -9,10 +9,12 @@ use crate::{
     constants::{
         AVAILABLE_MODELS_KEY, AWS_CREDENTIAL_VARIABLES, AWS_PAIR_FIELDS, AWS_PAIR_SUPPRESSOR_PREFIX, AWS_PAIRS_KEY,
         LOWER_TIER_DROPPED_PATHS, LOWER_TIER_REPLACED_KEYS, LOWER_TIER_STRIPPED_KEYS, MANAGED_SOURCES_BEHAVIOR_KEY,
-        MODEL_OVERRIDES_KEY, REPLACED_ADMIN_ARRAY_KEYS, REPLACED_ARRAY_KEYS, RESTRICTIVE_RULES, SANDBOX_PLATFORMS_PATH,
-        SHALLOW_MERGED_OBJECT_KEYS, STRICT_PLUGIN_ONLY_KEY,
+        MODEL_OVERRIDES_KEY, REPLACED_ADMIN_ARRAY_KEYS, RESTRICTIVE_RULES, SANDBOX_PLATFORMS_PATH,
+        STRICT_PLUGIN_ONLY_KEY,
     },
+    settings_merge_spec::MergeSpec,
     settings_resolve_values::{SettingsMap, get_path, omit, union_arrays},
+    settings_schema::schema,
 };
 
 /// `Qt` upstream: sets (or, with `None`, removes) the value at `path`, copying each object on the way and pruning
@@ -102,7 +104,8 @@ fn unclaimed_pairs(existing: &[Value], incoming: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-fn merge_value(key: &str, destination: &mut Value, source: &Value) {
+fn merge_value(rules: &MergeSpec, key: &str, destination: &mut Value, source: &Value) {
+    let listed = |keys: &[String]| keys.iter().any(|listed| listed == key);
     if REPLACED_ADMIN_ARRAY_KEYS.contains(&key) || LOWER_TIER_REPLACED_KEYS.contains(&key) {
         let next = match (key == AWS_PAIRS_KEY, &*destination, source) {
             (true, Value::Array(existing), Value::Array(incoming)) => {
@@ -115,25 +118,25 @@ fn merge_value(key: &str, destination: &mut Value, source: &Value) {
         *destination = next;
         return;
     }
-    if !REPLACED_ARRAY_KEYS.contains(&key)
+    if !listed(&rules.replaced_arrays)
         && let (Value::Array(left), Value::Array(right)) = (&*destination, source)
     {
         let merged = union_arrays(right, left);
         *destination = Value::Array(merged);
         return;
     }
-    if key == "modelPicker" {
+    if listed(&rules.replaced) {
         *destination = source.clone();
         return;
     }
     match (destination, source) {
-        (Value::Object(left), Value::Object(right)) if SHALLOW_MERGED_OBJECT_KEYS.contains(&key) => {
+        (Value::Object(left), Value::Object(right)) if listed(&rules.shallow_objects) => {
             for (name, value) in right {
                 left.insert(name.clone(), value.clone());
             }
         }
         (Value::Array(left), Value::Array(right)) => *left = right.clone(),
-        (Value::Object(left), Value::Object(right)) => merge_tier(left, right),
+        (Value::Object(left), Value::Object(right)) => merge_tier(rules, left, right),
         (Value::Array(_), Value::Object(_)) => {}
         (destination, source) => *destination = source.clone(),
     }
@@ -141,10 +144,10 @@ fn merge_value(key: &str, destination: &mut Value, source: &Value) {
 
 /// `On(destination, source, BP)` upstream: a deep merge where later tiers' arrays come first in a union and the
 /// allow-list keys are replaced whole.
-fn merge_tier(destination: &mut SettingsMap, source: &SettingsMap) {
+fn merge_tier(rules: &MergeSpec, destination: &mut SettingsMap, source: &SettingsMap) {
     for (key, value) in source {
         match destination.get_mut(key) {
-            Some(existing) => merge_value(key, existing, value),
+            Some(existing) => merge_value(rules, key, existing, value),
             None => {
                 destination.insert(key.clone(), value.clone());
             }
@@ -245,11 +248,13 @@ pub(crate) fn build_admin(tiers: &[SettingsMap], merge: bool, demoted: usize, pl
         restrict(&mut admin, &considered);
         return Some(admin);
     }
+    let fallback = MergeSpec::default();
+    let rules = schema().map_or(&fallback, |schema| schema.merge_spec());
     let mut admin = SettingsMap::new();
     for tier in lower.iter().rev() {
-        merge_tier(&mut admin, tier);
+        merge_tier(rules, &mut admin, tier);
     }
-    merge_tier(&mut admin, &top);
+    merge_tier(rules, &mut admin, &top);
     restrict(&mut admin, &considered);
     pin_model_overrides(&mut admin, &considered);
     Some(admin)
