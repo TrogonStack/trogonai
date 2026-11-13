@@ -217,8 +217,8 @@ pub use options::{
 };
 pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{
-    DenialDisposition, McpServerProvenance, PermissionDecision, PermissionFuture, ToolPermissionHandler,
-    ToolPermissionRequest,
+    ComputerFolder, DenialDisposition, MatchedAskRule, McpServerProvenance, PermissionDecision,
+    PermissionDecisionClassification, PermissionFuture, ToolPermissionHandler, ToolPermissionRequest,
 };
 pub use permission_mode::PermissionMode;
 pub use permission_update::{

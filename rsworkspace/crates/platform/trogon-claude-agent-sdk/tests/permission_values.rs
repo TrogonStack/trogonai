@@ -11,8 +11,8 @@ use std::sync::Arc;
 use serde_json::json;
 use trogon_claude_agent_sdk::{
     CancellationToken, ControlRequestId, DenialDisposition, FeatureSupport, JsonObject, PermissionBehavior,
-    PermissionDecision, PermissionMode, PermissionRuleValue, PermissionUpdate, PermissionUpdateDestination, ToolName,
-    ToolPermissionHandler, ToolPermissionRequest,
+    PermissionDecision, PermissionDecisionClassification, PermissionMode, PermissionRuleValue, PermissionUpdate,
+    PermissionUpdateDestination, ToolName, ToolPermissionHandler, ToolPermissionRequest,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -35,6 +35,13 @@ fn request() -> ToolPermissionRequest {
         default_to_no: FeatureSupport::NotReported,
         suppress_always_allow_rule: FeatureSupport::NotReported,
         requires_user_interaction: FeatureSupport::NotReported,
+        decision_reason_type: None,
+        decision_reason_code: None,
+        server_policy_ask_only: FeatureSupport::NotReported,
+        plugin: None,
+        server_prompt: None,
+        computer_folder: None,
+        matched_ask_rule: None,
         additional_fields: JsonObject::new(),
     }
 }
@@ -45,14 +52,32 @@ fn decisions_default_to_unmodified_allow_and_continuing_deny() {
         PermissionDecision::allow(),
         PermissionDecision::Allow {
             updated_input: None,
-            updated_permissions: None
+            updated_permissions: None,
+            decision_classification: None,
         }
     ));
     assert!(matches!(
         PermissionDecision::deny("no"),
-        PermissionDecision::Deny { message, disposition: DenialDisposition::Continue } if message == "no"
+        PermissionDecision::Deny {
+            message,
+            disposition: DenialDisposition::Continue,
+            decision_classification: None,
+        } if message == "no"
     ));
     assert_eq!(DenialDisposition::default(), DenialDisposition::Continue);
+}
+
+#[test]
+fn decision_classifications_are_the_typescript_literals() {
+    assert_eq!(
+        PermissionDecisionClassification::UserTemporary.as_str(),
+        "user_temporary"
+    );
+    assert_eq!(
+        PermissionDecisionClassification::UserPermanent.as_str(),
+        "user_permanent"
+    );
+    assert_eq!(PermissionDecisionClassification::UserReject.as_str(), "user_reject");
 }
 
 #[tokio::test]

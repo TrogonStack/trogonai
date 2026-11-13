@@ -245,6 +245,74 @@ impl PermissionUpdate {
         };
         serde_json::to_value(wire)
     }
+
+    /// Python's `PermissionUpdate.to_dict()`: `type`, then `destination`, then the variant's fields, with
+    /// `ruleContent` written as `null` when a rule has none.
+    pub(crate) fn to_python_wire_json(&self) -> Result<Value, serde_json::Error> {
+        let (kind, destination, fields) = match self {
+            Self::Unknown(value) => return Ok(Value::from(value.clone())),
+            Self::AddRules {
+                rules,
+                behavior,
+                destination,
+            } => ("addRules", destination, python_rules(rules, behavior)?),
+            Self::ReplaceRules {
+                rules,
+                behavior,
+                destination,
+            } => ("replaceRules", destination, python_rules(rules, behavior)?),
+            Self::RemoveRules {
+                rules,
+                behavior,
+                destination,
+            } => ("removeRules", destination, python_rules(rules, behavior)?),
+            Self::SetMode { mode, destination } => ("setMode", destination, vec![("mode", Value::from(mode.as_str()))]),
+            Self::AddDirectories {
+                directories,
+                destination,
+            } => (
+                "addDirectories",
+                destination,
+                vec![("directories", serde_json::to_value(directories)?)],
+            ),
+            Self::RemoveDirectories {
+                directories,
+                destination,
+            } => (
+                "removeDirectories",
+                destination,
+                vec![("directories", serde_json::to_value(directories)?)],
+            ),
+        };
+        let mut object = JsonObject::new();
+        object.insert("type".to_owned(), Value::from(kind));
+        object.insert("destination".to_owned(), serde_json::to_value(destination)?);
+        object.extend(fields.into_iter().map(|(key, value)| (key.to_owned(), value)));
+        Ok(Value::Object(object))
+    }
+}
+
+/// The `rules` and `behavior` fields of Python's rule updates.
+fn python_rules(
+    rules: &[PermissionRuleValue],
+    behavior: &PermissionBehavior,
+) -> Result<Vec<(&'static str, Value)>, serde_json::Error> {
+    let rules = rules
+        .iter()
+        .map(|rule| {
+            let mut value = JsonObject::new();
+            value.insert("toolName".to_owned(), Value::from(rule.tool_name.as_str()));
+            value.insert(
+                "ruleContent".to_owned(),
+                rule.rule_content.clone().map_or(Value::Null, Value::from),
+            );
+            Value::Object(value)
+        })
+        .collect();
+    Ok(vec![
+        ("rules", Value::Array(rules)),
+        ("behavior", serde_json::to_value(behavior)?),
+    ])
 }
 
 #[cfg(test)]

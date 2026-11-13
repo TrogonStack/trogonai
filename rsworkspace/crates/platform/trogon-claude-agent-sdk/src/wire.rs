@@ -33,7 +33,7 @@ pub(crate) enum Frame {
 }
 
 pub(crate) enum IncomingControl {
-    Permission(ToolPermissionRequest),
+    Permission(Box<ToolPermissionRequest>),
     Hook {
         callback_id: String,
         input: JsonObject,
@@ -201,8 +201,48 @@ fn optional_tool_id(value: Option<String>) -> Result<Option<ToolUseId>, Protocol
     Ok(value.map(ToolUseId::from))
 }
 
+/// Takes `key` out of `fields` when `accept` reads it, leaving any other value where it was.
+fn take<T>(fields: &mut JsonObject, key: &str, accept: impl FnOnce(&Value) -> Option<T>) -> Option<T> {
+    let value = fields.get(key).and_then(accept)?;
+    fields.shift_remove(key);
+    Some(value)
+}
+
+fn string(value: &Value) -> Option<String> {
+    value.as_str().map(str::to_owned)
+}
+
+/// TypeScript `computerFolder`: an object with a string `path` and `computer_name`, or nothing.
+fn computer_folder(value: &Value) -> Option<crate::ComputerFolder> {
+    Some(crate::ComputerFolder {
+        path: string(value.get("path")?)?,
+        computer_name: string(value.get("computer_name")?)?,
+    })
+}
+
+/// TypeScript `matchedAskRule`, with `ruleContent` only when the wire carries one.
+fn matched_ask_rule(value: &Value) -> Option<crate::MatchedAskRule> {
+    let rule_content = match value.get("rule_content") {
+        None => None,
+        Some(content) => Some(string(content)?),
+    };
+    Some(crate::MatchedAskRule {
+        source: string(value.get("source")?)?,
+        tool_name: string(value.get("tool_name")?)?,
+        rule_content,
+    })
+}
+
 fn permission_request(data: JsonObject, id: &ControlRequestId) -> Result<ToolPermissionRequest, ProtocolError> {
-    let wire: PermissionRequestWire = decode(data)?;
+    let mut wire: PermissionRequestWire = decode(data)?;
+    let fields = &mut wire.additional_fields;
+    let decision_reason_type = take(fields, "decision_reason_type", string);
+    let decision_reason_code = take(fields, "decision_reason_code", string);
+    let server_policy_ask_only = take(fields, "server_policy_ask_only", Value::as_bool);
+    let plugin = take(fields, "plugin", string);
+    let server_prompt = take(fields, "server_prompt", string);
+    let computer_folder = take(fields, "computer_folder", computer_folder);
+    let matched_ask_rule = take(fields, "matched_ask_rule", matched_ask_rule);
     Ok(ToolPermissionRequest {
         tool_name: ToolName::from(wire.tool_name),
         input: wire.input,
@@ -228,6 +268,13 @@ fn permission_request(data: JsonObject, id: &ControlRequestId) -> Result<ToolPer
         default_to_no: wire.default_to_no.into(),
         suppress_always_allow_rule: wire.suppress_always_allow_rule.into(),
         requires_user_interaction: wire.requires_user_interaction.into(),
+        decision_reason_type,
+        decision_reason_code,
+        server_policy_ask_only: server_policy_ask_only.into(),
+        plugin,
+        server_prompt,
+        computer_folder,
+        matched_ask_rule,
         additional_fields: wire.additional_fields,
     })
 }
@@ -246,7 +293,7 @@ pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<
             let id = ControlRequestId::from(wire.request_id);
             let request = if wire.request.subtype == "can_use_tool" {
                 match permission_request(wire.request.data, &id) {
-                    Ok(request) => IncomingControl::Permission(request),
+                    Ok(request) => IncomingControl::Permission(Box::new(request)),
                     Err(error) => IncomingControl::Malformed(error),
                 }
             } else if wire.request.subtype == "hook_callback" {
@@ -345,32 +392,68 @@ pub(crate) fn control_request(
     .map_err(ProtocolError::from)
 }
 
+/// The `can_use_tool` answer in the dialect's shape, or `None` when the host answered out of band.
+///
+/// TypeScript writes `{...result, toolUseID}` with `updatedInput` only when the handler set it. Python sends the
+/// original input when the handler left it unset and never adds `toolUseID`.
 pub(crate) fn permission_response(
     id: &ControlRequestId,
     input: JsonObject,
+    tool_use_id: Option<&ToolUseId>,
     decision: PermissionDecision,
-) -> Result<Value, ProtocolError> {
+    style: crate::ArgvStyle,
+) -> Result<Option<Value>, ProtocolError> {
+    let typescript = style == crate::ArgvStyle::TypeScript;
+    let tool_use_id = tool_use_id.filter(|_| typescript).map(ToolUseId::as_str);
     let response = match decision {
         PermissionDecision::Allow {
             updated_input,
             updated_permissions,
+            decision_classification,
         } => runtime_payload::PermissionResponsePayload::Allow {
-            updated_input: updated_input.unwrap_or(input),
+            updated_input: if typescript {
+                updated_input
+            } else {
+                Some(updated_input.unwrap_or(input))
+            },
             updated_permissions: updated_permissions
                 .map(|updates| {
                     updates
                         .iter()
-                        .map(crate::PermissionUpdate::to_wire_json)
+                        .map(|update| {
+                            if typescript {
+                                update.to_wire_json()
+                            } else {
+                                update.to_python_wire_json()
+                            }
+                        })
                         .collect::<Result<Vec<_>, _>>()
                 })
                 .transpose()?,
+            decision_classification: decision_classification.map(crate::PermissionDecisionClassification::as_str),
+            tool_use_id,
         },
-        PermissionDecision::Deny { message, disposition } => runtime_payload::PermissionResponsePayload::Deny {
+        PermissionDecision::Deny {
             message,
-            interrupt: disposition == DenialDisposition::Interrupt,
+            disposition,
+            decision_classification,
+        } => runtime_payload::PermissionResponsePayload::Deny {
+            message,
+            interrupt: (disposition == DenialDisposition::Interrupt).then_some(true),
+            decision_classification: decision_classification.map(crate::PermissionDecisionClassification::as_str),
+            tool_use_id,
         },
+        PermissionDecision::AnsweredOutOfBand if typescript => return Ok(None),
+        PermissionDecision::AnsweredOutOfBand => {
+            return callback_error_response(
+                id,
+                "Tool permission callback must return PermissionResult (PermissionResultAllow or PermissionResultDeny), got <class 'NoneType'>",
+            )
+            .map(Some);
+        }
+        PermissionDecision::Failed { message } => return callback_error_response(id, &message).map(Some),
     };
-    success_response(id, response)
+    success_response(id, response).map(Some)
 }
 
 pub(crate) fn success_response<T: Serialize>(id: &ControlRequestId, response: T) -> Result<Value, ProtocolError> {
@@ -388,6 +471,7 @@ pub(crate) fn callback_error_response(id: &ControlRequestId, message: &str) -> R
         response: runtime_payload::CallbackResponse::Error {
             request_id: id.as_str(),
             error: message,
+            error_code: None,
         },
     };
     serde_json::to_value(frame).map_err(ProtocolError::from)

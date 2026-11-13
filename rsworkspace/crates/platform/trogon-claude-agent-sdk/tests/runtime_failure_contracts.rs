@@ -744,6 +744,7 @@ async fn unknown_permission_suggestion_values_reach_the_callback_and_round_trip(
             PermissionDecision::Allow {
                 updated_input: None,
                 updated_permissions: Some(request.suggestions),
+                decision_classification: None,
             }
         }
     }));
