@@ -1299,24 +1299,9 @@ where
                     if !self.admit_callback(&id).await? {
                         return Ok(());
                     }
-                    let name = crate::McpServerName::from(server_name);
-                    let server = self.sdk_mcp_servers.get(&name).cloned();
-                    if let Some(server) = server {
-                        let signal = crate::CancellationToken::new();
-                        let callback_signal = signal.clone();
-                        let response_id = id.clone();
-                        let fallback = wire::callback_error_response(&id, "SDK MCP request timed out");
-                        self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-                            match server.request(message, callback_signal).await {
-                                Ok(response) => {
-                                    wire::success_response(&response_id, McpResponsePayload::new(response)?)
-                                }
-                                Err(_) => wire::callback_error_response(&response_id, "SDK MCP request failed"),
-                            }
-                        });
-                    } else {
-                        self.write_response(wire::callback_error_response(&id, "Unknown SDK MCP server"))
-                            .await?;
+                    match self.argv_style {
+                        crate::ArgvStyle::TypeScript => self.typescript_mcp_message(id, server_name, message).await?,
+                        crate::ArgvStyle::Python => self.python_mcp_message(id, server_name, message).await?,
                     }
                 }
                 (IncomingControl::Elicitation(request), _) => {
@@ -1485,6 +1470,135 @@ where
     /// Under backpressure, messages held behind a transcript flush count against the buffer too.
     fn deferred_full(&self) -> bool {
         matches!(self.limits.message_buffer, crate::MessageBuffer::Backpressure(capacity) if self.deferred_messages.len() >= capacity.get())
+    }
+
+    /// `sdk.mjs` `mcp_message`: an unknown server or a message that is not an object fails the control request,
+    /// a request waits for the server's response however long it takes, and anything else is handed to the
+    /// server and acknowledged at once.
+    async fn typescript_mcp_message(
+        &mut self,
+        id: ControlRequestId,
+        server_name: Option<serde_json::Value>,
+        message: Option<serde_json::Value>,
+    ) -> Result<(), Error> {
+        let session = match &server_name {
+            Some(serde_json::Value::String(name)) => self
+                .sdk_mcp_servers
+                .get(&crate::McpServerName::from(name.as_str()))
+                .cloned(),
+            _ => None,
+        };
+        let Some(session) = session else {
+            let text = format!(
+                "SDK MCP server not found: {}",
+                crate::mcp_routing::js_string(server_name.as_ref())
+            );
+            return self.write_response(wire::callback_error_response(&id, &text)).await;
+        };
+        let message = match message {
+            Some(serde_json::Value::Object(message)) => Some(message),
+            // An array is an object to `in`, so it is handed over like a notification.
+            Some(serde_json::Value::Array(_)) => None,
+            other => {
+                let text = crate::mcp_routing::typescript_not_an_object(other.as_ref());
+                return self.write_response(wire::callback_error_response(&id, &text)).await;
+            }
+        };
+        if let Some(message) = message
+            .as_ref()
+            .filter(|message| crate::mcp_routing::typescript_expects_response(message))
+        {
+            let message = message.clone();
+            let signal = crate::CancellationToken::new();
+            let callback_signal = signal.clone();
+            let response_id = id.clone();
+            let fallback = wire::callback_error_response(&id, "SDK MCP request timed out");
+            self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                match session.request(message, callback_signal).await {
+                    Ok(Some(response)) => wire::success_response(
+                        &response_id,
+                        McpResponsePayload {
+                            mcp_response: serde_json::Value::Object(response),
+                        },
+                    ),
+                    // `sdk.mjs` waits for a response the server never sends until the query closes.
+                    Ok(None) => pending().await,
+                    Err(_) => wire::callback_error_response(&response_id, "SDK MCP request failed"),
+                }
+            });
+            return Ok(());
+        }
+        if let Some(message) = message {
+            // `transport.onmessage` runs the server's handling up to its first wait before the acknowledgment is
+            // written; whatever is left keeps running on its own.
+            let mut delivery = Box::pin(async move {
+                if let Err(error) = session.request(message, crate::CancellationToken::new()).await {
+                    tracing::debug!(%error, "SDK MCP server failed to handle a message");
+                }
+            });
+            let delivered =
+                std::future::poll_fn(|context| std::task::Poll::Ready(delivery.as_mut().poll(context).is_ready()))
+                    .await;
+            if !delivered {
+                drop(tokio::spawn(delivery));
+            }
+        }
+        self.write_response(wire::success_response(
+            &id,
+            McpResponsePayload {
+                mcp_response: crate::mcp_routing::typescript_acknowledgment(),
+            },
+        ))
+        .await
+    }
+
+    /// The Python `Query` `mcp_message`: a missing field fails the control request, and everything else is
+    /// answered with an `mcp_response`, a JSON-RPC error when the message could not be delivered.
+    async fn python_mcp_message(
+        &mut self,
+        id: ControlRequestId,
+        server_name: Option<serde_json::Value>,
+        message: Option<serde_json::Value>,
+    ) -> Result<(), Error> {
+        let truthy = crate::python_json::is_truthy;
+        let (Some(server_name), Some(message)) = (server_name.filter(truthy), message.filter(truthy)) else {
+            return self
+                .write_response(wire::callback_error_response(
+                    &id,
+                    "Missing server_name or message for MCP request",
+                ))
+                .await;
+        };
+        // The `assert isinstance` checks fail with an `AssertionError` whose text is empty.
+        let (serde_json::Value::String(server_name), serde_json::Value::Object(message)) = (server_name, message)
+        else {
+            return self.write_response(wire::callback_error_response(&id, "")).await;
+        };
+        let Some(session) = self
+            .sdk_mcp_servers
+            .get(&crate::McpServerName::from(server_name.as_str()))
+            .cloned()
+        else {
+            let mcp_response =
+                crate::mcp_routing::python_error(&message, -32601, format!("Server '{server_name}' not found"));
+            return self
+                .write_response(wire::success_response(&id, McpResponsePayload { mcp_response }))
+                .await;
+        };
+        let signal = crate::CancellationToken::new();
+        let callback_signal = signal.clone();
+        let response_id = id.clone();
+        let fallback = wire::callback_error_response(&id, "SDK MCP request timed out");
+        self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+            let mcp_response = match session.request(message.clone(), callback_signal).await {
+                Ok(Some(response)) => serde_json::Value::Object(response),
+                Ok(None) => crate::mcp_routing::python_acknowledgment(),
+                Err(crate::McpServerError::Protocol(text)) => crate::mcp_routing::python_error(&message, -32603, text),
+                Err(error) => crate::mcp_routing::python_error(&message, -32603, error.to_string()),
+            };
+            wire::success_response(&response_id, McpResponsePayload { mcp_response })
+        });
+        Ok(())
     }
 
     fn callback_timeout(&self) -> Option<Duration> {

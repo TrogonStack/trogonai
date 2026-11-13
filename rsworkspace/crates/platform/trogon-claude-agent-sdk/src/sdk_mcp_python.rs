@@ -4,7 +4,7 @@
 use super::{LocalMcpSession, McpServerError, RequestId, ServerState, tool_error, typescript::initialize_issues};
 use crate::{
     CallbackError, CancellationToken, JsonObject, McpToolRequest, ToolResultStatus, constants,
-    python_json::{float_repr, python_repr},
+    python_json::{float_repr, is_truthy, python_repr},
 };
 use serde_json::Value;
 use std::{cmp::Reverse, sync::atomic::Ordering};
@@ -606,17 +606,5 @@ fn py_str(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
         other => py_repr(other),
-    }
-}
-
-/// Python truthiness of the value `json.loads` reads from this JSON.
-fn is_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(flag) => *flag,
-        Value::Number(number) => number.as_f64().is_some_and(|float| float != 0.0),
-        Value::String(text) => !text.is_empty(),
-        Value::Array(items) => !items.is_empty(),
-        Value::Object(object) => !object.is_empty(),
     }
 }

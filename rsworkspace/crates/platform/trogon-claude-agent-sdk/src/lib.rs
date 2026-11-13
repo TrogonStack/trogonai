@@ -34,6 +34,7 @@ mod framing;
 mod hooks;
 mod js_object_order;
 mod managed_settings_delivery;
+mod mcp_routing;
 mod mcp_server_dialect;
 mod mcp_server_name;
 mod mcp_server_options;

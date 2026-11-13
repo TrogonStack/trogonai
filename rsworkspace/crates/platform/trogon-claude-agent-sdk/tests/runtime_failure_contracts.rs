@@ -24,13 +24,14 @@ use tokio::{
     time::timeout,
 };
 use trogon_claude_agent_sdk::{
-    AgentName, CallbackError, CancellationToken, ClaudeAgentOptions, ClaudeSdkClient, Content, ContentBlock,
+    AgentName, ArgvStyle, CallbackError, CancellationToken, ClaudeAgentOptions, ClaudeSdkClient, Content, ContentBlock,
     ContinueConversation, Customizations, DialogKind, ElicitationMode, ElicitationRequest, ElicitationResponse, Error,
-    HookEvent, HookFailureMode, HookRegistration, HookRequest, JsonObject, McpFuture, McpRemoteServerOptions,
-    McpServerName, McpServerOptions, McpServers, Message, MessageId, PermissionDecision, Prompt, ProtocolError,
-    QueueCapacity, ResultStatus, SdkMcpServer, SdkMcpServers, SdkMcpSession, SessionEntry, SessionError, SessionFork,
-    SessionKey, SessionPersistence, SessionProjectKey, SessionStore, SessionStoreError, SessionStoreFuture,
-    SessionStoreOptions, SystemPrompt, Timeout, ToolPermissionRequest, ToolResultStatus, UserDialogRequest, UserInput,
+    HookEvent, HookFailureMode, HookRegistration, HookRequest, JsonObject, LocalMcpServer, LocalMcpServerOptions,
+    McpFuture, McpRemoteServerOptions, McpServerDialect, McpServerName, McpServerOptions, McpServers, Message,
+    MessageId, PermissionDecision, Prompt, ProtocolError, QueueCapacity, ResultStatus, SdkMcpServer, SdkMcpServers,
+    SdkMcpSession, SessionEntry, SessionError, SessionFork, SessionKey, SessionPersistence, SessionProjectKey,
+    SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreOptions, SystemPrompt, Timeout,
+    ToolPermissionRequest, ToolResultStatus, UserDialogRequest, UserInput,
     adapters::{NativeFileSystem, RuntimeAdapters, SpawnProcess, TokioProcessSpawner},
     query_turn_with_adapters, query_with_adapters,
     test_support::FixedEnvironment,
@@ -418,7 +419,7 @@ async fn callback_failures_return_bounded_protocol_fallbacks_without_stopping_co
                     .sdk_mcp_servers
                     .insert(McpServerName::from("local"), Arc::new(FailedMcp));
                 (
-                    json!({"subtype":"mcp_message","server_name":"local","message":{}}),
+                    json!({"subtype":"mcp_message","server_name":"local","message":{"jsonrpc":"2.0","id":1,"method":"ping"}}),
                     "error",
                 )
             }
@@ -579,10 +580,10 @@ async fn mcp_replacement_swaps_in_process_servers_before_the_response() -> TestR
     let replacing = tokio::spawn(async move { handle.set_mcp_servers(McpServers::new(), embedded).await });
     let request = cli.read().await?;
     for (name, expected) in [
-        ("previous", "Unknown SDK MCP server"),
+        ("previous", "SDK MCP server not found: previous"),
         ("fresh", "SDK MCP request failed"),
     ] {
-        cli.send(json!({"type":"control_request","request_id":"lookup","request":{"subtype":"mcp_message","server_name":name,"message":{}}})).await?;
+        cli.send(json!({"type":"control_request","request_id":"lookup","request":{"subtype":"mcp_message","server_name":name,"message":{"jsonrpc":"2.0","id":1,"method":"ping"}}})).await?;
         let response = cli.read().await?;
         assert_eq!(response["response"]["subtype"], "error");
         assert_eq!(response["response"]["error"], expected);
@@ -593,9 +594,245 @@ async fn mcp_replacement_swaps_in_process_servers_before_the_response() -> TestR
     )
     .await?;
     assert_eq!(replacing.await??.errors.len(), 1);
-    cli.send(json!({"type":"control_request","request_id":"lookup","request":{"subtype":"mcp_message","server_name":"fresh","message":{}}})).await?;
+    cli.send(json!({"type":"control_request","request_id":"lookup","request":{"subtype":"mcp_message","server_name":"fresh","message":{"jsonrpc":"2.0","id":2,"method":"ping"}}})).await?;
     let response = cli.read().await?;
     assert_eq!(response["response"]["error"], "SDK MCP request failed");
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// Sends one `mcp_message` control request and returns the control response that answers it.
+async fn mcp_message(cli: &mut ScriptedCli, id: &str, mut request: Value) -> Result<Value, Box<dyn std::error::Error>> {
+    request["subtype"] = json!("mcp_message");
+    cli.send(json!({"type":"control_request","request_id":id,"request":request}))
+        .await?;
+    let response = cli.read().await?;
+    assert_eq!(response["response"]["request_id"], id, "{response}");
+    Ok(response["response"].clone())
+}
+
+fn local_mcp_server(dialect: McpServerDialect) -> Arc<dyn SdkMcpServer> {
+    Arc::new(LocalMcpServer::from(LocalMcpServerOptions {
+        dialect,
+        ..LocalMcpServerOptions::new(McpServerName::from("local"))
+    }))
+}
+
+/// `sdk.mjs` fails an `mcp_message` for an unknown server or a message that is not an object, waits on a
+/// request for as long as the server takes, and acknowledges anything else with id 0 once it is handed over.
+#[tokio::test]
+async fn mcp_message_routes_like_the_typescript_query() -> TestResult {
+    let mut configured = options()?;
+    configured.sdk_mcp_servers.insert(
+        McpServerName::from("local"),
+        local_mcp_server(McpServerDialect::TypeScript),
+    );
+    let (client, mut cli) = connect(configured).await?;
+    let ping = json!({"jsonrpc":"2.0","id":7,"method":"ping"});
+    for (request, error) in [
+        (
+            json!({"server_name":"missing","message":ping}),
+            "SDK MCP server not found: missing",
+        ),
+        (json!({"message":ping}), "SDK MCP server not found: undefined"),
+        (
+            json!({"server_name":null,"message":ping}),
+            "SDK MCP server not found: null",
+        ),
+        (json!({"server_name":1.0,"message":ping}), "SDK MCP server not found: 1"),
+        (
+            json!({"server_name":"local"}),
+            "Cannot use 'in' operator to search for 'method' in undefined",
+        ),
+        (
+            json!({"server_name":"local","message":"text"}),
+            "Cannot use 'in' operator to search for 'method' in text",
+        ),
+    ] {
+        let response = mcp_message(&mut cli, "failed", request).await?;
+        assert_eq!(response["subtype"], "error");
+        assert_eq!(response["error"], error);
+    }
+    let answered = mcp_message(&mut cli, "request", json!({"server_name":"local","message":ping})).await?;
+    assert_eq!(
+        answered["response"],
+        json!({"mcp_response":{"result":{},"jsonrpc":"2.0","id":7}})
+    );
+    for message in [
+        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+        json!({"jsonrpc":"2.0","id":null,"method":"ping"}),
+        json!({"jsonrpc":"2.0","id":3,"result":{}}),
+        json!([]),
+    ] {
+        let acknowledged = mcp_message(
+            &mut cli,
+            "notification",
+            json!({"server_name":"local","message":message}),
+        )
+        .await?;
+        assert_eq!(acknowledged["subtype"], "success");
+        assert_eq!(
+            acknowledged["response"],
+            json!({"mcp_response":{"jsonrpc":"2.0","result":{},"id":0}})
+        );
+    }
+    // The server never answers a message its schema rejects, so the control request stays open.
+    cli.send(json!({"type":"control_request","request_id":"silent","request":{"subtype":"mcp_message","server_name":"local","message":{"jsonrpc":"1.0","id":4,"method":"ping"}}})).await?;
+    let after = mcp_message(&mut cli, "after", json!({"server_name":"local","message":ping})).await?;
+    assert_eq!(after["response"]["mcp_response"]["id"], 7);
+    cli.send(json!({"type":"control_cancel_request","request_id":"silent"}))
+        .await?;
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// The Python `Query` fails an `mcp_message` without a server name or message, and answers everything else with
+/// an `mcp_response`: a JSON-RPC error under the message's id when it could not be delivered.
+#[tokio::test]
+async fn mcp_message_routes_like_the_python_query() -> TestResult {
+    let mut configured = options()?;
+    configured.argv_style = ArgvStyle::Python;
+    configured
+        .sdk_mcp_servers
+        .insert(McpServerName::from("local"), local_mcp_server(McpServerDialect::Python));
+    let (client, mut cli) = connect(configured).await?;
+    let ping = json!({"jsonrpc":"2.0","id":5,"method":"ping"});
+    for (request, error) in [
+        (
+            json!({"message":ping}),
+            "Missing server_name or message for MCP request",
+        ),
+        (
+            json!({"server_name":"","message":ping}),
+            "Missing server_name or message for MCP request",
+        ),
+        (
+            json!({"server_name":"local","message":{}}),
+            "Missing server_name or message for MCP request",
+        ),
+        (json!({"server_name":5,"message":ping}), ""),
+        (json!({"server_name":"local","message":[1]}), ""),
+    ] {
+        let response = mcp_message(&mut cli, "failed", request).await?;
+        assert_eq!(response["subtype"], "error");
+        assert_eq!(response["error"], error);
+    }
+    for (message, expected) in [
+        (
+            ping.clone(),
+            json!({"jsonrpc":"2.0","id":5,"error":{"code":-32601,"message":"Server 'missing' not found"}}),
+        ),
+        (
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            json!({"jsonrpc":"2.0","id":null,"error":{"code":-32601,"message":"Server 'missing' not found"}}),
+        ),
+    ] {
+        let response = mcp_message(&mut cli, "unknown", json!({"server_name":"missing","message":message})).await?;
+        assert_eq!(response["subtype"], "success");
+        assert_eq!(
+            serde_json::to_string(&response["response"]["mcp_response"])?,
+            serde_json::to_string(&expected)?
+        );
+    }
+    let answered = mcp_message(&mut cli, "request", json!({"server_name":"local","message":ping})).await?;
+    assert_eq!(
+        answered["response"],
+        json!({"mcp_response":{"jsonrpc":"2.0","id":5,"result":{}}})
+    );
+    let acknowledged = mcp_message(
+        &mut cli,
+        "notification",
+        json!({"server_name":"local","message":{"jsonrpc":"2.0","method":"notifications/initialized"}}),
+    )
+    .await?;
+    assert_eq!(
+        serde_json::to_string(&acknowledged["response"]["mcp_response"])?,
+        r#"{"jsonrpc":"2.0","result":{}}"#
+    );
+    let unreadable = mcp_message(
+        &mut cli,
+        "unreadable",
+        json!({"server_name":"local","message":{"jsonrpc":"1.0","id":6,"method":"ping"}}),
+    )
+    .await?;
+    assert_eq!(unreadable["subtype"], "success");
+    assert_eq!(unreadable["response"]["mcp_response"]["id"], 6);
+    assert_eq!(unreadable["response"]["mcp_response"]["error"]["code"], -32603);
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// A server whose handling of every message waits once before it fails, and then reports that it finished.
+struct LateFailingMcp {
+    finished: Arc<tokio::sync::Notify>,
+}
+impl SdkMcpServer for LateFailingMcp {
+    fn open_session(&self) -> Arc<dyn SdkMcpSession> {
+        Arc::new(Self {
+            finished: Arc::clone(&self.finished),
+        })
+    }
+}
+impl SdkMcpSession for LateFailingMcp {
+    fn request(&self, _: JsonObject, _: CancellationToken) -> McpFuture<'_> {
+        let finished = Arc::clone(&self.finished);
+        Box::pin(async move {
+            tokio::task::yield_now().await;
+            finished.notify_one();
+            Err(CallbackError::Cancelled.into())
+        })
+    }
+}
+
+/// `sdk.mjs` acknowledges a notification once `transport.onmessage` returns, so a server that is still working on
+/// it, and later fails, does not hold the acknowledgment back.
+#[tokio::test]
+async fn typescript_mcp_message_acknowledges_a_notification_the_server_finishes_later() -> TestResult {
+    let finished = Arc::new(tokio::sync::Notify::new());
+    let mut configured = options()?;
+    configured.sdk_mcp_servers.insert(
+        McpServerName::from("late"),
+        Arc::new(LateFailingMcp {
+            finished: Arc::clone(&finished),
+        }),
+    );
+    let (client, mut cli) = connect(configured).await?;
+    let acknowledged = mcp_message(
+        &mut cli,
+        "notification",
+        json!({"server_name":"late","message":{"jsonrpc":"2.0","method":"notifications/initialized"}}),
+    )
+    .await?;
+    assert_eq!(acknowledged["subtype"], "success");
+    assert_eq!(
+        acknowledged["response"],
+        json!({"mcp_response":{"jsonrpc":"2.0","result":{},"id":0}})
+    );
+    timeout(Duration::from_secs(5), finished.notified()).await?;
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// The Python `Query` answers a request the server fails with a JSON-RPC internal error under the request's id.
+#[tokio::test]
+async fn python_mcp_message_answers_a_failed_request_with_an_internal_error() -> TestResult {
+    let mut configured = options()?;
+    configured.argv_style = ArgvStyle::Python;
+    configured
+        .sdk_mcp_servers
+        .insert(McpServerName::from("failed"), Arc::new(FailedMcp));
+    let (client, mut cli) = connect(configured).await?;
+    let response = mcp_message(
+        &mut cli,
+        "failed",
+        json!({"server_name":"failed","message":{"jsonrpc":"2.0","id":8,"method":"ping"}}),
+    )
+    .await?;
+    assert_eq!(response["subtype"], "success");
+    assert_eq!(
+        response["response"]["mcp_response"],
+        json!({"jsonrpc":"2.0","id":8,"error":{"code":-32603,"message":"MCP callback failed"}})
+    );
     cli.disconnect(client).await?;
     Ok(())
 }
