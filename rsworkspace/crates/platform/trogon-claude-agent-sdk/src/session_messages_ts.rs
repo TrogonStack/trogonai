@@ -37,20 +37,20 @@ pub struct MessageOptions {
 
 type Entries = IndexMap<String, JsonObject>;
 
-fn str_field<'a>(entry: &'a JsonObject, key: &str) -> Option<&'a str> {
+pub(crate) fn str_field<'a>(entry: &'a JsonObject, key: &str) -> Option<&'a str> {
     entry.get(key).and_then(Value::as_str)
 }
 
-fn uuid_of(entry: &JsonObject) -> &str {
+pub(crate) fn uuid_of(entry: &JsonObject) -> &str {
     str_field(entry, "uuid").unwrap_or("")
 }
 
-fn kind_of(entry: &JsonObject) -> Option<&str> {
+pub(crate) fn kind_of(entry: &JsonObject) -> Option<&str> {
     str_field(entry, "type")
 }
 
 /// A truthy `parentUuid`, the only kind JavaScript follows.
-fn parent_uuid(entry: &JsonObject) -> Option<&str> {
+pub(crate) fn parent_uuid(entry: &JsonObject) -> Option<&str> {
     str_field(entry, "parentUuid").filter(|parent| !parent.is_empty())
 }
 
@@ -58,7 +58,7 @@ fn is_conversation(entry: &JsonObject) -> bool {
     matches!(kind_of(entry), Some("user" | "assistant"))
 }
 
-fn flag(entry: &JsonObject, key: &str) -> bool {
+pub(crate) fn flag(entry: &JsonObject, key: &str) -> bool {
     truthy(entry.get(key))
 }
 
@@ -187,7 +187,7 @@ fn fold_voice_call(entry: JsonObject) -> JsonObject {
 }
 
 /// `U$`: the queued command an entry carries.
-fn queued_command(entry: &JsonObject) -> Option<&JsonObject> {
+pub(crate) fn queued_command(entry: &JsonObject) -> Option<&JsonObject> {
     if kind_of(entry) == Some("system") && str_field(entry, "subtype") == Some("voice_call_talk") {
         return entry
             .get("fold")
@@ -202,7 +202,7 @@ fn queued_command(entry: &JsonObject) -> Option<&JsonObject> {
     (attachment.get("type").and_then(Value::as_str) == Some("queued_command")).then_some(attachment)
 }
 
-fn command_string<'a>(entry: &'a JsonObject, key: &str) -> Option<&'a str> {
+pub(crate) fn command_string<'a>(entry: &'a JsonObject, key: &str) -> Option<&'a str> {
     queued_command(entry)
         .and_then(|command| command.get(key))
         .and_then(Value::as_str)
@@ -351,10 +351,13 @@ fn is_tool_result(entry: &JsonObject) -> bool {
             })
 }
 
-struct Linked {
-    chain: Vec<JsonObject>,
+pub(crate) struct Linked {
+    pub(crate) chain: Vec<JsonObject>,
     relinked: Entries,
     leaf: String,
+    /// `found.terminal`: the tip the terminal conversation entry was reached from, when the leaf came from the tip
+    /// search rather than the fallback.
+    pub(crate) terminal: Option<String>,
 }
 
 fn relink_compactions(entries: &[JsonObject]) -> Result<Entries, MessagesError> {
@@ -434,7 +437,7 @@ fn relink_compactions(entries: &[JsonObject]) -> Result<Entries, MessagesError> 
 }
 
 /// `vp`: the linked chain of visible entries ending at the selected leaf.
-fn link(entries: &[JsonObject]) -> Result<Option<Linked>, MessagesError> {
+pub(crate) fn link(entries: &[JsonObject]) -> Result<Option<Linked>, MessagesError> {
     let map = relink_compactions(entries)?;
     let position: HashMap<&str, usize> = entries
         .iter()
@@ -469,6 +472,7 @@ fn link(entries: &[JsonObject]) -> Result<Option<Linked>, MessagesError> {
 
     let mut dead: HashSet<String> = HashSet::new();
     let mut terminal: Option<&JsonObject> = None;
+    let mut terminal_tip: Option<String> = None;
     for tip in tips {
         let mut visited: Vec<String> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
@@ -487,6 +491,7 @@ fn link(entries: &[JsonObject]) -> Result<Option<Linked>, MessagesError> {
             current = parent_uuid(entry).and_then(|parent| map.get(parent));
         }
         if terminal.is_some() {
+            terminal_tip = Some(uuid_of(tip).to_owned());
             break;
         }
         dead.extend(visited);
@@ -544,6 +549,7 @@ fn link(entries: &[JsonObject]) -> Result<Option<Linked>, MessagesError> {
         chain,
         relinked: map,
         leaf: leaf_uuid,
+        terminal: terminal_tip,
     }))
 }
 

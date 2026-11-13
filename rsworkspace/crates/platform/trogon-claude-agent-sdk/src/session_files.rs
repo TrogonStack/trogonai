@@ -22,7 +22,7 @@ use unicode_normalization::UnicodeNormalization;
 use crate::{
     JsonObject, SdkSessionInfo, SessionId, SummaryDialect,
     session_project_key::{canonicalize_lenient, sanitize_path},
-    session_prompt::{entry_first_prompt, iso_to_epoch_ms},
+    session_prompt::{PromptMode, entry_first_prompt_with, iso_to_epoch_ms},
     session_transcript::MessagePage,
 };
 
@@ -456,6 +456,11 @@ pub(crate) fn extract_first_prompt_from_head(head: &str) -> String {
 }
 
 pub(crate) fn extract_first_prompt_from_head_with(head: &str, dialect: SummaryDialect) -> String {
+    extract_first_prompt_from_head_mode(head, dialect, PromptMode::Stored)
+}
+
+/// Upstream `Ug`: the head scan, with `mode` choosing whether a plugin prompt is shown as its label.
+pub(crate) fn extract_first_prompt_from_head_mode(head: &str, dialect: SummaryDialect, mode: PromptMode) -> String {
     let mut command_fallback: Option<String> = None;
     for line in head.split('\n') {
         if !(line.contains("\"type\":\"user\"") || line.contains("\"type\": \"user\"")) {
@@ -472,7 +477,7 @@ pub(crate) fn extract_first_prompt_from_head_with(head: &str, dialect: SummaryDi
         let Ok(Value::Object(entry)) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        if let Some(prompt) = entry_first_prompt(dialect, &entry, &mut command_fallback) {
+        if let Some(prompt) = entry_first_prompt_with(dialect, mode, &entry, &mut command_fallback) {
             return prompt;
         }
     }

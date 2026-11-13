@@ -126,3 +126,64 @@ pub(crate) const TS_DENIAL_KINDS: [&str; 7] = [
     "interrupted",
     "cancelled",
 ];
+
+/// `Exe`: the trailer appended to a plugin prompt in a stored user message.
+pub(crate) const TS_PLUGIN_PROMPT_TRAILER: &str = "\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns \u{2014} it starts this turn in the user's place. Address the message above.";
+
+pub(crate) const TS_PLUGIN_PROMPT_HEADER_PREFIX: &str = "The ";
+
+pub(crate) const TS_PLUGIN_PROMPT_HEADER_SUFFIX: &str = " plugin sent a message:\n";
+
+pub(crate) const TS_PASTED_OPEN: &str = "<pasted_content id=\"";
+
+pub(crate) const TS_TRANSCRIPT_KINDS: [&str; 5] = ["user", "assistant", "attachment", "system", "progress"];
+
+/// `wMe`: the longest identifier the data-flow records accept.
+pub(crate) const TS_MAX_IDENTIFIER_UNITS: usize = 256;
+
+pub(crate) const TS_FLOW_VERSION: u64 = 1;
+
+/// `kMe`: exclusive bound of `inner_call_index`.
+pub(crate) const TS_INNER_CALL_LIMIT: f64 = 2_147_483_648.0;
+
+pub(crate) const TS_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+pub(crate) const TS_BASE58_ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+pub(crate) const TS_FLOW_TOUCHED_KINDS: [&str; 3] = ["artifact", "memory", "session"];
+
+pub(crate) const TS_FLOW_TOUCHED_ACTIONS: [&str; 3] = ["read", "write", "copy"];
+
+pub(crate) const TS_DERIVED_TYPES: [&str; 2] = ["claude_code_session", "unknown"];
+
+pub(crate) const TS_DERIVED_VIA: [&str; 11] = [
+    "clear",
+    "fork",
+    "branch",
+    "background",
+    "cloud",
+    "teleport",
+    "teammate",
+    "launch",
+    "resume",
+    "import",
+    "compact",
+];
+
+/// `MB`: keys a fork clears on every copied entry (`isSidechain` is reset to false separately).
+pub(crate) const TS_FORK_CLEARED_KEYS: [&str; 8] = [
+    "teamName",
+    "agentName",
+    "sessionKind",
+    "slug",
+    "sourceToolAssistantUUID",
+    "summarizedTurnPromptUuids",
+    "droppedPromptUuids",
+    "turnAttributionKey",
+];
+
+pub(crate) const TS_FORK_MESSAGE_KEYS: [&str; 3] = ["anchorUuid", "uuids", "allUuids"];
+
+pub(crate) const TS_FORK_SEGMENT_KEYS: [&str; 3] = ["headUuid", "anchorUuid", "tailUuid"];
+
+pub(crate) const TS_FORK_TITLE_FALLBACK: &str = "Forked session";
