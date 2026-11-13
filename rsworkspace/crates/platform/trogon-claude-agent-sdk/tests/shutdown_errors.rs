@@ -177,7 +177,8 @@ async fn t14_a_write_after_stdin_closed_is_not_ready_or_terminated() -> TestResu
     let client = ClaudeSdkClient::connect(options("normal", ArgvStyle::Python)?).await?;
     client.send_prompt(Prompt::from("go")).await?;
     client.finish_input().await?;
-    // Once the result settled the run, stdin is closed; the CLI then exits cleanly and the run stops.
+    // With nothing bidirectional configured, finishing the input closes stdin at once; the CLI then exits cleanly
+    // and the run stops.
     let error = timeout(Duration::from_secs(10), async {
         loop {
             match client.send_prompt(Prompt::from("late")).await {

@@ -47,7 +47,13 @@ async fn receive_result(client: &mut ClaudeSdkClient) -> Result<String, Box<dyn 
 
 #[tokio::test]
 async fn coalesced_input_count_ends_the_run_after_one_result() -> TestResult {
-    let mut client = ClaudeSdkClient::connect(options("queued-coalesce")?).await?;
+    // A permission callback is a bidirectional need, so the run waits for the result and idle state instead of
+    // closing stdin as soon as the input is written.
+    let mut configured = options("queued-coalesce")?;
+    configured.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
+        PermissionDecision::allow()
+    }));
+    let mut client = ClaudeSdkClient::connect(configured).await?;
     let handle = client.handle();
     let input = [
         UserInput::from(Prompt::from("one")),

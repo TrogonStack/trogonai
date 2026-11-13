@@ -169,11 +169,16 @@ fails with `Error::Protocol` while it is still the latest call, as `sdk.mjs`
 throws reading `bridge_session_id`. Under `ArgvStyle::Python` a work secret
 request gets the unsupported subtype error.
 
-Under TypeScript the run ends as `sdk.mjs` does: when nothing needs the CLI to
-keep asking (no embedded MCP server, hook, permission, elicitation or dialog
-handler, auth callback or work secret answerer), a streamed input closes stdin as
-soon as it is written and a single turn ends at its result. Otherwise the run
-waits for session idle. `ArgvStyle::Python` keeps its own run-end rule.
+The run ends as `hasBidirectionalNeeds` decides. When nothing needs the CLI to keep
+asking (no embedded MCP server, hook or permission handler, and under TypeScript
+no elicitation or dialog handler, auth callback or work secret answerer), a streamed
+input closes stdin as soon as it is written. `query()` with a prompt follows
+`sdk.mjs`'s single user turn and closes stdin at the result, or at session idle
+when something needs the CLI. Under `ArgvStyle::Python` a prompt closes stdin as
+soon as it is written when nothing needs the CLI, and otherwise waits for the run
+to end. `query()` and the client keep yielding what the CLI sends after the
+result until the CLI exits; only `query_turn()` stops at the first result. A CLI that never
+sends a result still gets its stdin closed after the last prompt when nothing needs it.
 
 [The feature-connect example](examples/feature_connect.rs) checks blocking-hook
 registration and MCP connection without a prompt. It refuses startup when the

@@ -51,6 +51,16 @@ fn options() -> Result<ClaudeAgentOptions, Box<dyn std::error::Error>> {
     Ok(options)
 }
 
+/// Options with a permission callback, which is a bidirectional need: the run keeps stdin open until it settles
+/// instead of closing it as soon as the input is finished, as both upstream SDKs do.
+fn options_with_needs() -> Result<ClaudeAgentOptions, Box<dyn std::error::Error>> {
+    let mut options = options()?;
+    options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
+        PermissionDecision::allow()
+    }));
+    Ok(options)
+}
+
 fn adapters<P>(process: P) -> RuntimeAdapters<FixedEnvironment, P> {
     RuntimeAdapters {
         environment: FixedEnvironment {
@@ -284,7 +294,7 @@ async fn s13_empty_hooks_are_ignored_and_hook_callback_count_is_unbounded() -> T
 #[tokio::test]
 /// Both upstream SDKs write input whenever it arrives, so a prompt sent mid-turn reaches the CLI.
 async fn s15_input_sent_during_a_turn_is_written_and_closed_input_stays_recoverable() -> TestResult {
-    let mut configured = options()?;
+    let mut configured = options_with_needs()?;
     configured.limits.input_after_finish = trogon_claude_agent_sdk::InputAfterFinish::Reject;
     let (mut client, mut cli) = connect(configured).await?;
     client.query(Prompt::from("first")).await?;
@@ -1317,7 +1327,7 @@ async fn background_task_ledger_rejects_new_tasks_at_its_limit_but_accepts_dupli
 #[tokio::test]
 async fn task_terminal_states_and_session_idle_complete_a_finished_run() -> TestResult {
     for status in ["completed", "failed", "stopped", "killed"] {
-        let (mut client, mut cli) = connect(options()?).await?;
+        let (mut client, mut cli) = connect(options_with_needs()?).await?;
         client.send_prompt(Prompt::from("run with background task")).await?;
         cli.read().await?;
         client.finish_input().await?;
@@ -1350,7 +1360,7 @@ async fn task_terminal_states_and_session_idle_complete_a_finished_run() -> Test
 
 #[tokio::test]
 async fn error_results_and_queue_retractions_preserve_run_completion() -> TestResult {
-    let (mut client, mut cli) = connect(options()?).await?;
+    let (mut client, mut cli) = connect(options_with_needs()?).await?;
     let mut first = UserInput::from(Prompt::from("first"));
     first.uuid = Some(MessageId::from("queued-first"));
     let mut second = UserInput::from(Prompt::from("second"));

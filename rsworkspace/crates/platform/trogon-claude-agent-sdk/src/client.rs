@@ -1268,9 +1268,16 @@ async fn start_query(
     prompt: crate::UserInput,
     completion: Completion,
 ) -> Result<Query, Error> {
+    // `sdk.mjs` treats a prompt as a single user turn: stdin closes at the result, or at session idle when
+    // something needs the CLI to keep asking. Python closes it once the prompt was written, which the run rule
+    // does. The reader keeps going until the CLI exits either way; only `query_turn` stops at the result.
+    let settle = match (completion, client.runtime.handle.style) {
+        (Completion::Run, crate::ArgvStyle::TypeScript) => Completion::Turn,
+        (completion, _) => completion,
+    };
     let startup = async {
         client.send_input(prompt).await?;
-        client.runtime.handle.finish_with(completion).await
+        client.runtime.handle.finish_with(settle).await
     }
     .await;
     if let Err(error) = startup {

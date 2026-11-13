@@ -166,20 +166,19 @@ impl RunState {
         Ok(())
     }
 
-    /// `needs` is TypeScript's `hasBidirectionalNeeds()`, and `None` for Python, which has no such rule.
+    /// `needs` is `hasBidirectionalNeeds()`, which both upstream SDKs apply.
     ///
-    /// TypeScript closes stdin as soon as the input finished when nothing needs the CLI to keep asking, without
-    /// waiting for a result. For a single turn it ends the run at the result when the session is idle, has not
-    /// reported a state or nothing needs the CLI.
-    fn settled(&self, callbacks: usize, needs: Option<bool>) -> bool {
-        if needs == Some(false) && matches!(self.input_done, Some(Completion::Run)) {
+    /// A streamed input that finished closes stdin as soon as it was written when nothing needs the CLI to keep
+    /// asking, without waiting for a result. For a single prompt (`sdk.mjs` `isSingleUserTurn`) stdin closes at
+    /// the result, or at session idle when something needs the CLI.
+    fn settled(&self, callbacks: usize, needs: bool) -> bool {
+        if !needs && matches!(self.input_done, Some(Completion::Run)) {
             return true;
         }
         self.result_received
             && match self.input_done {
                 Some(Completion::Turn) => {
-                    callbacks == 0
-                        && (needs != Some(true) || matches!(self.session_state, None | Some(SessionState::Idle)))
+                    callbacks == 0 && (!needs || matches!(self.session_state, None | Some(SessionState::Idle)))
                 }
                 Some(Completion::Run) => {
                     !self.turn_active
@@ -1008,23 +1007,27 @@ where
         }
     }
 
-    /// TypeScript `hasBidirectionalNeeds()`: SDK MCP servers, hooks, a permission, elicitation or user dialog
-    /// handler, an auth callback or a work secret answerer. `None` under Python.
-    fn bidirectional_needs(&self) -> Option<bool> {
-        (self.argv_style == crate::ArgvStyle::TypeScript).then(|| {
-            !self.sdk_mcp_servers.is_empty()
-                || self
-                    .initialize_request
-                    .get("hooks")
-                    .and_then(serde_json::Value::as_object)
-                    .is_some_and(|hooks| !hooks.is_empty())
-                || self.handler.is_some()
-                || self.elicitation_handler.is_some()
-                || self.user_dialog_handler.is_some()
-                || self.oauth_token_handler.is_some()
-                || self.host_auth_token_handler.is_some()
-                || self.host.answerer().is_some()
-        })
+    /// `hasBidirectionalNeeds()`. TypeScript: SDK MCP servers, hooks, a permission, elicitation or user dialog
+    /// handler, an auth callback or a work secret answerer. Python's `_has_bidirectional_needs` knows only SDK MCP
+    /// servers, hooks and the permission callback, because it has no other callback.
+    fn bidirectional_needs(&self) -> bool {
+        let hooks = self
+            .initialize_request
+            .get("hooks")
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|hooks| !hooks.is_empty());
+        let common = !self.sdk_mcp_servers.is_empty() || hooks || self.handler.is_some();
+        match self.argv_style {
+            crate::ArgvStyle::Python => common,
+            crate::ArgvStyle::TypeScript => {
+                common
+                    || self.elicitation_handler.is_some()
+                    || self.user_dialog_handler.is_some()
+                    || self.oauth_token_handler.is_some()
+                    || self.host_auth_token_handler.is_some()
+                    || self.host.answerer().is_some()
+            }
+        }
     }
 
     fn running_callbacks(&self) -> usize {

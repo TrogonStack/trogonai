@@ -3799,10 +3799,12 @@
     },
     {
       "id": "c29-bidirectional-needs",
-      "concept": "The run ends at its result only when nothing needs the CLI to keep asking",
+      "concept": "The run ends at its result only when nothing needs the CLI to keep asking, and the reader keeps yielding until the CLI exits",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python sources have no hasBidirectionalNeeds predicate and keep their own run-end rule."
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 1070,
+        "line_end": 1120,
+        "sha256": "a40157c5e7776cde1d3d22d52c0520669eb95bc137cb389706efc350027ba76b"
       },
       "typescript": {
         "file": "package/sdk.mjs",
@@ -3815,16 +3817,22 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "TypeScript treats a run as needing the CLI when it has an embedded MCP server, a non-empty hooks object, canUseTool, onElicitation, onUserDialog, getOAuthToken, getHostAuthToken or a work secret answerer. A streamed input is closed as soon as it was written when nothing needs the CLI. A result ends a single turn, and closes stdin, when the session reported no state or is idle or when nothing needs the CLI; otherwise the run end waits for idle or its ceiling."
+        "behavior": "TypeScript treats a run as needing the CLI when it has an embedded MCP server, a non-empty hooks object, canUseTool, onElicitation, onUserDialog, getOAuthToken, getHostAuthToken or a work secret answerer. Python's _has_bidirectional_needs knows only SDK MCP servers, hooks and can_use_tool. A streamed input is closed as soon as it was written when nothing needs the CLI, in both. A prompt string is a single user turn in TypeScript: a result ends it, and closes stdin, when the session reported no state or is idle or when nothing needs the CLI, otherwise the run end waits for idle or its ceiling. Python closes stdin as soon as a prompt string was written when nothing needs the CLI, and otherwise waits for the run to end. Both readers keep yielding every message the CLI sends after the result until the CLI exits."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
         "golden_run_end::a_single_turn_ends_at_its_result_unless_something_needs_the_cli_like_sdk_mjs",
-        "golden_run_end::a_streamed_input_is_closed_when_written_unless_something_needs_the_cli_like_sdk_mjs"
+        "golden_run_end::a_streamed_input_is_closed_when_written_unless_something_needs_the_cli_like_sdk_mjs",
+        "golden_run_end::a_single_prompt_keeps_yielding_after_its_result_like_sdk_mjs",
+        "golden_run_end::a_streamed_input_keeps_yielding_after_its_result_like_sdk_mjs",
+        "golden_run_end::python_closes_stdin_once_the_prompt_is_written_and_keeps_yielding",
+        "golden_run_end::without_a_result_stdin_closes_when_the_input_is_written_unless_something_needs_the_cli",
+        "golden_run_end::python_without_a_result_closes_stdin_once_the_prompt_is_written_unless_something_needs_the_cli"
       ],
       "rust": [
+        "src/client.rs",
         "src/driver.rs"
       ]
     }

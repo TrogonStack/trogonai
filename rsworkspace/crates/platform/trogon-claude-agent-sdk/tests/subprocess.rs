@@ -97,9 +97,14 @@ async fn s02_non_json_stdout_lines_are_skipped() -> TestResult {
 }
 
 /// Both upstream SDKs end the run quietly when no idle state follows the last result before the run-end ceiling.
+/// The ceiling only applies while a permission callback keeps the CLI talking; without any bidirectional need both
+/// SDKs close the input at once and the run ends when the CLI exits.
 #[tokio::test]
 async fn s05_a_missing_idle_state_ends_the_run_quietly_at_the_ceiling() -> TestResult {
     let mut options = options("stuck-running")?;
+    options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
+        std::future::pending::<PermissionDecision>().await
+    }));
     options.limits.run_end_timeout = Timeout::new(Duration::from_millis(300));
     let mut response = query(Prompt::from("stuck"), options).await?;
     let results = timeout(Duration::from_secs(5), async {
