@@ -271,7 +271,7 @@ pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<
             }
         }
         _ => match crate::message_decode::decode(object, mode)? {
-            Decoded::Message(message) => Frame::Message(message),
+            Decoded::Message(message) => Frame::Message(*message),
             Decoded::KeepAlive => Frame::KeepAlive,
             Decoded::Unparsed => Frame::Unparsed,
         },
