@@ -6,13 +6,15 @@ use crate::{
     adapters::{DirectoryEntryKind, ReadFile, SettingsHost},
     constants::{AUTH_HELPERS, CLOUD_PROVIDER_FLAGS, OTEL_EXACT, OTEL_PREFIXES},
     constants::{
-        DISABLE_ADMIN_ENV_UNION_VARIABLE, MANAGED_SETTINGS_DROP_IN_DIRECTORY, MANAGED_SETTINGS_FILE,
-        MANAGED_SOURCES_BEHAVIOR_KEY, PARENT_RESTRICT_FALSE_KEYS, PARENT_RESTRICT_TRUE_KEYS, SETTINGS_FILE_MAX_BYTES,
+        DISABLE_ADMIN_ENV_UNION_VARIABLE, LOGIN_METHOD_KEY, LOGIN_METHODS, LOGIN_ORGANIZATION_KEY,
+        MANAGED_SETTINGS_DROP_IN_DIRECTORY, MANAGED_SETTINGS_FILE, MANAGED_SOURCES_BEHAVIOR_KEY, MANAGED_SOURCES_MERGE,
+        PARENT_RESTRICT_FALSE_KEYS, PARENT_RESTRICT_TRUE_KEYS, SETTINGS_FILE_MAX_BYTES,
     },
+    settings_resolve_admin::build_admin,
     settings_resolve_parent::parent_slice,
     settings_resolve_platform::{MdmEvaluation, PlatformKind, managed_directory, platform_kind, wsl_managed_directory},
     settings_resolve_tier::{LoadState, TierRead},
-    settings_resolve_values::{SettingsMap, has_authored_value, has_policy_content, merge_with_union, omit},
+    settings_resolve_values::{SettingsMap, has_authored_value, has_policy_content, merge_with_union},
 };
 
 fn is_absent(error: &io::Error) -> bool {
@@ -193,9 +195,10 @@ struct Selection {
     file_present: bool,
     tiers: Vec<SettingsMap>,
     track_no_ln: bool,
+    remote_in_sources: bool,
 }
 
-fn select_admin(remote: Option<&SettingsMap>, mdm: &TierRead, file: &TierRead) -> Selection {
+fn select_admin(remote: Option<&SettingsMap>, mdm: &TierRead, file: &TierRead, platform: &str) -> Selection {
     let mdm_settings = mdm.settings.as_ref().filter(|settings| !settings.is_empty());
     let remote_candidate = nonempty(remote);
     let mdm_candidate = nonempty(mdm_settings);
@@ -222,7 +225,19 @@ fn select_admin(remote: Option<&SettingsMap>, mdm: &TierRead, file: &TierRead) -
     if mdm_demoted && let Some(tier) = mdm_candidate {
         tiers.push(tier.clone());
     }
-    let admin = tiers.first().map(|first| omit(first, &[MANAGED_SOURCES_BEHAVIOR_KEY]));
+    let slots = [
+        (remote, remote_wins),
+        (mdm_settings, mdm_wins),
+        (file.settings.as_ref(), file_candidate.is_some()),
+    ];
+    let merge = slots
+        .iter()
+        .find(|&&(raw, wins)| raw.is_some_and(|raw| wins || raw.contains_key(MANAGED_SOURCES_BEHAVIOR_KEY)))
+        .and_then(|&(raw, _)| raw.and_then(|raw| raw.get(MANAGED_SOURCES_BEHAVIOR_KEY)))
+        .and_then(Value::as_str)
+        == Some(MANAGED_SOURCES_MERGE);
+    let demoted = usize::from(remote_demoted) + usize::from(mdm_demoted);
+    let admin = build_admin(&tiers, merge, demoted, platform);
     let held_empty = admin.is_none();
     let empty_remote = held_empty && remote.is_some_and(has_policy_content);
     let empty_mdm = held_empty && mdm.holds_policy_content();
@@ -242,6 +257,7 @@ fn select_admin(remote: Option<&SettingsMap>, mdm: &TierRead, file: &TierRead) -
         file_present: file_candidate.is_some() || first_empty == Some(2),
         admin: admin.or_else(|| first_empty.map(|_| SettingsMap::new())),
         tiers,
+        remote_in_sources: remote_candidate.is_some(),
         track_no_ln: remote_authored && head_remote.is_some() || mdm_authored && head_mdm.is_some(),
     }
 }
@@ -336,6 +352,33 @@ fn restrictive_union_env(tiers: &[SettingsMap], first_trusted_tier: usize) -> Op
     (!result.is_empty()).then_some(result)
 }
 
+/// `mX` upstream: the machine policy, read without the remote tier, keeps the login pins it sets.
+fn pin_machine_login(merged: &mut SettingsMap, mdm: &TierRead, file: &TierRead, kind: PlatformKind) {
+    let machine_mdm = if mdm.user_writable {
+        TierRead {
+            settings: Some(SettingsMap::new()),
+            has_policy_content: false,
+            load_state: LoadState::Loaded,
+            user_writable: false,
+            unreadable: false,
+        }
+    } else {
+        mdm.clone()
+    };
+    let machine = select_admin(None, &machine_mdm, file, kind.as_str()).admin;
+    let Some(machine) = machine else {
+        return;
+    };
+    if let Some(organization) = machine.get(LOGIN_ORGANIZATION_KEY) {
+        merged.insert(LOGIN_ORGANIZATION_KEY.to_owned(), organization.clone());
+    }
+    if let Some(method) = machine.get(LOGIN_METHOD_KEY)
+        && method.as_str().is_some_and(|name| LOGIN_METHODS.contains(&name))
+    {
+        merged.insert(LOGIN_METHOD_KEY.to_owned(), method.clone());
+    }
+}
+
 /// `QP` upstream for the default configuration: no policy helper, no host-managed provider.
 pub(crate) fn resolve_policy<H: SettingsHost>(
     host: &H,
@@ -346,7 +389,7 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
     let kind = platform_kind(host);
     let file = read_file_tier(host, kind, &evaluation.mdm, evaluation.wsl_inherits);
     let remote = remote.filter(|settings| !settings.is_empty());
-    let selection = select_admin(remote, &evaluation.mdm, &file);
+    let selection = select_admin(remote, &evaluation.mdm, &file, kind.as_str());
     let admin = selection.admin.clone();
     let parent_included = admin.is_none()
         || admin.as_ref().and_then(|admin| admin.get("parentSettingsBehavior")) == Some(&Value::String("merge".into()))
@@ -415,6 +458,9 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
             .any(|tier| tier.get("forceRemoteSettingsRefresh") == Some(&Value::Bool(true)))
         {
             merged.insert("forceRemoteSettingsRefresh".to_owned(), Value::Bool(true));
+        }
+        if selection.remote_in_sources || evaluation.mdm.user_writable {
+            pin_machine_login(&mut merged, &evaluation.mdm, &file, kind);
         }
         let union_disabled = crate::settings_resolve_env::flag_is_true(host, DISABLE_ADMIN_ENV_UNION_VARIABLE);
         if !union_disabled {
