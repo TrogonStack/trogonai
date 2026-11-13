@@ -92,6 +92,8 @@ mod release_request;
 mod release_section_wire;
 mod release_server;
 mod release_server_error;
+mod release_sources;
+mod release_sources_error;
 mod requester_xkey;
 #[cfg(test)]
 mod scripted_release;
@@ -151,6 +153,8 @@ pub use release_record::ReleaseRecord;
 pub use release_request::ReleaseRequest;
 pub use release_server::ReleaseServer;
 pub use release_server_error::ReleaseServerError;
+pub use release_sources::ReleaseSources;
+pub use release_sources_error::ReleaseSourcesError;
 pub use requester_xkey::{RequesterXkey, RequesterXkeyError};
 pub use seal_error::SealError;
 pub use sealed_release::SealedRelease;
