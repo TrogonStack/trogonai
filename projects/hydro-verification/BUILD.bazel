@@ -1,0 +1,10 @@
+genrule(
+    name = "verify",
+    testonly = True,
+    srcs = [".config/mise/lib/verify"],
+    outs = ["verify-hydro"],
+    cmd = "cp $(location .config/mise/lib/verify) $@ && chmod +x $@",
+    executable = True,
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
