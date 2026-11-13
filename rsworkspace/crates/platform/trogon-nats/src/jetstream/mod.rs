@@ -2,6 +2,7 @@ pub mod claim_bucket;
 pub mod claim_check;
 pub mod claim_retention;
 pub mod client;
+pub mod conditional_kv;
 pub mod create_conflicts;
 pub mod message;
 pub mod not_found;
@@ -9,6 +10,7 @@ pub mod object_store;
 pub mod processor;
 pub mod publish;
 pub mod stream_max_age;
+pub mod strict_kv;
 pub mod traits;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -22,6 +24,10 @@ pub use client::{
     ConsumerError, GetStreamError, MessagesError, NatsJetStreamClient, NatsJetStreamConsumer, PublishAckFuture,
     PublishError, StreamError,
 };
+pub use conditional_kv::{
+    JetStreamConditionalKvUpdate, NativeKvCasError, NativeKvCasStage, NativeKvExpectation, NativeKvKey, NativeKvScope,
+    NativeKvUpdate,
+};
 pub use create_conflicts::{
     is_create_key_already_exists, is_create_key_value_already_exists, is_create_stream_already_exists,
 };
@@ -32,6 +38,10 @@ pub use object_store::{ClaimBucketBinding, ObjectStoreGet, ObjectStorePut};
 pub use processor::{HandlerVerdict, MessageHandler, PoisonReason, Processor, ProcessorError, RedeliveryPolicy};
 pub use publish::{PublishOutcome, publish_event};
 pub use stream_max_age::StreamMaxAge;
+pub use strict_kv::{
+    JetStreamStrictKvRead, NativeKvReadError, StrictNativeKvStore, strict_native_kv_entry, strict_native_kv_operation,
+    strict_native_kv_raw_operation,
+};
 pub use traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
     JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
@@ -48,3 +58,6 @@ pub use mocks::{
     MockJetStreamPurger, MockJetStreamStream, MockJsMessage, MockKvEntryOutcome, MockKvGetOutcome, MockObjectStore,
     MockPublishedOutboundMessage, MockStreamProvisionError,
 };
+
+mod strict_stream;
+pub use strict_stream::{NativeStreamReadError, StrictNativeStreamReader, parse_native_stored_headers};
