@@ -41,6 +41,7 @@
 
 mod admission_limit;
 mod admission_limit_error;
+mod config_setting;
 mod constants;
 mod credential_release;
 mod credential_release_error;
@@ -99,6 +100,7 @@ mod xkey_sealer;
 
 pub use admission_limit::AdmissionLimit;
 pub use admission_limit_error::AdmissionLimitError;
+pub use config_setting::ConfigSetting;
 pub use constants::{
     RELEASE_DEADLINE, RELEASE_SUBSCRIPTION, RELEASE_TTL_BOUND, THROTTLED_RETRY_AFTER, UNBUNDLED_GENERATION,
 };
