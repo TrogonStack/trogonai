@@ -14,6 +14,7 @@ use tokio::{
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
     PermissionDecision, ProtocolError, StderrTail, ToolPermissionHandler, Transport,
+    constants::TYPESCRIPT_INITIALIZE_TIMEOUT,
     wire::{
         self, ControlResponse, Frame, IncomingControl,
         runtime_payload::{
@@ -515,8 +516,6 @@ impl Initialization {
         })
     }
 }
-
-const TYPESCRIPT_INITIALIZE_TIMEOUT: Duration = Duration::from_millis(660_000);
 
 /// Python: `max(int(os.environ.get("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT", "60000")) / 1000, 60)` seconds.
 pub(crate) fn python_initialize_timeout(value: Option<std::ffi::OsString>) -> Result<Duration, Error> {
@@ -1088,9 +1087,9 @@ where
         }
         if expectations.plugins > 0 && connection_info.plugins_applied != crate::FeatureSupport::Supported {
             tracing::warn!(
-                "[Query.initialize] Claude Code reported plugins_applied={} for {} plugins sent with pluginDelivery 'initialize'; the process is running with the plugins it was launched with.",
-                javascript_string(connection_info.plugins_applied),
-                expectations.plugins
+                plugins_applied = javascript_string(connection_info.plugins_applied),
+                plugins = expectations.plugins,
+                "[Query.initialize] Claude Code did not apply the plugins sent with pluginDelivery 'initialize'; the process is running with the plugins it was launched with."
             );
         }
         self.state = State::Idle;

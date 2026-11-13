@@ -35,9 +35,10 @@ fn the_refusal_quotes_the_path_like_python_repr() {
     let error = super::CliPathError::WindowsBatchScript {
         path: "C:\\tools\\claude's.cmd".into(),
     };
-    assert!(error.to_string().starts_with(
-        "Refusing to execute batch script \"C:\\\\tools\\\\claude's.cmd\": Windows runs .bat/.cmd files via cmd.exe,"
-    ));
+    assert_eq!(
+        error.to_string(),
+        "Refusing to execute batch script \"C:\\\\tools\\\\claude's.cmd\": Windows runs .bat/.cmd files via cmd.exe, which can execute commands injected through CLI arguments, and no reliable escaping for cmd.exe exists. Use a native claude executable instead: install Claude Code natively (irm https://claude.ai/install.ps1 | iex), point ClaudeAgentOptions(cli_path=...) at a claude.exe, or install the claude-agent-sdk wheel for a platform that bundles claude.exe (e.g. Windows x64)."
+    );
     assert_eq!(super::python_repr("a\tb'\"c"), "'a\\tb\\'\"c'");
 }
 

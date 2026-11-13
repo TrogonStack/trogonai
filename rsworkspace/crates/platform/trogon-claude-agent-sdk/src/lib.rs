@@ -32,6 +32,7 @@ mod environment_plan;
 mod error;
 mod framing;
 mod hooks;
+mod js_object_order;
 mod managed_settings_delivery;
 mod mcp_server_name;
 mod mcp_server_options;
@@ -81,6 +82,7 @@ mod session_reader;
 mod session_resume;
 mod session_store;
 mod session_store_helpers;
+mod session_store_shared;
 mod session_store_ts;
 mod session_subpath;
 mod session_summary;
@@ -242,13 +244,13 @@ pub use session_store::{
     SessionStoreFuture, SessionStoreLimits, SessionStoreOperation, SessionStoreOptions,
 };
 pub use session_store_helpers::{
-    ImportOptions, SessionStoreHelperError, StoreListOptions, delete_session_via_store, delete_session_via_store_with,
-    fork_session_via_store, fork_session_via_store_with, get_session_info_from_store, get_session_info_from_store_with,
-    get_session_messages_from_store, get_session_messages_from_store_with, get_subagent_messages_from_store,
-    get_subagent_messages_from_store_with, import_session_to_store, list_sessions_from_store,
-    list_subagents_from_store, list_subagents_from_store_with, rename_session_via_store, rename_session_via_store_with,
-    tag_session_via_store, tag_session_via_store_with,
+    delete_session_via_store, delete_session_via_store_with, fork_session_via_store, fork_session_via_store_with,
+    get_session_info_from_store, get_session_info_from_store_with, get_session_messages_from_store,
+    get_session_messages_from_store_with, get_subagent_messages_from_store, get_subagent_messages_from_store_with,
+    import_session_to_store, list_sessions_from_store, list_subagents_from_store, list_subagents_from_store_with,
+    rename_session_via_store, rename_session_via_store_with, tag_session_via_store, tag_session_via_store_with,
 };
+pub use session_store_shared::{ImportOptions, SessionStoreHelperError, StoreListOptions};
 pub use session_subpath::{SessionSubpath, SessionSubpathError};
 pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_entry_to_sdk_info};
 pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, SessionMessageKind};

@@ -19,6 +19,7 @@ use crate::{
         TS_FLOW_VERSION, TS_FORK_CLEARED_KEYS, TS_FORK_MESSAGE_KEYS, TS_FORK_SEGMENT_KEYS, TS_FORK_TITLE_FALLBACK,
         TS_INNER_CALL_LIMIT, TS_MAX_IDENTIFIER_UNITS, TS_SAFE_INTEGER, TS_TRANSCRIPT_KINDS,
     },
+    js_object_order::js_key_order,
     session_messages_ts::{
         MessagesError, command_string, flag, kind_of, link, parent_uuid, queued_command, str_field, uuid_of,
     },
@@ -1173,50 +1174,6 @@ pub(crate) fn js_stringify(value: &Value) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-    }
-}
-
-/// The own keys of a JavaScript object in enumeration order: array indices ascending first, then the other keys in
-/// insertion order.
-pub(crate) fn js_key_order(map: &JsonObject) -> Vec<(&String, &Value)> {
-    fn index(key: &str) -> Option<u32> {
-        let canonical = key == "0" || (!key.starts_with('0') && key.bytes().all(|byte| byte.is_ascii_digit()));
-        if !canonical || key.is_empty() || key.len() > 10 {
-            return None;
-        }
-        key.parse::<u32>().ok().filter(|number| *number != u32::MAX)
-    }
-    let mut indexed: Vec<(u32, &String, &Value)> = Vec::new();
-    let mut named: Vec<(&String, &Value)> = Vec::new();
-    for (key, value) in map {
-        match index(key) {
-            Some(number) => indexed.push((number, key, value)),
-            None => named.push((key, value)),
-        }
-    }
-    indexed.sort_by_key(|(number, _, _)| *number);
-    indexed
-        .into_iter()
-        .map(|(_, key, value)| (key, value))
-        .chain(named)
-        .collect()
-}
-
-/// The value as a JavaScript object graph holds it: every object's keys in enumeration order.
-pub(crate) fn js_ordered(value: Value) -> Value {
-    match value {
-        Value::Array(items) => Value::Array(items.into_iter().map(js_ordered).collect()),
-        Value::Object(map) => {
-            let order: Vec<String> = js_key_order(&map).into_iter().map(|(key, _)| key.clone()).collect();
-            let mut map = map;
-            Value::Object(
-                order
-                    .into_iter()
-                    .filter_map(|key| map.remove(&key).map(|item| (key, js_ordered(item))))
-                    .collect(),
-            )
-        }
-        other => other,
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::{JsonObject, MessageId};
+use crate::{JsonObject, MessageId, constants::CONNECTION_INFO_FIELDS};
 use serde::Deserialize;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -55,23 +55,6 @@ pub struct ConnectionInfo {
     pub additional_fields: JsonObject,
     raw: serde_json::Value,
 }
-
-const CONNECTION_INFO_FIELDS: &[&str] = &[
-    "commands",
-    "models",
-    "agents",
-    "account",
-    "output_style",
-    "available_output_styles",
-    "hooks_applied",
-    "hook_on_failure_supported",
-    "plugins_applied",
-    "managed_settings_applied",
-    "sdk_mcp_manifests_parked",
-    "claude_code_version",
-    "fast_mode_state",
-    "fast_mode_disabled_reason",
-];
 
 impl ConnectionInfo {
     /// Reads an initialize response. Any JSON value is accepted, as upstream accepts it.

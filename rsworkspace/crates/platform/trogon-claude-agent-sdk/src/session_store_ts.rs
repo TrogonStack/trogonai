@@ -21,14 +21,15 @@ use crate::{
     SessionMessage, SessionMutationError, SessionProjectKey, SessionStore, SessionStoreOperation, SessionSubpath,
     SummaryDialect,
     constants::{DEFAULT_IMPORT_BATCH, MAX_IMPORT_BYTES},
+    js_object_order::js_ordered,
     session_files::valid_uuid,
     session_files_ts::session_info_from_lite,
-    session_fork_ts::{ForkTsRequest, fork_entries, js_ordered, load_state_from_objects},
+    session_fork_ts::{ForkTsRequest, fork_entries, load_state_from_objects},
     session_messages_ts::{session_messages_from_objects, subagent_messages},
     session_mutations::sanitize_unicode_ts,
     session_project_key::{canonicalize_lenient_in, project_name_ts},
     session_prompt::{PromptMode, entry_first_prompt_with, iso_from_epoch_ms, iso_to_epoch_ms, js_space, js_trim},
-    session_store_helpers::{
+    session_store_shared::{
         SessionStoreHelperError, StoreListOptions, invalid_session, jsonl_to_lite, main_key, not_found,
     },
     session_summary::summary_entry_to_sdk_info,
@@ -584,8 +585,9 @@ pub(crate) async fn import_session(
                 Ok(value) => Some(value),
                 Err(error) => {
                     tracing::warn!(
-                        "importSessionToStore: skipping unreadable sidecar {}: {error}",
-                        sidecar.display()
+                        path = %sidecar.display(),
+                        %error,
+                        "importSessionToStore: skipping unreadable sidecar"
                     );
                     None
                 }
@@ -593,8 +595,9 @@ pub(crate) async fn import_session(
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => {
                 tracing::warn!(
-                    "importSessionToStore: skipping unreadable sidecar {}: {error}",
-                    sidecar.display()
+                    path = %sidecar.display(),
+                    %error,
+                    "importSessionToStore: skipping unreadable sidecar"
                 );
                 None
             }
@@ -670,13 +673,14 @@ async fn append_jsonl_in_batches(
         match serde_json::from_str::<Value>(&line) {
             Ok(Value::Object(object)) => batch.push(SessionEntry::new(js_reordered(object))),
             Ok(_) => {
-                tracing::warn!("importSessionToStore: skipping non-object line in {}", path.display());
+                tracing::warn!(path = %path.display(), "importSessionToStore: skipping non-object line");
                 continue;
             }
             Err(error) => {
                 tracing::warn!(
-                    "importSessionToStore: skipping unparseable line in {}: {error}",
-                    path.display()
+                    path = %path.display(),
+                    %error,
+                    "importSessionToStore: skipping unparseable line"
                 );
                 continue;
             }

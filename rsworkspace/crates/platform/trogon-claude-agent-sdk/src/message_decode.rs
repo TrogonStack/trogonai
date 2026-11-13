@@ -564,5 +564,4 @@ fn conversation_reset(raw: &JsonObject) -> Option<ConversationResetMessage> {
 }
 
 #[cfg(test)]
-#[path = "message_decode/tests.rs"]
 mod tests;

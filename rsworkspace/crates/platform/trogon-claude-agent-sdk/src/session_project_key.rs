@@ -1,6 +1,11 @@
-use std::path::Path;
+use std::{
+    ffi::OsStr,
+    path::{Component, Path},
+};
 
 use unicode_normalization::UnicodeNormalization;
+
+use crate::adapters::{EnvironmentVariable, SystemEnvironment};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SessionProjectKey(String);
@@ -142,7 +147,6 @@ pub(crate) fn canonicalize_lenient_in(directory: &Path, dialect: crate::SummaryD
 /// Node `path.resolve(directory ?? ".")`: absolute against the current directory, with `.` and `..` folded
 /// lexically and no trailing separator.
 pub(crate) fn lexical_resolve(directory: &Path) -> std::path::PathBuf {
-    use std::path::Component;
     let directory = if directory.as_os_str().is_empty() {
         Path::new(".")
     } else {
@@ -194,8 +198,13 @@ pub(crate) fn project_name_with(canonical: &str, config_dir: Option<&str>, name_
 
 /// Upstream `_o` / `Wn(directory)`: [`project_name_with`] over the process environment.
 pub(crate) fn project_name_ts(canonical: &str) -> String {
-    let config_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
-    let name = std::env::var("CLAUDE_CODE_PROJECT_DIR_NAME").ok();
+    let unicode_var = |key: &str| {
+        SystemEnvironment
+            .var_os(OsStr::new(key))
+            .and_then(|value| value.into_string().ok())
+    };
+    let config_dir = unicode_var("CLAUDE_CONFIG_DIR");
+    let name = unicode_var("CLAUDE_CODE_PROJECT_DIR_NAME");
     project_name_with(canonical, config_dir.as_deref(), name.as_deref())
 }
 
