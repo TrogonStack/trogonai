@@ -9,7 +9,7 @@ use serde_json::{Number, Value};
 use crate::{constants::JS_MAX_EXACT_INTEGER, js_object_order::js_key_order};
 
 /// JavaScript `Number::toString` for the double a JSON number token parses to.
-fn js_number(number: &Number) -> String {
+pub(crate) fn js_number(number: &Number) -> String {
     let exact = number.as_u64().or_else(|| number.as_i64().map(i64::unsigned_abs));
     if exact.is_some_and(|magnitude| magnitude <= JS_MAX_EXACT_INTEGER) {
         return number.to_string();

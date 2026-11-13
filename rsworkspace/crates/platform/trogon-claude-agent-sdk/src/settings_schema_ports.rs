@@ -14,7 +14,11 @@ use crate::constants::{
     SETTINGS_PATTERN_SCOPED_PACKAGE, SETTINGS_PAYLOAD_FORBIDDEN_KEYS, SETTINGS_PROVIDER_NAMES,
     SETTINGS_REQUEST_TIMEOUT_LIMIT, SETTINGS_RESERVED_MARKETPLACE_NAMES,
 };
-use crate::settings_schema_hosts::is_https_with_host;
+use crate::{
+    settings_json::js_number,
+    settings_numbers::{finite_number, infinity, js_value},
+    settings_schema_hosts::is_https_with_host,
+};
 
 fn unicode_pattern(pattern: &str) -> Option<Regex> {
     Regex::new(pattern).ok()
@@ -285,7 +289,7 @@ pub(crate) fn clean_credential_entry(value: &Value) -> Value {
 /// JavaScript `Number(value)` for the JSON values a request timeout can carry; `None` stands for `NaN`.
 pub(crate) fn to_number(value: &Value) -> Option<f64> {
     match value {
-        Value::Number(number) => number.as_f64(),
+        Value::Number(number) => js_value(number),
         Value::Null => Some(0.0),
         Value::Bool(flag) => Some(f64::from(u8::from(*flag))),
         Value::String(text) => string_to_number(text),
@@ -324,13 +328,16 @@ fn string_to_number(text: &str) -> Option<f64> {
     }
 }
 
-/// A JavaScript number as the JSON value `JSON.stringify` would show: integral values stay integers and
-/// non-finite values become `null`.
+/// A JavaScript number as a settings value: integral values stay integers, the infinities stay infinite until
+/// the resolver prints them, and `NaN` becomes `null`.
 pub(crate) fn number_value(number: f64) -> Value {
+    if number.is_infinite() {
+        return Value::Number(infinity(number < 0.0));
+    }
     if number.fract() == 0.0 && number.abs() < 1e15 {
         Value::from(number as i64)
     } else {
-        serde_json::Number::from_f64(number).map_or(Value::Null, Value::Number)
+        finite_number(number)
     }
 }
 
@@ -395,15 +402,16 @@ fn extract_issues(extract: &Value) -> usize {
     usize::from(crate::settings_schema_regexp::capturing_groups(&source).is_none_or(|groups| groups < 1))
 }
 
-/// JavaScript `String(value)` for the JSON values a battery can hold.
-fn js_string(value: &Value) -> String {
+/// JavaScript `String(value)` for the JSON values a settings document can hold.
+pub(crate) fn js_string(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
         Value::Null => "null".to_owned(),
         Value::Bool(flag) => flag.to_string(),
-        Value::Number(number) => number
-            .as_f64()
-            .map_or_else(|| number.to_string(), |n| number_value(n).to_string()),
+        Value::Number(number) => match js_value(number) {
+            Some(value) if value.is_infinite() => if value > 0.0 { "Infinity" } else { "-Infinity" }.to_owned(),
+            _ => js_number(number),
+        },
         Value::Array(items) => items
             .iter()
             .map(|item| if item.is_null() { String::new() } else { js_string(item) })
@@ -479,7 +487,7 @@ pub(crate) fn credential_env_issues(value: &Value) -> usize {
 fn same_key(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Object(_) | Value::Array(_), _) | (_, Value::Object(_) | Value::Array(_)) => false,
-        (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
+        (Value::Number(left), Value::Number(right)) => js_value(left) == js_value(right),
         _ => left == right,
     }
 }

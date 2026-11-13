@@ -419,3 +419,69 @@ fn the_python_dialect_keeps_integer_tokens_exact() {
         r#"{"custom":{"n":12345678901234567890,"m":9007199254740993,"z":0,"w":1,"f":0.1}}"#
     );
 }
+
+fn effective_text(host: &FakeHost) -> (String, Vec<String>) {
+    let resolved =
+        serde_json::to_value(resolve_settings_with(host, &options(json!({}))).expect("resolve")).expect("encode");
+    let sources = resolved["sources"]
+        .as_array()
+        .expect("sources")
+        .iter()
+        .map(|source| source["source"].as_str().expect("source name").to_owned())
+        .collect();
+    (js_stringify(&resolved["effective"]), sources)
+}
+
+#[test]
+fn numbers_past_the_double_range_resolve_as_infinity_does_in_the_typescript_resolver() {
+    let host = FakeHost::linux()
+        .file(
+            "/home/fixture/.claude/settings.json",
+            r#"{"custom":{"l":[null,1]},"env":{"A":5,"B":true,"C":null,"D":1.5e300,"E":1e400,"F":-1e400,"G":[1,[2,null]],"H":{},"I":1e21,"J":1e-7,"K":-0,"L":0.1,"M":123456789012345678901}}"#,
+        )
+        .file(
+            "/work/project/.claude/settings.json",
+            r#"{"custom":{"l":[1e400,-1e400,1e400,null],"x":1e400},"n":-1e400}"#,
+        );
+    let (effective, sources) = effective_text(&host);
+    assert_eq!(
+        effective,
+        r#"{"env":{"A":"5","B":"true","C":"null","D":"1.5e+300","E":"Infinity","F":"-Infinity","G":"1,2,","H":"[object Object]","I":"1e+21","J":"1e-7","K":"0","L":"0.1","M":"123456789012345680000"},"custom":{"l":[null,1,null,null],"x":null},"n":null}"#
+    );
+    assert_eq!(sources, ["user", "project"]);
+}
+
+#[test]
+fn a_typed_setting_refuses_infinity_and_the_file_does_not_load() {
+    let host = FakeHost::linux()
+        .file("/home/fixture/.claude/settings.json", r#"{"model":1e400}"#)
+        .file(
+            "/work/project/.claude/settings.json",
+            r#"{"cleanupPeriodDays":1e400,"theme":"dark"}"#,
+        );
+    let (effective, sources) = effective_text(&host);
+    assert_eq!(effective, "{}");
+    assert!(sources.is_empty(), "{sources:?}");
+}
+
+#[test]
+fn an_infinite_environment_value_overrides_as_its_string() {
+    let host = FakeHost::linux()
+        .file("/home/fixture/.claude/settings.json", r#"{"env":{"A":"x"}}"#)
+        .file("/work/project/.claude/settings.json", r#"{"env":{"A":1e400,"B":"y"}}"#);
+    assert_eq!(effective_text(&host).0, r#"{"env":{"A":"Infinity","B":"y"}}"#);
+}
+
+#[test]
+fn a_managed_file_with_an_infinite_number_still_loads() {
+    let host = FakeHost::linux().file(
+        "/etc/claude-code/managed-settings.json",
+        r#"{"permissions":{"allow":["Bash"]},"n":1e400}"#,
+    );
+    let result = resolve(&host, json!({}));
+    assert_eq!(
+        js_stringify(&result["effective"]),
+        r#"{"permissions":{"allow":["Bash"]},"n":null}"#
+    );
+    assert_eq!(result["machinePolicy"]["didNotLoad"], json!(false));
+}

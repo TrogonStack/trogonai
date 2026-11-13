@@ -421,7 +421,11 @@ command output. A `ResolverState` holds what upstream keeps between calls;
 thread, so the host's clock alone decides when one has ended. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
 `claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
 byte for byte. Integers above 2^53 read like `JSON.parse` by default; `resolve_settings_in_dialect`
-and `resolve_settings_in_dialect_with` take `SettingsDialect::Python` to keep them exact. Gaps: schema value normalization, and cloud and org mode.
+and `resolve_settings_in_dialect_with` take `SettingsDialect::Python` to keep them exact. A number
+past the double range reads as `Infinity`, as `JSON.parse` reads it: a typed setting refuses it, an
+`env` value spells it `"Infinity"` (env values go through `String()`, as `z.coerce.string()` does),
+and the result holds `null` where it survives, which is what `JSON.stringify` prints for it. Gaps:
+schema value normalization, and cloud and org mode.
 
 To print resolved settings exactly as the TypeScript SDK would, serialize them with `js_stringify`
 instead of `serde_json::to_string`. It writes what `JSON.stringify` writes: the shortest digits of

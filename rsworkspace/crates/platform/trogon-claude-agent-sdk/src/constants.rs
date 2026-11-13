@@ -333,6 +333,22 @@ pub(crate) const SETTINGS_SCHEMA_JSON: &str = include_str!("upstream/settings_sc
 /// Magnitude up to which every integer is exactly a JavaScript number (2^53).
 pub(crate) const JS_MAX_EXACT_INTEGER: u64 = 1 << 53;
 
+/// The double a settings value holds for `Infinity` (2^63). `serde_json` has no number for Infinity, and number
+/// normalization turns every whole double below 2^64 that a document holds into an integer, so no document
+/// leaves a float with this value behind.
+pub(crate) const SETTINGS_INFINITY_MARKER: f64 = 9_223_372_036_854_775_808.0;
+
+/// The double a settings value holds for `-Infinity` (-2^62), for the same reason as [`SETTINGS_INFINITY_MARKER`].
+pub(crate) const SETTINGS_NEGATIVE_INFINITY_MARKER: f64 = -4_611_686_018_427_387_904.0;
+
+/// The integer equal to [`SETTINGS_INFINITY_MARKER`]. A finite double with the marker's value, such as a document's
+/// `9223372036854775808.0`, is held as this integer so that it does not read back as `Infinity`.
+pub(crate) const SETTINGS_INFINITY_MARKER_INTEGER: u64 = 1 << 63;
+
+/// The integer equal to [`SETTINGS_NEGATIVE_INFINITY_MARKER`], for the same reason as
+/// [`SETTINGS_INFINITY_MARKER_INTEGER`].
+pub(crate) const SETTINGS_NEGATIVE_INFINITY_MARKER_INTEGER: i64 = -(1 << 62);
+
 /// Largest integer a JavaScript number holds exactly (`Number.MAX_SAFE_INTEGER`).
 pub(crate) const SETTINGS_SCHEMA_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 
