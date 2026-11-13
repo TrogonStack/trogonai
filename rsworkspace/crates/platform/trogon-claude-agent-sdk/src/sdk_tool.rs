@@ -4,8 +4,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
-    CallbackError, CancellationToken, JsonObject, McpToolInputSchema, McpToolName, ToolResultStatus,
-    sdk_mcp_choices::ValidationChoices,
+    CallbackError, CancellationToken, JsonObject, McpToolInputSchema, McpToolName, ToolResultStatus, ValidationChoices,
 };
 
 #[derive(Clone, Debug)]

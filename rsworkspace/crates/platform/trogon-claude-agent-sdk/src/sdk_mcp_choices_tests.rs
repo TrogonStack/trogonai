@@ -9,6 +9,7 @@
 use super::*;
 use crate::sdk_mcp_zod::Node;
 use crate::sdk_mcp_zod_run::Input;
+use crate::{SchemaPointer, SchemaPointerError, ValidationChoices, ValidationChoicesError, ValidationChoicesOptions};
 use serde_json::json;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
