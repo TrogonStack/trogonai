@@ -459,3 +459,6 @@ impl Transport for ProcessTransport {
 
 #[cfg(test)]
 mod command_tests;
+
+#[cfg(all(test, unix))]
+mod tests;

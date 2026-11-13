@@ -1158,33 +1158,40 @@
           "symbols": [
             "ClaudeAgentOptions.hooks",
             "HookCallback",
-            "HookMatcher",
             "HookInput",
             "HookJSONOutput"
           ],
-          "prefixes": []
+          "prefixes": [
+            "HookContext",
+            "HookMatcher"
+          ]
         },
         "typescript": {
           "symbols": [
             "Options.hooks",
             "HookCallback",
-            "HookCallbackMatcher",
             "HookInput",
             "HookJSONOutput",
             "core.Options.hooks",
             "core.HookCallback",
-            "core.HookCallbackMatcher",
             "core.HookInput",
             "core.HookJSONOutput"
           ],
-          "prefixes": []
+          "prefixes": [
+            "HookCallbackMatcher",
+            "core.HookCallbackMatcher"
+          ]
         }
       },
       "rust_api": [
         "HookRegistration",
         "HookRequest",
+        "HookRequest.typed_input",
         "HookOutput",
-        "HookFailureMode"
+        "HookOutput.Json",
+        "HookFailureMode",
+        "HookInput",
+        "HookJSONOutput"
       ],
       "tests": [
         {
@@ -1206,10 +1213,26 @@
         {
           "path": "tests/runtime_features.rs",
           "name": "continue_hook_does_not_require_blocking_failure_capability"
+        },
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "a_hook_request_exposes_its_input_as_the_upstream_union"
+        },
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "every_sync_output_is_sent_byte_for_byte_as_given"
+        },
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "every_async_output_is_sent_byte_for_byte_as_given"
+        },
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "an_output_no_member_declares_is_sent_unchanged"
         }
       ],
-      "status": "partial",
-      "rationale": "Hook routing/cancellation and fail-closed blocking registration exist. Inputs retain event-specific JSON; typed output coverage is deliberately narrower than upstream event-specific structures."
+      "status": "supported",
+      "rationale": "Hook routing, cancellation (HookContext.signal is HookRequest.signal) and fail-closed blocking registration match upstream. HookRequest.typed_input decodes every input into the upstream HookInput union, and HookOutput.Json sends any upstream HookJSONOutput, sync or async, exactly as given, so no event-specific field is narrowed or dropped."
     },
     {
       "id": "hook-events",
@@ -1223,22 +1246,243 @@
         "typescript": {
           "symbols": [
             "HookEvent",
-            "core.HookEvent"
+            "core.HookEvent",
+            "HOOK_EVENTS",
+            "EXIT_REASONS",
+            "ExitReason",
+            "core.HOOK_EVENTS",
+            "core.EXIT_REASONS",
+            "core.ExitReason"
           ],
           "prefixes": []
         }
       },
       "rust_api": [
-        "HookEvent"
+        "HookEvent",
+        "HookEvent.ALL",
+        "HOOK_EVENTS",
+        "EXIT_REASONS",
+        "ExitReason"
       ],
       "tests": [
         {
           "path": "src/hooks_tests.rs",
           "name": "hook_output_uses_wire_names_and_typed_decisions"
+        },
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "the_event_list_matches_the_upstream_hook_events_constant"
+        },
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "exit_reasons_match_the_upstream_constant_and_round_trip"
         }
       ],
       "status": "supported",
-      "rationale": "Event enum mirrors the reviewed named events; added/removed literal members always require review."
+      "rationale": "HookEvent.ALL lists every event in the order upstream HOOK_EVENTS does, and HOOK_EVENTS, EXIT_REASONS and ExitReason are generated from the pinned declarations; an exit reason upstream adds later decodes as ExitReason.Unknown, and a new event still requires review."
+    },
+    {
+      "id": "hook-types",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": [
+            "BaseHookInput",
+            "CwdChangedHookSpecificOutput",
+            "ElicitationHookSpecificOutput",
+            "ElicitationResultHookSpecificOutput",
+            "FileChangedHookSpecificOutput",
+            "HookEffort",
+            "MessageDisplayHookSpecificOutput",
+            "NotificationHookInput",
+            "NotificationHookSpecificOutput",
+            "PermissionDeniedHookSpecificOutput",
+            "PermissionRequestHookInput",
+            "PermissionRequestHookSpecificOutput",
+            "PostModelSwitchHookSpecificOutput",
+            "PostToolBatchHookSpecificOutput",
+            "PostToolUseFailureHookInput",
+            "PostToolUseFailureHookSpecificOutput",
+            "PostToolUseHookInput",
+            "PostToolUseHookSpecificOutput",
+            "PreCompactHookInput",
+            "PreModelSwitchHookSpecificOutput",
+            "PreToolUseHookInput",
+            "PreToolUseHookSpecificOutput",
+            "SessionStartHookSpecificOutput",
+            "StopHookInput",
+            "StopHookSpecificOutput",
+            "SubagentStartHookInput",
+            "SubagentStartHookSpecificOutput",
+            "SubagentStopHookInput",
+            "SubagentStopHookSpecificOutput",
+            "UserPromptExpansionHookSpecificOutput",
+            "UserPromptSubmitHookInput",
+            "UserPromptSubmitHookSpecificOutput",
+            "WorktreeCreateHookSpecificOutput",
+            "types.AsyncHookJSONOutput",
+            "types.HookSpecificOutput",
+            "types.SyncHookJSONOutput"
+          ]
+        },
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "AsyncHookJSONOutput",
+            "BaseHookInput",
+            "ConfigChangeHookInput",
+            "CwdChangedHookInput",
+            "CwdChangedHookSpecificOutput",
+            "DirectoryAddedHookInput",
+            "ElicitationHookInput",
+            "ElicitationHookSpecificOutput",
+            "ElicitationResultHookInput",
+            "ElicitationResultHookSpecificOutput",
+            "FileChangedHookInput",
+            "FileChangedHookSpecificOutput",
+            "HookPermissionDecision",
+            "InstructionsLoadedHookInput",
+            "MessageDisplayHookInput",
+            "MessageDisplayHookSpecificOutput",
+            "NotificationHookInput",
+            "NotificationHookSpecificOutput",
+            "PermissionDeniedHookInput",
+            "PermissionDeniedHookSpecificOutput",
+            "PermissionRequestHookInput",
+            "PermissionRequestHookSpecificOutput",
+            "PostCompactHookInput",
+            "PostModelSwitchHookInput",
+            "PostModelSwitchHookSpecificOutput",
+            "PostToolBatchHookInput",
+            "PostToolBatchHookSpecificOutput",
+            "PostToolUseFailureHookInput",
+            "PostToolUseFailureHookSpecificOutput",
+            "PostToolUseHookInput",
+            "PostToolUseHookSpecificOutput",
+            "PreCompactHookInput",
+            "PreModelSwitchHookInput",
+            "PreModelSwitchHookSpecificOutput",
+            "PreToolUseHookInput",
+            "PreToolUseHookSpecificOutput",
+            "SessionEndHookInput",
+            "SessionStartHookInput",
+            "SessionStartHookSpecificOutput",
+            "SetupHookInput",
+            "SetupHookSpecificOutput",
+            "StopFailureHookInput",
+            "StopHookInput",
+            "StopHookSpecificOutput",
+            "SubagentStartHookInput",
+            "SubagentStartHookSpecificOutput",
+            "SubagentStopHookInput",
+            "SubagentStopHookSpecificOutput",
+            "SyncHookJSONOutput",
+            "TaskCompletedHookInput",
+            "TaskCreatedHookInput",
+            "TeammateIdleHookInput",
+            "UserPromptExpansionHookInput",
+            "UserPromptExpansionHookSpecificOutput",
+            "UserPromptSubmitHookInput",
+            "UserPromptSubmitHookSpecificOutput",
+            "WorktreeCreateHookInput",
+            "WorktreeCreateHookSpecificOutput",
+            "WorktreeRemoveHookInput",
+            "core.AsyncHookJSONOutput",
+            "core.BaseHookInput",
+            "core.ConfigChangeHookInput",
+            "core.CwdChangedHookInput",
+            "core.CwdChangedHookSpecificOutput",
+            "core.DirectoryAddedHookInput",
+            "core.ElicitationHookInput",
+            "core.ElicitationHookSpecificOutput",
+            "core.ElicitationResultHookInput",
+            "core.ElicitationResultHookSpecificOutput",
+            "core.FileChangedHookInput",
+            "core.FileChangedHookSpecificOutput",
+            "core.HookPermissionDecision",
+            "core.InstructionsLoadedHookInput",
+            "core.MessageDisplayHookInput",
+            "core.MessageDisplayHookSpecificOutput",
+            "core.NotificationHookInput",
+            "core.NotificationHookSpecificOutput",
+            "core.PermissionDeniedHookInput",
+            "core.PermissionDeniedHookSpecificOutput",
+            "core.PermissionRequestHookInput",
+            "core.PermissionRequestHookSpecificOutput",
+            "core.PostCompactHookInput",
+            "core.PostModelSwitchHookInput",
+            "core.PostModelSwitchHookSpecificOutput",
+            "core.PostToolBatchHookInput",
+            "core.PostToolBatchHookSpecificOutput",
+            "core.PostToolUseFailureHookInput",
+            "core.PostToolUseFailureHookSpecificOutput",
+            "core.PostToolUseHookInput",
+            "core.PostToolUseHookSpecificOutput",
+            "core.PreCompactHookInput",
+            "core.PreModelSwitchHookInput",
+            "core.PreModelSwitchHookSpecificOutput",
+            "core.PreToolUseHookInput",
+            "core.PreToolUseHookSpecificOutput",
+            "core.SessionEndHookInput",
+            "core.SessionStartHookInput",
+            "core.SessionStartHookSpecificOutput",
+            "core.SetupHookInput",
+            "core.SetupHookSpecificOutput",
+            "core.StopFailureHookInput",
+            "core.StopHookInput",
+            "core.StopHookSpecificOutput",
+            "core.SubagentStartHookInput",
+            "core.SubagentStartHookSpecificOutput",
+            "core.SubagentStopHookInput",
+            "core.SubagentStopHookSpecificOutput",
+            "core.SyncHookJSONOutput",
+            "core.TaskCompletedHookInput",
+            "core.TaskCreatedHookInput",
+            "core.TeammateIdleHookInput",
+            "core.UserPromptExpansionHookInput",
+            "core.UserPromptExpansionHookSpecificOutput",
+            "core.UserPromptSubmitHookInput",
+            "core.UserPromptSubmitHookSpecificOutput",
+            "core.WorktreeCreateHookInput",
+            "core.WorktreeCreateHookSpecificOutput",
+            "core.WorktreeRemoveHookInput"
+          ]
+        }
+      },
+      "rust_api": [
+        "upstream::hooks",
+        "upstream::hooks::SyncHookJSONOutput",
+        "upstream::hooks::AsyncHookJSONOutput",
+        "upstream::hooks::SyncHookJSONOutputHookSpecificOutput"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "fixtures_carry_one_input_for_every_upstream_hook_event"
+        },
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "every_hook_input_decodes_into_its_own_event_and_round_trips"
+        },
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "an_input_no_event_declares_stays_whole_as_unknown"
+        },
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "an_input_with_undeclared_keys_keeps_them_in_order"
+        },
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "fixtures_carry_one_sync_output_for_every_hook_specific_output"
+        },
+        {
+          "path": "tests/upstream_hooks.rs",
+          "name": "both_upstream_decisions_are_typed"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Every event input, its base fields and effort, every hook-specific output and both sync and async output shapes are generated from the pinned TypeScript declarations with undeclared keys kept in order. Python TypedDicts declare the same wire keys, so one set of types serves both."
     },
     {
       "id": "elicitation",

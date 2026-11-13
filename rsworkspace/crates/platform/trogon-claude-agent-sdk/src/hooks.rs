@@ -1,3 +1,4 @@
+use crate::upstream::hooks::{HookInput, HookJSONOutput};
 use crate::{CancellationToken, JsonObject, Timeout, ToolUseId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -41,6 +42,43 @@ pub enum HookEvent {
 }
 
 impl HookEvent {
+    /// Every event, in the order upstream `HOOK_EVENTS` lists them.
+    pub const ALL: [Self; 33] = [
+        Self::PreToolUse,
+        Self::PostToolUse,
+        Self::PostToolUseFailure,
+        Self::PostToolBatch,
+        Self::Notification,
+        Self::UserPromptSubmit,
+        Self::UserPromptExpansion,
+        Self::SessionStart,
+        Self::SessionEnd,
+        Self::Stop,
+        Self::StopFailure,
+        Self::SubagentStart,
+        Self::SubagentStop,
+        Self::PreCompact,
+        Self::PostCompact,
+        Self::PreModelSwitch,
+        Self::PostModelSwitch,
+        Self::PermissionRequest,
+        Self::PermissionDenied,
+        Self::Setup,
+        Self::TeammateIdle,
+        Self::TaskCreated,
+        Self::TaskCompleted,
+        Self::Elicitation,
+        Self::ElicitationResult,
+        Self::ConfigChange,
+        Self::WorktreeCreate,
+        Self::WorktreeRemove,
+        Self::InstructionsLoaded,
+        Self::CwdChanged,
+        Self::FileChanged,
+        Self::DirectoryAdded,
+        Self::MessageDisplay,
+    ];
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::PreToolUse => "PreToolUse",
@@ -101,6 +139,18 @@ pub struct HookRequest {
     pub input: JsonObject,
     pub tool_use_id: Option<ToolUseId>,
     pub signal: CancellationToken,
+}
+
+impl HookRequest {
+    /// The input as the upstream `HookInput` union. A payload no declared event reproduces
+    /// exactly is `HookInput::Unknown` with every key kept.
+    pub fn typed_input(&self) -> HookInput {
+        let value = Value::Object(self.input.clone());
+        match HookInput::best_match(&value) {
+            Some((_, input)) => input,
+            None => HookInput::Unknown(value),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -276,7 +326,17 @@ pub struct SyncHookOutput {
 #[derive(Clone, Debug)]
 pub enum HookOutput {
     Sync(Box<SyncHookOutput>),
-    Async { timeout: Option<Timeout> },
+    Async {
+        timeout: Option<Timeout>,
+    },
+    /// An upstream `HookJSONOutput`, sent exactly as given.
+    Json(Box<HookJSONOutput>),
+}
+
+impl From<HookJSONOutput> for HookOutput {
+    fn from(output: HookJSONOutput) -> Self {
+        Self::Json(Box::new(output))
+    }
 }
 
 impl Default for HookOutput {
@@ -295,6 +355,7 @@ impl HookOutput {
 
     pub fn to_wire_json(&self) -> Result<Value, serde_json::Error> {
         match self {
+            Self::Json(output) => serde_json::to_value(output),
             Self::Async { timeout } => serde_json::to_value(AsyncHookOutputWire {
                 asynchronous: true,
                 async_timeout: timeout.map(|timeout| timeout.as_duration().as_millis()),

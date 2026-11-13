@@ -299,6 +299,7 @@ pub use tool_rule::ToolRule;
 pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
 pub use transport::Transport;
+pub use upstream::hooks::{EXIT_REASONS, ExitReason, HOOK_EVENTS, HookInput, HookJSONOutput};
 pub use upstream::settings::Settings;
 pub use upstream::settings_resolution::{
     PolicySettingsOrigin, ProvenanceEntry, ResolveSettingsOptions, ResolvedSettingSource, ResolvedSettings,

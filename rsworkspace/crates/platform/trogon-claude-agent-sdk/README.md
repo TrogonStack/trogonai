@@ -133,9 +133,11 @@ Suggestions keep unknown destinations, behaviors and update types verbatim, so
 they round-trip into an allow decision. A permission request that cannot be
 decoded gets an error response and the session continues.
 
-`HookRegistration` and `HookOutput` support hook callbacks. Blocking failure
-semantics require advertised CLI support and registered hooks; startup refuses
-incompatible responders. [The hooks example](examples/hooks.rs) blocks shell
+`HookRegistration` and `HookOutput` support hook callbacks.
+`HookRequest::typed_input` decodes the input into the generated upstream
+`HookInput`, and `HookOutput::Json` sends any upstream `HookJSONOutput` as
+given. Blocking failure semantics require advertised CLI support and
+registered hooks; startup refuses incompatible responders. [The hooks example](examples/hooks.rs) blocks shell
 commands. Elicitation and user-dialog callbacks also receive cancellation
 signals. Declare supported dialog kinds explicitly.
 
