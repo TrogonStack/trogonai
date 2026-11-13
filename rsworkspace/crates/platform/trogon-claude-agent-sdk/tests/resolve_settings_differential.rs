@@ -4,8 +4,8 @@
 //! the JSON they produce byte for byte, the Rust side printed through `js_stringify` as `JSON.stringify` prints it.
 //!
 //! Opt in with `mise run claude-sdk:resolve-diff`, which fetches the pinned package and points
-//! `CLAUDE_SDK_TS_PACKAGE_DIR` at it. Without that variable the test only checks that the fixtures are
-//! well-formed.
+//! `CLAUDE_SDK_TS_PACKAGE_DIR` at it. Without that variable the tests check that the fixtures are well-formed and
+//! replay what upstream printed for the cases that record it in `expected.json`.
 
 use std::{
     collections::BTreeMap,
@@ -28,7 +28,9 @@ mod remap_settings_host;
 use remap_settings_host::{ProcessIdentity, RemapHost};
 
 const PACKAGE_VARIABLE: &str = "CLAUDE_SDK_TS_PACKAGE_DIR";
-const SCRUBBED: [&str; 4] = [
+const ROOT_MARKER: &str = "$ROOT";
+const SCRUBBED: [&str; 5] = [
+    "CLAUDE_CODE_ENTRYPOINT",
     "CLAUDE_CONFIG_DIR",
     "WSL_DISTRO_NAME",
     "WSL_INTEROP",
@@ -292,6 +294,31 @@ fn fixtures_are_well_formed() {
     }
 }
 
+/// What the pinned TypeScript resolver printed for a case whose answer holds on any machine (`expected.json` beside
+/// `tree`, with `$ROOT` for the fixture root).
+fn recorded(tree: &Path) -> Option<String> {
+    let text = fs::read_to_string(tree.with_file_name("expected.json")).ok()?;
+    Some(text.trim_end().to_owned())
+}
+
+#[test]
+fn rust_matches_the_recorded_typescript_output() {
+    let scratch = tempfile::tempdir().expect("scratch");
+    let mut replayed = 0;
+    for case in cases() {
+        let Some(expected) = recorded(&case.tree) else {
+            continue;
+        };
+        let root = scratch.path().join(&case.name);
+        prepare(&case.tree, &case.spec, &root);
+        let ours = format!("[{}]", rust_results(&case.name, &case.spec, &root).join(","));
+        let ours = ours.replace(&*root.to_string_lossy(), ROOT_MARKER);
+        assert_eq!(ours, expected, "{} differs from what upstream printed", case.name);
+        replayed += 1;
+    }
+    assert!(replayed > 0, "no case records what upstream printed");
+}
+
 #[test]
 #[ignore = "needs the pinned TypeScript package: mise run claude-sdk:resolve-diff"]
 fn rust_matches_the_pinned_typescript_resolver_byte_for_byte() {
@@ -320,6 +347,13 @@ fn rust_matches_the_pinned_typescript_resolver_byte_for_byte() {
         let theirs = upstream.as_str();
         if ours != theirs {
             mismatches.push(format!("{name}\n  rust:     {ours}\n  upstream: {theirs}"));
+        }
+        if let Some(stored) = recorded(tree)
+            && theirs.replace(&*root.to_string_lossy(), ROOT_MARKER) != stored
+        {
+            mismatches.push(format!(
+                "{name}\n  expected.json no longer matches what upstream prints"
+            ));
         }
     }
     assert!(

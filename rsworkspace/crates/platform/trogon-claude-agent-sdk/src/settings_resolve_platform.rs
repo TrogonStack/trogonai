@@ -91,6 +91,11 @@ pub(crate) fn runs_under_wsl<H: SettingsHost>(host: &H) -> bool {
     proc_version(host).is_some_and(|text| kernel_looks_like_wsl(&text))
 }
 
+/// `wP()` upstream: the kernel says WSL, whatever the environment variables say.
+pub(crate) fn kernel_reports_wsl<H: SettingsHost>(host: &H) -> bool {
+    proc_version(host).is_some_and(|text| kernel_looks_like_wsl(&text))
+}
+
 /// `LYe.getManagedFilePath()` upstream.
 pub(crate) fn managed_directory(kind: PlatformKind) -> PathBuf {
     PathBuf::from(match kind {

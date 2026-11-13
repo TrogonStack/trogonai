@@ -1019,3 +1019,40 @@ pub(crate) const JS_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 /// The `$schema` the TypeScript dialect adds to a tool input schema.
 pub(crate) const MCP_TS_JSON_SCHEMA_DRAFT_07: &str = "http://json-schema.org/draft-07/schema#";
+
+/// Variable naming the surface that launched the process.
+pub(crate) const ENTRYPOINT_VARIABLE: &str = "CLAUDE_CODE_ENTRYPOINT";
+
+/// Entrypoints of a cloud session that takes its managed settings from the organization (`Cf` upstream).
+pub(crate) const ORGANIZATION_ENTRYPOINTS: [&str; 2] = ["remote_cowork", "remote_cowork_trigger"];
+
+/// Allow-list keys a document the organization withholds can still narrow (`JP` upstream).
+pub(crate) const HELD_ALLOW_LIST_KEYS: [&str; 8] = [
+    "allowedMcpServers",
+    "availableModels",
+    "strictKnownMarketplaces",
+    "allowedChannelPlugins",
+    "allowedProviders",
+    "allowedMarketplaces",
+    "allowedHttpHookUrls",
+    "httpHookAllowedEnvVars",
+];
+
+/// Gate keys that mean nothing without the allow list they gate (`HX` upstream).
+pub(crate) const ALLOW_LIST_GATES: [(&str, &str); 2] = [
+    ("allowManagedMcpServersOnly", "allowedMcpServers"),
+    ("enforceAvailableModels", "availableModels"),
+];
+
+/// The allow list of MCP servers, which the admin may take from any managed tier when servers are managed-only.
+pub(crate) const MCP_SERVER_ALLOW_LIST_KEY: &str = "allowedMcpServers";
+
+/// Key that says whether the parent process's managed settings merge under the managed tier.
+pub(crate) const PARENT_SETTINGS_BEHAVIOR_KEY: &str = "parentSettingsBehavior";
+
+/// Links the writability walk follows before it gives up and treats the document as writable (`DYe` upstream).
+pub(crate) const WRITABLE_WALK_LINK_LIMIT: usize = 40;
+
+/// The write bit for others (`S_IWOTH`) and for the group (`S_IWGRP`) of a mode.
+pub(crate) const MODE_OTHER_WRITABLE: u32 = 0o2;
+pub(crate) const MODE_GROUP_WRITABLE: u32 = 0o20;

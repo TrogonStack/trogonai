@@ -4,8 +4,6 @@
 //!
 //! Upstream also records a status-only warning for every key the restriction changes. Status-only warnings never
 //! reach the resolved settings, so they are not modeled here.
-#![allow(dead_code)]
-
 use serde_json::Value;
 
 use crate::{
@@ -47,7 +45,7 @@ fn differs(original: &SettingsMap, restricted: &SettingsMap) -> bool {
 }
 
 /// lodash `isEqual` over JSON values: numbers compare by value, objects regardless of key order.
-fn js_equal(left: &Value, right: &Value) -> bool {
+pub(crate) fn js_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
         (Value::Array(left), Value::Array(right)) => {
