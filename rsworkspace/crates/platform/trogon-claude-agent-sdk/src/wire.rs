@@ -58,6 +58,9 @@ pub(crate) enum IncomingControl {
     HostAuthTokenRefresh {
         status: Option<Value>,
     },
+    RemoteControlWork {
+        session_id: Option<Value>,
+    },
     /// A `ui_*` subtype, with the request minus its `subtype`.
     Ui {
         subtype: String,
@@ -330,6 +333,10 @@ pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<
             } else if wire.request.subtype == "host_auth_token_refresh" {
                 let wire: HostAuthTokenWire = decode(wire.request.data)?;
                 IncomingControl::HostAuthTokenRefresh { status: wire.status }
+            } else if wire.request.subtype == "remote_control_work_secret" {
+                IncomingControl::RemoteControlWork {
+                    session_id: wire.request.data.get("session_id").cloned(),
+                }
             } else if crate::constants::UI_SUBTYPES.contains(&wire.request.subtype.as_str()) {
                 IncomingControl::Ui {
                     subtype: wire.request.subtype,

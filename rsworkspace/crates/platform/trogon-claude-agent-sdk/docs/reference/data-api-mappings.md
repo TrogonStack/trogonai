@@ -176,6 +176,7 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 | `PermissionUpdate` in `updatedPermissions` | `PermissionUpdate.to_dict` (`type`, `destination`, then the fields); an update without a destination is a `PermissionUpdate::Unknown` raw object | the update in declaration order |
 | `ElicitationRequest`, `ElicitationMode::Other` | no elicitation support: unsupported-subtype error | `onElicitation` with any `mode`; `{"action":"decline"}` without a handler |
 | `UserDialogRequest`, `supported_dialog_kinds` | no dialog support: unsupported-subtype error | `onUserDialog` for every kind; no response without a handler |
+| `RemoteControlOptions`, `WorkSecretRefresher`, `ClientHandle::enable_remote_control` | no remote control: unsupported-subtype error | `enableRemoteControl` and `remote_control_work_secret` answered for the attached session; enabling without a `response` throws a `TypeError` (`Error::Protocol`) while it is the latest call |
 | `UiHost`, `UiHandler`, `ClientHandle::set_ui_host` | no UI host: unsupported-subtype error | `uiHost` methods for the six `ui_*` subtypes; the return value is the response, and `Ok(None)` answers success without a `response` like `undefined` |
 | `signal` on each request | the handler task is cancelled and nothing is written | the signal aborts and the answer is still written |
 | `DuplicateControlRequests` | `RunBoth`: both run and answer | `Skip` (default): the redelivered id is ignored |

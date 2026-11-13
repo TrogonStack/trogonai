@@ -27,8 +27,8 @@ use trogon_claude_agent_sdk::{
     DialogKind, DuplicateControlRequests, ElicitationMode, ElicitationRequest, ElicitationResponse, FeatureSupport,
     HostAuthToken, HostAuthTokenRequest, JsonObject, MatchedAskRule, OAuthTokenRequest, OAuthTokenResponse,
     OAuthTokenState, PermissionDecision, PermissionDecisionClassification, PermissionMode, PermissionUpdate,
-    PermissionUpdateDestination, ToolPermissionRequest, ToolUseId, UiHost, UiRequest, UserDialogRequest,
-    UserDialogResponse,
+    PermissionUpdateDestination, RemoteControlOptions, ToolPermissionRequest, ToolUseId, UiHost, UiRequest,
+    UserDialogRequest, UserDialogResponse, WorkSecretRefreshRequest,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -43,6 +43,7 @@ use scripted_process::{ScriptedProcessHarness, ScriptedProcessSpawner};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+const REMOTE: &str = include_str!("fixtures/auth_callbacks/remote_control.json");
 const UI: &str = include_str!("fixtures/auth_callbacks/ui_host.json");
 
 /// One thing the scripted CLI does after `initialize` is answered.
@@ -110,9 +111,15 @@ async fn serve(
         let Some(line) = line else { break };
         let frame: Value = serde_json::from_str(&line)?;
         if frame["type"] == "control_request" {
+            // A `remote_control` answer reports the request's `name` as the bridge session it attached.
+            let response = if frame["request"]["subtype"] == "remote_control" {
+                json!({"bridge_session_id": frame["request"]["name"]})
+            } else {
+                json!({})
+            };
             write(
                 &mut stdout,
-                &json!({"type":"control_response","response":{"subtype":"success","request_id":frame["request_id"],"response":{}}}),
+                &json!({"type":"control_response","response":{"subtype":"success","request_id":frame["request_id"],"response":response}}),
             )
             .await?;
             if frame["request"]["subtype"] == "initialize"
@@ -752,6 +759,103 @@ async fn every_dialog_kind_reaches_the_handler_and_a_null_answer_writes_nothing(
     Ok(())
 }
 
+fn work_secret_options(refreshed: &Arc<Mutex<Vec<String>>>) -> RemoteControlOptions {
+    let observed = Arc::clone(refreshed);
+    RemoteControlOptions {
+        work_secret: Some("opaque".into()),
+        refresh_work_secret: Some(Arc::new(move |request: WorkSecretRefreshRequest| {
+            let secret = match observed.lock() {
+                Ok(mut seen) => {
+                    seen.push(request.session_id);
+                    if seen.len() == 1 { "fresh" } else { "" }
+                }
+                Err(_) => "",
+            };
+            async move { Ok::<_, CallbackError>(Some(secret.to_owned())) }
+        })),
+        reattach_session_id: Some("cse_abcd1234".into()),
+        keep_session_on_exit: None,
+    }
+}
+
+#[tokio::test]
+async fn remote_control_work_secret_is_answered_for_the_attached_session() -> TestResult {
+    let refreshed = Arc::new(Mutex::new(Vec::new()));
+    let remote = work_secret_options(&refreshed);
+    let responses = run_with(
+        options(ArgvStyle::TypeScript),
+        vec![
+            Step::Hold,
+            request(
+                "w1",
+                json!({"subtype":"remote_control_work_secret","session_id":"cse_abcd1234"}),
+            ),
+            Step::Wait(100),
+            request(
+                "w2",
+                json!({"subtype":"remote_control_work_secret","session_id":"other_abcd1234"}),
+            ),
+            Step::Wait(100),
+            request(
+                "w3",
+                json!({"subtype":"remote_control_work_secret","session_id":"cse_zzzzzzzz"}),
+            ),
+            request("w4", json!({"subtype":"remote_control_work_secret"})),
+            request("w5", json!({"subtype":"remote_control_work_secret","session_id":null})),
+            request("w6", json!({"subtype":"remote_control_work_secret","session_id":5})),
+            request(
+                "w7",
+                json!({"subtype":"remote_control_work_secret","session_id":["cse_abcd1234"]}),
+            ),
+        ],
+        7,
+        |handle: ClientHandle| async move {
+            let reply = handle
+                .enable_remote_control(true, Some("cse_abcd1234"), Some(remote))
+                .await?;
+            assert_eq!(reply, Some(json!({"bridge_session_id":"cse_abcd1234"})));
+            Ok::<(), Box<dyn std::error::Error>>(())
+        },
+    )
+    .await?;
+    assert_eq!(responses, Captured::parse(REMOTE)?.strings("work_secret", "responses")?);
+    assert_eq!(
+        *refreshed.lock().map_err(|_| "lock poisoned")?,
+        ["cse_abcd1234", "cse_abcd1234"]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_attach_that_names_another_session_removes_the_work_secret_answerer() -> TestResult {
+    let refreshed = Arc::new(Mutex::new(Vec::new()));
+    let remote = work_secret_options(&refreshed);
+    let responses = run_with(
+        options(ArgvStyle::TypeScript),
+        vec![
+            Step::Hold,
+            request(
+                "w1",
+                json!({"subtype":"remote_control_work_secret","session_id":"cse_abcd1234"}),
+            ),
+        ],
+        1,
+        |handle: ClientHandle| async move {
+            handle
+                .enable_remote_control(true, Some("cse_9999"), Some(remote))
+                .await?;
+            Ok::<(), Box<dyn std::error::Error>>(())
+        },
+    )
+    .await?;
+    assert_eq!(
+        responses,
+        Captured::parse(REMOTE)?.strings("work_secret_other_session", "responses")?
+    );
+    assert!(refreshed.lock().map_err(|_| "lock poisoned")?.is_empty());
+    Ok(())
+}
+
 /// A `uiHost` whose `copy`, `promptRead` and `readSelection` answer and whose `promptPaint` fails; `promptFill` and
 /// `promptSuggest` are absent.
 fn ui_host(seen: &Arc<Mutex<Vec<(Value, bool)>>>) -> UiHost {
@@ -835,5 +939,35 @@ async fn python_answers_ui_requests_as_unsupported_even_with_a_host_set() -> Tes
         Captured::parse(UI)?.strings("python_unsupported_ui", "responses")?
     );
     assert!(seen.lock().map_err(|_| "lock poisoned")?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_answers_work_secret_requests_as_unsupported_even_with_an_answerer_set() -> TestResult {
+    let refreshed = Arc::new(Mutex::new(Vec::new()));
+    let remote = work_secret_options(&refreshed);
+    let responses = run_with(
+        options(ArgvStyle::Python),
+        vec![
+            Step::Hold,
+            request(
+                "p3",
+                json!({"subtype":"remote_control_work_secret","session_id":"cse_abcd1234"}),
+            ),
+        ],
+        1,
+        |handle: ClientHandle| async move {
+            handle
+                .enable_remote_control(true, Some("cse_abcd1234"), Some(remote))
+                .await?;
+            Ok::<(), Box<dyn std::error::Error>>(())
+        },
+    )
+    .await?;
+    assert_eq!(
+        responses,
+        Captured::parse(REMOTE)?.strings("python_unsupported_work_secret", "responses")?
+    );
+    assert!(refreshed.lock().map_err(|_| "lock poisoned")?.is_empty());
     Ok(())
 }

@@ -20,15 +20,18 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
     ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, ContextUsageDetail, ControlOperation, Error, InterruptReceipt,
     JsonObject, LocalPlugin, MaxThinkingTokensDisplay, McpPermissionModeOverride, McpServerName, McpServers, MessageId,
-    ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RewindMode, SdkMcpServers, SettingsUpdateSource, TaskId,
-    ToolUseId,
+    ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RemoteControlOptions, RewindMode, SdkMcpServers,
+    SettingsUpdateSource, TaskId, ToolUseId,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
 
+#[path = "support/captured.rs"]
+mod captured;
 #[path = "support/scripted_process.rs"]
 mod scripted_process;
 
+use captured::Captured;
 use scripted_process::{ScriptedProcessHarness, ScriptedProcessSpawner};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -566,5 +569,112 @@ async fn python_controls_match_claude_agent_sdk_bytes_and_returns() -> TestResul
             r#"{"type": "control_request", "request_id": "<id>", "request": {"subtype": "stop_task", "task_id": "t"}}"#,
         ]
     );
+    Ok(())
+}
+
+const CAPTURED: &str = include_str!("fixtures/auth_callbacks/remote_control.json");
+
+#[tokio::test]
+async fn enable_remote_control_writes_the_typescript_request_bytes() -> TestResult {
+    let (client, server) = connect(
+        ArgvStyle::TypeScript,
+        script([
+            ("initialize", vec![Reply::Success(first_initialize())]),
+            (
+                "remote_control",
+                vec![
+                    Reply::Success(json!({"bridge_session_id":"nm"})),
+                    Reply::Success(json!({})),
+                    Reply::Success(json!({})),
+                    Reply::Success(json!({})),
+                ],
+            ),
+        ]),
+    )
+    .await?;
+    let handle = client.handle();
+    let options = RemoteControlOptions {
+        work_secret: Some("sec".into()),
+        reattach_session_id: Some("cse_1".into()),
+        keep_session_on_exit: Some(true),
+        ..RemoteControlOptions::default()
+    };
+    let reply = handle.enable_remote_control(true, Some("nm"), Some(options)).await?;
+    assert_eq!(reply, Some(json!({"bridge_session_id":"nm"})));
+    handle.enable_remote_control(false, None, None).await?;
+    handle.enable_remote_control(true, None, None).await?;
+    let keep_off = RemoteControlOptions {
+        keep_session_on_exit: Some(false),
+        ..RemoteControlOptions::default()
+    };
+    handle.enable_remote_control(true, None, Some(keep_off)).await?;
+    client.disconnect().await?;
+    let written = server.await??;
+    let lines: Vec<String> = written
+        .iter()
+        .filter(|line| line.contains(r#""subtype":"remote_control""#))
+        .map(|line| typescript_line(line))
+        .collect();
+    assert_eq!(
+        lines,
+        Captured::parse(CAPTURED)?.strings("remote_request_bytes", "requests")?
+    );
+    Ok(())
+}
+
+/// What the scripted CLI answers a `remote_control` request with in the captured `sdk.mjs` run.
+fn remote_answer(answer: &str) -> Reply {
+    match answer {
+        "absent" => Reply::Omitted,
+        "null" => Reply::Success(Value::Null),
+        _ => Reply::Success(json!({})),
+    }
+}
+
+#[tokio::test]
+async fn an_undefined_remote_control_response_follows_sdk_mjs() -> TestResult {
+    let captured = Captured::parse(CAPTURED)?;
+    for answer in ["absent", "null", "empty"] {
+        for state in ["on", "off"] {
+            let scenario = format!("remote_{answer}_{state}");
+            let (client, server) = connect(
+                ArgvStyle::TypeScript,
+                script([
+                    ("initialize", vec![Reply::Success(first_initialize())]),
+                    ("remote_control", vec![remote_answer(answer)]),
+                ]),
+            )
+            .await?;
+            let result = client
+                .handle()
+                .enable_remote_control(state == "on", Some("n1"), None)
+                .await;
+            client.disconnect().await?;
+            let written = server.await??;
+            let lines: Vec<String> = written
+                .iter()
+                .filter(|line| line.contains(r#""subtype":"remote_control""#))
+                .map(|line| typescript_line(line))
+                .collect();
+            assert_eq!(lines, captured.strings(&scenario, "requests")?, "{scenario}");
+            let seen = captured.field(&scenario, "seen")?;
+            match (seen.get("error"), result) {
+                // `sdk.mjs` throws a `TypeError` reading `bridge_session_id` off the missing response.
+                (Some(error), Err(Error::Protocol(_))) => assert_eq!(error["name"], "TypeError", "{scenario}"),
+                (Some(_), other) => {
+                    return Err(format!("{scenario}: expected a TypeError, got ok={}", other.is_ok()).into());
+                }
+                (None, Ok(reply)) => {
+                    // `sdk.mjs` returns `undefined` for an absent response and the value otherwise, `null` included.
+                    let expected = match &seen["reply"] {
+                        Value::String(text) if text == "__undefined__" => None,
+                        other => Some(other.clone()),
+                    };
+                    assert_eq!(reply, expected, "{scenario}");
+                }
+                (None, Err(error)) => return Err(format!("{scenario}: {error}").into()),
+            }
+        }
+    }
     Ok(())
 }

@@ -1700,6 +1700,8 @@
         "UserDialogRequest",
         "UserDialogResponse",
         "DialogKind",
+        "WorkSecretRefresher",
+        "WorkSecretRefreshRequest",
         "ClientHandle.set_ui_host",
         "UiHost",
         "UiHandler",
@@ -1728,15 +1730,27 @@
         },
         {
           "path": "tests/golden_inbound_control.rs",
+          "name": "remote_control_work_secret_is_answered_for_the_attached_session"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "an_attach_that_names_another_session_removes_the_work_secret_answerer"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
           "name": "ui_requests_reach_the_matching_host_method"
         },
         {
           "path": "tests/golden_inbound_control.rs",
           "name": "python_answers_ui_requests_as_unsupported_even_with_a_host_set"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "python_answers_work_secret_requests_as_unsupported_even_with_an_answerer_set"
         }
       ],
       "status": "supported",
-      "rationale": "As in sdk.mjs 0.3.323, supportedDialogKinds is only advertised in initialize and every request_user_dialog reaches the handler whatever its kind. AnsweredOutOfBand and a missing handler write nothing; a redelivered in-flight id is skipped. claude_agent_sdk 0.2.181 has no dialog handler and answers with its unsupported-subtype error in the Python dialect. It also routes the TypeScript-only uiHost subtypes (ui_copy, ui_prompt_read, ui_prompt_fill, ui_prompt_paint, ui_prompt_suggest, ui_read_selection) to the matching method installed through ClientHandle.set_ui_host, and a subtype whose method is absent falls through to the unsupported request error; claude_agent_sdk 0.2.181 has no uiHost and answers each with its unsupported-subtype error, host set or not."
+      "rationale": "As in sdk.mjs 0.3.323, supportedDialogKinds is only advertised in initialize and every request_user_dialog reaches the handler whatever its kind. AnsweredOutOfBand and a missing handler write nothing; a redelivered in-flight id is skipped. claude_agent_sdk 0.2.181 has no dialog handler and answers with its unsupported-subtype error in the Python dialect. It also routes the TypeScript-only uiHost subtypes (ui_copy, ui_prompt_read, ui_prompt_fill, ui_prompt_paint, ui_prompt_suggest, ui_read_selection) to the matching method installed through ClientHandle.set_ui_host, and a subtype whose method is absent falls through to the unsupported request error; claude_agent_sdk 0.2.181 has no uiHost and answers each with its unsupported-subtype error, host set or not. It answers the TypeScript-only refreshWorkSecret (remote_control_work_secret) only for the session enableRemoteControl attached; claude_agent_sdk 0.2.181 answers it with its unsupported-subtype error, answerer set or not."
     },
     {
       "id": "embedded-mcp",
@@ -3212,7 +3226,9 @@
         "ClientHandle.seed_read_state",
         "ClientHandle.background_tasks",
         "ControlReply",
-        "ControlRejectionError"
+        "ControlRejectionError",
+        "ClientHandle.enable_remote_control",
+        "RemoteControlOptions"
       ],
       "tests": [
         {
@@ -3238,10 +3254,18 @@
         {
           "path": "tests/error_contracts.rs",
           "name": "control_timeout_diagnostics_identify_each_wire_operation"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "enable_remote_control_writes_the_typescript_request_bytes"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "an_undefined_remote_control_response_follows_sdk_mjs"
         }
       ],
       "status": "supported",
-      "rationale": "Every request matches sdk.mjs 0.3.323 byte for byte, captured from the published package with JSON.stringify number spelling, optional fields omitted when unset and the same request ids. Replies keep the value the CLI sent (ControlReply::as_json), None when the reply has no response where TypeScript returns undefined, with the generated upstream type available through decode, and each method returns what the TypeScript method returns: readFile is None on any failure, setMcpPermissionModeOverride is {} for an absent response, backgroundTasks is true for an absent backgrounded. A rejection keeps its error_code when it matches the TypeScript pattern. backgroundTasks refuses a non-boolean backgrounded where TypeScript returns it untyped. Python 0.2.181 has none of these methods."
+      "rationale": "Every request matches sdk.mjs 0.3.323 byte for byte, captured from the published package with JSON.stringify number spelling, optional fields omitted when unset and the same request ids. Replies keep the value the CLI sent (ControlReply::as_json), None when the reply has no response where TypeScript returns undefined, with the generated upstream type available through decode, and each method returns what the TypeScript method returns: readFile is None on any failure, setMcpPermissionModeOverride is {} for an absent response, backgroundTasks is true for an absent backgrounded. A rejection keeps its error_code when it matches the TypeScript pattern. backgroundTasks refuses a non-boolean backgrounded where TypeScript returns it untyped. Python 0.2.181 has none of these methods. enableRemoteControl writes the remote_control request with the optional name, reattach_session_id, keep_session_on_exit and work_secret fields in the TypeScript order, returns the response as sdk.mjs does, and while it is still the latest call, enabling with an absent or null response fails as sdk.mjs does reading bridge_session_id. It installs the work secret answerer only for the attached session, cleared by a failed or superseded call; it can be called only after connect, so sdk.mjs's call before initialize completes has no Rust counterpart. enableRemoteControl is not published in the upstream declaration files."
     },
     {
       "id": "custom-transport",

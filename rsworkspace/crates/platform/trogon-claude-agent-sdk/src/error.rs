@@ -29,6 +29,7 @@ pub enum ControlOperation {
     ReloadSkills,
     ReloadOutputStyles,
     SeedReadState,
+    RemoteControl,
 }
 
 impl std::fmt::Display for ControlOperation {
@@ -57,6 +58,7 @@ impl std::fmt::Display for ControlOperation {
             Self::ReloadSkills => "reload_skills",
             Self::ReloadOutputStyles => "reload_output_styles",
             Self::SeedReadState => "seed_read_state",
+            Self::RemoteControl => "remote_control",
         })
     }
 }

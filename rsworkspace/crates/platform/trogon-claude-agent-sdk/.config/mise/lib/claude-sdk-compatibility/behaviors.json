@@ -3695,6 +3695,74 @@
       ]
     },
     {
+      "id": "c25-remote-control-work-secret",
+      "concept": "The host answers a remote control work secret refresh",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no work secret answerer; they answer the request with their unsupported subtype error."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "else if(e.request.subtype===\"remote_control_work_secret\"){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 286,
+        "sha256": "1411082d7df22fa0e4054c4e25cbf50a47375e0ded8b036426f9f6f78efff57f"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript answers remote_control_work_secret only for the session the last enableRemoteControl attached, comparing ids with j8 (equal, or the same suffix of at least four characters after the last underscore). A missing answerer, or a session this host did not attach, is an error; otherwise refreshWorkSecret runs with the attached session id and the signal and an empty result answers {work_secret:null}."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_inbound_control::remote_control_work_secret_is_answered_for_the_attached_session",
+        "golden_inbound_control::an_attach_that_names_another_session_removes_the_work_secret_answerer",
+        "golden_inbound_control::python_answers_work_secret_requests_as_unsupported_even_with_an_answerer_set"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/remote_control.rs",
+        "src/wire.rs"
+      ]
+    },
+    {
+      "id": "c26-enable-remote-control",
+      "concept": "enableRemoteControl installs the work secret answerer",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no enableRemoteControl method; they answer the request with their unsupported subtype error."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "async enableRemoteControl(e,t,n){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 759,
+        "sha256": "78200a9b9ea749bec93caf80409310f24e097e4acf64850bc27edb657125124b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript sends remote_control with the optional name, reattach_session_id, keep_session_on_exit and work_secret. When enabling and still the latest call, a response that is absent or null throws the engine TypeError Cannot read properties of undefined (or null) (reading 'bridge_session_id') after the answerer was installed, so the answerer stays; when disabling, the response is returned as it is. It answers for reattachSessionId, else the session id inside the work secret's ingress token, only when enabling with a work secret and a refresh function. A failed call clears the answerer unless a newer call began, and a successful enable keeps the candidate that j8 matches to the response's bridge_session_id."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_controls::enable_remote_control_writes_the_typescript_request_bytes",
+        "golden_controls::an_undefined_remote_control_response_follows_sdk_mjs",
+        "golden_inbound_control::remote_control_work_secret_is_answered_for_the_attached_session"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/remote_control.rs",
+        "src/runtime_payload.rs"
+      ]
+    },
+    {
       "id": "c27-ui-host",
       "concept": "A uiHost draws the CLI's prompt",
       "python": {

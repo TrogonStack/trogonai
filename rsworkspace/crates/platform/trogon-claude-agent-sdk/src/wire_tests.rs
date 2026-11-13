@@ -102,6 +102,28 @@ fn a_failed_handler_answers_its_message_and_a_cancelled_python_handler_writes_no
 }
 
 #[test]
+fn remote_control_work_secret_keeps_the_raw_session_id() -> Result<(), ProtocolError> {
+    let parse = |request: &str| {
+        parse_frame(format!(r#"{{"type":"control_request","request_id":"r","request":{request}}}"#).as_bytes())
+    };
+    assert!(matches!(
+        parse(r#"{"subtype":"remote_control_work_secret","session_id":5}"#)?,
+        Frame::ControlRequest {
+            request: IncomingControl::RemoteControlWork { session_id: Some(_) },
+            ..
+        }
+    ));
+    assert!(matches!(
+        parse(r#"{"subtype":"remote_control_work_secret"}"#)?,
+        Frame::ControlRequest {
+            request: IncomingControl::RemoteControlWork { session_id: None },
+            ..
+        }
+    ));
+    Ok(())
+}
+
+#[test]
 fn ui_requests_keep_their_payload_and_other_ui_subtypes_are_unsupported() -> Result<(), ProtocolError> {
     let parse = |request: &str| {
         parse_frame(format!(r#"{{"type":"control_request","request_id":"r","request":{request}}}"#).as_bytes())

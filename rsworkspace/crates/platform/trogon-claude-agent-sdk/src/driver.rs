@@ -356,7 +356,7 @@ where
     user_dialog_handler: Option<Arc<dyn crate::UserDialogHandler>>,
     oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
     host_auth_token_handler: Option<Arc<dyn crate::HostAuthTokenHandler>>,
-    /// The `uiHost` that `ClientHandle` installs.
+    /// The work secret answerer and `uiHost` that `ClientHandle` installs.
     host: crate::remote_control::HostState,
     session: Option<crate::SessionRuntime<F>>,
     mirror_flush: Option<MirrorBarrier>,
@@ -1305,6 +1305,47 @@ where
                         Ok(token) => {
                             wire::success_response(&response_id, crate::auth_token::host_auth_wire_json(&token))
                                 .map(Some)
+                        }
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::RemoteControlWork { session_id } => {
+                let Some(answerer) = self.host.answerer().filter(|_| !python) else {
+                    if let Some(response) = wire::unsupported_response(&id, "remote_control_work_secret", style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                match crate::remote_control::same_requested_session(&answerer.session_id, session_id.as_ref()) {
+                    Err(message) => return self.write_response(wire::callback_error_response(&id, &message)).await,
+                    Ok(false) => {
+                        return self
+                            .write_response(wire::callback_error_response(
+                                &id,
+                                "remote_control_work_secret names a session this host did not attach.",
+                            ))
+                            .await;
+                    }
+                    Ok(true) => {}
+                }
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::WorkSecretRefreshRequest {
+                    session_id: answerer.session_id.clone(),
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "refreshWorkSecret callback timed out").map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match answerer.refresh.call(request).await {
+                        Ok(secret) => {
+                            let secret = secret.filter(|secret| !secret.is_empty());
+                            let mut response = JsonObject::new();
+                            response.insert("work_secret".into(), secret.map_or(serde_json::Value::Null, Into::into));
+                            wire::success_response(&response_id, response).map(Some)
                         }
                         Err(error) => wire::handler_error_response(&response_id, &error, style),
                     }

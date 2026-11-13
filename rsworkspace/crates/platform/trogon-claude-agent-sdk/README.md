@@ -161,6 +161,14 @@ Under the default TypeScript dialect, `ClientHandle::set_ui_host` takes a
 falls through to the unsupported subtype error. Under `ArgvStyle::Python` every
 `ui_*` request gets that error.
 
+`ClientHandle::enable_remote_control` takes `RemoteControlOptions` and, under
+the default TypeScript dialect, answers `remote_control_work_secret` for the
+session it attached, matched as `sdk.mjs` does. It returns the `response` as
+sent: `None` is `undefined` and `Some(null)` is `null`. Enabling with either one
+fails with `Error::Protocol` while it is still the latest call, as `sdk.mjs`
+throws reading `bridge_session_id`. Under `ArgvStyle::Python` a work secret
+request gets the unsupported subtype error.
+
 [The feature-connect example](examples/feature_connect.rs) checks blocking-hook
 registration and MCP connection without a prompt. It refuses startup when the
 installed CLI does not advertise blocking-hook support. Verification with CLI

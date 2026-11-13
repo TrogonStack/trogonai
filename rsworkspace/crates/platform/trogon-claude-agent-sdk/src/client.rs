@@ -722,6 +722,47 @@ impl ClientHandle {
         self.host.set_ui_host(host);
     }
 
+    /// TypeScript `enableRemoteControl(enabled, name, options)`. A work secret with a refresher installs the
+    /// answerer for `remote_control_work_secret`, kept only when the CLI reports a `bridge_session_id` that names
+    /// the same session. Needs `ArgvStyle::TypeScript`; Python has no such control request.
+    ///
+    /// Returns the frame's `response` as `sdk.mjs` does: `None` is `undefined` (the frame had no `response`
+    /// key) and `Some(Value::Null)` is `null`. When this is still the latest call, enabling with either one fails
+    /// like `sdk.mjs` reading `bridge_session_id` off it, and the answerer installed for the call stays.
+    pub async fn enable_remote_control(
+        &self,
+        enabled: bool,
+        name: Option<&str>,
+        options: Option<crate::RemoteControlOptions>,
+    ) -> Result<Option<serde_json::Value>, Error> {
+        let options = options.unwrap_or_default();
+        let next = options.answerer(enabled);
+        let (generation, previous) = self.host.begin_remote_control(next.clone());
+        let request = RequestPayload::RemoteControl {
+            enabled,
+            name,
+            reattach_session_id: options.reattach_session_id.as_deref(),
+            keep_session_on_exit: options.keep_session_on_exit,
+            work_secret: options.work_secret.as_ref().map(crate::SensitiveString::expose),
+        }
+        .to_value()?;
+        let response = match self.control(ControlOperation::RemoteControl, request).await {
+            Ok(response) => response,
+            Err(error) => {
+                self.host.remote_control_failed(generation);
+                return Err(error);
+            }
+        };
+        if enabled
+            && !self
+                .host
+                .remote_control_enabled(generation, response.as_ref(), [next, previous])
+        {
+            return Err(missing_response(ControlOperation::RemoteControl));
+        }
+        Ok(response)
+    }
+
     /// TypeScript `setMaxThinkingTokens(tokens)`: `thinking_display` is left out.
     pub async fn set_max_thinking_tokens(&self, max_thinking_tokens: Option<u64>) -> Result<(), Error> {
         self.send_max_thinking_tokens(max_thinking_tokens, None).await
