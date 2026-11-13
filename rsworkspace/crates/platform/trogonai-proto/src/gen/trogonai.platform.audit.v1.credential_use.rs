@@ -19,6 +19,11 @@ pub struct CredentialUse {
     /// Field 2: `credential`
     #[serde(rename = "credential", with = "::buffa::json_helpers::proto_string")]
     pub credential: ::buffa::alloc::string::String,
+    /// The binding the credential was used under. An injection names the
+    /// connection binding that placed it. A release serves no connection binding,
+    /// because the credential's own release policy binds it to a runtime service,
+    /// destination and location, so a release names the credential itself.
+    ///
     /// Field 3: `binding_id`
     #[serde(
         rename = "bindingId",

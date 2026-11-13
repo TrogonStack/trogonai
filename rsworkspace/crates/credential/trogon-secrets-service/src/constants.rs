@@ -13,6 +13,9 @@ pub const RELEASE_TTL_BOUND: Duration = Duration::from_secs(300);
 /// value has none, which the wire contract spells as zero.
 pub const UNBUNDLED_GENERATION: u64 = 0;
 
+/// Why a credential state read that found its bound gone answers nothing.
+pub(crate) const BOUND_VANISHED: &str = "the last event of the credential's subject was removed during the read";
+
 /// The destination a release record names when `host:port` is longer than an
 /// audit name may be (a 250 byte host and a port do not fit). It is the egress
 /// proxy's spelling, so both records of the dual audit (ADR#0023 Decision 6)
@@ -41,3 +44,11 @@ pub const THROTTLED_RETRY_AFTER: Duration = RELEASE_DEADLINE;
 /// How many releases one member of the queue group works on at once when the
 /// operator sets no limit.
 pub(crate) const DEFAULT_ADMISSION_LIMIT: NonZeroUsize = NonZeroUsize::MIN.saturating_add(63);
+
+/// The characters the contract's `egress_host.host_is_exact` rule keeps out
+/// of a host, so a destination is never a pattern or a path.
+pub(crate) const NOT_EXACT_HOST_CHARACTERS: [char; 3] = ['*', '/', ' '];
+
+/// The length of a NATS curve public key: the `X` prefix and 55 base32
+/// characters.
+pub(crate) const CURVE_KEY_LEN: usize = 56;

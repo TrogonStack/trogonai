@@ -7,15 +7,8 @@ use trogonai_proto::policy::egress_permissions::v1alpha1::EgressHost;
 use trogonai_proto::secrets::exchange::v1alpha1::release_location::Value;
 use trogonai_proto::secrets::exchange::v1alpha1::{CredentialAddress, ReleaseLocation, ResolveForReleaseRequest};
 
+use super::constants::{CURVE_KEY_LEN, NOT_EXACT_HOST_CHARACTERS};
 use super::{ReleaseCallError, ReleaseCaller, ReleaseDestination, ReleaseRequest};
-
-/// The characters the contract's `egress_host.host_is_exact` rule keeps out
-/// of a host, so a destination is never a pattern or a path.
-const NOT_EXACT_HOST_CHARACTERS: [char; 3] = ['*', '/', ' '];
-
-/// The length of a NATS curve public key: the `X` prefix and 55 base32
-/// characters.
-const CURVE_KEY_LEN: usize = 56;
 
 /// One release request, read from the caller the subject names and the
 /// payload it sent.
