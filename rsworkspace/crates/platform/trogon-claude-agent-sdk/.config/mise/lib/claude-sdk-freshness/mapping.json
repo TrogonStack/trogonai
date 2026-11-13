@@ -1741,6 +1741,14 @@
           "name": "ui_requests_reach_the_matching_host_method"
         },
         {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_single_turn_ends_at_its_result_unless_something_needs_the_cli_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_streamed_input_is_closed_when_written_unless_something_needs_the_cli_like_sdk_mjs"
+        },
+        {
           "path": "tests/golden_inbound_control.rs",
           "name": "python_answers_ui_requests_as_unsupported_even_with_a_host_set"
         },
@@ -1750,7 +1758,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "As in sdk.mjs 0.3.323, supportedDialogKinds is only advertised in initialize and every request_user_dialog reaches the handler whatever its kind. AnsweredOutOfBand and a missing handler write nothing; a redelivered in-flight id is skipped. claude_agent_sdk 0.2.181 has no dialog handler and answers with its unsupported-subtype error in the Python dialect. It also routes the TypeScript-only uiHost subtypes (ui_copy, ui_prompt_read, ui_prompt_fill, ui_prompt_paint, ui_prompt_suggest, ui_read_selection) to the matching method installed through ClientHandle.set_ui_host, and a subtype whose method is absent falls through to the unsupported request error; claude_agent_sdk 0.2.181 has no uiHost and answers each with its unsupported-subtype error, host set or not. It answers the TypeScript-only refreshWorkSecret (remote_control_work_secret) only for the session enableRemoteControl attached; claude_agent_sdk 0.2.181 answers it with its unsupported-subtype error, answerer set or not."
+      "rationale": "As in sdk.mjs 0.3.323, supportedDialogKinds is only advertised in initialize and every request_user_dialog reaches the handler whatever its kind. AnsweredOutOfBand and a missing handler write nothing; a redelivered in-flight id is skipped. claude_agent_sdk 0.2.181 has no dialog handler and answers with its unsupported-subtype error in the Python dialect. It also routes the TypeScript-only uiHost subtypes (ui_copy, ui_prompt_read, ui_prompt_fill, ui_prompt_paint, ui_prompt_suggest, ui_read_selection) to the matching method installed through ClientHandle.set_ui_host, and a subtype whose method is absent falls through to the unsupported request error; claude_agent_sdk 0.2.181 has no uiHost and answers each with its unsupported-subtype error, host set or not. It answers the TypeScript-only refreshWorkSecret (remote_control_work_secret) only for the session enableRemoteControl attached; claude_agent_sdk 0.2.181 answers it with its unsupported-subtype error, answerer set or not. Under the TypeScript dialect the run ends as hasBidirectionalNeeds decides in sdk.mjs: a streamed input closes stdin as soon as it is written and a single turn ends at its result when nothing needs the CLI, and otherwise the run waits for the session to be idle. The Python dialect keeps its own run-end rule."
     },
     {
       "id": "embedded-mcp",

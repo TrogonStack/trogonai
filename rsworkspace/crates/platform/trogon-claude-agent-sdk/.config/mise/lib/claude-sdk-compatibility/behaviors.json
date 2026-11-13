@@ -3796,6 +3796,37 @@
         "src/ui_host.rs",
         "src/wire.rs"
       ]
+    },
+    {
+      "id": "c29-bidirectional-needs",
+      "concept": "The run ends at its result only when nothing needs the CLI to keep asking",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no hasBidirectionalNeeds predicate and keep their own run-end rule."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "hasBidirectionalNeeds(){return this.sdkMcpServers.size>0",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 234,
+        "sha256": "21662671158a7a5267c0fa8b6b0610b3e5e4ae44ef6ab0566391dd56304a8360"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript treats a run as needing the CLI when it has an embedded MCP server, a non-empty hooks object, canUseTool, onElicitation, onUserDialog, getOAuthToken, getHostAuthToken or a work secret answerer. A streamed input is closed as soon as it was written when nothing needs the CLI. A result ends a single turn, and closes stdin, when the session reported no state or is idle or when nothing needs the CLI; otherwise the run end waits for idle or its ceiling."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_run_end::a_single_turn_ends_at_its_result_unless_something_needs_the_cli_like_sdk_mjs",
+        "golden_run_end::a_streamed_input_is_closed_when_written_unless_something_needs_the_cli_like_sdk_mjs"
+      ],
+      "rust": [
+        "src/driver.rs"
+      ]
     }
   ]
 }

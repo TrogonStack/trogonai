@@ -166,10 +166,21 @@ impl RunState {
         Ok(())
     }
 
-    fn settled(&self, callbacks: usize) -> bool {
+    /// `needs` is TypeScript's `hasBidirectionalNeeds()`, and `None` for Python, which has no such rule.
+    ///
+    /// TypeScript closes stdin as soon as the input finished when nothing needs the CLI to keep asking, without
+    /// waiting for a result. For a single turn it ends the run at the result when the session is idle, has not
+    /// reported a state or nothing needs the CLI.
+    fn settled(&self, callbacks: usize, needs: Option<bool>) -> bool {
+        if needs == Some(false) && matches!(self.input_done, Some(Completion::Run)) {
+            return true;
+        }
         self.result_received
             && match self.input_done {
-                Some(Completion::Turn) => callbacks == 0,
+                Some(Completion::Turn) => {
+                    callbacks == 0
+                        && (needs != Some(true) || matches!(self.session_state, None | Some(SessionState::Idle)))
+                }
                 Some(Completion::Run) => {
                     !self.turn_active
                         && self.pending_inputs.is_empty()
@@ -898,7 +909,11 @@ where
             if let Some(error) = self.expired_control() {
                 return Err(error);
             }
-            if self.run_state.settled(self.running_callbacks()) && self.mirror_flush.is_none() {
+            if self
+                .run_state
+                .settled(self.running_callbacks(), self.bidirectional_needs())
+                && self.mirror_flush.is_none()
+            {
                 self.end_input().await;
             }
             let between_turns = self.run_state.input_done.is_some()
@@ -991,6 +1006,25 @@ where
                 }
             }
         }
+    }
+
+    /// TypeScript `hasBidirectionalNeeds()`: SDK MCP servers, hooks, a permission, elicitation or user dialog
+    /// handler, an auth callback or a work secret answerer. `None` under Python.
+    fn bidirectional_needs(&self) -> Option<bool> {
+        (self.argv_style == crate::ArgvStyle::TypeScript).then(|| {
+            !self.sdk_mcp_servers.is_empty()
+                || self
+                    .initialize_request
+                    .get("hooks")
+                    .and_then(serde_json::Value::as_object)
+                    .is_some_and(|hooks| !hooks.is_empty())
+                || self.handler.is_some()
+                || self.elicitation_handler.is_some()
+                || self.user_dialog_handler.is_some()
+                || self.oauth_token_handler.is_some()
+                || self.host_auth_token_handler.is_some()
+                || self.host.answerer().is_some()
+        })
     }
 
     fn running_callbacks(&self) -> usize {

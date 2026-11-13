@@ -169,6 +169,12 @@ fails with `Error::Protocol` while it is still the latest call, as `sdk.mjs`
 throws reading `bridge_session_id`. Under `ArgvStyle::Python` a work secret
 request gets the unsupported subtype error.
 
+Under TypeScript the run ends as `sdk.mjs` does: when nothing needs the CLI to
+keep asking (no embedded MCP server, hook, permission, elicitation or dialog
+handler, auth callback or work secret answerer), a streamed input closes stdin as
+soon as it is written and a single turn ends at its result. Otherwise the run
+waits for session idle. `ArgvStyle::Python` keeps its own run-end rule.
+
 [The feature-connect example](examples/feature_connect.rs) checks blocking-hook
 registration and MCP connection without a prompt. It refuses startup when the
 installed CLI does not advertise blocking-hook support. Verification with CLI

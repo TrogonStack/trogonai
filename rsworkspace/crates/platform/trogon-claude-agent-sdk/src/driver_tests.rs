@@ -728,3 +728,30 @@ fn the_initialize_request_carries_managed_settings_after_the_plugins() -> Result
     )?;
     Ok(())
 }
+
+/// `settled` against `hasBidirectionalNeeds()` in `sdk.mjs`: with no needs the input ends when it finished, and a
+/// single turn ends at the result unless a need keeps the run open while the session is not idle.
+#[test]
+fn settled_follows_the_typescript_bidirectional_needs_rule() {
+    let finished = |completion, state| RunState {
+        input_done: Some(completion),
+        session_state: state,
+        ..RunState::default()
+    };
+    // No needs: a finished input run ends before any result.
+    assert!(finished(Completion::Run, None).settled(0, Some(false)));
+    assert!(!finished(Completion::Run, None).settled(0, Some(true)));
+    assert!(!finished(Completion::Run, None).settled(0, None));
+    // A single turn waits for its result.
+    let mut turn = finished(Completion::Turn, Some(SessionState::Running));
+    assert!(!turn.settled(0, Some(false)));
+    turn.result_received = true;
+    assert!(turn.settled(0, Some(false)));
+    assert!(!turn.settled(0, Some(true)));
+    assert!(turn.settled(0, None));
+    turn.session_state = Some(SessionState::Idle);
+    assert!(turn.settled(0, Some(true)));
+    turn.session_state = None;
+    assert!(turn.settled(0, Some(true)));
+    assert!(!turn.settled(1, Some(true)));
+}
