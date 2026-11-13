@@ -524,3 +524,6 @@ pub(crate) const CLOUD_PROVIDER_FLAGS: [&str; 3] = [
     "CLAUDE_CODE_USE_ANTHROPIC_AWS",
     "CLAUDE_CODE_USE_MANTLE",
 ];
+
+/// Upstream `aM` gives up on a path after this many symlink hops.
+pub(crate) const SYMLINK_HOP_LIMIT: usize = 64;

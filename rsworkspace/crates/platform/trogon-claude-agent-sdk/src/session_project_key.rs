@@ -36,7 +36,7 @@ impl SessionProjectKey {
             .canonicalize(directory)
             .map_err(SessionProjectKeyError::Directory)?;
         let absolute = absolute.to_str().ok_or(SessionProjectKeyError::NotUnicode)?;
-        let normalized: String = without_verbatim_prefix(absolute).nfc().collect();
+        let normalized = platform_nfc(&without_verbatim_prefix(absolute), crate::SummaryDialect::TypeScript);
         Self::new(sanitize_path(&normalized, crate::SummaryDialect::TypeScript))
     }
 
@@ -106,14 +106,27 @@ pub(crate) fn hyphenate(name: &str, dialect: crate::SummaryDialect) -> String {
     }
 }
 
-/// Upstream `canonicalizePath` / `_canonicalize_path`: realpath plus NFC, falling back to the input when the path
-/// cannot be resolved.
+/// Unicode normalization of a path: TypeScript's `tt` applies NFC on macOS only, Python's `_canonicalize_path` on
+/// every platform.
+pub(crate) fn platform_nfc(text: &str, dialect: crate::SummaryDialect) -> String {
+    match dialect {
+        crate::SummaryDialect::TypeScript if !cfg!(target_os = "macos") => text.to_owned(),
+        _ => text.nfc().collect(),
+    }
+}
+
+/// Upstream `_canonicalize_path`: realpath plus NFC, falling back to the input when the path cannot be resolved.
 pub(crate) fn canonicalize_lenient(directory: &Path) -> String {
+    canonicalize_lenient_in(directory, crate::SummaryDialect::Python)
+}
+
+/// Upstream `canonicalizePath` / `_canonicalize_path` for the selected rule set.
+pub(crate) fn canonicalize_lenient_in(directory: &Path, dialect: crate::SummaryDialect) -> String {
     let resolved = directory
         .canonicalize()
         .unwrap_or_else(|_| std::path::absolute(directory).unwrap_or_else(|_| directory.to_path_buf()));
     let text = resolved.to_string_lossy();
-    without_verbatim_prefix(&text).nfc().collect()
+    platform_nfc(&without_verbatim_prefix(&text), dialect)
 }
 
 /// Derives the [`SessionStore`](crate::SessionStore) project key for a directory (the current directory when
@@ -130,5 +143,5 @@ pub fn project_key_for_directory_in(
     dialect: crate::SummaryDialect,
 ) -> Result<SessionProjectKey, SessionProjectKeyError> {
     let directory = directory.unwrap_or_else(|| Path::new("."));
-    SessionProjectKey::new(sanitize_path(&canonicalize_lenient(directory), dialect))
+    SessionProjectKey::new(sanitize_path(&canonicalize_lenient_in(directory, dialect), dialect))
 }

@@ -63,6 +63,7 @@ mod session_messages_ts;
 mod session_mutations;
 mod session_path_component;
 mod session_precompact;
+mod session_probe_ts;
 mod session_project_key;
 mod session_prompt;
 mod session_reader;
