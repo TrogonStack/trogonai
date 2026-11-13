@@ -21,20 +21,13 @@ pub(crate) fn read_document(text: &str, dialect: SettingsDialect) -> Option<Sett
     if js_trim(text).is_empty() {
         return Some(SettingsMap::new());
     }
-    let Value::Object(mut document) =
-        serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(text)).ok()?
-    else {
-        return None;
-    };
-    for entry in document.values_mut() {
-        normalize_numbers(entry, dialect);
-    }
+    let mut document = parse_object(text, dialect)?;
     let schema = schema()?;
     let spec = schema.read_spec();
     for key in &spec.managed_only {
         document.shift_remove(key);
     }
-    if sanitize(&mut document, schema, spec) {
+    if sanitize(&mut document, schema, spec, false) {
         return None;
     }
     let parsed = schema.parse_document(&document)?;
@@ -44,20 +37,39 @@ pub(crate) fn read_document(text: &str, dialect: SettingsDialect) -> Option<Sett
     }
 }
 
-/// `cm` without the policy options. Returns whether a finding is fatal for the file.
-fn sanitize(document: &mut Map<String, Value>, schema: &SettingsSchema, spec: &ReadSpec) -> bool {
+/// The document object of a settings text, with numbers the way JavaScript prints them (`Ya` plus `Tr`) for the dialect.
+fn parse_object(text: &str, dialect: SettingsDialect) -> Option<Map<String, Value>> {
+    let Value::Object(mut document) =
+        serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(text)).ok()?
+    else {
+        return None;
+    };
+    for entry in document.values_mut() {
+        normalize_numbers(entry, dialect);
+    }
+    Some(document)
+}
+
+/// `cm`. With `policy_source` it reads a managed settings document (`skipMcpServerEntryFilter` and
+/// `policySource` upstream): what cannot be read is replaced by its most restrictive reading instead of
+/// being dropped. Returns whether a finding is fatal for the file.
+fn sanitize(document: &mut Map<String, Value>, schema: &SettingsSchema, spec: &ReadSpec, policy_source: bool) -> bool {
     resolve_aliases(document, spec);
     clear_nulls(document, spec);
-    wrap_single_servers(document, spec);
-    filter_permission_rules(document);
+    if !policy_source {
+        wrap_single_servers(document, spec);
+    }
+    filter_permission_rules(document, policy_source);
     let mut fatal = declares_guard_hooks_outside_hooks(document, spec);
     fatal |= sanitize_hooks(document, schema);
     filter_marketplaces(document, schema, spec);
     filter_model_picker(document, schema);
     filter_model_pricing(document, schema);
-    filter_cross_session_inbound(document, spec);
-    filter_remote_control(document, spec);
-    filter_mcp_lists(document, schema, spec);
+    filter_cross_session_inbound(document, spec, policy_source);
+    filter_remote_control(document, spec, policy_source);
+    if !policy_source {
+        filter_mcp_lists(document, schema, spec);
+    }
     fatal
 }
 
@@ -94,17 +106,27 @@ fn wrap_single_servers(document: &mut Map<String, Value>, spec: &ReadSpec) {
     }
 }
 
-/// `u7e`: rules that are not valid permission rules are dropped from the three lists.
-fn filter_permission_rules(document: &mut Map<String, Value>) {
+/// `u7e`: rules that are not valid permission rules are dropped from the three lists. A managed `deny`
+/// or `ask` list with nothing readable in it stays as written, so the schema parse that follows
+/// judges it.
+fn filter_permission_rules(document: &mut Map<String, Value>, policy_source: bool) {
     let Some(Value::Object(permissions)) = document.get_mut("permissions") else {
         return;
     };
     for list in ["allow", "deny", "ask"] {
         if let Some(Value::Array(rules)) = permissions.get_mut(list) {
-            rules.retain(|rule| {
-                rule.as_str()
-                    .is_some_and(|text| is_valid_permission_rule(text, list == "allow"))
-            });
+            let readable: Vec<Value> = rules
+                .iter()
+                .filter(|rule| {
+                    rule.as_str()
+                        .is_some_and(|text| is_valid_permission_rule(text, list == "allow"))
+                })
+                .cloned()
+                .collect();
+            if policy_source && list != "allow" && !rules.is_empty() && readable.is_empty() {
+                continue;
+            }
+            *rules = readable;
         }
     }
 }
@@ -210,32 +232,54 @@ fn filter_model_pricing(document: &mut Map<String, Value>, schema: &SettingsSche
 }
 
 /// `T7e`.
-fn filter_cross_session_inbound(document: &mut Map<String, Value>, spec: &ReadSpec) {
+fn filter_cross_session_inbound(document: &mut Map<String, Value>, spec: &ReadSpec, policy_source: bool) {
     let valid = document.get("crossSessionInbound").is_none_or(|value| {
         value
             .as_str()
             .is_some_and(|mode| spec.cross_session_inbound.iter().any(|known| known == mode))
     });
-    if !valid {
+    if valid {
+        return;
+    }
+    if policy_source {
+        document.insert("crossSessionInbound".to_owned(), Value::from("refuse"));
+    } else {
         document.shift_remove("crossSessionInbound");
     }
 }
 
 /// `P7e`.
-fn filter_remote_control(document: &mut Map<String, Value>, spec: &ReadSpec) {
-    let Some(control) = document.get_mut("remoteControl") else {
+fn filter_remote_control(document: &mut Map<String, Value>, spec: &ReadSpec, policy_source: bool) {
+    let Some(entry) = document.get_mut("remoteControl") else {
         return;
     };
-    let Value::Object(control) = control else {
-        document.shift_remove("remoteControl");
+    if !entry.is_object() {
+        if policy_source {
+            let mut restrictive = Map::new();
+            restrictive.insert("shareHostProfile".to_owned(), Value::from("off"));
+            *entry = Value::Object(restrictive);
+        } else {
+            document.shift_remove("remoteControl");
+        }
+        return;
+    }
+    let Some(control) = entry.as_object_mut() else {
         return;
     };
+    if policy_source && control.keys().any(|name| name != "shareHostProfile") {
+        control.insert("shareHostProfile".to_owned(), Value::from("off"));
+    }
     let valid = control.get("shareHostProfile").is_none_or(|value| {
         value
             .as_str()
             .is_some_and(|mode| spec.share_host_profile.iter().any(|known| known == mode))
     });
-    if !valid {
+    if valid {
+        return;
+    }
+    if policy_source {
+        control.insert("shareHostProfile".to_owned(), Value::from("off"));
+    } else {
         control.shift_remove("shareHostProfile");
     }
 }
@@ -288,6 +332,18 @@ pub(crate) fn js_property_order(value: Value) -> Value {
             )
         }
         other => other,
+    }
+}
+
+/// A managed settings document after the policy sanitizers, before the policy schema parse.
+#[cfg(test)]
+pub(crate) fn sanitize_policy_document(text: &str) -> Option<SettingsMap> {
+    let mut document = parse_object(text, SettingsDialect::TypeScript)?;
+    let schema = schema()?;
+    sanitize(&mut document, schema, schema.read_spec(), true);
+    match js_property_order(Value::Object(document)) {
+        Value::Object(ordered) => Some(ordered),
+        _ => None,
     }
 }
 
