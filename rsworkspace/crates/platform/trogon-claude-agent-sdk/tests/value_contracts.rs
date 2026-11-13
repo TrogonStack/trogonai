@@ -70,12 +70,12 @@ fn prompt_rule_and_tool_conversions_preserve_text() {
 
 #[test]
 fn timeout_and_capacity_conversions_keep_their_public_bounds() -> TestResult {
-    assert!(matches!(Timeout::try_from(Duration::ZERO), Err(TimeoutError::Zero)));
+    assert!(matches!(Timeout::checked(Duration::ZERO), Err(TimeoutError::Zero)));
     assert!(matches!(
-        Timeout::try_from(Timeout::MAX + Duration::from_nanos(1)),
+        Timeout::checked(Timeout::MAX + Duration::from_nanos(1)),
         Err(TimeoutError::TooLarge)
     ));
-    assert_eq!(Timeout::try_from(Timeout::MAX)?.as_duration(), Timeout::MAX);
+    assert_eq!(Timeout::checked(Timeout::MAX)?.as_duration(), Timeout::MAX);
     assert!(matches!(QueueCapacity::try_from(0), Err(QueueCapacityError::Zero)));
     assert!(matches!(
         QueueCapacity::try_from(QueueCapacity::MAX + 1),
@@ -297,7 +297,7 @@ fn callback_configuration_debug_reports_structure_without_callback_or_input_deta
         matcher: Some("fixture-private-matcher".into()),
         callbacks: Vec::new(),
         timeout: None,
-        on_failure: HookFailureMode::Continue,
+        on_failure: Some(HookFailureMode::Continue),
     };
     assert_eq!(
         registration.to_wire_json(&["callback-one".into()])?,
@@ -483,7 +483,7 @@ fn s18_structured_input_blocks_pass_through_unvalidated() -> TestResult {
 
 #[test]
 fn input_identity_and_origin_round_trip_without_losing_extension_fields() -> TestResult {
-    let origin = MessageOrigin::new("host", object(json!({"trace":"one"}))?)?;
+    let origin = MessageOrigin::new("host", object(json!({"trace":"one"}))?);
     assert_eq!(origin.kind(), "host");
     assert_eq!(origin.additional_fields(), &object(json!({"trace":"one"}))?);
     let encoded = serde_json::to_value(origin.clone())?;
@@ -547,7 +547,7 @@ fn registry() -> Result<(LocalMcpServer, Arc<AtomicUsize>), Box<dyn std::error::
         description: "fixture-private-description".into(),
         input_schema: McpToolInputSchema::new(object(
             json!({"type":"object","required":["status"],"properties":{"status":{"type":"string"}}}),
-        )?)?,
+        )?),
         handler: Arc::new(move |request: McpToolRequest| {
             let calls = Arc::clone(&observed);
             async move {
@@ -685,7 +685,7 @@ async fn s11_local_mcp_lists_tools_whose_names_upstream_only_warns_about() -> Te
     let tool = SdkTool::from(SdkToolOptions {
         name: McpToolName::from("needs review!"),
         description: "listed".into(),
-        input_schema: McpToolInputSchema::new(object(json!({"type":"object"}))?)?,
+        input_schema: McpToolInputSchema::new(object(json!({"type":"object"}))?),
         handler: Arc::new(|_request: McpToolRequest| async { Ok::<_, CallbackError>(McpToolOutput::text("ok")) }),
     });
     let server = LocalMcpServer::from(LocalMcpServerOptions {
@@ -761,7 +761,7 @@ async fn m02_m03_local_mcp_reports_tool_failures_as_error_results_before_invokin
 
 #[test]
 fn output_schema_debug_does_not_disclose_schema_contents() -> TestResult {
-    let schema = OutputSchema::new(object(json!({"type":"object","description":"fixture-private-schema"}))?)?;
+    let schema = OutputSchema::new(object(json!({"type":"object","description":"fixture-private-schema"}))?);
     assert!(schema.is_valid(&json!({})));
     assert_eq!(format!("{schema:?}"), "OutputSchema { .. }");
     Ok(())

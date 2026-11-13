@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Compare the Rust resolveSettings port with the pinned TypeScript one byte for byte"
+#MISE depends=["claude-sdk:install"]
+set -euo pipefail
+
+root="${MISE_PROJECT_ROOT:?Run this task through mise}"
+lib="$root/.config/mise/lib/claude-sdk-freshness"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+python3 "$lib/fetch_pinned_typescript.py" "$scratch/package"
+cd "$root"
+CLAUDE_SDK_TS_PACKAGE_DIR="$scratch/package" exec cargo test \
+  --features test-support --test resolve_settings_differential -- --include-ignored "$@"

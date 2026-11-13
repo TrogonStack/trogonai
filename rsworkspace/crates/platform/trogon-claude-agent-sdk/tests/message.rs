@@ -1,6 +1,6 @@
 use trogon_claude_agent_sdk::{
-    AssistantMessage, Content, JsonObject, Message, ResultMessage, ResultStatus, SessionId, StreamEvent, SystemMessage,
-    UserMessage,
+    AssistantMessage, Content, JsonObject, Message, ResultMessage, ResultStatus, SessionId, StreamEvent, SystemEvent,
+    SystemMessage, UserMessage,
 };
 
 #[test]
@@ -29,6 +29,7 @@ fn message_envelopes_keep_declared_variants_and_boxed_results() -> Result<(), Bo
         result_index: None,
         queued_turn_count: None,
         additional_fields: JsonObject::new(),
+        raw: JsonObject::new(),
     };
     let variants = [
         Message::Assistant(AssistantMessage {
@@ -43,6 +44,7 @@ fn message_envelopes_keep_declared_variants_and_boxed_results() -> Result<(), Bo
             stop_reason: None,
             additional_fields: JsonObject::new(),
             message_fields: JsonObject::new(),
+            raw: JsonObject::new(),
         }),
         Message::User(UserMessage {
             content: Content::Text("prompt".into()),
@@ -53,11 +55,14 @@ fn message_envelopes_keep_declared_variants_and_boxed_results() -> Result<(), Bo
             tool_use_result: None,
             additional_fields: JsonObject::new(),
             message_fields: JsonObject::new(),
+            raw: JsonObject::new(),
         }),
         Message::System(SystemMessage {
             subtype: "future".into(),
             session_id: None,
             data: JsonObject::new(),
+            event: SystemEvent::Other,
+            raw: JsonObject::new(),
         }),
         Message::Result(Box::new(result)),
         Message::StreamEvent(StreamEvent {
@@ -66,10 +71,12 @@ fn message_envelopes_keep_declared_variants_and_boxed_results() -> Result<(), Bo
             event: JsonObject::new(),
             additional_fields: JsonObject::new(),
             parent_tool_use_id: None,
+            raw: JsonObject::new(),
         }),
         Message::Unknown {
             kind: "future_message".into(),
             data: serde_json::from_str(r#"{"future":null}"#)?,
+            raw: serde_json::from_str(r#"{"type":"future_message","future":null}"#)?,
         },
     ];
     let names: Vec<_> = variants
@@ -84,9 +91,15 @@ fn message_envelopes_keep_declared_variants_and_boxed_results() -> Result<(), Bo
                 "result"
             }
             Message::StreamEvent(_) => "stream_event",
-            Message::Unknown { kind, data } => {
+            Message::RateLimit(_) => "rate_limit_event",
+            Message::ConversationReset(_) => "conversation_reset",
+            Message::Unknown { kind, data, raw } => {
                 assert_eq!(kind, "future_message");
                 assert_eq!(data.get("future"), Some(&serde_json::Value::Null));
+                assert_eq!(
+                    raw.get("type").and_then(serde_json::Value::as_str),
+                    Some("future_message")
+                );
                 "unknown"
             }
         })
