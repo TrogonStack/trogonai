@@ -610,12 +610,16 @@ async fn callback_capacity_is_bounded_and_cancellation_preserves_control_progres
     }
     cli.send(json!({"type":"control_cancel_request","request_id":"pending"}))
         .await?;
+    cli.send(json!({"type":"control_request","request_id":"after-cancel","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}})).await?;
     let handle = client.handle();
     let control = tokio::spawn(async move { handle.set_model(None).await });
     let request = cli.read().await?;
     assert_eq!(request["request"]["subtype"], "set_model");
     cli.success(&request, json!({})).await?;
     control.await??;
+    started.notified().await;
+    cli.send(json!({"type":"control_cancel_request","request_id":"after-cancel"}))
+        .await?;
     cli.disconnect(client).await?;
     Ok(())
 }
@@ -648,6 +652,24 @@ async fn an_impossible_queued_turn_count_fails_through_a_typed_public_error() ->
     let mut frame = result();
     frame["queued_turn_count"] = u64::MAX.into();
     cli.send(frame).await?;
+    cli.end(0);
+    assert!(matches!(terminal(&mut client).await?, Error::TooManyInputs));
+    Ok(())
+}
+
+#[tokio::test]
+async fn queued_turn_counts_are_bounded_by_the_command_queue_not_the_message_queue() -> TestResult {
+    let mut configured = options()?;
+    configured.limits.message_queue_capacity = QueueCapacity::new(1)?;
+    configured.limits.command_queue_capacity = QueueCapacity::new(2)?;
+    let (mut client, mut cli) = connect(configured).await?;
+    let mut accepted = result();
+    accepted["queued_turn_count"] = 2.into();
+    cli.send(accepted).await?;
+    assert!(matches!(client.next_message().await?, Some(Message::Result(_))));
+    let mut rejected = result();
+    rejected["queued_turn_count"] = 3.into();
+    cli.send(rejected).await?;
     cli.end(0);
     assert!(matches!(terminal(&mut client).await?, Error::TooManyInputs));
     Ok(())
@@ -1130,6 +1152,46 @@ async fn a_control_request_after_the_run_settled_fails_only_that_request() -> Te
 }
 
 #[tokio::test]
+async fn a_turn_keeps_stdin_open_until_an_in_flight_callback_answers() -> TestResult {
+    let started = Arc::new(tokio::sync::Notify::new());
+    let observed = started.clone();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let released = release.clone();
+    let mut configured = options()?;
+    configured.permission_handler = Some(Arc::new(move |_: ToolPermissionRequest| {
+        observed.notify_one();
+        let released = released.clone();
+        async move {
+            released.notified().await;
+            PermissionDecision::allow()
+        }
+    }));
+    let (process, harness) = ScriptedProcessSpawner::new();
+    let mut cli = ScriptedCli::from(harness);
+    let querying = tokio::spawn(query_turn_with_adapters(
+        Prompt::from("settle"),
+        configured,
+        adapters(process),
+    ));
+    let request = cli.read().await?;
+    cli.success(&request, json!({})).await?;
+    let mut query = querying.await??;
+    cli.read().await?;
+    cli.send(json!({"type":"control_request","request_id":"late","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}})).await?;
+    timeout(Duration::from_secs(2), started.notified()).await?;
+    cli.send(result()).await?;
+    assert!(matches!(query.next_message().await?, Some(Message::Result(_))));
+    release.notify_one();
+    let response = cli.read().await?;
+    assert_eq!(response["response"]["request_id"], "late");
+    assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
+    cli.end(0);
+    assert!(query.next_message().await?.is_none());
+    query.close().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_callback_answered_after_the_run_settled_is_dropped_without_stopping_the_driver() -> TestResult {
     let dropped = Arc::new(tokio::sync::Notify::new());
     let _guard = tracing::subscriber::set_default(EventWatcher {
@@ -1160,12 +1222,11 @@ async fn a_callback_answered_after_the_run_settled_is_dropped_without_stopping_t
     cli.success(&request, json!({})).await?;
     let mut query = querying.await??;
     cli.read().await?;
-    cli.send(json!({"type":"control_request","request_id":"late","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}})).await?;
-    timeout(Duration::from_secs(2), started.notified()).await?;
     cli.send(result()).await?;
     assert!(matches!(query.next_message().await?, Some(Message::Result(_))));
-    // A turn settles while the callback is still running, which closes stdin before it answers.
     assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
+    cli.send(json!({"type":"control_request","request_id":"late","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}})).await?;
+    timeout(Duration::from_secs(2), started.notified()).await?;
     release.notify_one();
     // The driver must log the dropped answer before the child exits, or it can see the exit first.
     timeout(Duration::from_secs(2), dropped.notified()).await?;

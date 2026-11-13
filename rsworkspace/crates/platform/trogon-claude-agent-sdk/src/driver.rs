@@ -80,7 +80,7 @@ enum SessionState {
 }
 
 impl RunState {
-    fn observe(&mut self, message: &Message, limit: usize) -> Result<(), Error> {
+    fn observe(&mut self, message: &Message, queued_limit: usize, task_limit: usize) -> Result<(), Error> {
         match message {
             Message::Result(message) => {
                 self.result_received = true;
@@ -88,7 +88,7 @@ impl RunState {
                 self.awaiting_continuation = false;
                 if let Some(count) = message.queued_turn_count {
                     let count = usize::try_from(count).map_err(|_| Error::TooManyInputs)?;
-                    if count > limit {
+                    if count > queued_limit {
                         return Err(Error::TooManyInputs);
                     }
                     while self.pending_inputs.len() > count {
@@ -131,7 +131,7 @@ impl RunState {
                     ) =>
                 {
                     if let Some(id) = message.data.get("task_id").and_then(serde_json::Value::as_str) {
-                        if self.tasks.len() >= limit && !self.tasks.contains(id) {
+                        if self.tasks.len() >= task_limit && !self.tasks.contains(id) {
                             return Err(Error::TooManyTasks);
                         }
                         self.tasks.insert(id.to_owned());
@@ -164,7 +164,7 @@ impl RunState {
     fn settled(&self, callbacks: usize) -> bool {
         self.result_received
             && match self.input_done {
-                Some(Completion::Turn) => true,
+                Some(Completion::Turn) => callbacks == 0,
                 Some(Completion::Run) => {
                     !self.turn_active
                         && self.pending_inputs.is_empty()
@@ -722,7 +722,7 @@ where
         if self.callback_handles.contains_key(id) {
             return Err(ProtocolError::DuplicateControlRequest.into());
         }
-        if self.callbacks.len() >= self.limits.max_pending_controls.get() {
+        if self.callback_handles.len() >= self.limits.max_pending_controls.get() {
             self.write_response(wire::callback_error_response(id, "Too many outstanding SDK callbacks"))
                 .await?;
             return Ok(false);
@@ -862,8 +862,11 @@ where
     async fn frame(&mut self, frame: Frame) -> Result<(), Error> {
         match frame {
             Frame::Message(message) => {
-                self.run_state
-                    .observe(&message, self.limits.message_queue_capacity.get())?;
+                let (queued_limit, task_limit) = (
+                    self.limits.command_queue_capacity.get(),
+                    self.limits.message_queue_capacity.get(),
+                );
+                self.run_state.observe(&message, queued_limit, task_limit)?;
                 if matches!(message, Message::Result(_)) {
                     self.state = State::Idle;
                 }
@@ -985,7 +988,7 @@ where
                     if let Some(handler) = self
                         .handler
                         .clone()
-                        .filter(|_| self.callbacks.len() < self.limits.max_pending_controls.get())
+                        .filter(|_| self.callback_handles.len() < self.limits.max_pending_controls.get())
                     {
                         let callback_id = id.clone();
                         let fallback = wire::permission_response(
