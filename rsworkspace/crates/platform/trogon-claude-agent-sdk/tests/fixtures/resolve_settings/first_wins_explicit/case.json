@@ -1,0 +1,9 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "serverManagedSettings": {"managedSourcesBehavior":"first-wins","model":"remote","permissions":{"deny":["A"]}}
+  }
+}
