@@ -885,12 +885,17 @@ where
         Instant::now().checked_add(wait)
     }
 
+    /// TypeScript sends a random id per request, Python `req_{counter}_{random}`. The counter wraps unless the
+    /// caller opted into failing at exhaustion.
     fn next_request_id(&mut self) -> Result<ControlRequestId, Error> {
         self.next_id = match self.limits.request_id_exhaustion {
             crate::RequestIdExhaustion::Wrap => self.next_id.wrapping_add(1),
             crate::RequestIdExhaustion::Fail => self.next_id.checked_add(1).ok_or(Error::RequestIdExhausted)?,
         };
-        Ok(ControlRequestId::from(format!("request-{}", self.next_id)))
+        Ok(match self.argv_style {
+            crate::ArgvStyle::TypeScript => ControlRequestId::typescript(),
+            crate::ArgvStyle::Python => ControlRequestId::python(self.next_id),
+        })
     }
 
     fn controls_full(&self) -> bool {
@@ -1091,15 +1096,6 @@ where
         self.state = State::Idle;
         let _ = sender.send(Ok(connection_info));
         Ok(())
-    }
-
-    /// TypeScript sends a random id per request, Python `req_{counter}_{random}`.
-    fn next_request_id(&mut self) -> Result<ControlRequestId, Error> {
-        self.next_id = self.next_id.checked_add(1).ok_or(Error::RequestIdExhausted)?;
-        Ok(match self.argv_style {
-            crate::ArgvStyle::TypeScript => ControlRequestId::typescript(),
-            crate::ArgvStyle::Python => ControlRequestId::python(self.next_id),
-        })
     }
 
     async fn start_control(&mut self, response: ControlResponder, request: serde_json::Value) -> Result<(), Error> {
