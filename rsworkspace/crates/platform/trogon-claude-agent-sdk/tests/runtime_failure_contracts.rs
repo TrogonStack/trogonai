@@ -913,7 +913,7 @@ fn configured_store(
     store_options.config_directory = Some(directory.to_path_buf());
     store_options.project_key = Some(SessionProjectKey::new("project")?);
     store_options.limits.append_timeout = Timeout::new(Duration::from_secs(10));
-    store_options.limits.flush_timeout = Timeout::new(Duration::from_millis(100));
+    store_options.limits.flush_timeout = Some(Timeout::new(Duration::from_millis(100)));
     configured.cwd = Some(directory.to_path_buf());
     configured.session_store = Some(store_options);
     Ok(configured)
@@ -1023,7 +1023,7 @@ async fn shutdown_collects_each_queued_mirror_fence_and_retains_append_failures(
         let mut configured = eager_store(store.clone(), directory.path())?;
         if let Some(store) = &mut configured.session_store {
             // A failing append is retried twice with backoff before it is reported.
-            store.limits.flush_timeout = Timeout::new(Duration::from_secs(5));
+            store.limits.flush_timeout = Some(Timeout::new(Duration::from_secs(5)));
         }
         let (client, mut cli) = connect(configured).await?;
         client.send_prompt(Prompt::from("mirror run")).await?;
@@ -1380,7 +1380,7 @@ async fn a_mirror_failure_that_cannot_be_published_is_logged_and_does_not_fail_s
     let mut configured = eager_store(store.clone(), directory.path())?;
     configured.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(QueueCapacity::new(1)?);
     if let Some(store) = &mut configured.session_store {
-        store.limits.flush_timeout = Timeout::new(Duration::from_secs(5));
+        store.limits.flush_timeout = Some(Timeout::new(Duration::from_secs(5)));
     }
     let (client, mut cli) = connect(configured).await?;
     cli.send(json!({"type":"system","subtype":"fills_the_queue"})).await?;
