@@ -599,3 +599,199 @@ fn acknowledgment_rejects_a_leap_clock_before_serializing_receipt_time() {
     assert_eq!(ordinary.batches[0].acknowledged_at.seconds, time(0).timestamp());
     assert_eq!(ordinary.batches[0].acknowledged_at.nanos, 0);
 }
+
+fn assert_receipt_cannot_settle_another_sender(recipient: trogonai_proto::peers::state_v1alpha1::PeerState) {
+    let original = run(enrolled("sender", 0), &send(0, 1, 1));
+    let other_identity = identity("other_sender");
+    let other_send = SendMessage::new(
+        other_identity.owner().clone(),
+        reference("other_sender", 1),
+        IdempotencyKey::new("other_key").unwrap(),
+        MessageId::new("message_0").unwrap(),
+        identity("recipient").peer_id().clone(),
+        CollaborationRef::new("collaboration").unwrap(),
+        content(1, 1),
+        None,
+        time(1),
+    );
+    let other_sender = run(enrolled("other_sender", 0), &other_send);
+    assert_eq!(
+        original.outbox[0].message.message_id,
+        other_sender.outbox[0].message.message_id
+    );
+    assert_eq!(
+        original.outbox[0].message.recipient_peer_id,
+        other_sender.outbox[0].message.recipient_peer_id
+    );
+    assert_ne!(
+        original.outbox[0].message.sender_peer_id,
+        other_sender.outbox[0].message.sender_peer_id
+    );
+    let proof = receipt(&recipient, 0);
+    let settled = run(
+        original,
+        &SettleMessage::new(identity("sender").peer_id().clone(), proof.clone()),
+    );
+    assert_eq!(settled.outbox[0].settlement.as_option(), Some(proof.receipt()));
+    assert!(
+        evaluate_decision(
+            other_sender,
+            &SettleMessage::new(other_identity.peer_id().clone(), proof),
+        )
+        .is_err(),
+        "a recipient disposition must retain the original sending peer's authority"
+    );
+}
+
+#[test]
+fn prepared_receipt_cannot_settle_another_senders_same_message_id() {
+    let recipient = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    assert_receipt_cannot_settle_another_sender(recipient);
+}
+
+#[test]
+fn expired_receipt_without_intake_cannot_settle_another_senders_same_message_id() {
+    let recipient = run(
+        enrolled("recipient", 0),
+        &DisposeMessage::new(evidence(0, 1), TerminalDisposition::Expired, time(3601)),
+    );
+    assert!(recipient.inbox.is_empty());
+    assert_receipt_cannot_settle_another_sender(recipient);
+}
+
+#[test]
+fn unavailable_receipt_without_intake_cannot_settle_another_senders_same_message_id() {
+    let recipient = run(
+        enrolled("recipient", 0),
+        &DisposeMessage::new(evidence(0, 1), TerminalDisposition::Unavailable, time(3)),
+    );
+    assert!(recipient.inbox.is_empty());
+    assert_receipt_cannot_settle_another_sender(recipient);
+}
+
+#[test]
+fn legacy_intaken_receipts_recover_sender_without_rewriting_recipient_history() {
+    for disposition in [
+        None,
+        Some(TerminalDisposition::Expired),
+        Some(TerminalDisposition::Unavailable),
+    ] {
+        let before = inbox(&[0], 1);
+        let (_, events) = match disposition {
+            None => evaluate_decision(before.clone(), &prepare(&[0], 20, 3)).unwrap(),
+            Some(disposition) => evaluate_decision(
+                before.clone(),
+                &DisposeMessage::new(evidence(0, 1), disposition, time(3601)),
+            )
+            .unwrap(),
+        };
+        let mut event = events.iter().next().unwrap().clone();
+        match event.event.as_mut().unwrap() {
+            PeerEventCase::PeerBatchPrepared(prepared) => prepared.receipts[0].sender_peer_id = None,
+            PeerEventCase::PeerMessageDisposed(disposed) => {
+                disposed.receipt.as_option_mut().unwrap().sender_peer_id = None
+            }
+            _ => unreachable!(),
+        }
+        let recipient = commands::state::evolve(before, &event).unwrap();
+        let original = recipient.clone();
+        let proof = receipt(&recipient, 0);
+        assert_eq!(
+            proof.receipt().sender_peer_id.as_deref(),
+            Some(identity("sender").peer_id().as_str())
+        );
+        assert_eq!(recipient, original);
+        assert!(recipient.dispositions[0].sender_peer_id.is_none());
+        assert_receipt_cannot_settle_another_sender(recipient);
+    }
+}
+
+#[test]
+fn legacy_terminal_receipts_replay_without_granting_unproven_sender_authority() {
+    for disposition in [TerminalDisposition::Expired, TerminalDisposition::Unavailable] {
+        let before = enrolled("recipient", 0);
+        let (_, events) = evaluate_decision(
+            before.clone(),
+            &DisposeMessage::new(evidence(0, 1), disposition, time(3601)),
+        )
+        .unwrap();
+        let mut event = events.iter().next().unwrap().clone();
+        if let Some(PeerEventCase::PeerMessageDisposed(disposed)) = event.event.as_mut() {
+            disposed.receipt.as_option_mut().unwrap().sender_peer_id = None;
+        }
+        let recipient = commands::state::evolve(before, &event).unwrap();
+        assert!(recipient.inbox.is_empty());
+        assert_eq!(recipient.dispositions.len(), 1);
+        assert!(recipient.dispositions[0].sender_peer_id.is_none());
+        assert!(matches!(
+            AuthoritativeReceipt::from_recipient_history(&recipient, &MessageId::new("message_0").unwrap()),
+            Err(MessageError::InvalidTransition)
+        ));
+    }
+}
+
+#[test]
+fn legacy_settlement_replay_and_bound_retry_preserve_the_original_saved_receipt() {
+    let mut recipient = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    let sender = run(enrolled("sender", 0), &send(0, 1, 1));
+    let (_, events) = evaluate_decision(sender.clone(), &settle(&recipient, 0)).unwrap();
+    let mut event = events.iter().next().unwrap().clone();
+    if let Some(PeerEventCase::PeerMessageSettled(settled)) = event.event.as_mut() {
+        settled.receipt.as_option_mut().unwrap().sender_peer_id = None;
+    }
+    let settled = commands::state::evolve(sender, &event).unwrap();
+    let old = settled.outbox[0].settlement.as_option().unwrap().clone();
+    assert!(old.sender_peer_id.is_none());
+    assert_eq!(
+        error(settled.clone(), &settle(&recipient, 0)),
+        MessageError::AlreadySettled(Box::new(old.clone()))
+    );
+    recipient.dispositions[0].sender_peer_id = None;
+    recipient.inbox[0].disposition.as_option_mut().unwrap().sender_peer_id = None;
+    assert_eq!(
+        error(settled, &settle(&recipient, 0)),
+        MessageError::AlreadySettled(Box::new(old))
+    );
+}
+
+#[test]
+fn settlement_replay_rejects_present_malformed_or_foreign_sender_binding() {
+    let recipient = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    let sender = run(enrolled("sender", 0), &send(0, 1, 1));
+    let (_, events) = evaluate_decision(sender.clone(), &settle(&recipient, 0)).unwrap();
+    for binding in [
+        String::new(),
+        "invalid".to_owned(),
+        identity("other_sender").peer_id().to_string(),
+    ] {
+        let mut event = events.iter().next().unwrap().clone();
+        if let Some(PeerEventCase::PeerMessageSettled(settled)) = event.event.as_mut() {
+            settled.receipt.as_option_mut().unwrap().sender_peer_id = Some(binding.clone());
+        }
+        let error = commands::state::evolve(sender.clone(), &event).unwrap_err();
+        if binding == identity("other_sender").peer_id().as_str() {
+            assert_eq!(error, EvolveError::InvalidMessageTransition);
+        } else {
+            assert!(matches!(
+                error,
+                EvolveError::InvalidValue {
+                    field: "receipt.sender_peer_id",
+                    source: PeerValueError::InvalidPeerId
+                }
+            ));
+        }
+    }
+}
+
+#[test]
+fn authoritative_receipt_rejects_sender_binding_that_disagrees_with_intake() {
+    let prepared = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    for sender in [String::new(), identity("other_sender").peer_id().to_string()] {
+        let mut recipient = prepared.clone();
+        recipient.dispositions[0].sender_peer_id = Some(sender.clone());
+        recipient.inbox[0].disposition.as_option_mut().unwrap().sender_peer_id = Some(sender);
+        assert!(
+            AuthoritativeReceipt::from_recipient_history(&recipient, &MessageId::new("message_0").unwrap()).is_err()
+        );
+    }
+}

@@ -1,0 +1,19 @@
+use trogon_claude_agent_sdk::ToolName;
+
+#[test]
+fn valid_opaque_values_are_preserved_without_format_restrictions() {
+    for input in ["opaque-value", "unicode café value", "  "] {
+        let value = ToolName::from(input);
+        assert_eq!(value.as_str(), input);
+        assert_eq!(value.clone(), value);
+        assert_eq!(value.to_string(), input);
+    }
+}
+
+#[test]
+fn owned_tool_names_preserve_the_original_text() {
+    let input = String::from("owned\0tool");
+    let value = ToolName::from(input.clone());
+    assert_eq!(value.as_str(), input);
+    assert_eq!(value.to_string(), input);
+}
