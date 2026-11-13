@@ -179,7 +179,11 @@ it drops messages it cannot read, reports parameter errors as `-32603` and
 lists each schema with its draft-07 `$schema`. `McpServerDialect::Python`
 answers like `create_sdk_mcp_server`: it reports unreadable messages as
 `McpServerError::Protocol`, refuses requests before `initialize` and answers a
-cancelled call with `-32800`. Custom
+cancelled call with `-32800`. Both dialects validate `clientInfo.icons` and
+`capabilities.elicitation` (`form` and `url`) like the pinned schemas: zod issues
+for TypeScript (unknown icon keys are stripped, `elicitation.url` must be an
+object or array), the generic `-32602` for Python (`null` is accepted for every
+optional field). The server keeps and echoes neither. Custom
 `SdkMcpServer`/`SdkMcpSession` implementations can add methods; the built-in
 server does not expose server-initiated client requests.
 [The SDK tools example](examples/sdk_tools.rs) registers an echo tool.

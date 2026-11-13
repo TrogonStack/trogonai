@@ -143,7 +143,7 @@ async fn dispatch(
         .is_some_and(|meta| !meta.is_object() && !meta.is_null());
     let initializes = method == "initialize";
     if meta_is_invalid
-        || (initializes && !initialize_issues(params).is_empty())
+        || (initializes && !initialize_is_valid(params))
         || (method == "tools/call" && !call_params_are_valid(params))
         || (!initializes && method != "ping" && !session.initialized.load(Ordering::SeqCst))
     {
@@ -167,6 +167,67 @@ async fn dispatch(
         ("id".into(), id.value.clone()),
         ("result".into(), sort_keys(result)),
     ]))
+}
+
+/// `InitializeRequestParams` under pydantic. The zod issues decide everything except the two models whose
+/// pydantic shape differs: `Icon` and `ElicitationCapability`, which accept `null` for every optional field and
+/// ignore the contents of `form` and `url`.
+fn initialize_is_valid(params: Option<&JsonObject>) -> bool {
+    let concerns = |issue: &JsonObject, prefix: &[&str]| {
+        issue.get("path").and_then(Value::as_array).is_some_and(|path| {
+            path.len() >= prefix.len() && path.iter().zip(prefix).all(|(step, name)| step.as_str() == Some(*name))
+        })
+    };
+    let others_valid = initialize_issues(params).iter().all(|issue| {
+        concerns(issue, &["params", "capabilities", "elicitation"])
+            || concerns(issue, &["params", "clientInfo", "icons"])
+    });
+    others_valid
+        && elicitation_is_valid(
+            params
+                .and_then(|params| params.get("capabilities"))
+                .and_then(|capabilities| capabilities.get("elicitation")),
+        )
+        && icons_are_valid(
+            params
+                .and_then(|params| params.get("clientInfo"))
+                .and_then(|client_info| client_info.get("icons")),
+        )
+}
+
+fn elicitation_is_valid(elicitation: Option<&Value>) -> bool {
+    match elicitation {
+        None | Some(Value::Null) => true,
+        Some(Value::Object(elicitation)) => ["form", "url"].into_iter().all(|key| {
+            elicitation
+                .get(key)
+                .is_none_or(|mode| mode.is_object() || mode.is_null())
+        }),
+        Some(_) => false,
+    }
+}
+
+fn icons_are_valid(icons: Option<&Value>) -> bool {
+    let icon_is_valid = |icon: &Value| {
+        let Some(icon) = icon.as_object() else {
+            return false;
+        };
+        icon.get("src").is_some_and(Value::is_string)
+            && icon
+                .get("mimeType")
+                .is_none_or(|mime| mime.is_string() || mime.is_null())
+            && icon.get("sizes").is_none_or(|sizes| {
+                sizes.is_null() || sizes.as_array().is_some_and(|sizes| sizes.iter().all(Value::is_string))
+            })
+            && icon
+                .get("theme")
+                .is_none_or(|theme| theme.is_null() || matches!(theme.as_str(), Some("light" | "dark")))
+    };
+    match icons {
+        None | Some(Value::Null) => true,
+        Some(Value::Array(icons)) => icons.iter().all(icon_is_valid),
+        Some(_) => false,
+    }
 }
 
 fn error(id: &RequestId, code: i32, message: &str, data: &str) -> JsonObject {

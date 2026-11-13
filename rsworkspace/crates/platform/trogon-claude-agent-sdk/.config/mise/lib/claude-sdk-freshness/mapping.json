@@ -1725,6 +1725,14 @@
           "name": "server_retains_initialize_and_runs_typed_tool"
         },
         {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "typescript_dialect_validates_icons_and_elicitation_like_the_bundled_zod_schemas"
+        },
+        {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "python_dialect_validates_icons_and_elicitation_like_the_pydantic_models"
+        },
+        {
           "path": "tests/mcp_tool_values.rs",
           "name": "mcp_tool_name_accepts_ascii_boundaries"
         },

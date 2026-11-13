@@ -1,0 +1,4428 @@
+{
+ "sources": {
+  "typescript": "@anthropic-ai/claude-agent-sdk 0.3.323 createSdkMcpServer over an in-memory transport",
+  "python": "claude-agent-sdk 0.2.181 create_sdk_mcp_server through Query._handle_sdk_mcp_request, with mcp 2.3.0"
+ },
+ "typescript": {
+  "servers": {
+   "demo": {
+    "name": "demo",
+    "version": "2.0.0",
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "echo",
+      "description": "Echo text",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "text": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "text"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "echo"
+     }
+    ]
+   }
+  },
+  "cases": [
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": []
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{},\"version\":{\"name\":\"c\",\"icons\":[],\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "https://example.com/i.png",
+           "mimeType": "image/png",
+           "sizes": [
+            "48x48",
+            "any"
+           ],
+           "theme": "dark"
+          }
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{},\"version\":{\"name\":\"c\",\"icons\":[{\"src\":\"https://example.com/i.png\",\"mimeType\":\"image/png\",\"sizes\":[\"48x48\",\"any\"],\"theme\":\"dark\"}],\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x"
+          }
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{},\"version\":{\"name\":\"c\",\"icons\":[{\"src\":\"x\"}],\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "data:image/png;base64,AAAA"
+          }
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{},\"version\":{\"name\":\"c\",\"icons\":[{\"src\":\"data:image/png;base64,AAAA\"}],\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "javascript:alert(1)"
+          }
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{},\"version\":{\"name\":\"c\",\"icons\":[{\"src\":\"javascript:alert(1)\"}],\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": ""
+          }
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{},\"version\":{\"name\":\"c\",\"icons\":[{\"src\":\"\"}],\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "extra": 1
+          }
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{},\"version\":{\"name\":\"c\",\"icons\":[{\"src\":\"x\"}],\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "theme": "light"
+          }
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{},\"version\":{\"name\":\"c\",\"icons\":[{\"src\":\"x\",\"theme\":\"light\"}],\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "theme": "auto"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"code\\\": \\\"invalid_value\\\",\\n    \\\"values\\\": [\\n      \\\"light\\\",\\n      \\\"dark\\\"\\n    ],\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"theme\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid option: expected one of \\\\\\\"light\\\\\\\"|\\\\\\\"dark\\\\\\\"\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "theme": null
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"code\\\": \\\"invalid_value\\\",\\n    \\\"values\\\": [\\n      \\\"light\\\",\\n      \\\"dark\\\"\\n    ],\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"theme\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid option: expected one of \\\\\\\"light\\\\\\\"|\\\\\\\"dark\\\\\\\"\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "theme": 1
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"code\\\": \\\"invalid_value\\\",\\n    \\\"values\\\": [\\n      \\\"light\\\",\\n      \\\"dark\\\"\\n    ],\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"theme\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid option: expected one of \\\\\\\"light\\\\\\\"|\\\\\\\"dark\\\\\\\"\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "mimeType": null
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"mimeType\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "mimeType": 1
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"mimeType\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "sizes": []
+          }
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{},\"version\":{\"name\":\"c\",\"icons\":[{\"src\":\"x\",\"sizes\":[]}],\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "sizes": "48x48"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"sizes\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received string\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "sizes": [
+            1
+           ]
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"sizes\\\",\\n      0\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "sizes": null
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"sizes\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received null\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "sizes": [
+            "bad",
+            2,
+            null
+           ]
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"sizes\\\",\\n      1\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"sizes\\\",\\n      2\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {}
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"src\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": null
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"src\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received null\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": 1
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"src\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": [
+            "a"
+           ]
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"src\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received array\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "mimeType": "image/png"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"src\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          null
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received null\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          "x"
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received string\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          1
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          []
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received array\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          true
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received boolean\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "https://example.com/i.png",
+           "mimeType": "image/png",
+           "sizes": [
+            "48x48",
+            "any"
+           ],
+           "theme": "dark"
+          },
+          {
+           "src": 1
+          },
+          "x",
+          {
+           "theme": "z"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      1,\\n      \\\"src\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      2\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received string\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      3,\\n      \\\"src\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  },\\n  {\\n    \\\"code\\\": \\\"invalid_value\\\",\\n    \\\"values\\\": [\\n      \\\"light\\\",\\n      \\\"dark\\\"\\n    ],\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      3,\\n      \\\"theme\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid option: expected one of \\\\\\\"light\\\\\\\"|\\\\\\\"dark\\\\\\\"\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": null
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received null\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": "x"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received string\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": 1
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received number\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": {}
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received object\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": {
+          "src": "x"
+         }
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received object\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": true
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received boolean\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x"
+          },
+          {
+           "src": "y",
+           "sizes": [
+            3,
+            "ok",
+            4
+           ]
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      1,\\n      \\\"sizes\\\",\\n      0\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      1,\\n      \\\"sizes\\\",\\n      2\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {}
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"form\":{}}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {}
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"form\":{}}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": {}
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"url\":{}}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {},
+          "url": {}
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"form\":{},\"url\":{}}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": true
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"form\":{\"applyDefaults\":true}}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": false
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"form\":{\"applyDefaults\":false}}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": "x"
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"boolean\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\",\\n      \\\"applyDefaults\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected boolean, received string\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": null
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"boolean\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\",\\n      \\\"applyDefaults\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected boolean, received null\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": 1
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"boolean\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\",\\n      \\\"applyDefaults\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected boolean, received number\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "extra": 1
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"form\":{\"extra\":1}}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": null
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received null\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received null\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": "x"
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received string\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received string\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": []
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received array\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received array\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": 1
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received number\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": true
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received boolean\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received boolean\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": null
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"url\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": "x"
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"url\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": []
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"url\":[]}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": 1
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"url\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": true
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"url\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": {
+           "extra": [
+            1
+           ]
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"url\":{\"extra\":[1]}}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": {
+           "a": null
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"url\":{\"a\":null}}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "unknown": 1
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"unknown\":1}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "unknown": null
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"unknown\":null}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {},
+          "extra": {
+           "a": 1
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"form\":{},\"extra\":{\"a\":1}}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "extra": "s",
+          "url": {}
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"elicitation\":{\"url\":{},\"extra\":\"s\"}},\"version\":{\"name\":\"c\",\"version\":\"1\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": null
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received null\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received null\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": []
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received array\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received array\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": "x"
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received string\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received string\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": 1
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received number\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": true
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received boolean\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received boolean\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": [
+          1
+         ]
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received array\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received array\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": "x",
+          "url": "y"
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received string\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received string\\\"\\n  },\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"url\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": 1,
+          "url": 1,
+          "z": 1
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received number\\\"\\n  },\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"url\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": {},
+          "form": []
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received array\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received array\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": "x"
+          },
+          "url": []
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"boolean\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\",\\n      \\\"applyDefaults\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected boolean, received string\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": "x"
+         },
+         "roots": 1
+        },
+        "clientInfo": {
+         "name": 1,
+         "version": "1",
+         "icons": [
+          1
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"code\\\": \\\"custom\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"url\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"roots\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"name\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": "x"
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "icons": [
+          {
+           "src": 1
+          }
+         ],
+         "version": 1
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received string\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\",\\n      \\\"form\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received string\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\",\\n      0,\\n      \\\"src\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"version\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tasks": 1,
+         "elicitation": 1,
+         "sampling": 1
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": "x",
+         "title": 1
+        }
+       }
+      },
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"sampling\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"record\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"elicitation\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected record, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"object\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"capabilities\\\",\\n      \\\"tasks\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected object, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"title\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  },\\n  {\\n    \\\"expected\\\": \\\"array\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"clientInfo\\\",\\n      \\\"icons\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected array, received string\\\"\\n  }\\n]\"}}"
+     ]
+    ],
+    "stored": "{\"capabilities\":null,\"version\":null}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "title": "T",
+         "websiteUrl": "u",
+         "description": "d",
+         "icons": [
+          {
+           "src": "https://example.com/i.png",
+           "mimeType": "image/png",
+           "sizes": [
+            "48x48",
+            "any"
+           ],
+           "theme": "dark"
+          }
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{},\"version\":{\"name\":\"c\",\"title\":\"T\",\"icons\":[{\"src\":\"https://example.com/i.png\",\"mimeType\":\"image/png\",\"sizes\":[\"48x48\",\"any\"],\"theme\":\"dark\"}],\"version\":\"1\",\"websiteUrl\":\"u\",\"description\":\"d\"}}"
+   },
+   {
+    "dialect": "typescript",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {},
+          "url": {}
+         },
+         "sampling": {},
+         "roots": {
+          "listChanged": true
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "https://example.com/i.png",
+           "mimeType": "image/png",
+           "sizes": [
+            "48x48",
+            "any"
+           ],
+           "theme": "dark"
+          }
+         ]
+        }
+       }
+      },
+      "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"demo\",\"version\":\"2.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "method": "notifications/initialized"
+      },
+      null
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 2,
+       "method": "tools/list"
+      },
+      "{\"result\":{\"tools\":[{\"name\":\"echo\",\"description\":\"Echo text\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"]},\"execution\":{\"taskSupport\":\"forbidden\"}}]},\"jsonrpc\":\"2.0\",\"id\":2}"
+     ]
+    ],
+    "stored": "{\"capabilities\":{\"sampling\":{},\"elicitation\":{\"form\":{},\"url\":{}},\"roots\":{\"listChanged\":true}},\"version\":{\"name\":\"c\",\"icons\":[{\"src\":\"https://example.com/i.png\",\"mimeType\":\"image/png\",\"sizes\":[\"48x48\",\"any\"],\"theme\":\"dark\"}],\"version\":\"1\"}}"
+   }
+  ]
+ },
+ "python": {
+  "servers": {
+   "demo": {
+    "name": "demo",
+    "version": "2.0.0",
+    "instructions": null,
+    "always_load": false,
+    "tools": [
+     {
+      "name": "echo",
+      "description": "Echo text",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "text": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "text"
+       ]
+      },
+      "annotations": null,
+      "search_hint": null,
+      "always_load": false,
+      "handler": "echo"
+     }
+    ]
+   }
+  },
+  "cases": [
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": []
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "https://example.com/i.png",
+           "mimeType": "image/png",
+           "sizes": [
+            "48x48",
+            "any"
+           ],
+           "theme": "dark"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "data:image/png;base64,AAAA"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "javascript:alert(1)"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": ""
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "extra": 1
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "theme": "light"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "theme": "auto"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "theme": null
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "theme": 1
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "mimeType": null
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "mimeType": 1
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "sizes": []
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "sizes": "48x48"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "sizes": [
+            1
+           ]
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "sizes": null
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x",
+           "sizes": [
+            "bad",
+            2,
+            null
+           ]
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {}
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": null
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": 1
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": [
+            "a"
+           ]
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "mimeType": "image/png"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          null
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          "x"
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          1
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          []
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          true
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "https://example.com/i.png",
+           "mimeType": "image/png",
+           "sizes": [
+            "48x48",
+            "any"
+           ],
+           "theme": "dark"
+          },
+          {
+           "src": 1
+          },
+          "x",
+          {
+           "theme": "z"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": null
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": "x"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": 1
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": {}
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": {
+          "src": "x"
+         }
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": true
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "x"
+          },
+          {
+           "src": "y",
+           "sizes": [
+            3,
+            "ok",
+            4
+           ]
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {}
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {}
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": {}
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {},
+          "url": {}
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": true
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": false
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": "x"
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": null
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": 1
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "extra": 1
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": null
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": "x"
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": []
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": 1
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": true
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": null
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": "x"
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": []
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": 1
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": true
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": {
+           "extra": [
+            1
+           ]
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": {
+           "a": null
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "unknown": 1
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "unknown": null
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {},
+          "extra": {
+           "a": 1
+          }
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "extra": "s",
+          "url": {}
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": null
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": []
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": "x"
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": 1
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": true
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": [
+          1
+         ]
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": "x",
+          "url": "y"
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": 1,
+          "url": 1,
+          "z": 1
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": {},
+          "form": []
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {
+           "applyDefaults": "x"
+          },
+          "url": []
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1"
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "url": "x"
+         },
+         "roots": 1
+        },
+        "clientInfo": {
+         "name": 1,
+         "version": "1",
+         "icons": [
+          1
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": "x"
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "icons": [
+          {
+           "src": 1
+          }
+         ],
+         "version": 1
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tasks": 1,
+         "elicitation": 1,
+         "sampling": 1
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": "x",
+         "title": 1
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"error\": {\"code\": -32602, \"message\": \"Invalid request parameters\", \"data\": \"\"}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "title": "T",
+         "websiteUrl": "u",
+         "description": "d",
+         "icons": [
+          {
+           "src": "https://example.com/i.png",
+           "mimeType": "image/png",
+           "sizes": [
+            "48x48",
+            "any"
+           ],
+           "theme": "dark"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ]
+    ]
+   },
+   {
+    "dialect": "python",
+    "server": "demo",
+    "exchanges": [
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "elicitation": {
+          "form": {},
+          "url": {}
+         },
+         "sampling": {},
+         "roots": {
+          "listChanged": true
+         }
+        },
+        "clientInfo": {
+         "name": "c",
+         "version": "1",
+         "icons": [
+          {
+           "src": "https://example.com/i.png",
+           "mimeType": "image/png",
+           "sizes": [
+            "48x48",
+            "any"
+           ],
+           "theme": "dark"
+          }
+         ]
+        }
+       }
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"2.0.0\"}}}"
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "method": "notifications/initialized"
+      },
+      null
+     ],
+     [
+      {
+       "jsonrpc": "2.0",
+       "id": 2,
+       "method": "tools/list"
+      },
+      "{\"jsonrpc\": \"2.0\", \"id\": 2, \"result\": {\"tools\": [{\"description\": \"Echo text\", \"inputSchema\": {\"properties\": {\"text\": {\"type\": \"string\"}}, \"required\": [\"text\"], \"type\": \"object\"}, \"name\": \"echo\"}]}}"
+     ]
+    ]
+   }
+  ]
+ }
+}
