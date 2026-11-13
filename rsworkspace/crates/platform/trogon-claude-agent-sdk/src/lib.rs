@@ -97,13 +97,16 @@ mod settings_read_hooks;
 mod settings_read_spec;
 mod settings_resolve;
 mod settings_resolve_admin;
+mod settings_resolve_connector;
 mod settings_resolve_env;
 mod settings_resolve_parent;
 mod settings_resolve_platform;
 mod settings_resolve_policy;
 mod settings_resolve_sources;
+mod settings_resolve_state;
 mod settings_resolve_tier;
 mod settings_resolve_values;
+mod settings_resolve_vetting;
 mod settings_sandbox;
 mod settings_schema;
 mod settings_schema_builtins;
@@ -253,8 +256,10 @@ pub use settings_dialect::SettingsDialect;
 pub use settings_input::SettingsInput;
 pub use settings_resolve::{
     ResolveSettingsError, filter_escalating_default_mode, resolve_settings, resolve_settings_in_dialect,
-    resolve_settings_in_dialect_with, resolve_settings_with,
+    resolve_settings_in_dialect_with, resolve_settings_in_dialect_with_state, resolve_settings_with,
+    resolve_settings_with_state,
 };
+pub use settings_resolve_state::ResolverState;
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };

@@ -80,6 +80,23 @@ fn substitute(value: &Value, root: &str) -> Value {
     }
 }
 
+/// Creates the symbolic links a case names: `links` maps a path under the root to the link text, and `$ROOT` in
+/// the text is the root. A link replaces whatever the copied tree holds at that path.
+#[cfg(unix)]
+fn make_links(spec: &Value, root: &Path) {
+    let root_text = root.to_string_lossy().into_owned();
+    for (path, target) in spec["links"].as_object().into_iter().flatten() {
+        let location = root.join(path);
+        fs::create_dir_all(location.parent().expect("parent")).expect("link parent");
+        let _ = fs::remove_file(&location);
+        let target = target.as_str().expect("link text").replace("$ROOT", &root_text);
+        std::os::unix::fs::symlink(target, location).expect("symlink");
+    }
+}
+
+#[cfg(not(unix))]
+fn make_links(_spec: &Value, _root: &Path) {}
+
 struct Case {
     name: String,
     spec: Value,
@@ -188,6 +205,7 @@ fn rust_matches_the_pinned_typescript_resolver_byte_for_byte() {
         copy_tree(&case.tree, &root);
         fs::create_dir_all(root.join("work")).expect("work");
         fs::create_dir_all(root.join("home")).expect("home");
+        make_links(&case.spec, &root);
         expected_names.push(case.name.clone());
         prepared.push((case.name, case.spec, root));
     }
