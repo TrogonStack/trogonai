@@ -2701,9 +2701,9 @@
       "concept": "Where the system prompt travels and which forms it takes",
       "python": {
         "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
-        "line_start": 511,
-        "line_end": 523,
-        "sha256": "79050a160bc02b75621e9b49fb59c73c5bbec6bdb712685cc03f53decf09e0a2"
+        "line_start": 525,
+        "line_end": 538,
+        "sha256": "7f1f0c16e1c6ed08aa71cb98c7cefaf93c08951b0888c7bb4daff97966267a47"
       },
       "typescript": {
         "file": "package/sdk.mjs",
