@@ -1872,7 +1872,7 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Inbound callbacks are unbounded upstream. Limits::max_incoming_callbacks is opt-in and answers the excess request with an error response."
+        "behavior": "Inbound callbacks are unbounded upstream. Limits::max_incoming_callbacks is opt-in and answers a request that would start one more callback with an error response; requests answered without a callback are not counted."
       },
       "decision": {
         "kind": "upstream"
@@ -2003,7 +2003,8 @@
       "contracts": [
         "upstream_defaults::the_default_limits_are_the_typescript_sdk",
         "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
-        "runtime_failure_contracts::duplicate_callback_request_id_is_a_terminal_protocol_error"
+        "runtime_failure_contracts::duplicate_callback_request_id_is_a_terminal_protocol_error",
+        "golden_inbound_control::a_redelivered_in_flight_request_is_skipped_or_run_twice"
       ],
       "rust": [
         "src/driver.rs",
@@ -2468,10 +2469,13 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "An answer from this client would pre-empt another client that can show the dialog, and an error would end the dialog for the user. The session continues without a response."
+        "reason": "An answer from this client would pre-empt another client that can show the dialog, and an error would end the dialog for the user, so the default writes nothing and the session continues. ArgvStyle::Python answers with Python's unsupported-subtype error when no handler is registered."
       },
       "contracts": [
-        "runtime_failure_contracts::a_dialog_without_a_handler_does_not_emit_a_response"
+        "runtime_failure_contracts::a_dialog_without_a_handler_does_not_emit_a_response",
+        "golden_inbound_control::typescript_answers_requests_without_a_handler_like_sdk_mjs",
+        "golden_inbound_control::python_answers_requests_without_a_handler_like_claude_agent_sdk",
+        "golden_inbound_control::every_dialog_kind_reaches_the_handler_and_a_null_answer_writes_nothing"
       ],
       "rust": [
         "src/driver.rs"
@@ -3209,7 +3213,7 @@
       "concept": "getOAuthToken and getHostAuthToken callbacks answered over the control channel",
       "python": {
         "status": "absent",
-        "reason": "claude_agent_sdk has no OAuth or host auth token callbacks and never answers oauth_token_refresh or host_auth_token_refresh."
+        "reason": "claude_agent_sdk has no OAuth or host auth token callbacks, sets neither CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH nor CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH, and answers oauth_token_refresh and host_auth_token_refresh with its plain \"Unsupported control request subtype\" error."
       },
       "typescript": {
         "file": "package/sdk.mjs",
@@ -3232,11 +3236,14 @@
         "callback_options::oauth_decline_reasons_and_failures_match_the_bundle",
         "callback_options::host_auth_token_responses_match_the_bundle",
         "callback_options::missing_callbacks_answer_with_the_bundle_errors",
-        "callback_options::a_cancel_request_cancels_the_token_callback_signal"
+        "callback_options::a_cancel_request_cancels_the_token_callback_signal",
+        "golden_inbound_control::python_answers_token_refreshes_as_unsupported_even_with_handlers",
+        "golden_inbound_control::a_non_string_token_state_reaches_the_oauth_handler_as_no_hint"
       ],
       "rust": [
         "src/auth_token.rs",
         "src/driver.rs",
+        "src/environment_plan.rs",
         "src/wire.rs"
       ]
     },
@@ -3435,6 +3442,110 @@
       "rust": [
         "src/permission.rs",
         "src/permission_update.rs",
+        "src/wire.rs"
+      ]
+    },
+    {
+      "id": "c16-null-callback-result",
+      "concept": "A permission, elicitation or dialog callback that returns null",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 664,
+        "line_end": 667,
+        "sha256": "c67707809464c317b81dcb3a093f96deb5da223c8f13015f0d98e68cae54ac4e"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "if(r===qu)return;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 0,
+        "sha256": "c264d7a6c10db698356ea8d41c469c1e5683e2a89833f0d02a0bce04fda80d38"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript treats null from canUseTool, onElicitation or onUserDialog as answered out of band and writes no response. Python rejects a permission result that is not PermissionResultAllow or PermissionResultDeny with a TypeError error response."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "AnsweredOutOfBand writes nothing by default; ArgvStyle::Python answers a permission request with Python's TypeError text."
+      },
+      "contracts": [
+        "golden_inbound_control::permission_decisions_are_written_byte_for_byte",
+        "golden_inbound_control::elicitation_passes_unknown_modes_and_a_null_answer_writes_nothing",
+        "golden_inbound_control::every_dialog_kind_reaches_the_handler_and_a_null_answer_writes_nothing"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/wire.rs"
+      ]
+    },
+    {
+      "id": "c17-cancelled-callback",
+      "concept": "control_cancel_request for an inbound request whose callback is running",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 719,
+        "line_end": 722,
+        "sha256": "e3a322559189d9572c1f03d6a0e6401e8da079c11d67fabae5ee4e32a24ea9a0"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "handleControlCancelRequest(e){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 110,
+        "sha256": "0f9e21d0695fddf85c55c12be516e58193058902deb62d0e917caca57da298db"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript aborts the callback's signal and still writes whatever the callback then returns. Python cancels the handler task, so no response is written."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "The callback's signal is cancelled and its answer is still written by default; ArgvStyle::Python aborts the task without a response."
+      },
+      "contracts": [
+        "golden_inbound_control::a_cancelled_handler_still_answers_in_typescript_and_stays_silent_in_python"
+      ],
+      "rust": [
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c18-unsupported-inbound-subtype",
+      "concept": "Inbound control request subtypes without a handler",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 705,
+        "line_end": 706,
+        "sha256": "713a3ffe27bbdc0e4871fb9cb576324b9da76b6ec0a3632010afb3dfaf760bba"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "throw new RE(\"Unsupported control request subtype: \"+e.request.subtype",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 60,
+        "sha256": "5098d46e5060cb41ccfb73690f3004f1b9f9b254831a47ae45c6a2fd924a0fd7"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript answers an unknown subtype with error_code unsupported_request, declines an elicitation without a handler, leaves dialogs and the remote tool subtypes unanswered, and names the missing getOAuthToken, getHostAuthToken or refreshWorkSecret callback. Python handles only can_use_tool, hook_callback and mcp_message and answers everything else with its unsupported-subtype error and no error_code."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "The TypeScript answers are the default; ArgvStyle::Python writes Python's answers, including its message without the trailing period for a missing canUseTool."
+      },
+      "contracts": [
+        "golden_inbound_control::typescript_answers_requests_without_a_handler_like_sdk_mjs",
+        "golden_inbound_control::python_answers_requests_without_a_handler_like_claude_agent_sdk"
+      ],
+      "rust": [
+        "src/driver.rs",
         "src/wire.rs"
       ]
     }

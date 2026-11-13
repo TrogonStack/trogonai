@@ -74,3 +74,29 @@ fn unknown_permission_suggestion_values_decode_into_a_permission_request() -> Re
     ));
     Ok(())
 }
+
+#[test]
+fn a_failed_handler_answers_its_message_and_a_cancelled_python_handler_writes_nothing() -> Result<(), ProtocolError> {
+    let id = ControlRequestId::from("hook");
+    let failed = crate::CallbackError::Failed(Box::new(std::io::Error::other("boom")));
+    for style in [crate::ArgvStyle::TypeScript, crate::ArgvStyle::Python] {
+        let response = handler_error_response(&id, &failed, style)?.map(|frame| frame.to_string());
+        assert_eq!(
+            response.as_deref(),
+            Some(r#"{"type":"control_response","response":{"subtype":"error","request_id":"hook","error":"boom"}}"#)
+        );
+    }
+    assert_eq!(
+        handler_error_response(&id, &crate::CallbackError::Cancelled, crate::ArgvStyle::Python)?,
+        None
+    );
+    let aborted = handler_error_response(&id, &crate::CallbackError::Cancelled, crate::ArgvStyle::TypeScript)?
+        .map(|frame| frame.to_string());
+    assert_eq!(
+        aborted.as_deref(),
+        Some(
+            r#"{"type":"control_response","response":{"subtype":"error","request_id":"hook","error":"This operation was aborted"}}"#
+        )
+    );
+    Ok(())
+}

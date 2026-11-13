@@ -473,7 +473,7 @@ async fn elicitation_callback_returns_a_typed_form_response() -> TestResult {
     let mut options = options("elicitation")?;
     options.elicitation_handler = Some(Arc::new(|request: ElicitationRequest| async move {
         assert_eq!(request.server_name.as_str(), "local");
-        assert_eq!(request.mode, ElicitationMode::Form);
+        assert_eq!(request.mode, Some(ElicitationMode::Form));
         assert!(request.requested_schema.is_some());
         assert!(!request.signal.is_cancelled());
         let mut content = trogon_claude_agent_sdk::JsonObject::new();
@@ -511,36 +511,43 @@ async fn declared_user_dialog_calls_the_handler() -> TestResult {
 }
 
 #[tokio::test]
-async fn undeclared_dialog_does_not_invoke_or_settle_a_handler() -> TestResult {
+async fn an_undeclared_dialog_kind_still_reaches_the_handler_like_the_typescript_sdk() -> TestResult {
     let mut options = options("dialog-undeclared")?;
     options.supported_dialog_kinds = vec![DialogKind::from("different-kind")];
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = Arc::clone(&calls);
-    options.user_dialog_handler = Some(Arc::new(move |_: UserDialogRequest| {
+    options.user_dialog_handler = Some(Arc::new(move |request: UserDialogRequest| {
         observed.fetch_add(1, Ordering::SeqCst);
-        async { Ok(UserDialogResponse::Cancelled) }
+        async move {
+            assert_eq!(request.dialog_kind.as_str(), "undeclared");
+            assert_eq!(request.request_id.as_str(), "dialog-1");
+            Ok(UserDialogResponse::Cancelled)
+        }
     }));
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("dialog")).await?;
-    assert_eq!(result(&mut client).await?, "undeclared");
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let response: Value = serde_json::from_str(&result(&mut client).await?)?;
+    assert_eq!(response, json!({"behavior":"cancelled"}));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     client.disconnect().await?;
     Ok(())
 }
 
-async fn undeclared_dialog_with_pending_callback(mode: &str) -> TestResult {
+async fn unanswered_dialog_with_pending_callback(mode: &str, handler: bool) -> TestResult {
     let mut options = options(mode)?;
     options.limits.max_incoming_callbacks = Some(QueueCapacity::new(1)?);
     options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| {
         std::future::pending::<PermissionDecision>()
     }));
-    options.supported_dialog_kinds = vec![DialogKind::from("different-kind")];
     let calls = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::clone(&calls);
-    options.user_dialog_handler = Some(Arc::new(move |_: UserDialogRequest| {
-        observed.fetch_add(1, Ordering::SeqCst);
-        async { Ok(UserDialogResponse::Cancelled) }
-    }));
+    if handler {
+        options.supported_dialog_kinds = vec![DialogKind::from("different-kind")];
+        let observed = Arc::clone(&calls);
+        options.user_dialog_handler = Some(Arc::new(move |_: UserDialogRequest| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            async { Ok(UserDialogResponse::Cancelled) }
+        }));
+    }
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("dialog")).await?;
     assert_eq!(result(&mut client).await?, "undeclared");
@@ -551,13 +558,13 @@ async fn undeclared_dialog_with_pending_callback(mode: &str) -> TestResult {
 }
 
 #[tokio::test]
-async fn saturated_callbacks_do_not_settle_undeclared_dialog() -> TestResult {
-    undeclared_dialog_with_pending_callback("dialog-undeclared-saturated").await
+async fn saturated_callbacks_leave_a_dialog_without_a_handler_unanswered() -> TestResult {
+    unanswered_dialog_with_pending_callback("dialog-undeclared-saturated", false).await
 }
 
 #[tokio::test]
-async fn duplicate_id_does_not_settle_undeclared_dialog() -> TestResult {
-    undeclared_dialog_with_pending_callback("dialog-undeclared-duplicate").await
+async fn a_dialog_reusing_an_in_flight_id_is_skipped() -> TestResult {
+    unanswered_dialog_with_pending_callback("dialog-undeclared-duplicate", true).await
 }
 
 #[tokio::test]

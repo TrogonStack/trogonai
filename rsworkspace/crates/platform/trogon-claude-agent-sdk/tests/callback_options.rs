@@ -528,7 +528,7 @@ async fn a_cancel_request_cancels_the_token_callback_signal() -> TestResult {
     let mut options = base();
     options.oauth_token_handler = Some(Arc::new(move |request: OAuthTokenRequest| {
         let tx = tx.clone();
-        // The driver aborts the task right after cancelling, so observe the signal from a detached task.
+        // Observe the signal from a detached task so the check does not depend on the handler finishing.
         let signal = request.signal.clone();
         tokio::spawn(async move {
             signal.cancelled().await;

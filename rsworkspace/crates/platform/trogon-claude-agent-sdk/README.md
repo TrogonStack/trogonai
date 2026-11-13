@@ -129,9 +129,11 @@ server prompt, plus a cancellation signal. A field of the wrong type stays in
 `additional_fields`. Decisions carry updated input, permission updates,
 interrupt and a decision classification; `AnsweredOutOfBand` writes nothing.
 Answers match `sdk.mjs` byte for byte by default and `claude_agent_sdk` under
-`ArgvStyle::Python`. Absent handlers deny host permission requests; an
-opted-in `limits.callback_timeout` denies, and cancellation suppresses a late
-reply.
+`ArgvStyle::Python`, including the answer without a handler, a callback the CLI
+cancels (TypeScript still writes its answer, Python writes nothing) and a
+request id redelivered while in flight (skipped by default, run twice with
+`DuplicateControlRequests::RunBoth`). An opted-in `limits.callback_timeout`
+denies.
 The CLI can authorize tools through its own permission mode or rules before
 consulting the host.
 Suggestions keep unknown destinations, behaviors and update types verbatim, so
@@ -143,8 +145,11 @@ decoded gets an error response and the session continues.
 `HookInput`, and `HookOutput::Json` sends any upstream `HookJSONOutput` as
 given. Blocking failure semantics require advertised CLI support and
 registered hooks; startup refuses incompatible responders. [The hooks example](examples/hooks.rs) blocks shell
-commands. Elicitation and user-dialog callbacks also receive cancellation
-signals. Declare supported dialog kinds explicitly.
+commands. Elicitation and user-dialog callbacks also receive the request id
+and a cancellation signal. As in `sdk.mjs`, every elicitation mode and dialog
+kind reaches the handler and `supported_dialog_kinds` is only advertised to the
+CLI. Without a handler an elicitation is declined and a dialog is left for
+another client to answer.
 
 [The feature-connect example](examples/feature_connect.rs) checks blocking-hook
 registration and MCP connection without a prompt. It refuses startup when the

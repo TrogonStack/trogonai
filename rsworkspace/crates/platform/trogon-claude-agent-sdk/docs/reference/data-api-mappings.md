@@ -95,8 +95,8 @@ integrity-verified published `0.3.319` declaration archive.
 | `extra_args: Vec<ExtraArgument>` | `extra_args` | `extraArgs` |
 | `tools: ToolSet` (`CliDefault`, `Only`, `ClaudeCodePreset`) | `tools` list, empty list or `{type: "preset", preset: "claude_code"}` | `tools` list or preset object |
 | `script_runtime: ScriptRuntime` | not applicable | `executable`, `executableArgs` (a native path runs directly with the arguments first; a path ending in `.js`, `.mjs`, `.ts`, `.tsx` or `.jsx`, matched case-sensitively, runs under the executable) |
-| `oauth_token_handler: Option<Arc<dyn OAuthTokenHandler>>` | not applicable | `getOAuthToken` (with `onDecline` as `OAuthTokenResponse::decline_reason`); sets `CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH` |
-| `host_auth_token_handler: Option<Arc<dyn HostAuthTokenHandler>>` | not applicable | `getHostAuthToken`; sets `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH`. A handler returns a string or none, never the bare number the bundle would forward. Both token callbacks use `limits.callback_timeout` when that opt-in limit is set. |
+| `oauth_token_handler: Option<Arc<dyn OAuthTokenHandler>>` | not applicable | `getOAuthToken` (with `onDecline` as `OAuthTokenResponse::decline_reason`); sets `CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH`. `ArgvStyle::Python` sets no variable and answers the request as an unsupported subtype, like Python. |
+| `host_auth_token_handler: Option<Arc<dyn HostAuthTokenHandler>>` | not applicable | `getHostAuthToken`; sets `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH`, except under `ArgvStyle::Python`, which answers like Python. A handler returns a string or none, never the bare number the bundle would forward. Both token callbacks use `limits.callback_timeout` when that opt-in limit is set. |
 | `tool_config: ToolConfig` | not applicable | `toolConfig.askUserQuestion` as `CLAUDE_CODE_QUESTION_*` variables; ignored under the Python dialect |
 | `workload: Option<String>` | not applicable | `workload`, merged into the extra arguments in place; an empty value is skipped |
 | `SessionStoreOptions::load_timeout`, `dialect` | `load_timeout_ms` (resume materialization wording) | `loadTimeoutMs` (default wording) |
@@ -166,8 +166,13 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 | `PermissionDecision::Allow` | `PermissionResultAllow` (`updatedInput` falls back to the original input) | result written as returned with `toolUseID` appended |
 | `PermissionDecision::Deny`, `DenialDisposition` | `PermissionResultDeny` (`interrupt` only when true) | result written as returned with `toolUseID` appended |
 | `PermissionDecisionClassification` | not applicable | `decisionClassification` |
-| `PermissionDecision::AnsweredOutOfBand` | `TypeError` error response | `null`: no response |
+| `PermissionDecision::AnsweredOutOfBand`, `ElicitationResponse::AnsweredOutOfBand`, `UserDialogResponse::AnsweredOutOfBand` | `TypeError` error response for a permission request | `null`: no response |
 | `PermissionUpdate` in `updatedPermissions` | `PermissionUpdate.to_dict` (`type`, `destination`, then the fields); an update without a destination is a `PermissionUpdate::Unknown` raw object | the update in declaration order |
+| `ElicitationRequest`, `ElicitationMode::Other` | no elicitation support: unsupported-subtype error | `onElicitation` with any `mode`; `{"action":"decline"}` without a handler |
+| `UserDialogRequest`, `supported_dialog_kinds` | no dialog support: unsupported-subtype error | `onUserDialog` for every kind; no response without a handler |
+| `signal` on each request | the handler task is cancelled and nothing is written | the signal aborts and the answer is still written |
+| `DuplicateControlRequests` | `RunBoth`: both run and answer | `Skip` (default): the redelivered id is ignored |
+| unknown and unhandled subtypes | `Unsupported control request subtype: <subtype>`, no `error_code` | `error_code` `unsupported_request`; remote tool subtypes unanswered; missing auth callbacks named |
 
 ## Messages
 

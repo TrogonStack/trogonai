@@ -258,7 +258,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         )?;
                         if mode == "permission-cancel" {
                             emit(json!({"type":"control_cancel_request","request_id":"permission-1"}))?;
-                            emit(result("cancelled-permission"))?;
                         }
                     }
                     "hook" => {
@@ -356,9 +355,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         emit(
                             json!({"type":"control_request","request_id":"dialog-1","request":{"subtype":"request_user_dialog","dialog_kind":if mode == "dialog" { "fixture-dialog" } else { "undeclared" },"payload":{"choice":1},"tool_use_id":"tool-dialog"}}),
                         )?;
-                        if mode == "dialog-undeclared" {
-                            emit(result("undeclared"))?;
-                        }
                     }
                     "malformed" => {
                         emit(json!({"type":"assistant","message":{"content":[]}}))?;
@@ -525,11 +521,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             "control_response" => {
-                if matches!(
-                    mode,
-                    "dialog-undeclared" | "dialog-undeclared-saturated" | "dialog-undeclared-duplicate"
-                ) {
-                    return Err(io::Error::other("undeclared dialog received a response").into());
+                if matches!(mode, "dialog-undeclared-saturated" | "dialog-undeclared-duplicate") {
+                    return Err(io::Error::other("unanswered dialog received a response").into());
                 }
                 if mode == "permission-context" || mode == "permission-cli-arg" {
                     emit(
@@ -538,7 +531,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     emit(result("context"))?;
                     continue;
                 }
-                if mode == "elicitation" || mode == "dialog" {
+                if mode == "elicitation" || mode == "dialog" || mode == "dialog-undeclared" {
                     emit(result(&serde_json::to_string(&value["response"]["response"])?))?;
                     continue;
                 }
@@ -552,13 +545,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
                 if mode == "permission-cancel" {
-                    return Err(io::Error::other("cancelled callback sent a response").into());
+                    assert_eq!(value["response"]["request_id"], "permission-1");
+                    emit(result(field(&value["response"]["response"], "behavior")?))?;
+                    continue;
                 }
                 if mode == "unknown-control" {
                     assert_eq!(value["response"]["subtype"], "error");
                     emit(result("unsupported-control-rejected"))?;
                 } else {
                     assert_eq!(value["response"]["request_id"], "permission-1");
+                    if value["response"]["subtype"] == "error" {
+                        emit(result(field(&value["response"], "error")?))?;
+                        continue;
+                    }
                     assert_eq!(value["response"]["subtype"], "success");
                     let decision = &value["response"]["response"];
                     let behavior = field(decision, "behavior")?;
