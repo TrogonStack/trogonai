@@ -11,12 +11,12 @@ pub mod namespace {
         Url(::buffa::alloc::string::String),
     }
     impl ::buffa::Oneof for Value {}
-    impl serde::Serialize for Value {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Value {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Uuid(v) => {

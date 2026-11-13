@@ -6,6 +6,7 @@ use sha2::Sha256;
 use std::time::Duration;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
@@ -42,7 +43,7 @@ fn random_secret() -> String {
 fn test_config() -> GithubConfig {
     GithubConfig {
         webhook_secret: GitHubWebhookSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("github").unwrap(),
+        subject_prefix: DottedNatsToken::new("github").unwrap(),
         stream_name: NatsToken::new("GITHUB").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
@@ -288,7 +289,7 @@ async fn subject_uses_configured_prefix() {
     let state = AppState {
         publisher: wrap_publisher(publisher.clone()),
         webhook_secret: GitHubWebhookSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("custom").unwrap(),
+        subject_prefix: DottedNatsToken::new("custom").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
     };
 
@@ -372,7 +373,7 @@ async fn ack_failure_returns_500() {
             MaxPayload::from_server_limit(usize::MAX),
         ),
         webhook_secret: GitHubWebhookSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("github").unwrap(),
+        subject_prefix: DottedNatsToken::new("github").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
     };
 
@@ -403,7 +404,7 @@ async fn ack_timeout_returns_500() {
             MaxPayload::from_server_limit(usize::MAX),
         ),
         webhook_secret: GitHubWebhookSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("github").unwrap(),
+        subject_prefix: DottedNatsToken::new("github").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_millis(10).unwrap(),
     };
 

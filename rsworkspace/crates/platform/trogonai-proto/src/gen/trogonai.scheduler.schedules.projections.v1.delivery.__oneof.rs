@@ -22,16 +22,16 @@ pub mod delivery {
             Self::Some(Kind::from(v))
         }
     }
-    impl serde::Serialize for Kind {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Kind {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::NatsMessage(v) => {
-                    map.serialize_entry("natsMessage", v)?;
+                    map.serialize_entry("natsMessage", &**v)?;
                 }
             }
             map.end()
@@ -70,16 +70,16 @@ pub mod delivery {
                     Self::Some(Kind::from(v))
                 }
             }
-            impl serde::Serialize for Kind {
-                fn serialize<S: serde::Serializer>(
+            impl ::serde::Serialize for Kind {
+                fn serialize<S: ::serde::Serializer>(
                     &self,
                     s: S,
                 ) -> ::core::result::Result<S::Ok, S::Error> {
-                    use serde::ser::SerializeMap;
+                    use ::serde::ser::SerializeMap;
                     let mut map = s.serialize_map(Some(1))?;
                     match self {
                         Self::LatestFromSubject(v) => {
-                            map.serialize_entry("latestFromSubject", v)?;
+                            map.serialize_entry("latestFromSubject", &**v)?;
                         }
                     }
                     map.end()

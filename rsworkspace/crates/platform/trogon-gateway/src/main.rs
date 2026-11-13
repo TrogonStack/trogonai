@@ -23,12 +23,13 @@ use std::net::SocketAddr;
 
 use crate::constants::{
     CLAIM_CHECK_TTL_GRACE, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
-    CREDENTIAL_WORKER_INTERVAL, DISCORD_BOT_TOKEN_RETRY_BACKOFF, ENABLE_RUNTIME_DISCORD_CREDENTIALS,
-    ENABLE_RUNTIME_GITHUB_CREDENTIALS, ENABLE_RUNTIME_GITLAB_CREDENTIALS, ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS,
-    ENABLE_RUNTIME_LINEAR_CREDENTIALS, ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS, ENABLE_RUNTIME_NOTION_CREDENTIALS,
-    ENABLE_RUNTIME_PLAID_CREDENTIALS, ENABLE_RUNTIME_SENTRY_CREDENTIALS, ENABLE_RUNTIME_SLACK_CREDENTIALS,
-    ENABLE_RUNTIME_TELEGRAM_CREDENTIALS, ENABLE_RUNTIME_TWITTER_CREDENTIALS, NATS_CONNECT_TIMEOUT,
-    NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR, OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
+    CREDENTIAL_WORKER_INTERVAL, DEFAULT_STREAM_MAX_AGE_SECS, DISCORD_BOT_TOKEN_RETRY_BACKOFF,
+    ENABLE_RUNTIME_DISCORD_CREDENTIALS, ENABLE_RUNTIME_GITHUB_CREDENTIALS, ENABLE_RUNTIME_GITLAB_CREDENTIALS,
+    ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS, ENABLE_RUNTIME_LINEAR_CREDENTIALS,
+    ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS, ENABLE_RUNTIME_NOTION_CREDENTIALS, ENABLE_RUNTIME_PLAID_CREDENTIALS,
+    ENABLE_RUNTIME_SENTRY_CREDENTIALS, ENABLE_RUNTIME_SLACK_CREDENTIALS, ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
+    ENABLE_RUNTIME_TWITTER_CREDENTIALS, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR,
+    OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
 };
 use crate::credential::commands::domain::CredentialKey;
 use crate::secret_store::openbao_secret_store::OpenBaoTransport;
@@ -40,7 +41,7 @@ use trogon_decider_runtime::StreamRead;
 use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{
     ClaimBucket, ClaimCheckPublisher, ClaimRetention, JetStreamGetRawMessage, JetStreamGetStreamInfo,
-    JetStreamPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, ObjectStorePut,
+    JetStreamPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, ObjectStorePut, StreamMaxAge,
 };
 use trogon_nats::{connect, wait_for_server_info};
 use trogon_std::SecretString;
@@ -86,13 +87,13 @@ async fn serve_with_env(
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
     env: &impl ReadEnv,
 ) -> anyhow::Result<()> {
-    if !resolved.has_any_source() {
-        anyhow::bail!("no sources configured — provide a config file with at least one source");
-    }
-
     trogon_telemetry::init_logger(trogon_telemetry::ServiceName::TrogonGateway, [], &SystemEnv, &SystemFs);
 
     info!("trogon-gateway starting");
+
+    if !resolved.has_any_source() {
+        info!("starting with no source integrations configured");
+    }
 
     let google_pubsub_sources = prepare_google_pubsub_sources(&resolved.google_pubsub)?;
 
@@ -104,13 +105,13 @@ async fn serve_with_env(
     log_nats_connection(server_max_payload, max_payload);
     let js_context = async_nats::jetstream::new(nats.clone());
     // Size the claim bucket TTL from the longest stream it serves so a message
-    // still on the stream can always resolve its claim. `has_any_source` is
-    // enforced above, so `max_stream_max_age` is always `Some` here; the fallback
-    // never expires rather than risk reclaiming a live claim.
-    let claim_retention = resolved
-        .max_stream_max_age()
-        .map(|stream_max_age| ClaimRetention::tracking(stream_max_age, CLAIM_CHECK_TTL_GRACE))
-        .unwrap_or(ClaimRetention::EventSourced);
+    // still on the stream can always resolve its claim. Empty-source mode uses
+    // the normal seven-day stream default until a source supplies its own age.
+    let claim_stream_max_age = match resolved.max_stream_max_age() {
+        Some(stream_max_age) => stream_max_age,
+        None => StreamMaxAge::from_secs(DEFAULT_STREAM_MAX_AGE_SECS)?,
+    };
+    let claim_retention = ClaimRetention::tracking(claim_stream_max_age, CLAIM_CHECK_TTL_GRACE);
     let claim_binding =
         NatsObjectStore::provision_claim_bucket(&js_context, ClaimBucket::default(), claim_retention).await?;
     let client = NatsJetStreamClient::new(js_context);

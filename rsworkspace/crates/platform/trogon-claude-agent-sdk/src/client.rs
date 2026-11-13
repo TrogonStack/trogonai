@@ -1,0 +1,593 @@
+use futures_util::StreamExt;
+
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+    time::timeout,
+};
+
+use crate::{
+    ClaudeAgentOptions, ControlOperation, Error, JsonObject, Message, Prompt, ProtocolError,
+    driver::{self, Command, Completion},
+    wire::runtime_payload::RequestPayload,
+};
+
+/// Owns one Claude Code subprocess. Keep consuming messages while a turn runs.
+pub struct ClaudeSdkClient {
+    runtime: ClientRuntime,
+    connection_info: crate::ConnectionInfo,
+}
+
+struct ClientRuntime {
+    handle: ClientHandle,
+    messages: mpsc::Receiver<Message>,
+    terminal: Option<oneshot::Receiver<Result<(), Error>>>,
+    shutdown: Option<oneshot::Sender<()>>,
+    driver: Option<JoinHandle<()>>,
+    process_id: Option<u32>,
+}
+
+/// A cloneable command handle that does not extend the subprocess owner's life.
+#[derive(Clone)]
+pub struct ClientHandle {
+    commands: mpsc::Sender<Command>,
+    timeout: std::time::Duration,
+}
+
+impl ClaudeSdkClient {
+    pub async fn connect(options: ClaudeAgentOptions) -> Result<Self, Error> {
+        let adapters: crate::adapters::RuntimeAdapters = crate::adapters::RuntimeAdapters::default();
+        Self::connect_with_adapters(options, adapters).await
+    }
+
+    pub async fn connect_with_adapters<E, P, F>(
+        mut options: ClaudeAgentOptions,
+        adapters: crate::adapters::RuntimeAdapters<E, P, F>,
+    ) -> Result<Self, Error>
+    where
+        E: crate::adapters::EnvironmentVariable
+            + crate::adapters::CurrentDirectory<Error = std::io::Error>
+            + crate::adapters::TemporaryDirectory,
+        P: crate::adapters::SpawnProcess<Error = std::io::Error>,
+        F: crate::adapters::SessionFileSystem,
+    {
+        let session = if let Some(store_options) = &options.session_store {
+            let mut store_options = store_options.clone();
+            if let Some((_, directory)) = options
+                .env
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case("CLAUDE_CONFIG_DIR"))
+            {
+                let directory = std::path::PathBuf::from(directory.expose());
+                if store_options
+                    .config_directory
+                    .as_ref()
+                    .is_some_and(|configured| configured != &directory)
+                {
+                    tracing::warn!(
+                        "the subprocess CLAUDE_CONFIG_DIR differs from the session store configuration directory; using the subprocess value so transcript mirror frames are not dropped"
+                    );
+                }
+                store_options.config_directory = Some(directory);
+            }
+            let resume = match &options.resume {
+                Some(session) => crate::StoreResume::Session(session.clone()),
+                None if options.continue_conversation == crate::ContinueConversation::Yes => {
+                    if !store_options.store.supports(crate::SessionStoreOperation::List) {
+                        return Err(Error::ContinueRequiresListSessions);
+                    }
+                    crate::StoreResume::Latest
+                }
+                None => crate::StoreResume::None,
+            };
+            let cwd = match options.cwd.clone() {
+                Some(cwd) => cwd,
+                None => adapters.environment.current_dir().map_err(Error::Io)?,
+            };
+            // The CLI must run in the directory the session project key was derived from.
+            options.cwd = Some(cwd.clone());
+            let runtime = crate::SessionRuntime::prepare_with_adapters(crate::SessionPreparationOptions {
+                store_options: &store_options,
+                resume,
+                cwd: &cwd,
+                subprocess_environment: &options.env,
+                environment: &adapters.environment,
+                process: &adapters.process,
+                filesystem: adapters.filesystem,
+            })
+            .await?;
+            if let Some(session_id) = &runtime.resume_session_id {
+                options.resume = Some(session_id.clone());
+                options.continue_conversation = crate::ContinueConversation::No;
+            }
+            Some(runtime)
+        } else {
+            None
+        };
+        let (command_tx, command_rx) = mpsc::channel(options.limits.command_queue_capacity.get());
+        let (message_tx, message_rx) = mpsc::channel(options.limits.message_queue_capacity.get());
+        let (terminal_tx, terminal_rx) = oneshot::channel();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let handle = ClientHandle {
+            commands: command_tx,
+            timeout: options.limits.control_timeout.as_duration(),
+        };
+        let (process_id, driver) = driver::spawn(driver::SpawnOptions {
+            options,
+            session,
+            commands: command_rx,
+            messages: message_tx,
+            shutdown: shutdown_rx,
+            terminal: terminal_tx,
+            process: &adapters.process,
+        })?;
+        let mut runtime = ClientRuntime {
+            handle,
+            messages: message_rx,
+            terminal: Some(terminal_rx),
+            shutdown: Some(shutdown_tx),
+            driver: Some(driver),
+            process_id,
+        };
+        match runtime.handle.initialize().await {
+            Ok(connection_info) => Ok(Self {
+                runtime,
+                connection_info,
+            }),
+            Err(error) => {
+                let cleanup = if matches!(error, Error::DriverStopped) {
+                    runtime.finish().await
+                } else {
+                    runtime.close().await
+                };
+                Err(connection_failure(error, cleanup))
+            }
+        }
+    }
+
+    pub fn handle(&self) -> ClientHandle {
+        self.runtime.handle.clone()
+    }
+
+    pub fn process_id(&self) -> Option<u32> {
+        self.runtime.process_id
+    }
+
+    /// Metadata reported during connection, without another protocol exchange.
+    pub fn connection_info(&self) -> &crate::ConnectionInfo {
+        &self.connection_info
+    }
+
+    pub async fn send_prompt(&self, prompt: Prompt) -> Result<(), Error> {
+        self.send_input(prompt.into()).await
+    }
+
+    pub async fn send_input(&self, input: crate::UserInput) -> Result<(), Error> {
+        self.runtime.handle.send_input(input).await
+    }
+
+    pub async fn finish_input(&self) -> Result<(), Error> {
+        self.runtime.handle.finish_input().await
+    }
+
+    pub async fn stream_input<S>(&self, mut stream: S) -> Result<(), Error>
+    where
+        S: futures_util::Stream<Item = crate::UserInput> + Unpin,
+    {
+        self.runtime.handle.stream_input(&mut stream).await
+    }
+
+    pub async fn query(&self, prompt: Prompt) -> Result<(), Error> {
+        self.runtime.handle.send_prompt(prompt).await
+    }
+
+    /// Cancellation-safe: cancelling this wait does not discard a message.
+    pub async fn next_message(&mut self) -> Result<Option<Message>, Error> {
+        match self.runtime.messages.recv().await {
+            Some(message) => Ok(Some(message)),
+            None => {
+                self.finish().await?;
+                Ok(None)
+            }
+        }
+    }
+
+    /// Waits for process shutdown and final storage work, reporting cleanup errors.
+    pub async fn disconnect(self) -> Result<(), Error> {
+        self.runtime.close().await
+    }
+
+    async fn finish(&mut self) -> Result<(), Error> {
+        self.runtime.finish().await
+    }
+}
+
+fn connection_failure(primary: Error, cleanup: Result<(), Error>) -> Error {
+    match cleanup {
+        Ok(()) => primary,
+        Err(cleanup) if matches!(primary, Error::DriverStopped) => cleanup,
+        Err(Error::DriverStopped) => primary,
+        Err(Error::BlockingHooksUnsupported) if matches!(primary, Error::BlockingHooksUnsupported) => primary,
+        Err(Error::HooksNotApplied) if matches!(primary, Error::HooksNotApplied) => primary,
+        Err(Error::ControlTimeout { operation }) if matches!(&primary, Error::ControlTimeout { operation: original } if *original == operation) => {
+            primary
+        }
+        Err(cleanup) => Error::Cleanup {
+            primary: Box::new(primary),
+            cleanup: Box::new(cleanup),
+        },
+    }
+}
+
+impl ClientRuntime {
+    async fn close(mut self) -> Result<(), Error> {
+        self.request_shutdown();
+        self.finish().await
+    }
+
+    fn request_shutdown(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+    }
+
+    async fn finish(&mut self) -> Result<(), Error> {
+        let outcome = if let Some(terminal) = self.terminal.as_mut() {
+            let outcome = terminal.await.map_err(|_| Error::DriverStopped)?;
+            self.terminal = None;
+            outcome
+        } else {
+            Ok(())
+        };
+        if let Some(driver) = self.driver.take() {
+            driver.await.map_err(Error::DriverTask)?;
+        }
+        outcome
+    }
+}
+
+impl Drop for ClientRuntime {
+    fn drop(&mut self) {
+        self.request_shutdown();
+    }
+}
+
+impl ClientHandle {
+    async fn initialize(&self) -> Result<crate::ConnectionInfo, Error> {
+        let (response, receiver) = oneshot::channel();
+        self.enqueue(Command::Initialize { response }).await?;
+        receiver.await.map_err(|_| Error::DriverStopped)?
+    }
+
+    pub async fn set_mcp_servers(
+        &self,
+        external: std::collections::BTreeMap<crate::McpServerName, crate::McpServerOptions>,
+        embedded: std::collections::BTreeMap<crate::McpServerName, std::sync::Arc<dyn crate::SdkMcpServer>>,
+    ) -> Result<crate::McpSetServersResult, Error> {
+        let (response, receiver) = oneshot::channel();
+        self.enqueue(Command::SetMcpServers {
+            external,
+            embedded,
+            response,
+        })
+        .await?;
+        let response = receiver.await.map_err(|_| Error::DriverStopped)??;
+        serde_json::from_value(response.into())
+            .map_err(ProtocolError::from)
+            .map_err(Error::from)
+    }
+    pub async fn stream_input<S>(&self, mut stream: S) -> Result<(), Error>
+    where
+        S: futures_util::Stream<Item = crate::UserInput> + Unpin,
+    {
+        while let Some(input) = stream.next().await {
+            self.send_input(input).await?;
+        }
+        self.finish_input().await
+    }
+    pub async fn send_prompt(&self, prompt: Prompt) -> Result<(), Error> {
+        self.send_input(prompt.into()).await
+    }
+
+    /// Writes one user input. The CLI queues it when a turn is already running.
+    pub async fn send_input(&self, input: crate::UserInput) -> Result<(), Error> {
+        let (response, receiver) = oneshot::channel();
+        self.enqueue(Command::Prompt { input, response }).await?;
+        receiver.await.map_err(|_| Error::DriverStopped)?
+    }
+
+    pub async fn interrupt(&self) -> Result<crate::InterruptReceipt, Error> {
+        let response = self
+            .control(
+                ControlOperation::Interrupt,
+                RequestPayload::Interrupt { cancel_queued: None }.to_value()?,
+            )
+            .await?;
+        Ok(crate::InterruptReceipt::from_json(response))
+    }
+
+    pub async fn interrupt_cancel_queued(&self) -> Result<crate::InterruptReceipt, Error> {
+        let response = self
+            .control(
+                ControlOperation::Interrupt,
+                RequestPayload::Interrupt {
+                    cancel_queued: Some(true),
+                }
+                .to_value()?,
+            )
+            .await?;
+        Ok(crate::InterruptReceipt::from_json(response))
+    }
+
+    pub async fn set_model(&self, model: Option<String>) -> Result<(), Error> {
+        self.control(
+            ControlOperation::SetModel,
+            RequestPayload::SetModel {
+                model: model.as_deref(),
+            }
+            .to_value()?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn set_permission_mode(&self, mode: crate::PermissionMode) -> Result<(), Error> {
+        self.control(
+            ControlOperation::SetPermissionMode,
+            RequestPayload::SetPermissionMode { mode: mode.as_str() }.to_value()?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn rewind_files(
+        &self,
+        user_message_id: crate::MessageId,
+        mode: crate::RewindMode,
+    ) -> Result<crate::RewindFilesResult, Error> {
+        self.typed_control(
+            ControlOperation::RewindFiles,
+            RequestPayload::RewindFiles {
+                user_message_id: user_message_id.as_str(),
+                dry_run: mode == crate::RewindMode::DryRun,
+            }
+            .to_value()?,
+        )
+        .await
+    }
+
+    pub async fn mcp_status(&self) -> Result<crate::McpStatusResponse, Error> {
+        self.typed_control(ControlOperation::McpStatus, RequestPayload::McpStatus.to_value()?)
+            .await
+    }
+
+    pub async fn context_usage(&self) -> Result<crate::ContextUsageResponse, Error> {
+        self.typed_control(
+            ControlOperation::ContextUsage,
+            RequestPayload::GetContextUsage.to_value()?,
+        )
+        .await
+    }
+
+    pub async fn reconnect_mcp_server(&self, server_name: crate::McpServerName) -> Result<(), Error> {
+        self.control(
+            ControlOperation::McpReconnect,
+            RequestPayload::McpReconnect {
+                server_name: server_name.as_str(),
+            }
+            .to_value()?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn toggle_mcp_server(
+        &self,
+        server_name: crate::McpServerName,
+        enabled: crate::McpEnabled,
+    ) -> Result<(), Error> {
+        self.control(
+            ControlOperation::McpToggle,
+            RequestPayload::McpToggle {
+                server_name: server_name.as_str(),
+                enabled: enabled == crate::McpEnabled::Enabled,
+            }
+            .to_value()?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn stop_task(&self, task_id: crate::TaskId) -> Result<(), Error> {
+        self.control(
+            ControlOperation::StopTask,
+            RequestPayload::StopTask {
+                task_id: task_id.as_str(),
+            }
+            .to_value()?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn background_tasks(&self, tool_use_id: Option<crate::ToolUseId>) -> Result<bool, Error> {
+        #[derive(serde::Deserialize)]
+        struct Response {
+            backgrounded: bool,
+        }
+        let response: Response = self
+            .typed_control(
+                ControlOperation::BackgroundTasks,
+                RequestPayload::BackgroundTasks {
+                    tool_use_id: tool_use_id.as_ref().map(crate::ToolUseId::as_str),
+                }
+                .to_value()?,
+            )
+            .await?;
+        Ok(response.backgrounded)
+    }
+
+    async fn typed_control<T: serde::de::DeserializeOwned>(
+        &self,
+        operation: ControlOperation,
+        request: serde_json::Value,
+    ) -> Result<T, Error> {
+        let response = self.control(operation, request).await?;
+        serde_json::from_value(response.into())
+            .map_err(ProtocolError::from)
+            .map_err(Error::from)
+    }
+
+    pub async fn finish_input(&self) -> Result<(), Error> {
+        self.finish_with(Completion::Run).await
+    }
+
+    async fn finish_with(&self, completion: Completion) -> Result<(), Error> {
+        let (response, receiver) = oneshot::channel();
+        self.enqueue(Command::FinishInput { completion, response }).await?;
+        receiver.await.map_err(|_| Error::DriverStopped)?
+    }
+
+    async fn control(&self, operation: ControlOperation, request: serde_json::Value) -> Result<JsonObject, Error> {
+        let (response, receiver) = oneshot::channel();
+        self.enqueue(Command::Control {
+            operation,
+            request,
+            response,
+        })
+        .await?;
+        receiver.await.map_err(|_| Error::DriverStopped)?
+    }
+
+    async fn enqueue(&self, command: Command) -> Result<(), Error> {
+        timeout(self.timeout, self.commands.send(command))
+            .await
+            .map_err(|_| Error::CommandQueueTimeout)?
+            .map_err(|_| Error::DriverStopped)
+    }
+}
+
+/// Messages through run completion, including background-agent continuation turns.
+pub struct Query {
+    client: Option<ClaudeSdkClient>,
+    one_turn: bool,
+    result_received: bool,
+}
+
+pub async fn query(prompt: impl Into<crate::UserInput>, options: ClaudeAgentOptions) -> Result<Query, Error> {
+    query_with_completion(prompt, options, Completion::Run).await
+}
+
+pub async fn query_turn(prompt: impl Into<crate::UserInput>, options: ClaudeAgentOptions) -> Result<Query, Error> {
+    query_with_completion(prompt, options, Completion::Turn).await
+}
+
+async fn query_with_completion(
+    prompt: impl Into<crate::UserInput>,
+    options: ClaudeAgentOptions,
+    completion: Completion,
+) -> Result<Query, Error> {
+    let adapters: crate::adapters::RuntimeAdapters = crate::adapters::RuntimeAdapters::default();
+    query_with_completion_and_adapters(prompt, options, completion, adapters).await
+}
+
+pub async fn query_with_adapters<E, P, F>(
+    prompt: impl Into<crate::UserInput>,
+    options: ClaudeAgentOptions,
+    adapters: crate::adapters::RuntimeAdapters<E, P, F>,
+) -> Result<Query, Error>
+where
+    E: crate::adapters::EnvironmentVariable
+        + crate::adapters::CurrentDirectory<Error = std::io::Error>
+        + crate::adapters::TemporaryDirectory,
+    P: crate::adapters::SpawnProcess<Error = std::io::Error>,
+    F: crate::adapters::SessionFileSystem,
+{
+    query_with_completion_and_adapters(prompt, options, Completion::Run, adapters).await
+}
+
+pub async fn query_turn_with_adapters<E, P, F>(
+    prompt: impl Into<crate::UserInput>,
+    options: ClaudeAgentOptions,
+    adapters: crate::adapters::RuntimeAdapters<E, P, F>,
+) -> Result<Query, Error>
+where
+    E: crate::adapters::EnvironmentVariable
+        + crate::adapters::CurrentDirectory<Error = std::io::Error>
+        + crate::adapters::TemporaryDirectory,
+    P: crate::adapters::SpawnProcess<Error = std::io::Error>,
+    F: crate::adapters::SessionFileSystem,
+{
+    query_with_completion_and_adapters(prompt, options, Completion::Turn, adapters).await
+}
+
+async fn query_with_completion_and_adapters<E, P, F>(
+    prompt: impl Into<crate::UserInput>,
+    options: ClaudeAgentOptions,
+    completion: Completion,
+    adapters: crate::adapters::RuntimeAdapters<E, P, F>,
+) -> Result<Query, Error>
+where
+    E: crate::adapters::EnvironmentVariable
+        + crate::adapters::CurrentDirectory<Error = std::io::Error>
+        + crate::adapters::TemporaryDirectory,
+    P: crate::adapters::SpawnProcess<Error = std::io::Error>,
+    F: crate::adapters::SessionFileSystem,
+{
+    let client = ClaudeSdkClient::connect_with_adapters(options, adapters).await?;
+    let startup = async {
+        client.send_input(prompt.into()).await?;
+        client.runtime.handle.finish_with(completion).await
+    }
+    .await;
+    if let Err(error) = startup {
+        return match client.disconnect().await {
+            Ok(()) => Err(error),
+            Err(cleanup) => Err(Error::Cleanup {
+                primary: Box::new(error),
+                cleanup: Box::new(cleanup),
+            }),
+        };
+    }
+    Ok(Query {
+        client: Some(client),
+        one_turn: matches!(completion, Completion::Turn),
+        result_received: false,
+    })
+}
+
+impl Query {
+    pub fn handle(&self) -> Option<ClientHandle> {
+        self.client.as_ref().map(ClaudeSdkClient::handle)
+    }
+
+    pub async fn next_message(&mut self) -> Result<Option<Message>, Error> {
+        let Some(client) = self.client.as_mut() else {
+            return Ok(None);
+        };
+        if self.one_turn && self.result_received {
+            self.disconnect_client().await?;
+            return Ok(None);
+        }
+        let message = client.next_message().await?;
+        if matches!(message, Some(Message::Result(_))) {
+            self.result_received = true;
+        }
+        Ok(message)
+    }
+
+    pub async fn close(mut self) -> Result<(), Error> {
+        self.disconnect_client().await
+    }
+
+    async fn disconnect_client(&mut self) -> Result<(), Error> {
+        if let Some(client) = self.client.take() {
+            client.disconnect().await?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;

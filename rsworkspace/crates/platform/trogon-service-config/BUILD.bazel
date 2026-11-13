@@ -1,0 +1,9 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "trogon-service-config",
+    deps = [
+        "//rsworkspace/crates/platform/trogon-nats",
+        "//rsworkspace/crates/platform/trogon-std",
+    ],
+)

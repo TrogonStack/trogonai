@@ -1,0 +1,452 @@
+{
+  "AgentInput": [
+    {
+      "description": "text",
+      "prompt": "text",
+      "subagent_type": "text",
+      "model": "sonnet",
+      "effort": "low",
+      "run_in_background": true,
+      "name": "text",
+      "team_name": "text",
+      "mode": "acceptEdits",
+      "isolation": "worktree"
+    }
+  ],
+  "BashInput": [
+    {
+      "command": "text",
+      "timeout": 3,
+      "description": "text",
+      "run_in_background": true,
+      "dangerouslyDisableSandbox": true
+    }
+  ],
+  "ExitPlanModeInput": [
+    {
+      "allowedPrompts": [
+        {
+          "tool": "Bash",
+          "prompt": "text"
+        }
+      ],
+      "extra_key": {
+        "any": [
+          "thing",
+          null
+        ]
+      }
+    }
+  ],
+  "FileEditInput": [
+    {
+      "file_path": "text",
+      "old_string": "text",
+      "new_string": "text",
+      "replace_all": true
+    }
+  ],
+  "FileReadInput": [
+    {
+      "file_path": "text",
+      "offset": 3,
+      "limit": 3,
+      "pages": "text",
+      "allow_large": true
+    }
+  ],
+  "FileWriteInput": [
+    {
+      "file_path": "text",
+      "content": "text"
+    }
+  ],
+  "GlobInput": [
+    {
+      "pattern": "text",
+      "path": "text"
+    }
+  ],
+  "GrepInput": [
+    {
+      "pattern": "text",
+      "path": "text",
+      "glob": "text",
+      "output_mode": "content",
+      "-B": 3,
+      "-A": 3,
+      "-C": 3,
+      "context": 3,
+      "-n": true,
+      "-i": true,
+      "-o": true,
+      "type": "text",
+      "head_limit": 3,
+      "offset": 3,
+      "multiline": true
+    }
+  ],
+  "TaskStopInput": [
+    {
+      "task_id": "text",
+      "shell_id": "text"
+    }
+  ],
+  "ListMcpResourcesInput": [
+    {
+      "server": "text"
+    }
+  ],
+  "RefreshMcpToolsInput": [
+    {
+      "server": "text"
+    }
+  ],
+  "McpInput": [
+    {
+      "extra_key": {
+        "any": [
+          "thing",
+          null
+        ]
+      }
+    }
+  ],
+  "NotebookEditInput": [
+    {
+      "notebook_path": "text",
+      "cell_id": "text",
+      "new_source": "text",
+      "cell_type": "code",
+      "edit_mode": "replace"
+    }
+  ],
+  "ReadMcpResourceDirInput": [
+    {
+      "server": "text",
+      "uri": "text"
+    }
+  ],
+  "ReadMcpResourceInput": [
+    {
+      "server": "text",
+      "uri": "text"
+    }
+  ],
+  "ReportFindingsInput": [
+    {
+      "level": "low",
+      "findings": [
+        {
+          "file": "text",
+          "line": 3,
+          "summary": "text",
+          "short_summary": "text",
+          "failure_scenario": "text",
+          "category": "text",
+          "verdict": "CONFIRMED",
+          "outcome": "fixed"
+        }
+      ]
+    }
+  ],
+  "TodoWriteInput": [
+    {
+      "todos": [
+        {
+          "content": "text",
+          "status": "pending",
+          "activeForm": "text"
+        }
+      ]
+    }
+  ],
+  "WebFetchInput": [
+    {
+      "url": "text",
+      "prompt": "text",
+      "offset": 3
+    }
+  ],
+  "WebSearchInput": [
+    {
+      "query": "text",
+      "allowed_domains": [
+        "text"
+      ],
+      "blocked_domains": [
+        "text"
+      ]
+    }
+  ],
+  "AskUserQuestionInput": [
+    {
+      "questions": [
+        {
+          "question": "text",
+          "header": "text",
+          "options": [
+            {
+              "label": "text",
+              "description": "text",
+              "preview": "text"
+            }
+          ],
+          "multiSelect": true
+        }
+      ],
+      "answers": {
+        "extra_key": "text"
+      },
+      "annotations": {
+        "extra_key": {
+          "preview": "text",
+          "notes": "text"
+        }
+      },
+      "metadata": {
+        "source": "text"
+      }
+    }
+  ],
+  "SendFeedbackInput": [
+    {
+      "type": "bug",
+      "title": "text",
+      "details": "text",
+      "area": "text",
+      "failure_mode": "instruction_following",
+      "task_category": "code_edit"
+    }
+  ],
+  "ClaudeDesignInput": [
+    {
+      "operation": "text",
+      "arguments": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    }
+  ],
+  "ProjectsInput": [
+    {
+      "method": "project_info",
+      "path": "text",
+      "content": "text",
+      "local_path": "text",
+      "present_to_user": true,
+      "query": "text",
+      "n": 3
+    }
+  ],
+  "EnterPlanModeInput": [
+    {}
+  ],
+  "TaskCreateInput": [
+    {
+      "subject": "text",
+      "description": "text",
+      "activeForm": "text",
+      "metadata": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    }
+  ],
+  "TaskGetInput": [
+    {
+      "taskId": "text"
+    }
+  ],
+  "TaskUpdateInput": [
+    {
+      "taskId": "text",
+      "subject": "text",
+      "description": "text",
+      "activeForm": "text",
+      "status": "pending",
+      "addBlocks": [
+        "text"
+      ],
+      "addBlockedBy": [
+        "text"
+      ],
+      "owner": "text",
+      "metadata": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    }
+  ],
+  "TaskListInput": [
+    {}
+  ],
+  "WorkflowInput": [
+    {
+      "script": "text",
+      "name": "text",
+      "description": "text",
+      "title": "text",
+      "args": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "scriptPath": "text",
+      "resumeFromRunId": "text"
+    }
+  ],
+  "CronCreateInput": [
+    {
+      "cron": "text",
+      "prompt": "text",
+      "recurring": true,
+      "durable": true
+    }
+  ],
+  "CronDeleteInput": [
+    {
+      "id": "text"
+    }
+  ],
+  "CronListInput": [
+    {}
+  ],
+  "ScheduleWakeupInput": [
+    {
+      "delaySeconds": 3,
+      "reason": "text",
+      "prompt": "text",
+      "stop": true,
+      "noop": true
+    }
+  ],
+  "RemoteTriggerInput": [
+    {
+      "action": "list",
+      "trigger_id": "text",
+      "session_id": "text",
+      "cursor": "text",
+      "body": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    }
+  ],
+  "ShowOnboardingRolePickerInput": [
+    {}
+  ],
+  "OfferChromeSetupInput": [
+    {
+      "reason": "text"
+    }
+  ],
+  "ReadNotificationsInput": [
+    {}
+  ],
+  "MonitorInput": [
+    {
+      "description": "text",
+      "timeout_ms": 3,
+      "command": "text",
+      "ws": {
+        "url": "text",
+        "protocols": [
+          "text"
+        ]
+      }
+    }
+  ],
+  "ProposeSkillsInput": [
+    {
+      "proposals": [
+        {
+          "name": "text",
+          "kind": "new",
+          "target": "text",
+          "description": "text",
+          "evidence": [
+            "text"
+          ],
+          "skillMd": "text"
+        }
+      ]
+    }
+  ],
+  "ProposeGoalInput": [
+    {
+      "condition": "text",
+      "ask_user": true
+    }
+  ],
+  "ArtifactInput": [
+    {
+      "action": "publish",
+      "file_path": "text",
+      "favicon": "text",
+      "icon": "text",
+      "limit": 3,
+      "page_token": "text",
+      "scope": "mine",
+      "title": "text",
+      "description": "text",
+      "label": "text",
+      "url": "text",
+      "prompt": "text",
+      "force": true,
+      "pin": true,
+      "out_dir": "text",
+      "file_paths": [
+        "text"
+      ],
+      "asset_id": "text",
+      "after": "text",
+      "capabilities": {
+        "extra_key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      },
+      "contract": "latest"
+    }
+  ],
+  "PushNotificationInput": [
+    {
+      "message": "text",
+      "status": "proactive"
+    }
+  ],
+  "EnterWorktreeInput": [
+    {
+      "name": "text",
+      "path": "text"
+    }
+  ],
+  "ExitWorktreeInput": [
+    {
+      "action": "keep",
+      "discard_changes": true
+    }
+  ]
+}

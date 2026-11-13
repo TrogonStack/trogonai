@@ -1,0 +1,72 @@
+name: CI Bazel
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.bazel*'
+      - 'MODULE.bazel*'
+      - '**/BUILD.bazel'
+      - '**/*.bzl'
+      - '.config/mise/config.toml'
+      - '.config/mise/mise.lock'
+      - '.config/bazel/**'
+      - 'projects/mise-bazel/**'
+      - '.config/mise/tasks/bazel/**'
+      - '.config/mise/tasks/github/workflows/ci-bazel/**'
+      - 'rsworkspace/Cargo.lock'
+      - 'rsworkspace/**/Cargo.toml'
+      - 'rsworkspace/crates/**'
+      - 'goworkspace/**'
+      - 'proto/trogonai/scheduler/schedules/v1/**'
+      - '.github/workflows/ci-bazel.yml'
+
+concurrency:
+  group: ci-bazel-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install build tools via mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install_args: bazel buf go rust
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      - name: Restore Bazel cache
+        id: bazel-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/bazel-disk-cache
+            ${{ runner.temp }}/bazel-repository-cache
+          key: bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.config/mise/config.toml', '.config/mise/mise.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.config/mise/config.toml', '.config/mise/mise.lock') }}-
+
+      - name: Test native targets
+        run: mise run --skip-tools github:workflows:ci-bazel:test
+
+      - name: Build native artifacts
+        run: mise run --skip-tools github:workflows:ci-bazel:build
+
+      - name: Save Bazel cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/bazel-disk-cache
+            ${{ runner.temp }}/bazel-repository-cache
+          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}

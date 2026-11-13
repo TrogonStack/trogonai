@@ -1,0 +1,263 @@
+# Rust Claude Agent SDK
+
+`trogon-claude-agent-sdk` launches an installed Claude Code executable and speaks
+its bidirectional `stream-json` protocol. Claude Code supplies the agent loop,
+model access and built-in tools; this library supplies typed messages,
+callbacks, controls and session storage. A native executable needs neither
+Python nor Node.js.
+
+[The lifecycle decision](docs/explanation/lifecycle.md) explains client
+ownership, query completion, hooks and cleanup, and why the Rust API combines
+explicit readiness with query convenience.
+
+## Use the library
+
+The crate is a workspace member available as a path dependency. It is not
+published to crates.io.
+
+```toml
+[dependencies]
+trogon-claude-agent-sdk = { path = "path/to/trogon-claude-agent-sdk" }
+tokio = { version = "1", features = ["macros", "rt"] }
+```
+
+```rust,no_run
+use trogon_claude_agent_sdk::{ClaudeAgentOptions, Message, Prompt, query};
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut response = query(
+        Prompt::from("Explain this project without changing files."),
+        ClaudeAgentOptions::default(),
+    ).await?;
+    while let Some(message) = response.next_message().await? {
+        if let Message::Result(result) = message {
+            println!("{}", result.result.unwrap_or_default());
+        }
+    }
+    Ok(())
+}
+```
+
+Queries can consume model usage and execute tools according to CLI permissions.
+[The connect example](examples/connect.rs) initializes and closes without a
+prompt. [The query example](examples/query.rs) prints assistant text.
+
+## Turns, runs and input
+
+`query()` receives the run through completion, including background-agent
+continuation turns. `query_turn()` explicitly stops after the first result.
+A result marks a turn boundary, which may precede run completion. The driver
+observes session state and delegated-agent lifecycle, with a bounded
+between-turn wait. Older CLIs that omit session state provide weaker completion
+information.
+
+For interactive use, create a `ClaudeSdkClient`, send a prompt and receive
+through `Message::Result`. The next prompt reuses the process.
+`send_input(UserInput)` accepts structured content and message identity.
+`InputBlock` is a transparent JSON-object wrapper forwarded verbatim, with a
+`text` convenience constructor; the CLI and the Messages API validate block shapes.
+
+Ordinary sends reject overlapping turns. Use the cloneable `ClientHandle` for
+queued input or `stream_input`, and receive on the owner concurrently. Call
+`finish_input()` when no more user messages will be sent. Reported queue counts
+handle CLIs that coalesce queued sends into a turn.
+
+Call `disconnect().await` to wait for shutdown and receive cleanup errors. Dropping
+the owner requests shutdown even when a handle survives, but does not call or
+await `disconnect()`. Cleanup needs a running Tokio runtime; the child also has a
+`kill_on_drop` fallback.
+
+## Messages and controls
+
+Known messages retain identity, origin, stop/terminal reasons, usage, permission
+denials and additional fields when reported. Nested upstream usage and denial
+payloads remain JSON. Unknown informational messages and content blocks remain
+explicit variants; malformed known fields cause typed protocol errors.
+
+`Message::Result` and `HookOutput::Sync` box their payloads to keep enum values
+compact when another dependency enables `serde_json`'s `preserve_order` feature.
+Pattern matching exposes the same fields through the box.
+
+`connect().await` completes the CLI initialization handshake before returning.
+`connection_info()` borrows the cached `ConnectionInfo` from that handshake,
+including support flags and additional metadata. Reading it is non-fallible and
+sends no protocol messages; `ConnectionInfo::as_json()` retains the original
+response, including omitted or explicitly null fields.
+The handle provides interrupt receipts, model and permission changes, rewind,
+MCP status/reconnect/toggle/replacement, context usage and task controls. Legacy
+interrupt replies remain distinct from reported empty queues. Newer controls
+depend on installed CLI support.
+
+## Callbacks and MCP
+
+`ToolPermissionHandler` receives request/tool identities, suggestions, MCP
+provenance and prompt context, plus a cancellation signal. Typed allow decisions
+can replace input and update permission rules. Absent handlers deny host
+permission requests; timeout denies, and cancellation suppresses a late reply.
+The CLI can authorize tools through its own permission mode or rules before
+consulting the host.
+Suggestions keep unknown destinations, behaviors and update types verbatim, so
+they round-trip into an allow decision. A permission request that cannot be
+decoded gets an error response and the session continues.
+
+`HookRegistration` and `HookOutput` support hook callbacks. Blocking failure
+semantics require advertised CLI support and registered hooks; startup refuses
+incompatible responders. [The hooks example](examples/hooks.rs) blocks shell
+commands. Elicitation and user-dialog callbacks also receive cancellation
+signals. Declare supported dialog kinds explicitly.
+
+[The feature-connect example](examples/feature_connect.rs) checks blocking-hook
+registration and MCP connection without a prompt. It refuses startup when the
+installed CLI does not advertise blocking-hook support. Verification with CLI
+`2.1.312` exercised that refusal; the pinned CLI `2.1.319` accepted registration
+and connected MCP. Pass an executable path as the example's first argument to
+check a separate CLI installation.
+
+Build a `LocalMcpServer` with named `LocalMcpServerOptions` fields. Define each
+schema-validated tool through `SdkTool::from(SdkToolOptions { ... })`, naming its
+metadata, input schema and async handler. Construct its `McpToolName` and
+`McpToolInputSchema` first. `McpToolName` stores any text; `LocalMcpServer::from`
+logs a warning for a name outside the MCP protocol limits (one to 128 ASCII
+letters, digits, underscores, hyphens or periods), and `tools/list` still lists it.
+`McpToolInputSchema` enforces a valid object input schema. `SdkTool::from` then
+assembles its inputs without returning an error.
+`LocalMcpServerOptions.tools` requires an immutable `SdkTools` collection.
+Use `tool.into()` for one tool, `SdkTools::default()` for none, or
+`SdkTools::new([first, second])?` to reject duplicate names when assembling
+several tools. Exact names must be unique; case-distinct names remain separate.
+`LocalMcpServer::from` assembles these inputs infallibly.
+Each client opens its own session. The built-in server supports initialize,
+initialized notification, ping and tool
+listing/calls. Custom
+`SdkMcpServer`/`SdkMcpSession` implementations can add methods; the built-in
+server does not expose server-initiated client requests.
+[The SDK tools example](examples/sdk_tools.rs) registers an echo tool.
+[The MCP-connect example](examples/mcp_connect.rs) checks the embedded server
+connection without registering hooks or sending a prompt.
+
+`McpServerOptions` configures external stdio, HTTP and SSE servers, whose
+connections the CLI owns. Pass credentials separately from URL userinfo.
+Dynamic updates retain existing same-name embedded sessions. Remove a server
+and re-add it to replace its registry instance.
+
+## Configuration and limits
+
+The interactive client follows Python's `ClaudeAgentOptions` and `ClaudeSDKClient`
+terminology, with Rust acronym casing. Its core optional fields default to `None`:
+
+| Rust field | Python field | TypeScript option |
+| --- | --- | --- |
+| `cli_path: Option<PathBuf>` | [`cli_path`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2467) | `pathToClaudeCodeExecutable` |
+| `cwd: Option<PathBuf>` | [`cwd`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2464) | `cwd` |
+| `model: Option<ModelName>` | [`model`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2438) | `model` |
+| `permission_mode: Option<PermissionMode>` | [`permission_mode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2393) | `permissionMode` |
+| `setting_sources: Option<Vec<SettingSource>>` | [`setting_sources`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2666) | `settingSources` |
+
+`PermissionMode` mirrors Python's
+[`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L25)
+and the exported type in
+[TypeScript `0.3.319`](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.319.tgz).
+Serde uses their literal names: `default`, `acceptEdits`, `plan`,
+`bypassPermissions`, `dontAsk`, and `auto`. `None` leaves the mode unset;
+`Some(PermissionMode::Default)` explicitly selects `default`. The runtime omits
+the flag for `None` and sends the explicit literal for `Some`.
+
+`SettingSource` uses the exact serde literals `user`, `project`, and `local`.
+Python's pinned `setting_sources` docs and TypeScript `0.3.319`'s `Options.settingSources`
+docs both describe omission as loading all CLI sources and an empty list as
+disabling filesystem settings. Rust preserves `None`, `Some(vec![])`, and caller
+order when building CLI arguments.
+
+Model strings and paths are stored without extra identifier restrictions.
+`env` values are `ConfigValue`s, which convert from strings as `Sensitive`;
+debug output lists every variable name, shows values the caller marks `Plain`,
+and prints sensitive values as `<redacted>`. MCP stdio arguments and
+environment values and HTTP or SSE header values follow the same rule.
+`ModelName` keeps the model out of debug output, so options debug output shows
+every other setting without listing fields by hand.
+Windows batch paths are refused only at process start.
+Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L93)
+and [`disconnect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L607)
+on an existing client. Rust intentionally uses an async factory for `connect`
+and consumes the client in `disconnect(self)` to observe cleanup errors. Published
+[TypeScript `0.3.319`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk/v/0.3.319)
+uses `Query` and `WarmQuery` with `close()` instead.
+
+Options include programmatic agents, model/effort, tool rules, budget, output
+schema, checkpointing, environment, additional directories, resume and fork.
+`OutputSchema` compiles locally and rejects nonlocal references. `UsdBudget`
+rejects nonfinite/negative values. Rewind requires checkpointing and CLI support.
+
+The default system prompt is empty; choose `SystemPrompt::ClaudeCode` for the
+CLI preset. Filesystem settings inherit CLI defaults when `setting_sources` is
+`None`; `Some(vec![])` disables user/project/local settings. Explicit lists retain
+caller order and duplicates. MCP discovery is disabled unless selected through
+`McpDiscovery::CliDefault`. `Customizations::Bare` disables further CLI
+customizations when supported.
+
+Frames, stderr, queues and outstanding controls have configurable bounds. A full
+message queue produces `Error::MessageQueueFull`; control handling progresses
+independently of message consumption. Stderr debug output omits its contents.
+`QueueCapacity` validates Tokio's range; positive `Timeout` values are bounded
+at 24 hours.
+
+## External session stores
+
+Set `session_store` to a `SessionStoreOptions`. Implement `SessionStore` for a
+backend or use `InMemorySessionStore`. Entries are keyed by project/session and
+optional subagent path; the in-memory backend deduplicates stable UUIDs.
+[The store example](examples/session_store.rs) needs no Claude or network.
+
+Mirroring follows CLI local writes. Each result waits for its own store barrier
+while controls remain serviceable. Failures appear as `mirror_error` messages
+and never fail the run; a transcript path outside the projects directory is
+logged and dropped. Pending entries are coalesced per key and drained early when
+they pass the entry or byte budget; frames are never rejected. A failed append
+is retried twice with 200 ms and 800 ms backoff, for any backend error; timeouts
+are not retried because an in-flight write may still complete.
+
+Store resume, like both upstream SDKs, loads transcripts before startup into a
+private temporary directory (`claude-resume-*`, mode 0700) and points the CLI's
+`CLAUDE_CONFIG_DIR` at it, so the caller's own configuration directory is never
+written. Authentication is copied in: `.credentials.json` with its refresh
+token removed, `.claude.json`, and `settings.json` without plugin entries or a
+nested `CLAUDE_CONFIG_DIR`. On macOS, without a configured directory or an
+API-key or OAuth-token variable, the keychain entry is read instead. The
+directory is removed after the process is reaped, retrying briefly while it is
+busy. A non-UUID, missing or empty session skips materialization and leaves
+`--resume` to the CLI. Latest-session resume walks newest to oldest and skips
+non-UUID, empty and sidechain sessions. File checkpointing cannot be combined
+with a session store.
+
+Project-key sanitization uses the pinned TypeScript SDK’s UTF-16 replacement
+behavior. Native hashing can differ for long project paths; use an explicit
+`SessionStoreOptions.project_key` when
+necessary. Backend retention and cross-process coordination belong to the backend.
+
+## Compatibility and verification
+
+The references are Python SDK
+[`0.2.179`](https://github.com/anthropics/claude-agent-sdk-python/tree/2209f2c134fee914c0f75733b631a5fc238ca846)
+and published TypeScript SDK `0.3.319`, paired with CLI `2.1.319`.
+This independent Rust implementation does not provide TypeScript browser/bridge
+hosting, every upstream convenience option or the complete MCP server protocol.
+Windows requires a native executable; batch scripts are refused.
+
+```sh
+mise exec -- cargo test --locked -p trogon-claude-agent-sdk --all-features
+mise exec -- cargo clippy --locked -p trogon-claude-agent-sdk --all-targets --all-features
+mise exec -- cargo fmt -p trogon-claude-agent-sdk --check
+```
+
+`test-support` enables the fixture CLI/subprocess suite. Store/type tests need
+no credentials. Unix-only filesystem/reaping tests are gated. Query examples are
+compiled, not executed by tests. Fixture results establish library/wire behavior,
+not live model or hosted provider conformance.
+
+[Runtime adapters](docs/explanation/runtime-adapters.md) explains how to replace
+process, environment, filesystem and wall-clock effects through generic traits,
+and how to use Tokio virtual time for retry and deadline tests.
+
+Pinned declaration relationships for the extracted options, validated values and
+message data are collected in [Data API mappings](docs/reference/data-api-mappings.md).

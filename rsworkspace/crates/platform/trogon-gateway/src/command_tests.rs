@@ -170,12 +170,10 @@ fn stream_message(subject: &str, payload: Bytes) -> StreamMessage {
     }
 }
 
-#[tokio::test]
-async fn serve_rejects_empty_sources_before_connecting() {
+#[test]
+fn empty_sources_are_valid_by_default() {
     let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
-    let resolved = config::load(Some(file.path())).unwrap();
-    let error = serve(resolved, std::future::pending()).await.unwrap_err();
-    assert!(error.to_string().starts_with("no sources configured"));
+    config::load(Some(file.path())).unwrap();
 }
 
 #[tokio::test]
@@ -194,6 +192,30 @@ async fn serve_provisions_stream_and_claim_bucket_before_graceful_shutdown() {
     NatsObjectStore::bind_claim_bucket(&js, ClaimBucket::default())
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn serve_without_sources_keeps_claims_for_the_default_stream_age() {
+    let server = JetStreamTestServer::start().await;
+    let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
+
+    tokio::time::timeout(Duration::from_secs(10), serve(resolved, std::future::ready(())))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let js = server.jetstream().await;
+    let mut claims = js
+        .get_stream(format!("OBJ_{}", ClaimBucket::default().as_str()))
+        .await
+        .unwrap();
+    assert_eq!(
+        claims.info().await.unwrap().config.max_age,
+        Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS) + Duration::from(CLAIM_CHECK_TTL_GRACE)
+    );
 }
 
 #[tokio::test]

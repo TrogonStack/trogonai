@@ -25,11 +25,21 @@ export default async () => {
       },
       nav: [
         { text: "Docs", link: "/get-started/" },
+        { text: "Releases", link: "/releases/" },
         { text: "ADRs", link: "/adr/" },
         { text: "Glossary", link: "/glossary/" },
         { text: "GitHub", link: "https://github.com/TrogonStack/trogonai" },
       ],
       sidebar: {
+        "/releases/": [
+          {
+            text: "Releases",
+            items: [
+              { text: "Overview", link: "/releases/" },
+              { text: "Release channels", link: "/releases/channels" },
+            ],
+          },
+        ],
         "/adr/": [
           {
             text: "Architecture Decision Records",
@@ -45,7 +55,10 @@ export default async () => {
         "/": [
           {
             text: "Get Started",
-            items: [{ text: "Overview", link: "/get-started/" }],
+            items: [
+              { text: "Overview", link: "/get-started/" },
+              { text: "Build with Bazel", link: "/how-to/use-bazel" },
+            ],
           },
           {
             text: "Agents",
@@ -186,6 +199,7 @@ export default async () => {
                   { text: "Connection HTTP Proxy", link: "/reference/connection-http-proxy" },
                   { text: "Connector Resource Parents", link: "/reference/connector-resource-parents" },
                   { text: "Connector Security Profile", link: "/reference/connector-security-profile" },
+                  { text: "Workload Identity", link: "/reference/workload-identity" },
                   { text: "Connector Account Identity", link: "/reference/connector-account-identity" },
                   { text: "Connector MCP Authorization", link: "/reference/connector-mcp-authorization" },
                   { text: "Connector Control API", link: "/reference/connector-control-api" },
@@ -242,6 +256,7 @@ export default async () => {
           {
             text: "Browse",
             items: [
+              { text: "Releases", link: "/releases/" },
               { text: "Glossary", link: "/glossary/" },
               { text: "Architecture Decision Records", link: "/adr/" },
             ],
