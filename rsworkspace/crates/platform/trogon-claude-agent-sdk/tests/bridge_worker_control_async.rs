@@ -195,6 +195,8 @@ struct Session {
     callbacks: ControlCallbacks,
     version: Option<String>,
     tasks: Vec<JoinHandle<()>>,
+    /// Where the attach path queues the replies the dispatcher builds on the spot.
+    written: Log,
 }
 
 impl Session {
@@ -211,7 +213,10 @@ impl Session {
             pending_prompts: &[],
         };
         let task = match answer_control_request(frame, &session, &mut self.callbacks) {
-            BridgeControlReply::Frame(_) => None,
+            BridgeControlReply::Frame(reply) => {
+                push(&self.written, reply);
+                None
+            }
             BridgeControlReply::Deferred(work) => self.control.start(frame, work),
             BridgeControlReply::Pending(pending) => Some(self.control.finish_pending(frame, pending)),
         };
@@ -249,6 +254,7 @@ async fn host_promises_are_answered_as_the_recorded_session_answered() -> TestRe
             callbacks: host.control,
             version: case["version"].as_str().map(str::to_owned),
             tasks: Vec::new(),
+            written: Arc::clone(&written),
         };
         session.deliver(&case["request"]);
         let_tasks_run().await;
