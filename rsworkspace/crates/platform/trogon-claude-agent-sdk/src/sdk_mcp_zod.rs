@@ -416,7 +416,7 @@ fn check_order(schema: &JsonObject) -> [StringCheckKind; 3] {
 /// The flags of the `RegExp` behind a pattern. The JSON Schema zod lists drops them, so a validation choice
 /// names them (`x-trogon-flags`); without one only the flags zod itself gives a format's regex apply (`u` for
 /// emoji).
-fn regexp_flags(schema: &JsonObject, format: Option<&str>) -> String {
+pub(crate) fn regexp_flags(schema: &JsonObject, format: Option<&str>) -> String {
     match schema.get("x-trogon-flags").and_then(Value::as_str) {
         Some(flags) => flags.to_owned(),
         None if format == Some("emoji") => "u".to_owned(),

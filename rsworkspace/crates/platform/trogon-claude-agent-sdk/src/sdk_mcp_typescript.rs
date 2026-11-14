@@ -3,13 +3,14 @@
 
 use super::{LocalMcpSession, McpServerError, RequestId, ServerState, tool_error};
 use crate::{
-    CallbackError, CancellationToken, JsonObject, McpToolRequest, OutputSchema, SdkTool, SdkTools,
+    CallbackError, CancellationToken, JsonObject, McpToolRequest, SdkTool, SdkTools,
     constants::{self, SUPPORTED_PROTOCOL_VERSIONS},
     sdk_mcp_js::stringify_primitive,
-    sdk_mcp_zod,
+    sdk_mcp_regexp, sdk_mcp_zod,
     sdk_mcp_zod_run::Input,
     settings_json::js_stringify_pretty,
 };
+use jsonschema::{Keyword, ValidationError, paths::Location};
 use serde_json::Value;
 
 pub(crate) async fn request(
@@ -235,6 +236,107 @@ fn listed_input_schema(tool: &SdkTool) -> JsonObject {
     input_schema
 }
 
+/// The keyword a schema `pattern` takes in the call check.
+const ECMA_PATTERN: &str = "x-trogon-pattern";
+
+/// The listed input schema compiled for the call check. `McpServer` checks the arguments with zod alone, where
+/// a `pattern` is an ECMAScript `RegExp`; the `jsonschema` regex engine rejects ECMAScript syntax such as a
+/// named backreference, and the draft-07 meta-schema asserts `format: regex` on every `pattern`. So each
+/// `pattern` moves to a keyword that runs the ECMAScript engine, and the rest compiles as before.
+fn call_validator(schema: &JsonObject) -> Result<jsonschema::Validator, String> {
+    jsonschema::options()
+        .with_keyword(ECMA_PATTERN, ecma_pattern)
+        .build(&Value::Object(ecma_patterns(schema)))
+        .map_err(|error| error.to_string())
+}
+
+/// `schema` with each string `pattern` in a schema position renamed to `ECMA_PATTERN`, keys in order.
+fn ecma_patterns(schema: &JsonObject) -> JsonObject {
+    fn subschema(value: &Value) -> Value {
+        match value {
+            Value::Object(schema) => Value::Object(ecma_patterns(schema)),
+            other => other.clone(),
+        }
+    }
+    schema
+        .iter()
+        .map(|(key, value)| {
+            let value = match (key.as_str(), value) {
+                (
+                    "properties" | "patternProperties" | "definitions" | "$defs" | "dependentSchemas" | "dependencies",
+                    Value::Object(named),
+                ) => Value::Object(
+                    named
+                        .iter()
+                        .map(|(name, value)| (name.clone(), subschema(value)))
+                        .collect(),
+                ),
+                ("allOf" | "anyOf" | "oneOf" | "prefixItems" | "items", Value::Array(schemas)) => {
+                    Value::Array(schemas.iter().map(subschema).collect())
+                }
+                (
+                    "additionalItems"
+                    | "additionalProperties"
+                    | "contains"
+                    | "contentSchema"
+                    | "else"
+                    | "if"
+                    | "items"
+                    | "not"
+                    | "propertyNames"
+                    | "then"
+                    | "unevaluatedItems"
+                    | "unevaluatedProperties",
+                    value,
+                ) => subschema(value),
+                (_, value) => value.clone(),
+            };
+            let key = if key == "pattern" && value.is_string() {
+                ECMA_PATTERN.to_owned()
+            } else {
+                key.clone()
+            };
+            (key, value)
+        })
+        .collect()
+}
+
+/// A `pattern` as zod's `.regex` checks it. One the ECMAScript engine cannot compile under these flags checks
+/// nothing, as zod's string node does.
+struct EcmaPattern {
+    regex: Option<regress::Regex>,
+    flags: String,
+}
+
+impl<'i> Keyword<'i> for EcmaPattern {
+    fn validate(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
+        if self.is_valid(instance) {
+            Ok(())
+        } else {
+            Err(ValidationError::custom("does not match the pattern"))
+        }
+    }
+
+    fn is_valid(&self, instance: &'i Value) -> bool {
+        match (&self.regex, instance.as_str()) {
+            (Some(regex), Some(text)) => sdk_mcp_regexp::test(regex, text, &self.flags),
+            _ => true,
+        }
+    }
+}
+
+fn ecma_pattern<'a>(
+    parent: &'a JsonObject,
+    value: &'a Value,
+    _location: Location,
+) -> Result<Box<dyn for<'i> Keyword<'i>>, ValidationError<'a>> {
+    let flags = sdk_mcp_zod::regexp_flags(parent, parent.get("format").and_then(Value::as_str));
+    let regex = value
+        .as_str()
+        .and_then(|source| sdk_mcp_regexp::compile(source, &flags).ok());
+    Ok(Box::new(EcmaPattern { regex, flags }))
+}
+
 fn listed_tool(state: &ServerState, tool: &SdkTool) -> JsonObject {
     let input_schema = listed_input_schema(tool);
     let mut listed = JsonObject::from_iter([
@@ -281,10 +383,10 @@ async fn call_tool(
     };
     let declared = tool.input_schema();
     // Compiled under the draft the listing advertises, so a draft-07 tuple (`items` as a list) compiles.
-    let schema = OutputSchema::new(listed_input_schema(tool));
-    if let Some(error) = schema.compile_error() {
-        return Ok(Ok(tool_error(error.to_owned())));
-    }
+    let schema = match call_validator(&listed_input_schema(tool)) {
+        Ok(schema) => schema,
+        Err(error) => return Ok(Ok(tool_error(error))),
+    };
     let Ok(prepared) = tool.validation().prepare(declared.as_json()) else {
         return Ok(Ok(tool_error(format!(
             "MCP error -32602: Tool {name} has a validation choice outside its input schema"
