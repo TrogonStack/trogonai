@@ -444,6 +444,7 @@ fn permission_request(tool_name: &str, input: JsonObject) -> ToolPermissionReque
         decision_reason: None,
         request_id: ControlRequestId::from("request-1"),
         signal: CancellationToken::new(),
+        raw_request: JsonObject::new(),
         suggestions: Vec::new(),
         agent_id: None,
         mcp_server: None,

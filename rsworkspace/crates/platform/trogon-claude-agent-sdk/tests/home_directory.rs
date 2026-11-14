@@ -104,10 +104,9 @@ impl Scenario {
             effective: self.passwd.clone().map(PathBuf::into_os_string),
             real: self.passwd.clone().map(PathBuf::into_os_string),
         };
-        let project = SessionProjectKey::new("project").map_err(|_| SessionError::MissingConfigDirectory)?;
+        let project = SessionProjectKey::new("project");
         let store = Arc::new(InMemorySessionStore::with_clock(FrozenClock));
-        let key = SessionKey::new(project.clone(), SessionId::from(SESSION))
-            .map_err(|_| SessionError::MissingConfigDirectory)?;
+        let key = SessionKey::new(project.clone(), SessionId::from(SESSION));
         let entry = SessionEntry::try_from(json!({"type":"user","message":"hello"}))
             .map_err(|_| SessionError::MissingConfigDirectory)?;
         store

@@ -838,6 +838,7 @@ async fn python_dialect_converts_every_content_block_kind() -> TestResult {
             content: content.clone(),
             structured_content: None,
             status: ToolResultStatus::Success,
+            result: None,
         })
     });
     let tool = tool_with("t", "", json!({"type":"object","properties":{}}), handler)?;
@@ -893,6 +894,7 @@ async fn python_dialect_converts_an_embedded_resource_that_is_not_a_mapping_like
                 content: content.clone(),
                 structured_content: None,
                 status: ToolResultStatus::Success,
+                result: None,
             })
         });
         let tool = tool_with("t", "", json!({"type":"object","properties":{}}), handler)?;
@@ -921,6 +923,7 @@ async fn python_dialect_reports_a_content_block_missing_its_fields_like_a_key_er
                 content: content.clone(),
                 structured_content: None,
                 status: ToolResultStatus::Success,
+                result: None,
             })
         });
         let tool = tool_with("t", "", json!({"type":"object","properties":{}}), handler)?;

@@ -1675,6 +1675,7 @@ impl ClaudeSdkClient {
             client: Some(self),
             one_turn: false,
             result_received: false,
+            sse: None,
         }
     }
 }

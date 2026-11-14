@@ -18,10 +18,10 @@ use std::{
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
-    ArgvStyle, Backgrounded, ClaudeAgentOptions, ClaudeSdkClient, ContextUsageDetail, ControlOperation, Error, InterruptReceipt,
-    JsRuntime, JsonObject, LocalPlugin, MaxThinkingTokensDisplay, McpPermissionModeOverride, McpServerName, McpServers,
-    MessageId, ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RemoteControlOptions, RewindMode,
-    SdkMcpServers, SettingsUpdateSource, TaskId, ToolUseId,
+    ArgvStyle, Backgrounded, ClaudeAgentOptions, ClaudeSdkClient, ContextUsageDetail, ControlOperation, Error,
+    InterruptReceipt, JsRuntime, JsonObject, LocalPlugin, MaxThinkingTokensDisplay, McpPermissionModeOverride,
+    McpServerName, McpServers, MessageId, ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions,
+    RemoteControlOptions, RewindMode, SdkMcpServers, SettingsUpdateSource, TaskId, ToolUseId,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };

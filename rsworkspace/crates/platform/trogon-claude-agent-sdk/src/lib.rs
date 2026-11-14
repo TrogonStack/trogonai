@@ -204,7 +204,6 @@ mod settings_schema_ports;
 mod settings_schema_regexp;
 mod shadow_warning;
 mod skills;
-mod startup_timeout;
 mod sse_ccr_event;
 mod sse_delivery_update;
 mod sse_drop_category;
@@ -222,6 +221,7 @@ mod sse_retry;
 mod sse_transport;
 mod sse_utf8_decoder;
 mod sse_worker_markers;
+mod startup_timeout;
 mod stderr_redaction;
 mod stderr_tail;
 mod summary_dialect;
@@ -477,7 +477,6 @@ pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };
 pub use settings_sandbox_schema::{SandboxConfigRejected, SandboxConfigSchema};
-pub use startup_timeout::StartupHooksRunning;
 pub use sse_ccr_event::SseCcrEvent;
 pub use sse_delivery_update::SseDeliveryUpdate;
 pub use sse_drop_category::SseDropCategory;
@@ -490,6 +489,7 @@ pub use sse_options::{CatchUpTruncatedHandler, DeliveryUpdateHandler, SseOptions
 pub use sse_parser::SseParser;
 pub use sse_prepared_write::SsePreparedWrite;
 pub use sse_transport::{G4_TEXT_ENVELOPE_ARM_PORTED, SseHandle, SseTransport};
+pub use startup_timeout::StartupHooksRunning;
 pub use stderr_tail::StderrTail;
 pub use summary_dialect::SummaryDialect;
 pub use system_prompt::{CustomPrompt, PresetPrompt};
