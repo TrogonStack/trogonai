@@ -209,7 +209,7 @@ fn resolve_core<H: SettingsHost>(
         key_order,
         mdm_did_not_load,
         file_did_not_load,
-    } = resolve_policy(host, kind, parent.as_ref(), remote.as_ref(), evaluation);
+    } = resolve_policy(host, state, kind, parent.as_ref(), remote.as_ref(), evaluation);
     let policy_settings = policy_settings.map(|mut settings| {
         for entry in settings.values_mut() {
             normalize_numbers(entry, dialect);
@@ -330,7 +330,7 @@ fn resolve_core<H: SettingsHost>(
     Ok(Value::Object(result))
 }
 
-static PROCESS_STATE: LazyLock<ResolverState> = LazyLock::new(ResolverState::new);
+static PROCESS_STATE: LazyLock<ResolverState> = LazyLock::new(ResolverState::for_process);
 
 /// `resolveSettings` upstream: reads the real host once and merges every enabled source.
 pub async fn resolve_settings(options: &ResolveSettingsOptions) -> Result<ResolvedSettings, ResolveSettingsError> {

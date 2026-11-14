@@ -1,4 +1,4 @@
-//! Ports the pinned bundle's path vetting walk (`bd` and the helpers it calls).
+//! Ports the pinned bundle's path vetting walk (`bd`, `Lx` and the helpers they call).
 //!
 //! The connector folder check vets a `.gitignore` path before it trusts what the folder holds: it walks the path one
 //! component at a time, follows symbolic links itself, and refuses a path whose links lead onto a network share or
@@ -60,6 +60,8 @@ pub(crate) trait VettingHost: NodeProcess {
     fn stat_device(&self, path: &str) -> Result<u64, Errno>;
     /// `os.homedir()`.
     fn home_directory(&self) -> Result<JsString, Errno>;
+    /// `realpathSync.native`.
+    fn real_path(&self, path: &[u16]) -> Result<JsString, Errno>;
 }
 
 /// The `reason` a refused path carries.
@@ -185,6 +187,35 @@ struct WalkOptions {
     unverified: bool,
     launch_ancestry: Option<JsString>,
     opaque_link_text: bool,
+}
+
+/// What `Lx` finds where a path really is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "the write check only asks which kind of answer came back; the probe replays read the paths"
+    )
+)]
+pub(crate) enum Located {
+    /// A component does not exist (`"gone"`).
+    Gone,
+    /// The path could not be examined (`"unverified"`).
+    Unverified,
+    /// The path is, or its links lead, onto a network location (`{network}`).
+    Network(JsString),
+    /// Where the path really is (`{real}`).
+    Real(JsString),
+}
+
+/// What a thrown `code` makes of `Lx`.
+fn located_failure(code: Option<&str>) -> Located {
+    if matches!(code, Some("ENOENT" | "ENOTDIR")) {
+        Located::Gone
+    } else {
+        Located::Unverified
+    }
 }
 
 /// State the bundle keeps for the life of the process (`Ub`, whether `/home` is automounted).
@@ -655,7 +686,8 @@ impl<'a> Vetter<'a> {
         }
     }
 
-    fn join(&self, args: &[&[u16]]) -> JsString {
+    /// `Ne.join`.
+    pub(crate) fn join(&self, args: &[&[u16]]) -> JsString {
         if self.win32() {
             self.path.win32_join(args)
         } else {
@@ -1298,6 +1330,32 @@ impl<'a> Vetter<'a> {
             return Err(VetError::Refused(RefusalReason::Unexamined));
         }
         Err(VetError::Refused(RefusalReason::Network))
+    }
+
+    /// `Lx`: where `path` really is, walked with the options the managed settings write check walks with (`S4`).
+    pub(crate) fn locate(&self, path: &[u16]) -> Located {
+        let network = self.is_unc(path)
+            || self.is_share_automount(path)
+            || (self.darwin() && on_network_mount(path))
+            || in_dot_namespace(path);
+        if network && !is_wsl_share(path) {
+            return Located::Network(path.to_vec());
+        }
+        let options = WalkOptions {
+            anchors: None,
+            unverified: true,
+            launch_ancestry: None,
+            opaque_link_text: true,
+        };
+        match self.walk(path, &options, &mut None) {
+            Err(error) => located_failure(error.code.as_deref()),
+            Ok(Walked::Unverified | Walked::Opaque) => Located::Unverified,
+            Ok(Walked::Path(landed)) => Located::Network(landed),
+            Ok(Walked::Done) => match self.host.real_path(path) {
+                Ok(real) => Located::Real(strip_device_prefix(&real)),
+                Err(errno) => located_failure(errno.as_deref()),
+            },
+        }
     }
 
     /// `bd`: vets a path the connector check is about to read.

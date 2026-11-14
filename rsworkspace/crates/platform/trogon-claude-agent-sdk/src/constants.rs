@@ -947,6 +947,126 @@ pub(crate) const VETTING_HOME_MOUNT: &str = "/home";
 /// Folder whose device `/home` is compared with (`TI.homeIsOwnMount` upstream).
 pub(crate) const VETTING_USERS_MOUNT: &str = "/Users";
 
+/// libuv's `uv_translate_sys_error` as node runs it on Windows: the `code` each Windows system error takes, in the
+/// order of its `switch`. A code missing here is `UNKNOWN`.
+pub(crate) const LIBUV_WINDOWS_ERRORS: [(i32, &str); 100] = [
+    (10013, "EACCES"),
+    (740, "EACCES"),
+    (1920, "EACCES"),
+    (1227, "EADDRINUSE"),
+    (10048, "EADDRINUSE"),
+    (10049, "EADDRNOTAVAIL"),
+    (10047, "EAFNOSUPPORT"),
+    (10035, "EAGAIN"),
+    (232, "EAGAIN"),
+    (10037, "EALREADY"),
+    (1004, "EBADF"),
+    (6, "EBADF"),
+    (33, "EBUSY"),
+    (231, "EBUSY"),
+    (32, "EBUSY"),
+    (995, "ECANCELED"),
+    (10004, "ECANCELED"),
+    (1113, "ECHARSET"),
+    (1236, "ECONNABORTED"),
+    (10053, "ECONNABORTED"),
+    (1225, "ECONNREFUSED"),
+    (10061, "ECONNREFUSED"),
+    (64, "ECONNRESET"),
+    (10054, "ECONNRESET"),
+    (183, "EEXIST"),
+    (80, "EEXIST"),
+    (998, "EFAULT"),
+    (10014, "EFAULT"),
+    (1232, "EHOSTUNREACH"),
+    (10065, "EHOSTUNREACH"),
+    (122, "EINVAL"),
+    (13, "EINVAL"),
+    (87, "EINVAL"),
+    (1464, "EINVAL"),
+    (10022, "EINVAL"),
+    (10046, "EINVAL"),
+    (1102, "EIO"),
+    (1111, "EIO"),
+    (23, "EIO"),
+    (1166, "EIO"),
+    (1165, "EIO"),
+    (1393, "EIO"),
+    (1129, "EIO"),
+    (1101, "EIO"),
+    (31, "EIO"),
+    (1106, "EIO"),
+    (1117, "EIO"),
+    (1104, "EIO"),
+    (205, "EIO"),
+    (110, "EIO"),
+    (1103, "EIO"),
+    (156, "EIO"),
+    (10056, "EISCONN"),
+    (1921, "ELOOP"),
+    (4, "EMFILE"),
+    (10024, "EMFILE"),
+    (10040, "EMSGSIZE"),
+    (111, "ENAMETOOLONG"),
+    (206, "ENAMETOOLONG"),
+    (1231, "ENETUNREACH"),
+    (10051, "ENETUNREACH"),
+    (10055, "ENOBUFS"),
+    (161, "ENOENT"),
+    (267, "ENOENT"),
+    (203, "ENOENT"),
+    (2, "ENOENT"),
+    (123, "ENOENT"),
+    (15, "ENOENT"),
+    (4392, "ENOENT"),
+    (126, "ENOENT"),
+    (3, "ENOENT"),
+    (11001, "ENOENT"),
+    (11004, "ENOENT"),
+    (8, "ENOMEM"),
+    (14, "ENOMEM"),
+    (82, "ENOSPC"),
+    (112, "ENOSPC"),
+    (277, "ENOSPC"),
+    (1100, "ENOSPC"),
+    (39, "ENOSPC"),
+    (2250, "ENOTCONN"),
+    (10057, "ENOTCONN"),
+    (145, "ENOTEMPTY"),
+    (10038, "ENOTSOCK"),
+    (50, "ENOTSUP"),
+    (109, "EOF"),
+    (5, "EPERM"),
+    (1314, "EPERM"),
+    (230, "EPIPE"),
+    (233, "EPIPE"),
+    (10058, "EPIPE"),
+    (10043, "EPROTONOSUPPORT"),
+    (19, "EROFS"),
+    (121, "ETIMEDOUT"),
+    (10060, "ETIMEDOUT"),
+    (17, "EXDEV"),
+    (1, "EISDIR"),
+    (208, "E2BIG"),
+    (10044, "ESOCKTNOSUPPORT"),
+    (193, "EFTYPE"),
+];
+
+/// `ERROR_INVALID_HANDLE`, which libuv's Windows `realpath` raises for a final path it cannot shorten.
+pub(crate) const WINDOWS_ERROR_INVALID_HANDLE: i32 = 6;
+
+/// The prefix `GetFinalPathNameByHandleW` puts on a network path, which libuv's `realpath` turns into `\\`.
+pub(crate) const LIBUV_UNC_PATH_PREFIX: &str = "\\\\?\\UNC\\";
+
+/// The prefix `GetFinalPathNameByHandleW` puts on a local path, which libuv's `realpath` drops.
+pub(crate) const LIBUV_LONG_PATH_PREFIX: &str = "\\\\?\\";
+
+/// The UTF-16 units node reads for each byte of the WTF-8 spelling of a lone surrogate: one U+FFFD apiece.
+pub(crate) const LIBUV_LONE_SURROGATE_TEXT: [u16; 3] = [0xFFFD; 3];
+
+/// The `code` libuv gives a Windows system error its table does not name.
+pub(crate) const LIBUV_UNKNOWN_ERROR: &str = "UNKNOWN";
+
 /// The macOS automounter map that says whether `/home` is automounted (`TI.readAutoMaster` upstream).
 pub(crate) const VETTING_AUTO_MASTER: &str = "/etc/auto_master";
 
@@ -972,14 +1092,6 @@ pub(crate) const VETTING_FIRMLINKED_FOLDERS: [&str; 16] = [
     "private",
     "sw",
 ];
-
-/// `ENAMETOOLONG` as the host reports it.
-#[cfg(target_os = "macos")]
-pub(crate) const NAME_TOO_LONG_ERRNO: i32 = 63;
-
-/// `ENAMETOOLONG` as the host reports it.
-#[cfg(not(target_os = "macos"))]
-pub(crate) const NAME_TOO_LONG_ERRNO: i32 = 36;
 
 /// Milliseconds the machine policy reading stays in force when the last read answered (`ret` upstream).
 pub(crate) const MDM_REREAD_IDLE_MS: i128 = 1_800_000;

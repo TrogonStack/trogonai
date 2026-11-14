@@ -13,10 +13,10 @@ use std::{
 };
 
 use trogon_claude_agent_sdk::adapters::{
-    CheckReadable, CheckWritable, CurrentDirectory, DirectoryEntry, DirectoryEntryKind, EffectiveGroupId,
-    EffectiveUserId, EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest, ExecuteFileStatus,
-    HomeDirectory, HostIdentity, LinkMetadata, OpenDirectoryNoFollow, OperatingSystem, ReadDeviceId, ReadDirectory,
-    ReadFile, ReadFileHead, ReadLink, ReadMetadata, ReadSymlinkMetadata, RealGroupId, RealUserId,
+    CanonicalizePath, CheckReadable, CheckWritable, CurrentDirectory, DirectoryEntry, DirectoryEntryKind,
+    EffectiveGroupId, EffectiveUserId, EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest,
+    ExecuteFileStatus, HomeDirectory, HostIdentity, LinkMetadata, OpenDirectoryNoFollow, OperatingSystem, ReadDeviceId,
+    ReadDirectory, ReadFile, ReadFileHead, ReadLink, ReadMetadata, ReadSymlinkMetadata, RealGroupId, RealUserId,
     SupplementaryGroupIds, WallClock,
 };
 
@@ -265,6 +265,14 @@ impl ReadMetadata for FakeHost {
     type Error = io::Error;
 
     fn metadata(&self, _path: &Path) -> Result<std::fs::Metadata, io::Error> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+}
+
+impl CanonicalizePath for FakeHost {
+    type Error = io::Error;
+
+    fn canonicalize(&self, _path: &Path) -> Result<PathBuf, io::Error> {
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 }

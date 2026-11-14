@@ -380,6 +380,14 @@ impl super::ReadMetadata for NativeHost {
     }
 }
 
+impl super::CanonicalizePath for NativeHost {
+    type Error = io::Error;
+
+    fn canonicalize(&self, path: &Path) -> Result<PathBuf, Self::Error> {
+        path.canonicalize()
+    }
+}
+
 impl CheckWritable for NativeHost {
     type Error = io::Error;
 
@@ -650,6 +658,7 @@ pub trait SettingsHost:
     + ReadLink<Error = io::Error>
     + super::ReadMetadata<Error = io::Error>
     + CheckWritable<Error = io::Error>
+    + super::CanonicalizePath<Error = io::Error>
     + EffectiveUserId
     + RealUserId
     + EffectiveGroupId
@@ -679,6 +688,7 @@ impl<T> SettingsHost for T where
         + ReadLink<Error = io::Error>
         + super::ReadMetadata<Error = io::Error>
         + CheckWritable<Error = io::Error>
+        + super::CanonicalizePath<Error = io::Error>
         + EffectiveUserId
         + RealUserId
         + EffectiveGroupId

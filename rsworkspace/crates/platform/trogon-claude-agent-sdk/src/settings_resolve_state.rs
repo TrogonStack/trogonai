@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    adapters::{CurrentDirectory, SettingsHost},
+    adapters::{CurrentDirectory, SettingsHost, capture_launch_directory},
     connector_folder::ConnectorFolders,
     connector_vetting::VettingState,
     node_path::NodePathDialect,
@@ -32,6 +32,12 @@ pub struct ResolverState {
 impl ResolverState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The state the SDK module starts with in this process, sharing the launch directory
+    /// [`capture_launch_directory`] read.
+    pub(crate) fn for_process() -> Self {
+        Self::new().with_launch_directory(capture_launch_directory())
     }
 
     /// A state whose machine policy re-reads run where `rereads` says.
@@ -94,3 +100,7 @@ impl ResolverState {
         &self.vetting
     }
 }
+
+#[cfg(test)]
+#[path = "settings_resolve_state_tests.rs"]
+mod tests;
