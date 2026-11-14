@@ -3557,12 +3557,13 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "TypeScript is the default and takes only the server map, ClaudeAgentOptions::mcp_servers; ClaudeAgentOptions::mcp_config selects the str or Path form only Python has, carried verbatim as its own --mcp-config value, text or path alike."
+        "reason": "TypeScript is the default and builds --mcp-config from the server map, ClaudeAgentOptions::mcp_servers. ClaudeAgentOptions::mcp_config is carried verbatim as its own --mcp-config value under either dialect, text or path alike, and stands in for the str or Path form only Python has."
       },
       "contracts": [
         "golden_argv_env::typescript_mcp_config_matches_upstream_bytes",
         "golden_argv_env::python_mcp_config_path_is_passed_verbatim",
-        "golden_argv_env::python_mcp_config_json_text_is_passed_verbatim"
+        "golden_argv_env::python_mcp_config_json_text_is_passed_verbatim",
+        "golden_argv_env::typescript_mcp_config_path_is_passed_verbatim"
       ],
       "rust": [
         "src/argv.rs"
@@ -3901,7 +3902,7 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "The launch directory is read once when the SDK module is imported, before the caller can change directory, is null when process.cwd throws, and is ignored when CLAUDE_CODE_SESSION_KIND is bg."
+        "behavior": "The launch directory is read once when the SDK module is imported, before the caller can change directory, is null when process.cwd throws, and is ignored when CLAUDE_CODE_SESSION_KIND is bg. Rust reads it from an image-load initializer, and loading the image that holds the crate is the moment its code enters the process, as importing the module is upstream, so a library loaded later captures it at that load just as a dynamic import does."
       },
       "decision": {
         "kind": "upstream"
