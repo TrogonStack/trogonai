@@ -136,7 +136,6 @@ mod settings_resolve_sources;
 mod settings_resolve_state;
 mod settings_resolve_tier;
 mod settings_resolve_values;
-mod settings_resolve_vetting;
 mod settings_resolve_writable;
 mod settings_sandbox;
 mod settings_schema;

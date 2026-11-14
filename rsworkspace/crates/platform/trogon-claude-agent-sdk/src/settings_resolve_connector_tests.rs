@@ -1,12 +1,13 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::io;
+use std::{fs, io};
 
-use super::{Bridge, errno, node_code, node_error, os_code, platform};
+use super::{Bridge, errno, locate_document, node_code, node_error, os_code, platform};
 use crate::{
     adapters::{NativeHost, OperatingSystem},
-    connector_vetting::{Platform, VettingHost},
+    connector_vetting::{Located, Platform, VettingHost},
     node_path::{NodeProcess, js},
+    settings_resolve_state::ResolverState,
 };
 
 const MISSING: &str = "/trogon-claude-sdk-no-such-folder";
@@ -83,4 +84,28 @@ fn the_bridge_reads_the_native_host_the_way_node_does() {
     );
     assert!(!bridge.home_directory().unwrap().is_empty());
     assert!(!bridge.cwd().unwrap().is_empty());
+}
+
+#[test]
+fn the_bridge_names_where_a_path_really_is() {
+    let bridge = Bridge { host: &NativeHost };
+    assert_eq!(bridge.real_path(&js("/")), Ok(js("/")));
+    assert_eq!(bridge.real_path(&js(MISSING)), Err(code("ENOENT")));
+}
+
+#[test]
+fn a_managed_document_is_located_with_the_folder_it_was_read_from() {
+    let root = tempfile::tempdir().unwrap();
+    let folder = root.path().canonicalize().unwrap();
+    fs::write(folder.join("managed-settings.json"), "{}").unwrap();
+    let state = ResolverState::new();
+    let real = |path: &std::path::Path| Located::Real(js(path.to_str().unwrap()));
+    assert_eq!(
+        locate_document(&NativeHost, &state, &folder, &["managed-settings.json".to_owned()]),
+        (real(&folder.join("managed-settings.json")), real(&folder))
+    );
+    assert_eq!(
+        locate_document(&NativeHost, &state, &folder, &["missing.json".to_owned()]),
+        (Located::Gone, real(&folder))
+    );
 }

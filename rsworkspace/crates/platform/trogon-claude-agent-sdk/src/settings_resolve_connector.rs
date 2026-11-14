@@ -16,7 +16,7 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use crate::{
     adapters::{DirectoryEntryKind, OperatingSystem, SettingsHost},
     connector_folder::names_connector_folder,
-    connector_vetting::{Errno, LinkStat, Platform, Vetter, VettingHost},
+    connector_vetting::{Errno, LinkStat, Located, Platform, Vetter, VettingHost},
     constants::VETTING_AUTO_MASTER,
     node_path::{JsString, NodeError, NodeProcess},
     settings_resolve_state::ResolverState,
@@ -169,6 +169,13 @@ impl<H: SettingsHost> VettingHost for Bridge<'_, H> {
             .map(|home| js_text(home.as_os_str()))
             .map_err(errno)
     }
+
+    fn real_path(&self, path: &[u16]) -> Result<JsString, Errno> {
+        self.host
+            .canonicalize(&native_path(path))
+            .map(|real| js_text(real.as_os_str()))
+            .map_err(errno)
+    }
 }
 
 /// `process.platform`, as far as the check branches on it.
@@ -205,6 +212,33 @@ pub(crate) fn skips_repository_settings<H: SettingsHost>(host: &H, state: &Resol
                 .is_ignored(&vetter, &directory)
                 .unwrap_or(false)
     })
+}
+
+/// `Lx(Mx(folder, ...components))` then `Lx(folder)` upstream: where a managed document and the folder it was read
+/// from really are, in the order the write check asks.
+pub(crate) fn locate_document<H: SettingsHost>(
+    host: &H,
+    state: &ResolverState,
+    folder: &Path,
+    components: &[String],
+) -> (Located, Located) {
+    let bridge = Bridge { host };
+    let vetter = Vetter::new(
+        &bridge,
+        platform(host.operating_system()),
+        state.node_path_dialect(),
+        None,
+        state.vetting(),
+    );
+    let folder = js_text(folder.as_os_str());
+    let components: Vec<JsString> = components
+        .iter()
+        .map(|component| component.encode_utf16().collect())
+        .collect();
+    let mut parts: Vec<&[u16]> = vec![folder.as_slice()];
+    parts.extend(components.iter().map(Vec::as_slice));
+    let document = vetter.locate(&vetter.join(&parts));
+    (document, vetter.locate(&folder))
 }
 
 #[cfg(all(test, unix))]
