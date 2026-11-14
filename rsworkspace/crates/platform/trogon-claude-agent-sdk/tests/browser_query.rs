@@ -30,6 +30,8 @@ type TestResult = Result<(), Box<dyn StdError>>;
 
 const FIXTURE: &str = include_str!("fixtures/browser_query/cases.json");
 const WAIT: Duration = Duration::from_secs(5);
+/// How long the recorder lets a query run before it takes the frames the socket was sent.
+const RECORDED_WAIT: Duration = Duration::from_millis(30);
 
 fn line(value: &Value) -> Frame {
     Frame::text(format!("{value}\n"))
@@ -208,13 +210,15 @@ async fn every_recorded_query_sends_the_recorded_initialize_request() -> TestRes
         let (url, mut seen) = websocket_cli(false).await?;
         assert_eq!(case["urls"], json!(["ws://127.0.0.1:1/"]), "{name}");
         let query = timeout(WAIT, browser_query(recorded_options(name, &url)?)).await??;
-        let mut request = seen.try_recv()?;
+        // The recorder takes what the socket was sent 30 ms after `query()`; the fake CLI reads it on its own task.
+        let mut request = timeout(WAIT, seen.recv()).await?.ok_or("an initialize request")?;
         request["request_id"] = json!("REQUEST");
         assert_eq!(
             serde_json::to_string(&request)?,
             serde_json::to_string(&case["frames"][0])?,
             "{name}"
         );
+        tokio::time::sleep(RECORDED_WAIT).await;
         assert!(seen.try_recv().is_err(), "{name}");
         assert_eq!(case["frames"].as_array().map(Vec::len), Some(1), "{name}");
         query.close();
