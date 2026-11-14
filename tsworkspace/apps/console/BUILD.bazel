@@ -102,9 +102,6 @@ vitest_bin.vitest_test(
     # the patches both loaders resolve to the same file, and because data is
     # copied to the output tree, that file is still a declared input.
     patch_node_fs = False,
-    # vitest spreads the test files over a pool of worker processes, so the
-    # test occupies several cores rather than the one Bazel assumes.
-    tags = ["cpu:4"],
 )
 
 oxlint_bin.oxlint_test(
