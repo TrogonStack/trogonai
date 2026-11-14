@@ -857,14 +857,14 @@ async fn s26_latest_resume_walks_newest_first_past_unusable_candidates() -> Test
     let older = "00000000-0000-4000-8000-000000000003";
     let project = fixture.project.clone();
     let key = |id: &str| SessionKey::new(project.clone(), SessionId::from(id));
-    fixture.store.append(&key(empty)?, &[]).await?;
+    fixture.store.append(&key(empty), &[]).await?;
     fixture
         .store
-        .append(&key(sidechain)?, &[entry(json!({"type":"user","isSidechain":true}))?])
+        .append(&key(sidechain), &[entry(json!({"type":"user","isSidechain":true}))?])
         .await?;
     fixture
         .store
-        .append(&key(older)?, &[entry(json!({"type":"user","message":"older"}))?])
+        .append(&key(older), &[entry(json!({"type":"user","message":"older"}))?])
         .await?;
     let listed = |id: &str, modified_at_ms| SessionListEntry {
         session_id: SessionId::from(id),

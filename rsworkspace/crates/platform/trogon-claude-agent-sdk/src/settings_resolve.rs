@@ -10,7 +10,7 @@ use crate::{
     settings_numbers::{PythonNumbers, approximate_numbers, exact_numbers, infinities_to_null, normalize_numbers},
     settings_resolve_connector::skips_repository_settings,
     settings_resolve_platform::asks_organization,
-    settings_resolve_policy::{PolicyResolution, resolve_policy},
+    settings_resolve_policy::{PolicyKeyOrder, PolicyResolution, resolve_policy},
     settings_resolve_sources::{
         local_settings_path, project_settings_path, read_settings_file, resolve_cwd, user_settings_path,
     },
@@ -204,9 +204,9 @@ fn resolve_core<H: SettingsHost>(
     let PolicyResolution {
         settings: policy_settings,
         origin,
+        key_order,
         mdm_did_not_load,
         file_did_not_load,
-        ..
     } = resolve_policy(host, kind, parent.as_ref(), remote.as_ref(), evaluation);
     let policy_settings = policy_settings.map(|mut settings| {
         for entry in settings.values_mut() {
@@ -250,7 +250,7 @@ fn resolve_core<H: SettingsHost>(
             "policySettings" => (None, policy_settings.clone()),
             _ => (None, None),
         };
-        let parsed_by_schema = name != "policySettings" || origin != Some("parent");
+        let parsed_by_schema = name != "policySettings" || key_order == PolicyKeyOrder::Schema;
         let settings = settings.map(|settings| {
             if parsed_by_schema {
                 in_schema_order(&settings)

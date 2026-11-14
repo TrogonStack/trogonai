@@ -7,7 +7,7 @@ use trogon_claude_agent_sdk::{
     ClaudeAgentOptions, ClaudeSdkClient, Customizations, HookEvent, HookFailureMode, HookOutput, HookRegistration,
     HookRequest, LocalMcpServer, LocalMcpServerOptions, McpServerDialect, McpServerName, McpToolInputSchema,
     McpToolName, McpToolOutput, McpToolRequest, SdkMcpServer, SdkMcpServers, SdkTool, SdkToolOptions,
-    SessionPersistence, ToolSet,
+    SessionPersistence, ToolSet, upstream::control::McpServerStatusStatus,
 };
 
 #[cfg_attr(
@@ -64,10 +64,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let connected = tokio::time::timeout(Duration::from_secs(15), async {
         loop {
             let status = handle.mcp_status().await?.decode()?;
-            if status.mcp_servers.iter().any(|server| {
-                server.get("name").and_then(serde_json::Value::as_str) == Some("example")
-                    && server.get("status").and_then(serde_json::Value::as_str) == Some("connected")
-            }) {
+            if status
+                .mcp_servers
+                .iter()
+                .any(|server| server.name == "example" && server.status == McpServerStatusStatus::Connected)
+            {
                 return Ok::<(), Box<dyn std::error::Error>>(());
             }
             tokio::time::sleep(Duration::from_millis(100)).await;

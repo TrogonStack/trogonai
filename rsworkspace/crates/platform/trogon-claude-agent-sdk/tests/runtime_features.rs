@@ -70,7 +70,7 @@ async fn typed_controls_preserve_receipts_and_use_exact_wire_operations() -> Tes
         .decode()?;
     assert!(rewind.can_rewind);
     assert_eq!(rewind.files_changed, Some(vec!["README.md".to_owned()]));
-    assert_eq!(handle.mcp_status().await?.decode()?.mcp_servers[0]["name"], "local");
+    assert_eq!(handle.mcp_status().await?.decode()?.mcp_servers[0].name, "local");
     assert_eq!(
         handle
             .context_usage(None)
