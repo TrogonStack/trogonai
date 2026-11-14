@@ -153,7 +153,6 @@ pub struct BridgeSession<H, P = TokioPacing> {
     pub(crate) session_access_token: Option<SensitiveString>,
     pub(crate) heartbeat_interval_ms: Option<u64>,
     pub(crate) outbound_only: bool,
-    pub(crate) claude_code_version: Option<String>,
     pub(crate) worker: Arc<WorkerClient<H, P>>,
     /// Tells the upload task which worker is current after a rebuild.
     pub(crate) worker_tx: watch::Sender<Arc<WorkerClient<H, P>>>,
@@ -251,7 +250,7 @@ where
         Arc::clone(&uploads),
         worker_rx,
         session_id.clone(),
-        claude_code_version.clone(),
+        claude_code_version,
         outbound_only,
         !caller_driven,
     ));
@@ -265,7 +264,6 @@ where
         session_access_token,
         heartbeat_interval_ms,
         outbound_only,
-        claude_code_version,
         worker_tx,
         worker,
         lifecycle,

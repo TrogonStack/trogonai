@@ -424,7 +424,7 @@ async fn a_result_reaches_the_run_end_machine_only_after_its_flush() -> Result<(
         "type": "system", "subtype": "session_state_changed", "state": "idle", "session_id": "s",
     }));
     fixture.driver.run_end.prompt_written();
-    fixture.driver.run_end.finish(false, true);
+    fixture.driver.run_end.finish(false, true, None);
     fixture.driver.held_observations.push_back((result, true));
     fixture.driver.held_observations.push_back((later, false));
     assert!(!fixture.driver.run_end.close_due());

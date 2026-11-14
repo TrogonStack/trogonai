@@ -143,9 +143,10 @@ fn refinement(name: &str) -> Result<Refinement, String> {
         "starts_with_a" => ("", Some("must start with a")),
         other => return Err(format!("unknown fixture refinement {other}")),
     };
+    let prefix_check = name == "starts_with_a";
     Ok(Arc::new(move |value: &Value| {
         let text = value.as_str().unwrap_or_default();
-        let fails = if name == "starts_with_a" {
+        let fails = if prefix_check {
             !text.starts_with('a')
         } else {
             text == rejected
