@@ -893,7 +893,14 @@ where
                     let Some(message) = message? else {
                         self.finish_mirror().await?;
                         self.run_end.reader_gone();
-                        return if matches!(self.state, State::Running | State::Initializing) || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
+                        // A clean exit in the middle of a turn ends the messages in both SDKs; only a failed exit
+                        // is an error, and the process close reports it.
+                        let unfinished = match self.state {
+                            State::Initializing => true,
+                            State::Running => self.limits.end_without_result == crate::EndWithoutResult::Fail,
+                            State::Idle => false,
+                        };
+                        return if unfinished || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
                     };
                     self.wire_ids = self.transport.take_wire_ids();
                     self.tap_startup(&message);

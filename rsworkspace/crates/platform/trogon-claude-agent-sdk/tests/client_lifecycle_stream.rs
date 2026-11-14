@@ -23,7 +23,8 @@ use std::{
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
-    ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, Error, Message, PermissionDecision, Prompt, ToolPermissionRequest,
+    ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, EndWithoutResult, Error, Message, PermissionDecision, Prompt,
+    ToolPermissionRequest,
     adapters::{NativeFileSystem, RuntimeAdapters},
     query_with_adapters,
     test_support::FixedEnvironment,
@@ -327,9 +328,8 @@ async fn receive_response_stops_after_the_result_like_python() -> TestResult {
     Ok(())
 }
 
-/// Python `ClaudeSDKClient.receive_response()` when the CLI exits before a result: it yields what arrived and
-/// ends, and `receive_messages()` then ends at once. Python ends both quietly; Rust reports the CLI leaving in
-/// the middle of a turn as `Error::UnexpectedEof`, the last item of `receive_response`, as `next_message` does.
+/// Python `ClaudeSDKClient.receive_response()` when the CLI exits with status 0 before a result: it yields what
+/// arrived and ends quietly, and `receive_messages()` then ends at once.
 #[tokio::test]
 async fn receive_response_ends_with_the_stream_like_python() -> TestResult {
     let captured = Captured::parse(CAPTURED)?;
@@ -343,13 +343,53 @@ async fn receive_response_ends_with_the_stream_like_python() -> TestResult {
     let (response, error) = tokio::time::timeout(Duration::from_secs(5), drain(client.receive_response())).await?;
     assert_eq!(response, captured.strings(scenario, "receive_response")?);
     assert_eq!(captured.field(scenario, "receive_response_ended")?, "done");
-    assert!(matches!(error, Some(Error::UnexpectedEof)), "{error:?}");
+    assert!(error.is_none(), "{error:?}");
 
     let (rest, error) = tokio::time::timeout(Duration::from_secs(5), drain(client.receive_messages())).await?;
     assert!(error.is_none(), "{error:?}");
     assert_eq!(rest, captured.strings(scenario, "receive_messages")?);
     assert_eq!(captured.field(scenario, "receive_messages_ended")?, "done");
     client.disconnect().await?;
+    server.await?.map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// TypeScript `for await (const message of query)` when the CLI exits with status 0 before a result: it yields
+/// what arrived and ends without an error, and the iterator stays ended.
+#[tokio::test]
+async fn the_query_ends_with_the_stream_like_sdk_mjs() -> TestResult {
+    let captured = Captured::parse(CAPTURED)?;
+    let scenario = "query_ends_with_the_stream";
+    let (process, harness) = ScriptedProcessSpawner::new();
+    let steps = vec![Step::Said("A"), Step::Wait(100), Step::Exit];
+    let server = tokio::spawn(serve(harness, steps, &[], Log::default()));
+    let mut query = query_with_adapters(Prompt::from("hi"), typescript_options(), adapters(process)).await?;
+
+    let (yielded, error) = tokio::time::timeout(Duration::from_secs(5), drain(&mut query)).await?;
+    assert!(error.is_none(), "{error:?}");
+    assert_eq!(yielded, captured.strings(scenario, "yielded")?);
+    assert_eq!(captured.field(scenario, "ended")?, "done");
+    assert!(query.next().await.is_none());
+    assert_eq!(captured.field(scenario, "next_after_end")?, "done");
+    query.disconnect().await?;
+    server.await?.map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// `EndWithoutResult::Fail` is the opt-in that reports the same clean exit as `Error::UnexpectedEof`.
+#[tokio::test]
+async fn the_opt_in_limit_fails_a_clean_exit_without_a_result() -> TestResult {
+    let (process, harness) = ScriptedProcessSpawner::new();
+    let steps = vec![Step::Said("A"), Step::Wait(100), Step::Exit];
+    let server = tokio::spawn(serve(harness, steps, &[], Log::default()));
+    let mut options = typescript_options();
+    options.limits.end_without_result = EndWithoutResult::Fail;
+    let mut query = query_with_adapters(Prompt::from("hi"), options, adapters(process)).await?;
+
+    let (yielded, error) = tokio::time::timeout(Duration::from_secs(5), drain(&mut query)).await?;
+    assert_eq!(yielded, vec!["A".to_owned()]);
+    assert!(matches!(error, Some(Error::UnexpectedEof)), "{error:?}");
+    query.disconnect().await?;
     server.await?.map_err(|error| error.to_string())?;
     Ok(())
 }

@@ -243,10 +243,10 @@ pub use model_name::ModelName;
 pub use node_path::NodePathDialect;
 pub use option_error::OptionError;
 pub use options::{
-    ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, FileCheckpointing,
-    InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, McpServers, MessageBuffer, PartialMessages,
-    RequestIdExhaustion, SdkMcpServers, SessionFork, SessionPersistence, Shutdown, SystemPrompt, ToolSet,
-    VerbatimPrompts,
+    ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, EndWithoutResult,
+    FileCheckpointing, InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, McpServers, MessageBuffer,
+    PartialMessages, RequestIdExhaustion, SdkMcpServers, SessionFork, SessionPersistence, Shutdown, SystemPrompt,
+    ToolSet, VerbatimPrompts,
 };
 pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{

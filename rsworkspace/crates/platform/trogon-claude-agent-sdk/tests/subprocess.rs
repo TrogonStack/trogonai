@@ -4,10 +4,10 @@ use std::{error::Error as StdError, sync::Arc, time::Duration};
 
 use tokio::time::{sleep, timeout};
 use trogon_claude_agent_sdk::{
-    BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, Error, FeatureSupport,
-    FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages, PermissionDecision, Prompt,
-    QueueCapacity, SessionId, SessionStore, SessionStoreOptions, SystemPrompt, Timeout, ToolPermissionRequest,
-    ToolRule, ToolSet, adapters::SystemClock, query,
+    BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, EndWithoutResult, Error,
+    FeatureSupport, FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages,
+    PermissionDecision, Prompt, QueueCapacity, SessionId, SessionStore, SessionStoreOptions, SystemPrompt, Timeout,
+    ToolPermissionRequest, ToolRule, ToolSet, adapters::SystemClock, query,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -599,19 +599,32 @@ async fn malformed_initialization_is_accepted_like_upstream() -> TestResult {
     Ok(())
 }
 
-#[tokio::test]
-async fn successful_process_exit_without_a_result_is_not_success() -> TestResult {
-    let mut client = ClaudeSdkClient::connect(options("no-result")?).await?;
+/// Reads every message after a prompt the CLI exits on with status 0 and never answers with a result.
+async fn read_without_a_result(options: ClaudeAgentOptions) -> Result<Result<(), Error>, Box<dyn StdError>> {
+    let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("missing result")).await?;
-    let error = loop {
+    let ended = loop {
         match client.next_message().await {
             Ok(Some(_)) => {}
-            Err(error) => break error,
-            Ok(None) => return Err(std::io::Error::other("missing terminal error").into()),
+            Ok(None) => break Ok(()),
+            Err(error) => break Err(error),
         }
     };
-    assert!(matches!(error, Error::UnexpectedEof));
     client.disconnect().await?;
+    Ok(ended)
+}
+
+/// TypeScript and Python treat only a failed exit as an error, so a clean exit in the middle of a turn ends the
+/// messages; `EndWithoutResult::Fail` keeps `UnexpectedEof` as an opt-in.
+#[tokio::test]
+async fn a_clean_exit_without_a_result_ends_the_messages_unless_the_limit_fails_it() -> TestResult {
+    let ended = read_without_a_result(options("no-result")?).await?;
+    assert!(ended.is_ok(), "{ended:?}");
+
+    let mut failing = options("no-result")?;
+    failing.limits.end_without_result = EndWithoutResult::Fail;
+    let ended = read_without_a_result(failing).await?;
+    assert!(matches!(ended, Err(Error::UnexpectedEof)), "{ended:?}");
     Ok(())
 }
 

@@ -437,6 +437,14 @@
           "name": "receive_response_ends_with_the_stream_like_python"
         },
         {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "the_query_ends_with_the_stream_like_sdk_mjs"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "the_opt_in_limit_fails_a_clean_exit_without_a_result"
+        },
+        {
           "path": "tests/client_lifecycle_connect.rs",
           "name": "query_writes_in_the_default_session"
         },
@@ -453,8 +461,8 @@
           "name": "query_stream_in_session_keeps_named_sessions"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust separates process ownership, cloneable controls and message consumption. Query and ClaudeSdkClient are futures_util Streams of Result<Message, Error>, the TypeScript async iterator, ending where next_message returns None; receive_messages() and receive_response() are Python's, the latter yielding through the next result and leaving later messages queued. Python's get_server_info() is ClientHandle::initialization_result, mapped under initialization. Every other ClaudeSDKClient and Query method is mapped by its own row. Python __init__, __aenter__ and __aexit__ are ClaudeSdkClient::new, UnconnectedClient::connect and scope under client-lifecycle. query(prompt, session_id) is query_in_session; query writes in Python's \"default\" session under the Python style and in the empty session sdk.mjs writes under the TypeScript style. query_stream and query_stream_in_session fill the session only on inputs that name none and leave stdin open, as Python's query(AsyncIterable) does. Still partial: when the CLI exits in the middle of a turn Rust ends receive_response with Error::UnexpectedEof where Python ends quietly."
+      "status": "supported",
+      "rationale": "Rust separates process ownership, cloneable controls and message consumption. Query and ClaudeSdkClient are futures_util Streams of Result<Message, Error>, the TypeScript async iterator, ending where next_message returns None; receive_messages() and receive_response() are Python's, the latter yielding through the next result and leaving later messages queued. Python's get_server_info() is ClientHandle::initialization_result, mapped under initialization. Every other ClaudeSDKClient and Query method is mapped by its own row. Python __init__, __aenter__ and __aexit__ are ClaudeSdkClient::new, UnconnectedClient::connect and scope under client-lifecycle. query(prompt, session_id) is query_in_session; query writes in Python's \"default\" session under the Python style and in the empty session sdk.mjs writes under the TypeScript style. query_stream and query_stream_in_session fill the session only on inputs that name none and leave stdin open, as Python's query(AsyncIterable) does. A CLI that exits with status 0 in the middle of a turn ends the messages quietly in both styles, as sdk.mjs and Python do; Limits::end_without_result set to EndWithoutResult::Fail keeps Error::UnexpectedEof as an opt-in."
     },
     {
       "id": "full-run-query",

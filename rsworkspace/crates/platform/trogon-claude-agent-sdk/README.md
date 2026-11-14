@@ -606,7 +606,9 @@ Python SDK's values: a 1 MiB line cap, a 60 second control wait, a 100 message
 buffer that stops reading stdout while full, and its initialize wait and
 shutdown ladder. Every other bound (pending controls, inbound callbacks, tracked
 tasks, queued inputs, a failing message queue, command queue room) is opt-in and
-keeps its typed error. Stderr debug output omits its contents. `QueueCapacity`
+keeps its typed error. A CLI that exits with status 0 before a result ends the
+messages quietly, as both SDKs do; `EndWithoutResult::Fail` reports it as
+`Error::UnexpectedEof` instead. Stderr debug output omits its contents. `QueueCapacity`
 validates Tokio's range; `Timeout::checked` rejects zero and values past 24
 hours.
 

@@ -64,6 +64,13 @@
       "receive_response_ended": "done",
       "receive_messages": [],
       "receive_messages_ended": "done"
+    },
+    "query_ends_with_the_stream": {
+      "yielded": [
+        "A"
+      ],
+      "ended": "done",
+      "next_after_end": "done"
     }
   }
 }

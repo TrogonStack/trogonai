@@ -167,6 +167,16 @@ pub enum InputAfterFinish {
     Reject,
 }
 
+/// Output that ends in the middle of a turn: the CLI closed stdout before the result, and exits cleanly.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EndWithoutResult {
+    /// Upstream: the messages end quietly, as TypeScript and Python do when the CLI exits with status 0.
+    #[default]
+    End,
+    /// Opt-in: the messages end with [`crate::Error::UnexpectedEof`].
+    Fail,
+}
+
 /// Waits and bounds on the runtime. The default is TypeScript's: no control or write timeout and no bounded queue.
 /// [`Limits::python`] selects Python's values. Every other bound is opt-in.
 #[derive(Clone, Debug)]
@@ -205,6 +215,7 @@ pub struct Limits {
     pub duplicate_control_requests: DuplicateControlRequests,
     pub request_id_exhaustion: RequestIdExhaustion,
     pub input_after_finish: InputAfterFinish,
+    pub end_without_result: EndWithoutResult,
 }
 
 impl Limits {
@@ -265,6 +276,7 @@ impl Default for Limits {
             duplicate_control_requests: DuplicateControlRequests::Skip,
             request_id_exhaustion: RequestIdExhaustion::Wrap,
             input_after_finish: InputAfterFinish::Write,
+            end_without_result: EndWithoutResult::End,
         }
     }
 }
