@@ -1,6 +1,9 @@
 use std::{future::Future, pin::Pin};
 
-use crate::{CancellationToken, ControlRequestId, FeatureSupport, JsonObject, PermissionUpdate, ToolName, ToolUseId};
+use crate::{
+    CancellationToken, ControlRequestId, FeatureSupport, JsonObject, PermissionUpdate, ToolName, ToolUseId,
+    upstream::tool_inputs::ToolInputSchemas,
+};
 
 #[derive(Clone, Debug)]
 pub struct ToolPermissionRequest {
@@ -37,6 +40,14 @@ pub struct ToolPermissionRequest {
     /// Wire keys the handler context does not name, and named keys whose value had a type the upstream SDK
     /// does not pass on, untouched and in wire order.
     pub additional_fields: JsonObject,
+}
+
+impl ToolPermissionRequest {
+    /// `input` as the `sdk-tools` input type of the tool `tool_name` names (see [`ToolInputSchemas::for_tool`]).
+    /// `input` stays as written.
+    pub fn typed_input(&self) -> ToolInputSchemas {
+        ToolInputSchemas::for_tool(self.tool_name.as_str(), &serde_json::Value::Object(self.input.clone()))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -112,6 +123,19 @@ impl PermissionDecision {
             updated_permissions: None,
             decision_classification: None,
         }
+    }
+
+    /// Allows the call with `input` as `updatedInput`, encoded exactly as the typed value encodes. `None` when
+    /// `input` does not encode to a JSON object, which is all `updatedInput` carries.
+    pub fn allow_with_input(input: &ToolInputSchemas) -> Option<Self> {
+        let serde_json::Value::Object(updated_input) = serde_json::to_value(input).ok()? else {
+            return None;
+        };
+        Some(Self::Allow {
+            updated_input: Some(updated_input),
+            updated_permissions: None,
+            decision_classification: None,
+        })
     }
 
     pub fn deny(message: impl Into<String>) -> Self {

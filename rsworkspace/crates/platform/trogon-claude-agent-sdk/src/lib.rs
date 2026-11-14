@@ -157,6 +157,7 @@ mod tool_config;
 mod tool_name;
 mod tool_rule;
 mod tool_use_id;
+mod tool_view;
 mod transcript_mirror;
 mod transport;
 mod usd_budget;
@@ -225,9 +226,9 @@ pub use mcp_url::{McpUrl, McpUrlError};
 pub use mcp_wire_ids::{McpWireIds, McpWireScan};
 pub use message::{
     AssistantMessage, Content, ContentBlock, ConversationResetMessage, DeferredToolUse, HookEventMessage, Message,
-    MessageDecoding, MirrorErrorMessage, RateLimitEvent, RateLimitInfo, ResultMessage, ResultStatus, StreamEvent,
-    SystemEvent, SystemMessage, TaskNotificationMessage, TaskProgressMessage, TaskStartedMessage, TaskUpdatedMessage,
-    ToolResultStatus, UserMessage,
+    MessageDecoding, MirrorErrorMessage, PermissionDenial, RateLimitEvent, RateLimitInfo, ResultMessage, ResultStatus,
+    StreamEvent, SystemEvent, SystemMessage, TaskNotificationMessage, TaskProgressMessage, TaskStartedMessage,
+    TaskUpdatedMessage, ToolResultStatus, UserMessage,
 };
 pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};

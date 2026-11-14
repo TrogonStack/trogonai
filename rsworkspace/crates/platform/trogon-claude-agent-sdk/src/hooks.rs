@@ -1,4 +1,8 @@
-use crate::upstream::hooks::{HookInput, HookJSONOutput};
+use crate::upstream::{
+    hooks::{HookInput, HookJSONOutput},
+    tool_inputs::ToolInputSchemas,
+    tool_outputs::ToolOutputSchemas,
+};
 use crate::{CancellationToken, JsonObject, Timeout, ToolUseId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -150,6 +154,20 @@ impl HookRequest {
             Some((_, input)) => input,
             None => HookInput::Unknown(value),
         }
+    }
+
+    /// The input's `tool_input` as the `sdk-tools` input type of the tool its `tool_name` names (see
+    /// [`ToolInputSchemas::for_tool`]), or `None` when either key is missing or `tool_name` is not a string.
+    pub fn typed_tool_input(&self) -> Option<ToolInputSchemas> {
+        let tool_name = self.input.get("tool_name")?.as_str()?;
+        Some(ToolInputSchemas::for_tool(tool_name, self.input.get("tool_input")?))
+    }
+
+    /// The input's `tool_response` as the `sdk-tools` output type of the tool its `tool_name` names (see
+    /// [`ToolOutputSchemas::for_tool`]), or `None` when either key is missing or `tool_name` is not a string.
+    pub fn typed_tool_response(&self) -> Option<ToolOutputSchemas> {
+        let tool_name = self.input.get("tool_name")?.as_str()?;
+        Some(ToolOutputSchemas::for_tool(tool_name, self.input.get("tool_response")?))
     }
 }
 

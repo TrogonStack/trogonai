@@ -55,7 +55,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `ControlRequestId` | [Python protocol `SDKControlRequest.request_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2885); an internal control-envelope string, not a published TypeScript wrapper class | Infallible opaque text; every string is stored verbatim. Outbound ids follow the dialect: TypeScript `Math.random().toString(36).substring(2,15)`, Python `req_{counter}_{os.urandom(4).hex()}`. |
 | `TaskId` | [Python `TaskStartedMessage.task_id`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1568) / TypeScript `SDKTaskStartedMessage.task_id` | Infallible opaque text; every string is stored verbatim. |
 | `ToolName` | [Python `ToolUseBlock.name`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L1224); the tool-call name string | Infallible opaque text; every string is stored verbatim. |
-| `BuiltinToolName` | [Python `ClaudeAgentOptions.tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2342) / TypeScript `Options.tools` string-list selection | Infallible opaque text. Names are joined into the `--tools` argument unvalidated, as both upstream SDKs do; callers must avoid commas and the CLI validates each name. |
+| `BuiltinToolName` | [Python `ClaudeAgentOptions.tools`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2342) / TypeScript `Options.tools` string-list selection | Infallible opaque text. Names are joined into the `--tools` argument unvalidated, as both upstream SDKs do; callers must avoid commas and the CLI validates each name. `BuiltinToolName::ALL` and its constants are TypeScript `BUILTIN_TOOL_NAMES`; `LEGACY_ALIASES` and `canonical_name` resolve the legacy names the pinned CLI accepts. |
 | `McpServerName` | [Python `ClaudeAgentOptions.mcp_servers`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2378) / TypeScript `Options.mcpServers` map key | Infallible opaque text; every string is stored verbatim. |
 | `McpUrl` | Python / TypeScript MCP `url` string | Infallible opaque text sent verbatim, as both SDKs do. `McpUrl::validated` is an opt-in check for HTTP(S), userinfo and fragments that neither SDK performs. |
 | `McpServerOptions` | Python `McpStdioServerConfig`, `McpSSEServerConfig`, `McpHttpServerConfig`, `McpSdkServerConfig` / TypeScript `McpServerConfigForProcessTransport` | Every upstream field in declaration order, then `extra` keys verbatim. `McpServerToolPolicy` carries the per-tool `tools` entries. |
@@ -164,6 +164,7 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 | --- | --- | --- |
 | `ToolPermissionRequest` | `ToolPermissionContext` (suggestions, tool use, agent, blocked path, decision reason, title, display name, description) | `canUseTool` options; `decisionReasonType`, `decisionReasonCode`, `serverPolicyAskOnly`, `plugin`, `serverPrompt`, `computerFolder` and `matchedAskRule` only when well typed, otherwise kept in `additional_fields` |
 | `PermissionDecision::Allow` | `PermissionResultAllow` (`updatedInput` falls back to the original input) | result written as returned with `toolUseID` appended |
+| `ToolPermissionRequest::typed_input()`, `PermissionDecision::allow_with_input(&ToolInputSchemas)` | `input: dict`, `updated_input: dict` (no tool types) | `input` and `updatedInput` as records, typed by `sdk-tools` `ToolInputSchemas` |
 | `PermissionDecision::Deny`, `DenialDisposition` | `PermissionResultDeny` (`interrupt` only when true) | result written as returned with `toolUseID` appended |
 | `PermissionDecisionClassification` | not applicable | `decisionClassification` |
 | `PermissionDecision::AnsweredOutOfBand`, `ElicitationResponse::AnsweredOutOfBand`, `UserDialogResponse::AnsweredOutOfBand` | `TypeError` error response for a permission request | `null`: no response |
@@ -186,6 +187,9 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 | `SystemEvent::{TaskStarted, TaskProgress, TaskNotification, TaskUpdated, MirrorError, Hook}` | `TaskStartedMessage` and the other `SystemMessage` subclasses | `SDKTaskStartedMessage` and the other system members |
 | `ResultMessage::deferred_tool()` | `DeferredToolUse` | `SDKResultSuccess.deferred_tool_use` |
 | `ContentBlock::{ServerToolUse, ServerToolResult}` | `ServerToolUseBlock`, `ServerToolResultBlock` | server tool blocks of `BetaMessage` |
+| `ToolInputSchemas::for_tool(name, &input)`, `ToolOutputSchemas::for_tool(name, &output)` | no tool types | `sdk-tools` input and output types, chosen by tool name (legacy aliases resolved, `mcp__` names as `McpInput` / `McpOutput`), `Unknown` with the value unchanged otherwise |
+| `ContentBlock::typed_input()`, `UserMessage::typed_tool_use_result(name)` | `ToolUseBlock.input: dict`, `UserMessage.tool_use_result` | tool use `input` and `SDKUserMessage.tool_use_result` typed by `sdk-tools` |
+| `ResultMessage::typed_permission_denials()`, `PermissionDenial` (`raw` kept) | `ResultMessage.permission_denials: list[Any]` | `SDKPermissionDenial` |
 | `Error::MessageParse(MessageParseError)` with Python decoding | `MessageParseError` (`KeyError` text) | not applicable |
 
 ## Hooks
@@ -195,6 +199,7 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 | `HookRegistration` (`matcher`, `callbacks`, `timeout`, `on_failure`) | `HookMatcher` | `HookCallbackMatcher` |
 | `HookRequest` (`input`, `tool_use_id`, `signal`) | callback arguments and `HookContext.signal` | `HookCallback` arguments and `{ signal }` |
 | `HookRequest::typed_input()` returning `HookInput` (generated, every event plus `Unknown`) | `HookInput` and its `*HookInput` TypedDicts | `HookInput` and its `*HookInput` members |
+| `HookRequest::typed_tool_input()`, `HookRequest::typed_tool_response()` returning `ToolInputSchemas` / `ToolOutputSchemas` | `tool_input: dict`, `tool_response: Any` (no tool types) | `tool_input: unknown`, `tool_response: unknown`, typed by `sdk-tools` `ToolInputSchemas` / `ToolOutputSchemas` |
 | `HookOutput::Json(HookJSONOutput)` (generated, sent exactly as given) | `HookJSONOutput`, `SyncHookJSONOutput`, `AsyncHookJSONOutput` (`continue_` and `async_` renamed on the wire) | `HookJSONOutput`, `SyncHookJSONOutput`, `AsyncHookJSONOutput` |
 | `HookOutput::{Sync, Async}`, `HookOutput::block` | `SyncHookJSONOutput`, `AsyncHookJSONOutput` (common fields only) | same |
 | `HookEvent`, `HookEvent::ALL`, `HOOK_EVENTS` | `HookEvent` | `HookEvent`, `HOOK_EVENTS` |

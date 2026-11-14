@@ -222,6 +222,9 @@ workspace_crate(
         "tool_use_id": {},
         "tool_use_id_storage": {},
         "transport": {},
+        "typed_tool_views": {
+            "compile_data": glob(["tests/fixtures/*.json"]),
+        },
         "upstream_defaults": {
             "data": [":claude_sdk_fixture"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},

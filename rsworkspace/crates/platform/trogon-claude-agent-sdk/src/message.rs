@@ -1,4 +1,7 @@
-use crate::{JsonObject, MessageId, MessageOrigin, SessionId, ToolName, ToolUseId, upstream::messages as ts};
+use crate::{
+    JsonObject, MessageId, MessageOrigin, SessionId, ToolName, ToolUseId,
+    upstream::{messages as ts, tool_inputs::ToolInputSchemas, tool_outputs::ToolOutputSchemas},
+};
 
 /// How messages the CLI writes are decoded.
 ///
@@ -118,6 +121,14 @@ impl UserMessage {
         self.tool_use_result.as_ref().and_then(serde_json::Value::as_object)
     }
 
+    /// `tool_use_result` as the `sdk-tools` output type of the tool `tool_name` names (see
+    /// [`ToolOutputSchemas::for_tool`]), or `None` when the key is absent. `tool_use_result` stays as written.
+    pub fn typed_tool_use_result(&self, tool_name: &str) -> Option<ToolOutputSchemas> {
+        self.tool_use_result
+            .as_ref()
+            .map(|result| ToolOutputSchemas::for_tool(tool_name, result))
+    }
+
     /// The message typed as TypeScript `SDKUserMessage` or, with `isReplay: true`, `SDKUserMessageReplay`.
     pub fn to_sdk_message(&self) -> ts::SDKMessage {
         sdk_message(&self.raw)
@@ -164,6 +175,20 @@ pub enum ContentBlock {
         kind: String,
         data: JsonObject,
     },
+}
+
+impl ContentBlock {
+    /// A `tool_use` block's input as the `sdk-tools` input type of the tool it names (see
+    /// [`ToolInputSchemas::for_tool`]), or `None` for any other block. `input` stays as written.
+    pub fn typed_input(&self) -> Option<ToolInputSchemas> {
+        match self {
+            Self::ToolUse { name, input, .. } => Some(ToolInputSchemas::for_tool(
+                name.as_str(),
+                &serde_json::Value::Object(input.clone()),
+            )),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -303,6 +328,42 @@ pub struct ResultMessage {
     pub raw: JsonObject,
 }
 
+/// One `permission_denials` entry exactly as the CLI wrote it: TypeScript `SDKPermissionDenial`, which Python
+/// keeps as an untyped list item. Nothing is validated; each accessor is `None` when its key is absent or holds
+/// another JSON kind.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PermissionDenial {
+    pub raw: serde_json::Value,
+}
+
+impl PermissionDenial {
+    pub fn tool_name(&self) -> Option<&str> {
+        self.raw.get("tool_name")?.as_str()
+    }
+
+    pub fn tool_use_id(&self) -> Option<&str> {
+        self.raw.get("tool_use_id")?.as_str()
+    }
+
+    pub fn tool_input(&self) -> Option<&JsonObject> {
+        self.raw.get("tool_input")?.as_object()
+    }
+
+    /// `tool_input` as the `sdk-tools` input type of the tool `tool_name` names (see
+    /// [`ToolInputSchemas::for_tool`]), or `None` when either key is missing or `tool_name` is not a string.
+    pub fn typed_input(&self) -> Option<ToolInputSchemas> {
+        Some(ToolInputSchemas::for_tool(
+            self.tool_name()?,
+            self.raw.get("tool_input")?,
+        ))
+    }
+
+    /// The entry typed as TypeScript `SDKPermissionDenial`, or `None` when it does not match that shape exactly.
+    pub fn to_sdk_permission_denial(&self) -> Option<ts::SDKPermissionDenial> {
+        crate::tool_view::exact(&self.raw)
+    }
+}
+
 /// Python `DeferredToolUse`.
 #[derive(Clone, Debug)]
 pub struct DeferredToolUse {
@@ -321,6 +382,13 @@ impl ResultMessage {
             name: deferred.get("name")?.as_str()?.to_owned(),
             input: deferred.get("input")?.as_object()?.clone(),
         })
+    }
+
+    /// Every `permission_denials` entry, in order and as written, or `None` when the key is absent.
+    pub fn typed_permission_denials(&self) -> Option<Vec<PermissionDenial>> {
+        self.permission_denials
+            .as_ref()
+            .map(|denials| denials.iter().cloned().map(|raw| PermissionDenial { raw }).collect())
     }
 
     /// The message typed as TypeScript `SDKResultMessage`, or `None` when it does not match a member exactly.
@@ -406,9 +474,5 @@ fn sdk_message(raw: &JsonObject) -> ts::SDKMessage {
 }
 
 fn exact<T: serde::Serialize + serde::de::DeserializeOwned>(raw: &JsonObject) -> Option<T> {
-    let value = serde_json::Value::Object(raw.clone());
-    let typed: T = serde_json::from_value(value.clone()).ok()?;
-    serde_json::to_value(&typed)
-        .is_ok_and(|round| round == value)
-        .then_some(typed)
+    crate::tool_view::exact(&serde_json::Value::Object(raw.clone()))
 }

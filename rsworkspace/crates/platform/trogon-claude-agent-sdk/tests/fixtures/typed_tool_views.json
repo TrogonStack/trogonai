@@ -1,0 +1,259 @@
+{
+  "source": "Tool calls and tool_use_result values from claude 2.1.323 session transcripts, with every string that is not a literal in the pinned sdk-tools.d.ts replaced by \"text\", numbers replaced, and MCP server names replaced. input_type and output_type are the sdk-tools types tsc accepts each value as, or null.",
+  "cases": [
+    {
+      "tool_name": "Agent",
+      "input": {
+        "description": "text",
+        "subagent_type": "text",
+        "run_in_background": true,
+        "prompt": "text"
+      },
+      "tool_use_result": {
+        "isAsync": true,
+        "status": "async_launched",
+        "agentId": "text",
+        "description": "text",
+        "resolvedModel": "text",
+        "prompt": "text",
+        "outputFile": "text",
+        "canReadOutputFile": true,
+        "canContinueAgent": true
+      },
+      "input_type": "AgentInput",
+      "output_type": "AgentOutput"
+    },
+    {
+      "tool_name": "Agent",
+      "input": {
+        "description": "text",
+        "subagent_type": "text",
+        "isolation": "worktree",
+        "run_in_background": true,
+        "prompt": "text"
+      },
+      "tool_use_result": {
+        "isAsync": true,
+        "status": "async_launched",
+        "agentId": "text",
+        "description": "text",
+        "resolvedModel": "text",
+        "prompt": "text",
+        "outputFile": "text",
+        "canReadOutputFile": true,
+        "canContinueAgent": true
+      },
+      "input_type": "AgentInput",
+      "output_type": "AgentOutput"
+    },
+    {
+      "tool_name": "Bash",
+      "input": {
+        "command": "text"
+      },
+      "tool_use_result": {
+        "stdout": "text",
+        "stderr": "text",
+        "interrupted": false,
+        "isImage": false,
+        "noOutputExpected": false
+      },
+      "input_type": "BashInput",
+      "output_type": "BashOutput"
+    },
+    {
+      "tool_name": "Bash",
+      "input": {
+        "command": "text"
+      },
+      "tool_use_result": "text",
+      "input_type": "BashInput",
+      "output_type": null
+    },
+    {
+      "tool_name": "Edit",
+      "input": {
+        "replace_all": false,
+        "file_path": "text",
+        "old_string": "text",
+        "new_string": "text"
+      },
+      "tool_use_result": {
+        "filePath": "text",
+        "oldString": "text",
+        "newString": "text",
+        "originalFile": null,
+        "structuredPatch": [
+          {
+            "oldStart": 3,
+            "oldLines": 3,
+            "newStart": 3,
+            "newLines": 3,
+            "lines": [
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text",
+              "text"
+            ]
+          }
+        ],
+        "userModified": false,
+        "replaceAll": false,
+        "contentNotInModelContext": true
+      },
+      "input_type": "FileEditInput",
+      "output_type": "FileEditOutput"
+    },
+    {
+      "tool_name": "Read",
+      "input": {
+        "file_path": "text"
+      },
+      "tool_use_result": {
+        "type": "text",
+        "file": {
+          "filePath": "text",
+          "content": "text",
+          "numLines": 3,
+          "startLine": 3,
+          "totalLines": 3
+        }
+      },
+      "input_type": "FileReadInput",
+      "output_type": "FileReadOutput"
+    },
+    {
+      "tool_name": "Write",
+      "input": {
+        "file_path": "text",
+        "content": "text"
+      },
+      "tool_use_result": {
+        "type": "create",
+        "filePath": "text",
+        "content": "text",
+        "structuredPatch": [],
+        "originalFile": null,
+        "userModified": false
+      },
+      "input_type": "FileWriteInput",
+      "output_type": "FileWriteOutput"
+    },
+    {
+      "tool_name": "Skill",
+      "input": {
+        "skill": "text"
+      },
+      "tool_use_result": {
+        "success": true,
+        "commandName": "text"
+      },
+      "input_type": null,
+      "output_type": null
+    },
+    {
+      "tool_name": "ToolSearch",
+      "input": {
+        "query": "text",
+        "max_results": 3
+      },
+      "tool_use_result": {
+        "matches": [
+          "text",
+          "text"
+        ],
+        "query": "text",
+        "total_deferred_tools": 3
+      },
+      "input_type": null,
+      "output_type": null
+    },
+    {
+      "tool_name": "SendMessage",
+      "input": {
+        "to": "text",
+        "summary": "text",
+        "message": "text",
+        "type": "text",
+        "recipient": "text",
+        "recipient_kind": "text",
+        "content": "text"
+      },
+      "tool_use_result": {
+        "success": true,
+        "message": "text",
+        "resumedAgentId": "text",
+        "revivedAgentId": "text",
+        "pin": {
+          "id": "text",
+          "name": "text",
+          "ref": "text"
+        }
+      },
+      "input_type": null,
+      "output_type": null
+    },
+    {
+      "tool_name": "mcp__example__search",
+      "input": {
+        "query": "text",
+        "minSimilarity": 1.5,
+        "limit": 3
+      },
+      "tool_use_result": [
+        {
+          "type": "text",
+          "text": "text"
+        }
+      ],
+      "input_type": "McpInput",
+      "output_type": "McpOutput"
+    },
+    {
+      "tool_name": "mcp__example__link",
+      "input": {
+        "url": "text"
+      },
+      "tool_use_result": "text",
+      "input_type": "McpInput",
+      "output_type": "McpOutput"
+    }
+  ]
+}
