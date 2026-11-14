@@ -28,6 +28,7 @@ rust.toolchain(versions = [])
 register_toolchains(
     "@mise_rust//:rust_toolchain",
     "@mise_rust//:cargo_toolchain",
+    "@mise_rust//:rustfmt_toolchain",
 )
 
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
