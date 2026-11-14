@@ -6,6 +6,7 @@ usage: python3 -I widen.py RECORDER OUT KEEP
 KEEP lists, comma separated, the profile keys the recorder uses as single levels; they keep their value.
 """
 
+import re
 import sys
 
 recorder, out, keep = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -25,4 +26,12 @@ def _widen(value):
 if TARGET in PROFILES:
     PROFILES[TARGET] = {{key: value if key in _KEEP else _widen(value) for key, value in PROFILES[TARGET].items()}}
 """
-open(out, "w", encoding="utf-8").write(source.replace(anchor, widened))
+source = source.replace(anchor, widened)
+# Neighbouring boundaries share case names, so a window can name a case twice: record it once.
+cases = re.search(r"^CASES = .*\n", source, re.M)
+if cases is None:
+    sys.stderr.write(f"{recorder} has no CASES line\n")
+    sys.exit(1)
+unique = "CASES = list({name: (name, files) for name, files in CASES}.values())\n"
+source = source[: cases.end()] + unique + source[cases.end() :]
+open(out, "w", encoding="utf-8").write(source)
