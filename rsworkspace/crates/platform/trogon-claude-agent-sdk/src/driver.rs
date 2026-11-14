@@ -1874,6 +1874,9 @@ where
                                 (control_value(self.argv_style, response), sender)
                             }
                         };
+                        if operation == ControlOperation::RemoteControl {
+                            self.host.settle_remote_control(response.as_ref());
+                        }
                         if operation == ControlOperation::Interrupt
                             && let Some(object) = response.as_ref().and_then(serde_json::Value::as_object)
                             && let crate::InterruptReceipt::Reported {

@@ -1090,6 +1090,10 @@ impl ClientHandle {
         let options = options.unwrap_or_default();
         let next = options.answerer(enabled);
         let (generation, previous) = self.host.begin_remote_control(next.clone());
+        if enabled {
+            self.host
+                .arm_remote_control(generation, [next.clone(), previous.clone()]);
+        }
         let request = RequestPayload::RemoteControl {
             enabled,
             name,
