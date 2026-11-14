@@ -20,7 +20,10 @@ workspace_crate(
             "tags": ["manual"],
         },
     },
+    # test-support turns on the optional buffa, but no Cargo crate enables that
+    # feature for the library, so crate_universe leaves buffa out of its dependencies.
     deps = [
+        "@crates//buffa-0.9.2",
         "//rsworkspace/crates/decider/trogon-decider",
         "//rsworkspace/crates/decider/trogon-decider-guest-sdk",
         "//rsworkspace/crates/decider/trogon-decider-wasm-runtime",
