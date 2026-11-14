@@ -403,7 +403,13 @@ pub(crate) fn read_policy_document(text: &str) -> PolicyRead {
             loaded: true,
         };
     }
-    let (Some(raw), Some(schema)) = (parse_object(text, SettingsDialect::TypeScript), schema()) else {
+    let raw = parse_object(
+        text,
+        SettingsDialect::TypeScript,
+        PythonCStack::MODULE,
+        NodeStack::NODE_24_DARWIN_ARM64,
+    );
+    let (Some(raw), Some(schema)) = (raw, schema()) else {
         return not_loaded;
     };
     let mut document = raw.clone();
