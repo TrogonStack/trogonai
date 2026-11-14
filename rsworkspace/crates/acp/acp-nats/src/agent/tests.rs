@@ -5,7 +5,7 @@ use crate::AgentHandler;
 use crate::agent::test_support::MockJs;
 use crate::config::Config;
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{ExtNotification, ExtRequest, PromptRequest, PromptResponse, StopReason};
+use agent_client_protocol::v1::schema::{ExtNotification, ExtRequest, PromptRequest, PromptResponse, StopReason};
 use trogon_nats::AdvancedMockNatsClient;
 
 fn mock_bridge() -> (
@@ -76,7 +76,7 @@ async fn ext_method_returns_agent_unavailable_when_nats_fails() {
         .ext_method(ExtRequest::new("ext", empty_raw_value()))
         .await
         .unwrap_err();
-    assert_eq!(err.code, ErrorCode::Other(crate::error::AGENT_UNAVAILABLE));
+    assert_eq!(err.code, ErrorCode::new(crate::error::AGENT_UNAVAILABLE));
 }
 
 #[tokio::test]

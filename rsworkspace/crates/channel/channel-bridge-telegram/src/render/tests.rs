@@ -1,6 +1,6 @@
 use super::*;
 use crate::constants::TEXT_CHUNK_LIMIT;
-use agent_client_protocol::schema::v1::{ContentChunk, TextContent, ToolCallUpdate, ToolCallUpdateFields};
+use agent_client_protocol::v1::schema::{ContentChunk, TextContent, ToolCallUpdate, ToolCallUpdateFields};
 
 #[test]
 fn a_defaulted_client_has_no_buffered_text_for_any_session() {

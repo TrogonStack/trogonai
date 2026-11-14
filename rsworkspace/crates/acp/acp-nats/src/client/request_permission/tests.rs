@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
     RequestPermissionResponse, SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
 };
@@ -45,7 +45,7 @@ impl ClientHandler for FailingClient {
         _: RequestPermissionRequest,
     ) -> agent_client_protocol::Result<RequestPermissionResponse> {
         Err(agent_client_protocol::Error::new(
-            i32::from(ErrorCode::InvalidParams),
+            i32::from(ErrorCode::INVALID_PARAMS),
             "permission denied",
         ))
     }
@@ -143,15 +143,15 @@ fn error_code_and_message_invalid_request_returns_invalid_params() {
     let err = serde_json::from_slice::<RequestPermissionRequest>(b"not json").unwrap_err();
     let rp_err = RequestPermissionError::InvalidRequest(err);
     let (code, _) = error_code_and_message(&rp_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
 }
 
 #[test]
 fn error_code_and_message_client_error_preserves_client_code() {
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "denied");
     let rp_err = RequestPermissionError::ClientError(client_err);
     let (code, message) = error_code_and_message(&rp_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "denied");
 }
 
@@ -162,7 +162,7 @@ fn request_permission_error_display() {
     let rp_err = RequestPermissionError::InvalidRequest(err);
     assert_eq!(rp_err.to_string(), expected);
 
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "permission denied");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "permission denied");
     let rp_err = RequestPermissionError::ClientError(client_err);
     assert_eq!(rp_err.to_string(), "client error: permission denied");
 }
@@ -173,7 +173,7 @@ fn request_permission_error_source() {
     let rp_err = RequestPermissionError::InvalidRequest(err);
     assert!(rp_err.source().is_some());
 
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "denied");
     let rp_err = RequestPermissionError::ClientError(client_err);
     assert!(rp_err.source().is_some());
 }

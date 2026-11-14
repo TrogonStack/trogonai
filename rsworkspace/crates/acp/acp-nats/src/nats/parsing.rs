@@ -6,6 +6,7 @@ use crate::session_id::AcpSessionId;
 pub enum GlobalAgentMethod {
     Initialize,
     Authenticate,
+    AuthStatus,
     Logout,
     SessionNew,
     SessionList,
@@ -26,6 +27,10 @@ pub enum SessionAgentMethod {
     Resume,
     Close,
     Delete,
+    Archive,
+    Unarchive,
+    Status,
+    SetTitle,
 }
 
 impl GlobalAgentMethod {
@@ -34,6 +39,7 @@ impl GlobalAgentMethod {
         match self {
             Self::Initialize => "initialize".to_string(),
             Self::Authenticate => "authenticate".to_string(),
+            Self::AuthStatus => "auth.status".to_string(),
             Self::Logout => "logout".to_string(),
             Self::SessionNew => "session.new".to_string(),
             Self::SessionList => "session.list".to_string(),
@@ -49,6 +55,7 @@ impl GlobalAgentMethod {
         match self {
             Self::Initialize => "initialize".to_string(),
             Self::Authenticate => "authenticate".to_string(),
+            Self::AuthStatus => "auth/status".to_string(),
             Self::Logout => "logout".to_string(),
             Self::SessionNew => "session/new".to_string(),
             Self::SessionList => "session/list".to_string(),
@@ -63,6 +70,7 @@ impl GlobalAgentMethod {
         match suffix {
             "initialize" => Some(Self::Initialize),
             "authenticate" => Some(Self::Authenticate),
+            "auth.status" => Some(Self::AuthStatus),
             "logout" => Some(Self::Logout),
             "session.new" => Some(Self::SessionNew),
             "session.list" => Some(Self::SessionList),
@@ -90,6 +98,10 @@ impl SessionAgentMethod {
             Self::Resume => "resume",
             Self::Close => "close",
             Self::Delete => "delete",
+            Self::SetTitle => "set_title",
+            Self::Status => "status",
+            Self::Unarchive => "unarchive",
+            Self::Archive => "archive",
         }
     }
 
@@ -105,6 +117,10 @@ impl SessionAgentMethod {
             Self::Resume => "session/resume",
             Self::Close => "session/close",
             Self::Delete => "session/delete",
+            Self::SetTitle => "session/set_title",
+            Self::Status => "session/status",
+            Self::Unarchive => "session/unarchive",
+            Self::Archive => "session/archive",
         }
     }
 
@@ -119,6 +135,10 @@ impl SessionAgentMethod {
             "resume" => Some(Self::Resume),
             "close" => Some(Self::Close),
             "delete" => Some(Self::Delete),
+            "set_title" => Some(Self::SetTitle),
+            "status" => Some(Self::Status),
+            "unarchive" => Some(Self::Unarchive),
+            "archive" => Some(Self::Archive),
             _ => None,
         }
     }

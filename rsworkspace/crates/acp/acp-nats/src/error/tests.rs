@@ -8,7 +8,7 @@ fn timeout_returns_agent_unavailable() {
         subject: "test.subject".into(),
     });
     assert_eq!(err.message, "Request timed out; agent may be overloaded or unavailable");
-    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+    assert_eq!(err.code, ErrorCode::new(AGENT_UNAVAILABLE));
 }
 
 #[test]
@@ -18,7 +18,7 @@ fn request_error_returns_agent_unavailable() {
         error: "connection refused".into(),
     });
     assert_eq!(err.message, "Agent unavailable: connection refused");
-    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+    assert_eq!(err.code, ErrorCode::new(AGENT_UNAVAILABLE));
 }
 
 #[test]
@@ -26,7 +26,7 @@ fn serialize_error_returns_internal() {
     let serde_err = serde_json::to_vec(&FailsSerialize).unwrap_err();
     let err = map_nats_error(NatsError::Serialize(serde_err));
     assert_eq!(err.message, "Failed to serialize request: test serialize failure");
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn deserialize_error_returns_internal() {
     let serde_err = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
     let err = map_nats_error(NatsError::Deserialize(serde_err));
     assert_eq!(err.message, "Invalid response from agent");
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn publish_operation_returns_internal() {
         "flush failed".into(),
     )));
     assert_eq!(err.message, "Publish operation failed");
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[test]
@@ -54,14 +54,14 @@ fn publish_operation_exhausted_returns_internal() {
         attempts: 3,
     });
     assert_eq!(err.message, "Publish operation exhausted");
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[test]
 fn other_error_returns_internal() {
     let err = map_nats_error(NatsError::Other("misc failure".into()));
     assert_eq!(err.message, "Request failed");
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 struct FailsSerialize;

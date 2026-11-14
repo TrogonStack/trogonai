@@ -2,7 +2,7 @@ use super::Bridge;
 use crate::nats::parsing::SessionAgentMethod;
 use crate::nats::{FlushClient, PublishClient, RequestClient, commands};
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::schema::v1::{SetSessionConfigOptionRequest, SetSessionConfigOptionResponse};
+use agent_client_protocol::v1::schema::{SetSessionConfigOptionRequest, SetSessionConfigOptionResponse};
 use agent_client_protocol::{Error, ErrorCode, Result};
 use tracing::{info, instrument};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
@@ -31,7 +31,7 @@ where
 
     let session_id = AcpSessionId::try_from(&args.session_id).map_err(|e| {
         bridge.metrics.record_error("session_validate", "invalid_session_id");
-        Error::new(ErrorCode::InvalidParams.into(), format!("Invalid session ID: {}", e))
+        Error::new(ErrorCode::INVALID_PARAMS, format!("Invalid session ID: {}", e))
     })?;
     let prefix = bridge.config.acp_prefix_ref();
     let subject = commands::SetConfigOptionSubject::new(prefix, &session_id);

@@ -1,6 +1,6 @@
 use crate::client_handler::ClientHandler;
 use crate::telemetry::metrics::Metrics;
-use agent_client_protocol::schema::v1::CompleteElicitationNotification;
+use agent_client_protocol::v1::schema::CompleteElicitationNotification;
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
 use trogon_semconv::span::ACP_CLIENT_ELICITATION_COMPLETE;

@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{WaitForTerminalExitRequest, WaitForTerminalExitResponse};
+use agent_client_protocol::v1::schema::{WaitForTerminalExitRequest, WaitForTerminalExitResponse};
 use async_nats::header::HeaderMap;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -22,7 +22,7 @@ pub enum TerminalWaitForExitError {
 
 fn invalid_params_error(message: impl Into<String>) -> TerminalWaitForExitError {
     TerminalWaitForExitError::InvalidParams(agent_client_protocol::Error::new(
-        i32::from(ErrorCode::InvalidParams),
+        i32::from(ErrorCode::INVALID_PARAMS),
         message.into(),
     ))
 }
@@ -31,7 +31,7 @@ pub fn error_code_and_message(e: &TerminalWaitForExitError) -> (ErrorCode, Strin
     match e {
         TerminalWaitForExitError::InvalidParams(inner) => (inner.code, inner.message.clone()),
         TerminalWaitForExitError::TimedOut => (
-            ErrorCode::InternalError,
+            ErrorCode::INTERNAL_ERROR,
             "Timed out waiting for terminal exit".to_string(),
         ),
         TerminalWaitForExitError::ClientError(inner) => (inner.code, inner.message.clone()),

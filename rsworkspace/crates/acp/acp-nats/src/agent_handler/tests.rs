@@ -1,6 +1,6 @@
 use super::*;
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{LlmProtocol, SessionConfigOptionValue, StopReason};
+use agent_client_protocol::v1::schema::{LlmProtocol, SessionConfigOptionValue, StopReason};
 use std::sync::Arc;
 
 struct MinimalAgent;
@@ -30,7 +30,7 @@ impl AgentHandler for MinimalAgent {
 
 fn assert_method_not_found<T>(result: Result<T>) {
     let error = result.err().unwrap();
-    assert_eq!(error.code, ErrorCode::MethodNotFound);
+    assert_eq!(error.code, ErrorCode::METHOD_NOT_FOUND);
 }
 
 fn empty_raw_value() -> Arc<serde_json::value::RawValue> {
@@ -43,6 +43,15 @@ fn empty_raw_value() -> Arc<serde_json::value::RawValue> {
 async fn optional_methods_default_to_method_not_found() {
     let agent = MinimalAgent;
 
+    assert_method_not_found(agent.auth_status(AuthStatusRequest::new()).await);
+    assert_method_not_found(agent.session_status(SessionStatusRequest::new("s1")).await);
+    assert_method_not_found(
+        agent
+            .set_session_title(SetSessionTitleRequest::new("s1", "Renamed"))
+            .await,
+    );
+    assert_method_not_found(agent.archive_session(ArchiveSessionRequest::new("s1")).await);
+    assert_method_not_found(agent.unarchive_session(UnarchiveSessionRequest::new("s1")).await);
     assert_method_not_found(agent.logout(LogoutRequest::new()).await);
     assert_method_not_found(agent.load_session(LoadSessionRequest::new("s1", ".")).await);
     assert_method_not_found(agent.set_session_mode(SetSessionModeRequest::new("s1", "mode")).await);

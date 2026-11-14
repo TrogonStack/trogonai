@@ -1,7 +1,7 @@
 use super::*;
 use crate::outbound::{SendText, SendTyping};
 use acp_nats::ClientHandler;
-use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate, TextContent};
+use agent_client_protocol::v1::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate, TextContent};
 use futures::StreamExt;
 use std::cell::RefCell;
 use std::rc::Rc;

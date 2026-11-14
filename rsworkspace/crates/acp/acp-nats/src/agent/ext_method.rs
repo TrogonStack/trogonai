@@ -2,7 +2,7 @@ use super::Bridge;
 use super::rpc_call::jsonrpc_call;
 use crate::ext_method_name::ExtMethodName;
 use crate::nats::{RequestClient, global};
-use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
+use agent_client_protocol::v1::schema::{ExtRequest, ExtResponse};
 use agent_client_protocol::{Error, ErrorCode, Result};
 use tracing::{info, instrument};
 use trogon_semconv::span::ACP_EXT;
@@ -26,7 +26,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
             .metrics
             .record_request("ext_method", bridge.clock.elapsed(start).as_secs_f64(), false);
         bridge.metrics.record_error("ext_method", "invalid_method_name");
-        Error::new(ErrorCode::InvalidParams.into(), format!("Invalid method name: {}", e))
+        Error::new(ErrorCode::INVALID_PARAMS, format!("Invalid method name: {}", e))
     })?;
 
     let nats = bridge.nats();

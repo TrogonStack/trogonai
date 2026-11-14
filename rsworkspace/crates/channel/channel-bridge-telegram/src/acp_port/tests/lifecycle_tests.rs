@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use acp_nats::nats::{AcpStream, commands, global, responses};
 use acp_nats::{AcpPrefix, AcpSessionId, NatsConfig};
-use agent_client_protocol::schema::v1::{CancelNotification, ContentBlock, NewSessionRequest, PromptRequest};
+use agent_client_protocol::v1::schema::{CancelNotification, ContentBlock, NewSessionRequest, PromptRequest};
 use futures::StreamExt;
 use serde_json::{Value, json};
 use trogon_channel::{
@@ -190,7 +190,7 @@ async fn session_creation_preserves_agent_errors_and_rejects_unusable_ids() {
     };
     let (result, ()) = tokio::join!(fixture.port.create_session(&record), respond);
     assert!(
-        matches!(result, Err(AcpPortError::Rpc(error)) if error.code == agent_client_protocol::ErrorCode::AuthRequired)
+        matches!(result, Err(AcpPortError::Rpc(error)) if error.code == agent_client_protocol::ErrorCode::AUTH_REQUIRED)
     );
     let respond = async {
         let request = next(&mut requests).await;

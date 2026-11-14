@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::error::AGENT_UNAVAILABLE;
 use agent_client_protocol::ErrorCode;
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::{Implementation, InitializeRequest, InitializeResponse};
+use agent_client_protocol::v1::schema::{Implementation, InitializeRequest, InitializeResponse};
 use trogon_nats::AdvancedMockNatsClient;
 
 #[tokio::test]
@@ -45,7 +45,7 @@ async fn initialize_returns_error_when_nats_request_fails() {
     let request = InitializeRequest::new(ProtocolVersion::LATEST);
     let err = bridge.initialize(request).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+    assert_eq!(err.code, ErrorCode::new(AGENT_UNAVAILABLE));
 }
 
 #[tokio::test]
@@ -57,7 +57,7 @@ async fn initialize_returns_error_when_response_is_invalid_json() {
     let err = bridge.initialize(request).await.unwrap_err();
 
     assert_eq!(err.message, "Invalid response from agent");
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[tokio::test]

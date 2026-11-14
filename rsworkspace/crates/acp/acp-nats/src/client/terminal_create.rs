@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{CreateTerminalRequest, CreateTerminalResponse};
+use agent_client_protocol::v1::schema::{CreateTerminalRequest, CreateTerminalResponse};
 use async_nats::header::HeaderMap;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
@@ -20,7 +20,7 @@ pub enum TerminalCreateError {
 pub fn error_code_and_message(e: &TerminalCreateError) -> (ErrorCode, String) {
     match e {
         TerminalCreateError::InvalidRequest(inner) => (
-            ErrorCode::InvalidParams,
+            ErrorCode::INVALID_PARAMS,
             format!("Invalid terminal/create request: {}", inner),
         ),
         TerminalCreateError::ClientError(inner) => (inner.code, inner.message.clone()),

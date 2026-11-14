@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionRequest,
     RequestPermissionResponse, SessionNotification, SessionUpdate,
 };
@@ -19,7 +19,7 @@ fn make_wire_request<T: serde::Serialize>(params: &T) -> (HeaderMap, Vec<u8>) {
 
 fn sample_request() -> ReadTextFileRequest {
     ReadTextFileRequest::new(
-        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        agent_client_protocol::v1::schema::SessionId::from("sess-1"),
         "/tmp/foo.txt".to_string(),
     )
 }
@@ -76,7 +76,7 @@ impl ClientHandler for FailingClient {
 
     async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
         Err(agent_client_protocol::Error::new(
-            i32::from(ErrorCode::InvalidParams),
+            i32::from(ErrorCode::INVALID_PARAMS),
             "file not found",
         ))
     }
@@ -86,7 +86,7 @@ impl ClientHandler for FailingClient {
 async fn fs_read_text_file_forwards_request_and_returns_response() {
     let client = MockClient::new("hello world");
     let (headers, payload) = make_wire_request(&ReadTextFileRequest::new(
-        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        agent_client_protocol::v1::schema::SessionId::from("sess-1"),
         "/tmp/foo.txt".to_string(),
     ));
 
@@ -195,16 +195,16 @@ fn error_code_and_message_invalid_request_returns_invalid_params() {
     let err = "Invalid read_text_file request: invalid request".to_string();
     let fs_err = FsReadTextFileError::InvalidRequest(err);
     let (code, message) = error_code_and_message(&fs_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert!(message.contains("Invalid read_text_file request"));
 }
 
 #[test]
 fn error_code_and_message_client_error_preserves_client_code() {
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "file not found");
     let fs_err = FsReadTextFileError::ClientError(client_err);
     let (code, message) = error_code_and_message(&fs_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "file not found");
 }
 
@@ -262,7 +262,7 @@ fn fs_read_text_file_error_display() {
     let fs_err = FsReadTextFileError::InvalidRequest(err.to_string());
     assert_eq!(fs_err.to_string(), expected);
 
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "file not found");
     let fs_err = FsReadTextFileError::ClientError(client_err);
     assert_eq!(fs_err.to_string(), "client error: file not found");
 }
@@ -273,7 +273,7 @@ fn fs_read_text_file_error_source() {
     let fs_err = FsReadTextFileError::InvalidRequest(err.to_string());
     assert!(fs_err.source().is_none());
 
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "file not found");
     let fs_err = FsReadTextFileError::ClientError(client_err);
     assert!(fs_err.source().is_some());
 }

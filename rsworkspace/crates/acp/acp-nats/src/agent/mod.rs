@@ -6,6 +6,8 @@
     )
 )]
 
+mod archive_session;
+mod auth_status;
 mod authenticate;
 mod bridge;
 mod cancel;
@@ -26,10 +28,15 @@ mod providers_list;
 mod providers_set;
 mod resume_session;
 pub(crate) mod rpc_call;
+#[cfg(test)]
+mod schema_1_15_tests;
+mod session_status;
 mod set_session_config_option;
 mod set_session_mode;
+mod set_session_title;
 #[cfg(test)]
 pub(crate) mod test_support;
+mod unarchive_session;
 
 pub use bridge::Bridge;
 

@@ -39,7 +39,7 @@ async fn publish_backpressure_error_reply<N: PublishClient + FlushClient>(
 ) {
     let response_id = response_id_from_request_headers(headers);
     let error = agent_client_protocol::Error::new(
-        ErrorCode::Other(AGENT_UNAVAILABLE).into(),
+        ErrorCode::new(AGENT_UNAVAILABLE),
         "Client proxy overloaded; retry with backoff",
     );
     match encode_agent_error(response_id, &error) {

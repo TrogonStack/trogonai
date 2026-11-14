@@ -1,6 +1,6 @@
 use super::*;
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest,
     KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
@@ -47,7 +47,7 @@ impl MockClient {
 impl ClientHandler for MockClient {
     async fn session_notification(
         &self,
-        n: agent_client_protocol::schema::v1::SessionNotification,
+        n: agent_client_protocol::v1::schema::SessionNotification,
     ) -> agent_client_protocol::Result<()> {
         self.notifications.lock().unwrap().push(format!("{:?}", n));
         Ok(())
@@ -144,7 +144,7 @@ pub(super) struct TerminalKillFailingClient;
 impl ClientHandler for TerminalKillFailingClient {
     async fn session_notification(
         &self,
-        n: agent_client_protocol::schema::v1::SessionNotification,
+        n: agent_client_protocol::v1::schema::SessionNotification,
     ) -> agent_client_protocol::Result<()> {
         let _ = n;
         Ok(())
@@ -200,7 +200,7 @@ pub(super) struct TerminalReleaseFailingClient;
 impl ClientHandler for TerminalReleaseFailingClient {
     async fn session_notification(
         &self,
-        n: agent_client_protocol::schema::v1::SessionNotification,
+        n: agent_client_protocol::v1::schema::SessionNotification,
     ) -> agent_client_protocol::Result<()> {
         let _ = n;
         Ok(())
@@ -262,7 +262,7 @@ pub(super) struct TerminalWaitForExitFailingClient;
 impl ClientHandler for TerminalWaitForExitFailingClient {
     async fn session_notification(
         &self,
-        n: agent_client_protocol::schema::v1::SessionNotification,
+        n: agent_client_protocol::v1::schema::SessionNotification,
     ) -> agent_client_protocol::Result<()> {
         let _ = n;
         Ok(())
@@ -322,7 +322,7 @@ pub(super) struct TerminalWaitForExitTimeoutClient;
 impl ClientHandler for TerminalWaitForExitTimeoutClient {
     async fn session_notification(
         &self,
-        n: agent_client_protocol::schema::v1::SessionNotification,
+        n: agent_client_protocol::v1::schema::SessionNotification,
     ) -> agent_client_protocol::Result<()> {
         let _ = n;
         Ok(())
@@ -794,9 +794,9 @@ async fn dispatch_client_method_dispatches_request_permission() {
 
     let request = RequestPermissionRequest::new(
         "sess-1",
-        agent_client_protocol::schema::v1::ToolCallUpdate::new(
+        agent_client_protocol::v1::schema::ToolCallUpdate::new(
             "call-1",
-            agent_client_protocol::schema::v1::ToolCallUpdateFields::new(),
+            agent_client_protocol::v1::schema::ToolCallUpdateFields::new(),
         ),
         vec![],
     );
@@ -868,9 +868,9 @@ async fn dispatch_client_method_dispatches_request_permission_client_error_publi
 
     let request = RequestPermissionRequest::new(
         "sess-1",
-        agent_client_protocol::schema::v1::ToolCallUpdate::new(
+        agent_client_protocol::v1::schema::ToolCallUpdate::new(
             "call-1",
-            agent_client_protocol::schema::v1::ToolCallUpdateFields::new(),
+            agent_client_protocol::v1::schema::ToolCallUpdateFields::new(),
         ),
         vec![],
     );
@@ -910,9 +910,9 @@ async fn dispatch_client_method_dispatches_request_permission_with_advanced_mock
 
     let request = RequestPermissionRequest::new(
         "sess-1",
-        agent_client_protocol::schema::v1::ToolCallUpdate::new(
+        agent_client_protocol::v1::schema::ToolCallUpdate::new(
             "call-1",
-            agent_client_protocol::schema::v1::ToolCallUpdateFields::new(),
+            agent_client_protocol::v1::schema::ToolCallUpdateFields::new(),
         ),
         vec![],
     );
@@ -950,11 +950,11 @@ async fn dispatch_client_method_dispatches_elicitation_create_method_not_found()
     let client = MockClient::new();
     let session_id = AcpSessionId::new("sess-1").unwrap();
 
-    let mode = agent_client_protocol::schema::v1::ElicitationFormMode::new(
-        agent_client_protocol::schema::v1::ElicitationSessionScope::new("sess-1"),
-        agent_client_protocol::schema::v1::ElicitationSchema::new(),
+    let mode = agent_client_protocol::v1::schema::ElicitationFormMode::new(
+        agent_client_protocol::v1::schema::ElicitationSessionScope::new("sess-1"),
+        agent_client_protocol::v1::schema::ElicitationSchema::new(),
     );
-    let request = agent_client_protocol::schema::v1::CreateElicitationRequest::new(mode, "please respond");
+    let request = agent_client_protocol::v1::schema::CreateElicitationRequest::new(mode, "please respond");
     let (headers, payload_bytes) =
         crate::client::test_support::encode_wire_request("elicitation/create", RequestId::Number(1), &request);
     let payload = bytes::Bytes::from(payload_bytes);
@@ -989,7 +989,7 @@ async fn dispatch_client_method_dispatches_elicitation_complete() {
     let client = MockClient::new();
     let session_id = AcpSessionId::new("sess-1").unwrap();
 
-    let notification = agent_client_protocol::schema::v1::CompleteElicitationNotification::new("elicitation-1");
+    let notification = agent_client_protocol::v1::schema::CompleteElicitationNotification::new("elicitation-1");
     let (headers, payload_bytes) =
         crate::client::test_support::encode_wire_notification("elicitation/complete", &notification);
     let payload = bytes::Bytes::from(payload_bytes);

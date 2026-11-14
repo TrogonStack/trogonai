@@ -1006,7 +1006,6 @@ where
             crate::ArgvStyle::Python => ControlRequestId::python(self.next_id),
         })
     }
-
     fn controls_full(&self) -> bool {
         self.limits
             .max_pending_controls

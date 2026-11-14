@@ -79,27 +79,25 @@ cel-parser = "=0.10.1"
 # ACP
 # Any bump must follow the upgrade ritual in docs/architecture/acp-conformance.md.
 # Unstable flags are enabled ahead of stabilization by policy (protocol v2 is watch-only).
-agent-client-protocol = { version = "=2.0.0", features = [
-    "unstable_auth_methods",
-    "unstable_elicitation",
+agent-client-protocol = { version = "=5.0.0", features = [
+    "unstable_auth_status",
     "unstable_end_turn_token_usage",
-    "unstable_mcp_over_acp",
-    "unstable_session_fork",
-] }
-# Direct schema dependency exists solely to enable schema-level unstable flags the
-# SDK facade does not forward (cargo feature unification applies them to the SDK's re-exports).
-# The version must match the SDK's own exact pin, otherwise the graph carries two
-# schema crates and the flags stop reaching the SDK's re-exported types.
-agent-client-protocol-schema = { version = "=1.5.0", features = [
     "unstable_llm_providers",
-    "unstable_nes",
+    "unstable_mcp_over_acp",
     "unstable_plan_operations",
+    "unstable_session_archive",
+    "unstable_session_fork",
+    "unstable_session_set_title",
+    "unstable_session_status",
+    "unstable_session_system_prompt",
+    "unstable_subagents",
 ] }
-# Official HTTP/WebSocket transport from the SDK repository, released in lockstep with
-# the core crate. Server side only: the `client` feature pulls reqwest 0.13 and
-# async-tungstenite, both conflicting with the workspace's exact pins.
-# Enables serde_json/preserve_order graph-wide through feature unification.
-agent-client-protocol-http = { version = "=2.0.0", default-features = false, features = ["server"] }
+# Keep the direct schema pin identical to the SDK's exact requirement so all
+# consumers share one set of protocol types and unified feature flags.
+agent-client-protocol-schema = { version = "=1.15.1", default-features = false }
+# Server side only: the client feature requires reqwest 0.13, which conflicts
+# with the workspace's exact reqwest pin.
+agent-client-protocol-http = { version = "=5.0.0", default-features = false, features = ["server"] }
 
 # MCP
 rmcp = { version = "3.0.0", default-features = false, features = ["client", "server", "transport-io", "transport-async-rw", "transport-streamable-http-server"] }

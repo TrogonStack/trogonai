@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::PromptResponse;
+use agent_client_protocol::v1::schema::PromptResponse;
 use bytes::Bytes;
 use jsonrpc_nats::{Message, ResponseId, encode};
 use trogon_nats::jetstream::mocks::*;
@@ -16,8 +16,8 @@ fn test_sid(s: &str) -> AcpSessionId {
     AcpSessionId::new(s).expect("test session id")
 }
 
-fn prompt_request() -> agent_client_protocol::schema::v1::PromptRequest {
-    agent_client_protocol::schema::v1::PromptRequest::new("s1", vec![])
+fn prompt_request() -> agent_client_protocol::v1::schema::PromptRequest {
+    agent_client_protocol::v1::schema::PromptRequest::new("s1", vec![])
 }
 
 fn make_nats_msg(payload: &[u8], headers: Option<async_nats::HeaderMap>) -> async_nats::Message {
@@ -68,7 +68,7 @@ async fn js_request_success() {
     let (consumer, tx) = MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(consumer);
 
-    let response = PromptResponse::new(agent_client_protocol::schema::v1::StopReason::EndTurn);
+    let response = PromptResponse::new(agent_client_protocol::v1::schema::StopReason::EndTurn);
     let msg = MockJsMessage::new(make_wire_success_msg("req-1", &response));
     tx.unbounded_send(Ok(msg)).unwrap();
 
@@ -87,7 +87,7 @@ async fn js_request_success() {
     assert!(result.is_ok());
     assert_eq!(
         result.unwrap().stop_reason,
-        agent_client_protocol::schema::v1::StopReason::EndTurn
+        agent_client_protocol::v1::schema::StopReason::EndTurn
     );
 }
 
@@ -209,8 +209,7 @@ async fn js_request_agent_error_response() {
     let (consumer, tx) = MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(consumer);
 
-    let agent_err =
-        agent_client_protocol::Error::new(agent_client_protocol::ErrorCode::InternalError.into(), "agent failed");
+    let agent_err = agent_client_protocol::Error::new(agent_client_protocol::ErrorCode::INTERNAL_ERROR, "agent failed");
     let msg = MockJsMessage::new(make_wire_error_msg("req-1", &agent_err));
     tx.unbounded_send(Ok(msg)).unwrap();
 
@@ -288,11 +287,11 @@ async fn js_request_skips_a_response_addressed_to_another_request() {
     let (consumer, tx) = MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(consumer);
 
-    let other = PromptResponse::new(agent_client_protocol::schema::v1::StopReason::Cancelled);
+    let other = PromptResponse::new(agent_client_protocol::v1::schema::StopReason::Cancelled);
     tx.unbounded_send(Ok(MockJsMessage::new(make_wire_success_msg("req-other", &other))))
         .unwrap();
 
-    let mine = PromptResponse::new(agent_client_protocol::schema::v1::StopReason::EndTurn);
+    let mine = PromptResponse::new(agent_client_protocol::v1::schema::StopReason::EndTurn);
     tx.unbounded_send(Ok(MockJsMessage::new(make_wire_success_msg("req-1", &mine))))
         .unwrap();
 
@@ -310,7 +309,7 @@ async fn js_request_skips_a_response_addressed_to_another_request() {
 
     assert_eq!(
         result.expect("expected the reply addressed to req-1").stop_reason,
-        agent_client_protocol::schema::v1::StopReason::EndTurn
+        agent_client_protocol::v1::schema::StopReason::EndTurn
     );
 }
 

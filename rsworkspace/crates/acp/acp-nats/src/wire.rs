@@ -50,19 +50,19 @@ pub fn merge_jsonrpc_headers(base: HeaderMap, overlay: HeaderMap) -> HeaderMap {
     jsonrpc_nats::merge_jsonrpc_headers(base, overlay)
 }
 
-pub fn acp_request_id(id: &ResponseId) -> agent_client_protocol::schema::v1::RequestId {
+pub fn acp_request_id(id: &ResponseId) -> agent_client_protocol::v1::schema::RequestId {
     match id {
-        ResponseId::Number(n) => agent_client_protocol::schema::v1::RequestId::Number(*n),
-        ResponseId::String(s) => agent_client_protocol::schema::v1::RequestId::Str(s.clone()),
-        ResponseId::Null => agent_client_protocol::schema::v1::RequestId::Null,
+        ResponseId::Number(n) => agent_client_protocol::v1::schema::RequestId::Number(*n),
+        ResponseId::String(s) => agent_client_protocol::v1::schema::RequestId::Str(s.clone()),
+        ResponseId::Null => agent_client_protocol::v1::schema::RequestId::Null,
     }
 }
 
-pub fn response_id_from_acp(id: &agent_client_protocol::schema::v1::RequestId) -> ResponseId {
+pub fn response_id_from_acp(id: &agent_client_protocol::v1::schema::RequestId) -> ResponseId {
     match id {
-        agent_client_protocol::schema::v1::RequestId::Number(n) => ResponseId::Number(*n),
-        agent_client_protocol::schema::v1::RequestId::Str(s) => ResponseId::String(s.clone()),
-        agent_client_protocol::schema::v1::RequestId::Null => ResponseId::Null,
+        agent_client_protocol::v1::schema::RequestId::Number(n) => ResponseId::Number(*n),
+        agent_client_protocol::v1::schema::RequestId::Str(s) => ResponseId::String(s.clone()),
+        agent_client_protocol::v1::schema::RequestId::Null => ResponseId::Null,
     }
 }
 

@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{ReadTextFileRequest, ReadTextFileResponse};
+use agent_client_protocol::v1::schema::{ReadTextFileRequest, ReadTextFileResponse};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
 use trogon_semconv::span::ACP_CLIENT_FS_READ_TEXT_FILE;
@@ -18,7 +18,7 @@ pub enum FsReadTextFileError {
 
 pub fn error_code_and_message(e: &FsReadTextFileError) -> (ErrorCode, String) {
     match e {
-        FsReadTextFileError::InvalidRequest(message) => (ErrorCode::InvalidParams, message.clone()),
+        FsReadTextFileError::InvalidRequest(message) => (ErrorCode::INVALID_PARAMS, message.clone()),
         FsReadTextFileError::ClientError(inner) => (inner.code, inner.message.clone()),
     }
 }
