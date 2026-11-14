@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { syncBuiltinESMExports } from 'node:module';
+import win32Path from 'node:path/win32';
 
 const self = fileURLToPath(import.meta.url);
 if (process.argv[2] === '--child') {
@@ -38,11 +39,12 @@ for (const [old, replacement] of [
   if (source.split(old).length !== 2) throw new Error(`bundle accessor not found exactly once: ${old}`);
   source = source.replace(old, () => replacement);
 }
-source += '\nexport{Wc as __walk,$o as __refuses,kO as __mac,Ys as __step,Bo as __host,hy as __autofs,OIe as __root,$p as __none};\n';
+source += '\nexport{Wc as __walk,$o as __refuses,kO as __mac,Ys as __step,Bo as __host,hy as __autofs,OIe as __root,$p as __none,wy as __reach,Og as __mountCache,Sl as __share,Lg as __server,Ug as __device,jt as __dots,Cl as __nt,fn as __two,kU as __rooted,gIe as __rootRe,mIe as __splitRe,hIe as __endRe};\n';
 const patchedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-platform-bundle-'));
 const patchedPath = path.join(patchedDir, 'bridge.mjs');
 fs.writeFileSync(patchedPath, source);
 
+const hookPath = path.join(path.dirname(self), 'bridge_create_session_win32_hook.mjs');
 const scenarios = [];
 const add = (name, platform, fn, args, probe = {}) => scenarios.push({ name, platform, fn, args, probe });
 const BASE = '/r/repo/.git';
@@ -240,24 +242,248 @@ for (const platform of ['linux', 'darwin']) {
   root('autofs_leaf_skipped', '/mnt', { ...kinds({ '/mnt/.git': 'dir', '/.git': 'dir' }), statfs: { '/mnt': [391] } });
 }
 
-const cases = [];
+// Windows path syntax: drive letters, backslashes, UNC and device paths, recorded with the win32 path module loaded.
+const R = String.raw;
+const W = R`C:\r\repo\.git`;
+const U = R`\\h\s\repo\.git`;
+const wp = (...parts) => [W, ...parts].join('\\');
+const up = (...parts) => [U, ...parts].join('\\');
+const wlink = (at, text, extra = {}) => ({ kinds: { [at]: 'symlink', ...(extra.kinds ?? {}) }, links: { [at]: text, ...(extra.links ?? {}) } });
+for (const [name, text, base, probe] of [
+  ['plain', wp('HEAD'), W, {}],
+  ['forward_slashes', 'C:/r/repo/.git/HEAD', W, {}],
+  ['mixed_runs', R`C:\r\\repo//.git\.\HEAD`, W, {}],
+  ['relative', R`refs\heads\main`, W, {}],
+  ['rooted_no_drive', R`\r\repo\HEAD`, W, {}],
+  ['rooted_forward', '/r/repo/HEAD', W, {}],
+  ['dot_dot', R`C:\r\repo\..\x`, W, {}],
+  ['dot_dot_past_root', R`C:\..\..\x`, W, {}],
+  ['drive_relative', R`C:x\y`, W, {}],
+  ['unc', R`\\h\s\repo\x`, W, {}],
+  ['unc_forward', '//h/s/repo/x', W, {}],
+  ['unc_root_only', R`\\h\s`, W, {}],
+  ['unc_one_part', R`\\h`, W, {}],
+  ['unc_trailing', R`\\h\s\\x`, W, {}],
+  ['network_text', '/network/h/s/x', W, {}],
+  ['vol_text', '/.vol/x', W, {}],
+  ['absent_tail', wp('refs', 'x'), W, { kinds: { [wp('refs')]: 'absent' } }],
+  ['file_midway', wp('HEAD', 'x'), W, { kinds: { [wp('HEAD')]: 'file' } }],
+  ['special', wp('HEAD'), W, { kinds: { [wp('HEAD')]: 'special' } }],
+  ['lookup_fails', wp('HEAD'), W, { kinds: { [wp('HEAD')]: 'other' } }],
+  ['link_relative', wp('HEAD'), W, wlink(wp('HEAD'), R`refs\heads\x`)],
+  ['link_forward_relative', wp('HEAD'), W, wlink(wp('HEAD'), 'refs/heads/x')],
+  ['link_drive_absolute_with_tail', wp('refs', 'heads', 'x'), W, wlink(wp('refs'), R`D:\elsewhere`)],
+  ['link_drive_absolute_trailing', wp('refs', 'heads', 'x'), W, wlink(wp('refs'), 'D:\\elsewhere\\')],
+  ['link_parent', wp('refs', 'heads', 'x'), W, wlink(wp('refs'), '..\\shared\\')],
+  ['link_rooted', wp('HEAD'), W, wlink(wp('HEAD'), R`\other`)],
+  ['link_rooted_forward', wp('HEAD'), W, wlink(wp('HEAD'), '/other')],
+  ['link_drive_relative', wp('HEAD'), W, wlink(wp('HEAD'), 'D:x')],
+  ['link_unc_other_host', wp('HEAD'), W, wlink(wp('HEAD'), R`\\h\s\x`)],
+  ['link_unc_same_host', up('HEAD'), U, wlink(up('HEAD'), R`\\h\s\other`)],
+  ['link_unc_same_host_case', up('HEAD'), U, wlink(up('HEAD'), R`\\H\s\other`)],
+  ['link_unc_other_share_same_host', up('HEAD'), U, wlink(up('HEAD'), R`\\h\t\other`)],
+  ['link_unc_dot_dot', up('HEAD'), U, wlink(up('HEAD'), R`\\h\s\..\x`)],
+  ['link_device_question', wp('HEAD'), W, wlink(wp('HEAD'), R`\\?\C:\x`)],
+  ['link_device_dot', wp('HEAD'), W, wlink(wp('HEAD'), R`\\.\pipe\x`)],
+  ['link_device_unc', up('HEAD'), U, wlink(up('HEAD'), R`\\?\UNC\h\s\x`)],
+  ['link_device_unc_lower', up('HEAD'), U, wlink(up('HEAD'), R`\\?\unc\h\s\x`)],
+  ['link_nt_prefix', wp('HEAD'), W, wlink(wp('HEAD'), R`\??\C:\x`)],
+  ['link_nt_forward', wp('HEAD'), W, wlink(wp('HEAD'), '/??/x')],
+  ['link_nt_after_dots', wp('HEAD'), W, wlink(wp('HEAD'), R`\a\..\??\x`)],
+  ['link_question_marks_inside', wp('HEAD'), W, wlink(wp('HEAD'), R`a\??\x`)],
+  ['link_loop', wp('a'), W, wlink(wp('a'), wp('a'))],
+  ['link_nul', wp('HEAD'), W, wlink(wp('HEAD'), 'a\u0000b')],
+  ['link_missing_text', wp('HEAD'), W, { kinds: { [wp('HEAD')]: 'symlink' } }],
+  ['link_posix_network', wp('HEAD'), W, wlink(wp('HEAD'), '/network/h/s')],
+  ['link_posix_vol', wp('HEAD'), W, wlink(wp('HEAD'), '/.vol/1/2')],
+]) {
+  add(`win32_walk_${name}`, 'win32', 'walk', [text, base], probe);
+}
+
+for (const [name, text, base] of [
+  ['relative', R`refs\x`, W],
+  ['drive_absolute', R`D:\other`, W],
+  ['dots_up', R`..\..\x`, W],
+  ['drive_relative', 'D:x', W],
+  ['rooted', R`\x`, W],
+  ['unc', R`\\h\s`, W],
+  ['unc_forward', '//h/s', W],
+  ['unc_same_host', R`\\h\s`, U],
+  ['unc_same_host_upper', R`\\H\S`, U],
+  ['unc_other_host', R`\\g\s`, U],
+  ['unc_base_forward', R`\\h\s`, '//h/s/repo'],
+  ['unc_four_separators', R`\\\\x`, U],
+  ['unc_dots', R`\\h\s\..\x`, U],
+  ['unc_dot_segment', R`\\h\s\a\.\x`, U],
+  ['unc_dot_space_run', R`\\h\s\. .\x`, U],
+  ['unc_triple_dot', R`\\h\s\...\x`, U],
+  ['unc_dot_prefixed_name', R`\\h\s\.a\x`, U],
+  ['unc_dot_suffixed_name', R`\\h\s\a.\x`, U],
+  ['unc_dot_at_end', R`\\h\s\.`, U],
+  ['unc_dot_dot_at_end', R`\\h\s\..`, U],
+  ['device_question', R`\\?\C:\x`, W],
+  ['device_dot', R`\\.\pipe\x`, W],
+  ['device_forward', '//?/C:/x', W],
+  ['device_unc', R`\\?\UNC\h\s\x`, U],
+  ['device_unc_other', R`\\?\UNC\g\s\x`, U],
+  ['device_unc_upper', R`\\?\unc\H\s`, U],
+  ['device_unc_without_server', '\\\\?\\UNC\\', U],
+  ['nt_prefix', R`\??\C:\x`, W],
+  ['nt_forward', '/??/x', W],
+  ['nt_after_dots', R`\a\..\??\x`, W],
+  ['nt_inside', R`a\??\x`, W],
+  ['posix_network', '/network/h/s', W],
+  ['posix_net', '/net', W],
+  ['posix_vol', '/.vol/1', W],
+  ['base_unc_relative_text', R`x\y`, U],
+  ['base_device', R`x`, R`\\?\C:\r`],
+]) {
+  add(`win32_refuses_${name}`, 'win32', 'refuses', [text, base], { home: '/home/me', master: '/home x' });
+}
+
+// The same checks on a posix host, where the text is not a Windows path but the share and device syntax still counts.
+for (const platform of ['linux', 'darwin']) {
+  for (const [name, text, base] of [
+    ['unc_same_host', '//h/s', '//h/repo'],
+    ['unc_same_host_case', '//H/s', '//h/repo'],
+    ['unc_other_host', '//g/s', '//h/repo'],
+    ['backslash_unc_same_host', R`\\h\s`, '//h/repo'],
+    ['backslash_unc_plain_base', R`\\h\s`, BASE],
+    ['unc_dots', '//h/../x', '//h/repo'],
+    ['unc_dot_run', '//h/. /x', '//h/repo'],
+    ['unc_triple_slash', '///h/x', '//h/repo'],
+    ['nt_slash', '/??/x', BASE],
+    ['nt_normalized', '/a/../??/x', BASE],
+    ['nt_inside', '/a/??/x', BASE],
+    ['device_slash', '//?/C:/x', BASE],
+    ['device_dot', '//./x', BASE],
+    ['device_unc', '//?/UNC/h/s', '//h/repo'],
+    ['device_unc_backslash', R`\\?\UNC\h\s`, '//h/repo'],
+    ['dots_text', '../x', BASE],
+    ['dot_text', './x', BASE],
+  ]) {
+    add(`${platform}_refuses_${name}`, platform, 'refuses', [text, base], { home: '/home/me', master: '/home x' });
+  }
+}
+add('linux_walk_link_unc_other_host', 'linux', 'walk', [`${BASE}/HEAD`, BASE], wlink(`${BASE}/HEAD`, '//h/other'));
+add('linux_walk_link_nt_slash', 'linux', 'walk', [`${BASE}/HEAD`, BASE], wlink(`${BASE}/HEAD`, '/??/x'));
+add('linux_walk_unc_base_link_same_host', 'linux', 'walk', ['/h/repo/.git/HEAD', '//h/repo/.git'], wlink('/h/repo/.git/HEAD', '//h/other'));
+
+// Reaching text from a base directory: refused, unreachable, and where it leads.
+for (const [name, text, base, probe] of [
+  ['relative', R`refs\x`, W, {}],
+  ['forward_relative', 'refs/x', W, {}],
+  ['dots_up', R`..\x`, W, {}],
+  ['dots_up_through_special', R`..\x`, W, { kinds: { [R`C:\r\repo\x`]: 'special' } }],
+  ['dots_up_joined_special', R`..\x`, W, { kinds: { [wp('..')]: 'special' } }],
+  ['drive_absolute', R`D:\x`, W, {}],
+  ['drive_absolute_special', R`D:\x`, W, { kinds: { [R`D:\x`]: 'special' } }],
+  ['rooted', R`\x`, W, {}],
+  ['unc_refused', R`\\h\s\x`, W, {}],
+  ['unc_same_host', R`\\h\s\x`, U, {}],
+  ['through_link', R`refs\x`, W, wlink(wp('refs'), R`D:\real`)],
+  ['through_refused_link', R`refs\x`, W, wlink(wp('refs'), R`\\g\s`)],
+]) {
+  add(`win32_reach_${name}`, 'win32', 'reach', [text, base], probe);
+}
+for (const platform of ['linux', 'darwin']) {
+  for (const [name, text, base, probe] of [
+    ['relative', 'refs/x', BASE, {}],
+    ['dots_up', '../x', BASE, {}],
+    ['dots_up_resolved_special', '../x', BASE, kinds({ '/r/repo/x': 'special' })],
+    ['dots_up_joined_special', '../x', BASE, kinds({ [`${BASE}/..`]: 'special' })],
+    ['absolute', '/abs/x', BASE, {}],
+    ['absolute_special', '/abs/x', BASE, kinds({ '/abs': 'special' })],
+    ['network', '/network/h/s', BASE, {}],
+    ['same_host_share', '//h/s', '//h/repo', {}],
+    ['through_link', 'refs/x', BASE, wlink(`${BASE}/refs`, '/real')],
+  ]) {
+    add(`${platform}_reach_${name}`, platform, 'reach', [text, base], probe);
+  }
+}
+
+// Finding the repository root with Windows paths.
+{
+  const root = (name, start, probe = {}) => add(`win32_root_${name}`, 'win32', 'root', [start], probe);
+  const git = (dir) => `${dir}\\.git`;
+  root('found_here', R`C:\a\b\c`, kinds({ [git(R`C:\a\b\c`)]: 'dir' }));
+  root('found_above', R`C:\a\b\c`, kinds({ [git(R`C:\a\b\c`)]: 'absent', [git(R`C:\a\b`)]: 'absent', [git(R`C:\a`)]: 'dir' }));
+  root('git_file', R`C:\a\b`, kinds({ [git(R`C:\a\b`)]: 'file' }));
+  root('special_marker', R`C:\a\b`, kinds({ [git(R`C:\a\b`)]: 'special', [git(R`C:\a`)]: 'dir' }));
+  root('absent_everywhere', R`C:\a\b`, kinds({ [git(R`C:\a\b`)]: 'absent', [git(R`C:\a`)]: 'absent', [R`C:\.git`]: 'absent' }));
+  root('at_drive_root', R`C:\a`, kinds({ [git(R`C:\a`)]: 'absent', [R`C:\.git`]: 'dir' }));
+  root('start_is_drive_root', 'C:\\', kinds({ [R`C:\.git`]: 'dir' }));
+  root('forward_slash_start', 'C:/a/b', kinds({ [git(R`C:\a\b`)]: 'dir' }));
+  root('start_with_dots', R`C:\a\b\..\c\.\d`, kinds({ [git(R`C:\a\c\d`)]: 'dir' }));
+  root('lower_case_drive', R`c:\a`, kinds({ [git(R`c:\a`)]: 'dir' }));
+  root('rooted_no_drive', R`\a\b`, kinds({ [git(R`\a\b`)]: 'absent', [git(R`\a`)]: 'dir' }));
+  root('unc_found_here', R`\\h\s\a\b`, kinds({ [git(R`\\h\s\a\b`)]: 'dir' }));
+  root('unc_found_at_share_root', R`\\h\s\a`, kinds({ [git(R`\\h\s\a`)]: 'absent', [git(R`\\h\s`)]: 'dir' }));
+  root('unc_absent_everywhere', R`\\h\s\a`, kinds({ [git(R`\\h\s\a`)]: 'absent', [git(R`\\h\s`)]: 'absent', [R`\.git`]: 'dir' }));
+  root('marker_link_ok', R`C:\a\b`, { ...wlink(git(R`C:\a\b`), R`D:\real`), stats: { [git(R`C:\a\b`)]: { kind: 'dir' } } });
+  root('marker_link_relative', R`C:\a\b`, { ...wlink(git(R`C:\a\b`), R`..\real`), stats: { [git(R`C:\a\b`)]: { kind: 'file' } } });
+  root('marker_link_dangling', R`C:\a\b`, { ...wlink(git(R`C:\a\b`), R`D:\real`, { kinds: { [git(R`C:\a`)]: 'dir' } }), stats: { [git(R`C:\a\b`)]: { code: 'ENOENT' } } });
+  root('marker_link_to_unc', R`C:\a\b`, wlink(git(R`C:\a\b`), R`\\h\s`, { kinds: { [git(R`C:\a`)]: 'dir' } }));
+  root('marker_link_to_device', R`C:\a\b`, wlink(git(R`C:\a\b`), R`\\?\C:\x`, { kinds: { [git(R`C:\a`)]: 'dir' } }));
+  root('marker_link_to_nt', R`C:\a\b`, wlink(git(R`C:\a\b`), R`\??\C:\x`, { kinds: { [git(R`C:\a`)]: 'dir' } }));
+  root('marker_link_unreadable', R`C:\a\b`, { kinds: { [git(R`C:\a\b`)]: 'symlink', [git(R`C:\a`)]: 'dir' } });
+}
+
+// The helpers behind the path syntax, one process per platform: the bundle's own regular expressions and checks, and
+// the path module of the platform where the bundle uses it.
+const flavorScenarios = [];
+{
+  const singles = ['', '/', '\\', 'a', 'a/b', 'a\\b', 'a//b\\\\c', 'a\\', 'a/', 'C:', 'C:\\', 'C:/', 'C:\\a', 'c:/a\\b', 'C:a', '1:\\a', '\\a', '/a',
+    '\\\\', '\\\\srv', '\\\\srv\\share', '\\\\srv\\share\\', '\\\\srv\\share\\x', '\\\\srv\\\\x', '\\\\\\share', '//srv/share/x', '//?/UNC/',
+    '//?/UNC/Srv/x', '//./UNC/H', '//?/c:/x', '//?x', '//', '//?/', '\\??\\x', '/??/x', 'a??', '\\\\.\\..\\??\\x', '\\\\?\\..\\??\\x', '/a/./b', '/a/../b', 'a/.. /b',
+    'a/.b', 'a./b', '..', '.', '...', '. ', '//a/./b', '//SRV/Share', '//srv/', '///', '/x/y', '//srv/share/..', '//Srv\\Share'];
+  const bases = ['/', '//srv/share', '//SRV/other', '/x', 'C:\\a', '\\\\srv\\share\\x'];
+  const pairs = [['C:\\a', 'b'], ['/a', 'b'], ['/a', '../b'], ['C:\\a', '..\\b'], ['a', 'b'], ['', 'b'], ['a', ''], ['C:\\', '..'], ['\\\\srv\\share\\x', '..\\..\\y'],
+    ['C:\\a', 'D:\\b'], ['C:\\a', '/b'], ['/a/b', '../../..'], ['/', 'x']];
+  const alone = ['/a/../b', 'C:\\a\\..\\b', 'a', '', '.', 'C:', '\\\\srv\\share', '/', '//a//b/'];
+  for (const [platform, win] of [['linux', false], ['win32', true]]) {
+    const calls = [['sep']];
+    for (const text of singles) {
+      for (const op of ['rooted', 'rootLen', 'split', 'ends', 'server', 'device', 'dots', 'nt', 'two', 'dirname']) calls.push([op, text]);
+      for (const base of bases) calls.push(['share', text, base]);
+    }
+    for (const pair of pairs) for (const op of ['join', 'resolve']) calls.push([op, ...pair]);
+    for (const text of alone) calls.push(['resolveAlone', text]);
+    flavorScenarios.push({ name: `flavor_${platform}`, platform, fn: 'flavor', args: calls.filter((call) => win || !['resolve', 'resolveAlone'].includes(call[0]) || call.slice(1).every((part) => part.startsWith('/'))), probe: {} });
+  }
+}
+
+const names = new Set();
 for (const scenario of scenarios) {
-  const run = spawnSync(process.execPath, [self, '--child', JSON.stringify({ bridgePath: patchedPath, ...scenario })], { encoding: 'utf8', timeout: 60000 });
+  if (names.has(scenario.name)) throw new Error(`duplicate scenario ${scenario.name}`);
+  names.add(scenario.name);
+}
+const cases = [];
+const flavorCases = [];
+for (const scenario of [...scenarios, ...flavorScenarios]) {
+  const win32 = scenario.platform === 'win32';
+  const run = spawnSync(process.execPath, [...(win32 ? ['--import', hookPath] : []), self, '--child', JSON.stringify({ bridgePath: patchedPath, ...scenario })], {
+    encoding: 'utf8',
+    timeout: 60000,
+    env: { ...process.env, WIN32_PATH_PARENT: pathToFileURL(patchedPath).href },
+  });
   if (run.status !== 0) throw new Error(`${scenario.name}: ${run.stderr.split('\n').map((line) => line.slice(0, 240)).join('\n')}`);
-  cases.push({ ...scenario, expect: JSON.parse(run.stdout) });
+  (scenario.fn === 'flavor' ? flavorCases : cases).push({ ...scenario, expect: JSON.parse(run.stdout) });
 }
 fs.rmSync(patchedDir, { recursive: true, force: true });
 
-const text = `[\n${cases.map((entry) => JSON.stringify(entry)).join(',\n')}\n]\n`;
-const target = path.join(fixturesDir, 'platform.json');
-if (check) {
-  if (!fs.existsSync(target) || fs.readFileSync(target, 'utf8') !== text) {
-    process.stderr.write(`${target} is stale\n`);
-    process.exit(1);
+for (const [file, list] of [['platform.json', cases], ['flavor.json', flavorCases]]) {
+  const text = `[\n${list.map((entry) => JSON.stringify(entry)).join(',\n')}\n]\n`;
+  const target = path.join(fixturesDir, file);
+  if (check) {
+    if (!fs.existsSync(target) || fs.readFileSync(target, 'utf8') !== text) {
+      process.stderr.write(`${target} is stale\n`);
+      process.exit(1);
+    }
+  } else {
+    fs.mkdirSync(fixturesDir, { recursive: true });
+    fs.writeFileSync(target, text);
   }
-} else {
-  fs.mkdirSync(fixturesDir, { recursive: true });
-  fs.writeFileSync(target, text);
 }
 
 // Runs one scenario in its own process: the platform is read when the bundle loads and the checks keep state.
@@ -268,6 +494,7 @@ async function child({ bridgePath: bridge, platform, fn, args, probe }) {
   globalThis.Bun = { which: () => null };
   process.env.PROBE_SESSION_CWD = '/nonexistent-session-directory';
   Object.defineProperty(process, 'platform', { value: platform });
+  if (platform === 'win32') process.chdir('/');
   if (probe.wsl) process.env.WSL_DISTRO_NAME = 'Ubuntu';
   const module = await import(pathToFileURL(bridge).href).catch((error) => {
     process.stderr.write(`import failed: ${String(error?.message ?? error).slice(0, 300)}\n`);
@@ -285,8 +512,10 @@ async function child({ bridgePath: bridge, platform, fn, args, probe }) {
   const warm = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-platform-warm-'));
   await module.createCodeSession(`http://127.0.0.1:${server.address().port}`, 't', 'T', 5000, undefined, { gitRepoUrl: 'https://github.com/acme/widgets', branch: '' }, warm).catch(() => {});
   server.close();
-  install(probe);
-  const result = invoke(module, fn, args);
+  install(probe, platform);
+  // The warm-up answered the home mount check against the real host and the bundle keeps that answer.
+  module.__mountCache.value = undefined;
+  const result = invoke(module, fn, args, platform);
   process.stdout.write(JSON.stringify(result));
 }
 
@@ -305,14 +534,14 @@ function entry(kind, dev) {
   };
 }
 
-function install(probe) {
+function install(probe, platform) {
   const kindMap = probe.kinds ?? {};
   const linkMap = probe.links ?? {};
   const stats = probe.stats ?? {};
   const statfsMap = Object.fromEntries(Object.entries(probe.statfs ?? {}).map(([key, list]) => [key, [...list]]));
   const real = { lstat: fs.lstatSync, readFile: fs.readFileSync };
   fs.lstatSync = (file, ...rest) => {
-    if (typeof file !== 'string' || !path.isAbsolute(file)) return real.lstat(file, ...rest);
+    if (typeof file !== 'string' || (platform !== 'win32' && !path.isAbsolute(file))) return real.lstat(file, ...rest);
     const kind = kindMap[file] ?? 'dir';
     if (kind === 'absent') throw failure('ENOENT');
     if (kind === 'other') throw failure('EIO');
@@ -355,17 +584,42 @@ function install(probe) {
   syncBuiltinESMExports();
 }
 
-function invoke(module, fn, args) {
+function invoke(module, fn, args, platform) {
   switch (fn) {
     case 'walk': return module.__walk(args[0], args[1]);
     case 'refuses': return module.__refuses(args[0], args[1]);
     case 'mac': return module.__mac(args[0], args[1]);
     case 'step': return module.__step(args[0], args[1]);
     case 'host': return module.__host(args[0]);
+    case 'reach': {
+      const resolve = platform === 'win32' ? win32Path.resolve : path.resolve;
+      return { refused: module.__refuses(args[0], args[1]), unreachable: module.__reach(args[0], args[1]), resolved: resolve(args[1], args[0]) };
+    }
     case 'autofs': return args[0].map((entryPath) => module.__autofs(entryPath));
     case 'root': {
       const found = module.__root(args[0]);
       return found === module.__none ? null : String(found);
+    }
+    case 'flavor': {
+      const flavorPath = platform === 'win32' ? win32Path : path;
+      const operations = {
+        sep: () => flavorPath.sep,
+        rooted: (text) => module.__rooted.test(text),
+        rootLen: (text) => text.match(module.__rootRe)?.[0].length ?? 0,
+        split: (text) => text.split(module.__splitRe),
+        ends: (text) => module.__endRe.test(text),
+        server: (text) => module.__server(text),
+        device: (text) => module.__device(text),
+        dots: (text) => module.__dots(text),
+        nt: (text) => module.__nt(text),
+        two: (text) => module.__two(text),
+        share: (text, base) => module.__share(text, base),
+        dirname: (text) => flavorPath.dirname(text),
+        join: (left, right) => flavorPath.join(left, right),
+        resolve: (left, right) => flavorPath.resolve(left, right),
+        resolveAlone: (text) => flavorPath.resolve(text),
+      };
+      return args.map(([operation, ...inputs]) => operations[operation](...inputs));
     }
     default: throw new Error(`unknown function ${fn}`);
   }

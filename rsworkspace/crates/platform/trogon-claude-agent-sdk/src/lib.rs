@@ -14,6 +14,7 @@ mod auth_token;
 mod bridge_client;
 #[cfg(test)]
 mod bridge_fake_probe;
+mod bridge_flavor;
 mod bridge_git;
 mod bridge_gitcmd;
 mod bridge_js;

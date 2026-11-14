@@ -5,15 +5,17 @@
 //! component at a time and every target passes the same checks. Everything the checks ask of the host goes through a
 //! [`PlatformProbe`], and the cache of automount roots is the one upstream keeps for the whole process.
 //!
-//! Path text is handled with POSIX rules, as upstream does on every platform but Windows; Windows path syntax is not
-//! ported.
+//! Path text is handled with POSIX rules, as upstream does on every platform but Windows, where the [`Flavor`] of the
+//! guard follows drive letters, backslashes and UNC roots.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
+use crate::bridge_flavor::{Flavor, share_refused};
 use crate::bridge_js::{is_js_space, js_trim};
 use crate::bridge_platform::{EntryKind, HostProbe, Platform, PlatformProbe};
 use crate::bridge_unicode::js_lowercase;
+use unicode_normalization::UnicodeNormalization;
 
 const LINK_DEPTH: u32 = 40;
 const PARTIAL_DEPTH: usize = 6;
@@ -97,7 +99,7 @@ pub(crate) fn dirname(path: &str) -> String {
 }
 
 /// `path.posix.join(base, name)` for a plain `name`.
-fn join(base: &str, name: &str) -> String {
+pub(crate) fn join(base: &str, name: &str) -> String {
     match base {
         "" | "." => name.to_owned(),
         "/" => format!("/{name}"),
@@ -125,16 +127,18 @@ pub(crate) fn resolve(base: &str, text: &str) -> String {
     format!("/{}", parts.join("/"))
 }
 
-/// `text.split(/\/+/)`: runs of slashes separate, and a trailing run leaves one empty piece.
-fn split_runs(text: &str) -> Vec<&str> {
+/// `text.split(/\/+/)`, or `text.split(/[/\\]+/)` on Windows: runs of separators split, and a trailing run leaves one
+/// empty piece.
+pub(crate) fn split_runs(text: &str, windows: bool) -> Vec<&str> {
+    let separates = |byte: u8| byte == b'/' || (windows && byte == b'\\');
     let mut pieces = Vec::new();
     let mut start = 0;
     let bytes = text.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index] == b'/' {
+        if separates(bytes[index]) {
             pieces.push(&text[start..index]);
-            while index < bytes.len() && bytes[index] == b'/' {
+            while index < bytes.len() && separates(bytes[index]) {
                 index += 1;
             }
             start = index;
@@ -216,11 +220,6 @@ fn net_share(parts: &[&str]) -> bool {
     let named = |part: &str| fold_case(&strip_format(part));
     (parts.len() == 2 && named(parts[0]) == "net")
         || (parts.len() == 3 && named(parts[0]) == "network" && named(parts[1]) == "servers")
-}
-
-/// Text that starts like a Windows share or device path, which upstream refuses before looking at anything else.
-fn share_syntax(text: &str) -> bool {
-    text.starts_with("//") || text.starts_with("\\\\") || text.starts_with("\\??\\")
 }
 
 /// Strips the `/System/Volumes/Data` prefix macOS puts in front of the writable volume's own directories.
@@ -318,6 +317,10 @@ fn lists_home(master: &str) -> bool {
 impl PathGuard {
     fn platform(&self) -> Platform {
         self.probe.platform()
+    }
+
+    fn flavor(&self) -> Flavor {
+        Flavor::of(self.platform())
     }
 
     /// The lower cased host of an automounted share path, when the path is one and the platform has them.
@@ -436,11 +439,13 @@ impl PathGuard {
 
     /// Whether `text` (a link target or a `gitdir:` value) is refused, relative to `base`.
     pub(crate) fn refuses(&self, text: &str, base: &str) -> bool {
-        let resolved = resolve(base, text);
+        let resolved = self.flavor().resolve(base, text);
+        if share_refused(text, base) || share_refused(&resolved, base) {
+            return true;
+        }
         let own = self.automount_host(base);
         [text, resolved.as_str()].iter().any(|candidate| {
-            share_syntax(candidate)
-                || self.automount_host(candidate).is_some_and(|host| Some(host) != own)
+            self.automount_host(candidate).is_some_and(|host| Some(host) != own)
                 || network_path(candidate)
                 || bare_net(candidate)
                 || special_mount(candidate)
@@ -457,20 +462,19 @@ impl PathGuard {
         if depth == 0 {
             return false;
         }
-        let (mut current, rest) = match path.strip_prefix('/') {
-            Some(rest) => ("/".to_owned(), rest),
-            None => (String::new(), path),
-        };
-        let parts = split_runs(rest);
+        let flavor = self.flavor();
+        let (root, rest) = path.split_at(flavor.root_len(path));
+        let mut current = root.to_owned();
+        let parts = flavor.split(rest);
         for (index, part) in parts.iter().enumerate() {
             if part.is_empty() || *part == "." {
                 continue;
             }
             if *part == ".." {
-                current = dirname(&current);
+                current = flavor.dirname(&current);
                 continue;
             }
-            current = join(&current, part);
+            current = flavor.join(&current, part);
             if self.forbidden_step(&current, base) || network_path(&current) {
                 return false;
             }
@@ -480,22 +484,22 @@ impl PathGuard {
                     let Some(text) = self.probe.link_text(&current) else {
                         return false;
                     };
-                    let parent = dirname(&current);
+                    let parent = flavor.dirname(&current);
                     if self.refuses(&text, &parent) {
                         return false;
                     }
-                    let target = if text.starts_with('/') {
+                    let target = if flavor.rooted(&text) {
                         text
                     } else {
-                        format!("{parent}/{text}")
+                        format!("{parent}{}{text}", flavor.sep())
                     };
-                    let remaining = parts[index + 1..].join("/");
+                    let remaining = parts[index + 1..].join(&flavor.sep().to_string());
                     let next = if remaining.is_empty() {
                         target
-                    } else if target.ends_with('/') {
+                    } else if flavor.ends_with_separator(&target) {
                         format!("{target}{remaining}")
                     } else {
-                        format!("{target}/{remaining}")
+                        format!("{target}{}{remaining}", flavor.sep())
                     };
                     return self.walk(&next, base, depth - 1);
                 }
@@ -510,13 +514,48 @@ impl PathGuard {
         if self.refuses(text, base) {
             return None;
         }
-        let joined = if text.starts_with('/') {
+        let flavor = self.flavor();
+        let joined = if flavor.rooted(text) {
             text.to_owned()
         } else {
-            format!("{base}/{text}")
+            format!("{base}{}{text}", flavor.sep())
         };
-        let resolved = resolve(base, text);
+        let resolved = flavor.resolve(base, text);
         (self.walks(&joined, base) && (resolved == joined || self.walks(&resolved, base))).then_some(resolved)
+    }
+
+    /// `path.join(base, name)` for the platform the guard asks.
+    pub(crate) fn join(&self, base: &str, name: &str) -> String {
+        self.flavor().join(base, name)
+    }
+
+    /// The directory of the nearest repository around `directory`, skipping automount map roots.
+    pub(crate) fn find_root(&self, directory: &str) -> Option<String> {
+        let flavor = self.flavor();
+        let mut current = flavor.resolve_alone(directory);
+        let root = current
+            .find(flavor.sep())
+            .map_or_else(|| flavor.sep().to_string(), |index| current[..=index].to_owned());
+        while current != root {
+            if !self.autofs_root(&current) && self.has_repository_marker(&current) {
+                return Some(self.precomposed(&current));
+            }
+            let parent = flavor.dirname(&current);
+            if parent == current {
+                break;
+            }
+            current = parent;
+        }
+        self.has_repository_marker(&root).then(|| self.precomposed(&root))
+    }
+
+    /// The path in the form macOS file names are compared in.
+    fn precomposed(&self, path: &str) -> String {
+        if self.platform() == Platform::Darwin {
+            path.nfc().collect()
+        } else {
+            path.to_owned()
+        }
     }
 
     /// What `path` is, without following a final link.
@@ -531,7 +570,7 @@ impl PathGuard {
 
     /// Whether `directory` holds a usable `.git` entry: a directory or file, or a link to one that passes the checks.
     pub(crate) fn has_repository_marker(&self, directory: &str) -> bool {
-        let marker = join(directory, ".git");
+        let marker = self.join(directory, ".git");
         match self.probe.entry_kind(&marker) {
             EntryKind::Symlink => self.probe.link_text(&marker).is_some_and(|target| {
                 self.reach(directory, &target).is_some()

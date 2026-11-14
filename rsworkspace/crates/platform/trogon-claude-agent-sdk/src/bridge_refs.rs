@@ -15,7 +15,7 @@ use std::pin::Pin;
 
 use crate::bridge_gitcmd::GitProbeContext;
 use crate::bridge_js::js_trim;
-use crate::bridge_paths::{PathGuard, dirname, resolve};
+use crate::bridge_paths::PathGuard;
 use crate::bridge_platform::EntryKind;
 
 const FALLBACK: &str = "main";
@@ -67,28 +67,10 @@ fn as_str(path: &Path) -> &str {
     path.to_str().unwrap_or_default()
 }
 
-/// The directory of the nearest repository around `directory`, skipping automount map roots.
-pub(crate) fn find_root(paths: &PathGuard, directory: &Path) -> Option<String> {
-    let mut current = resolve(as_str(directory), ".");
-    loop {
-        if current == "/" {
-            return paths.has_repository_marker("/").then_some(current);
-        }
-        if !paths.autofs_root(&current) && paths.has_repository_marker(&current) {
-            return Some(current);
-        }
-        let parent = dirname(&current);
-        if parent == current {
-            return None;
-        }
-        current = parent;
-    }
-}
-
 /// The `.git` directory of the nearest repository around `directory`, following a `gitdir:` file.
 pub(crate) fn find_git_dir(paths: &PathGuard, directory: &Path) -> Option<PathBuf> {
-    let root = find_root(paths, directory)?;
-    let dot_git = Path::new(&root).join(".git");
+    let root = paths.find_root(as_str(directory))?;
+    let dot_git = PathBuf::from(paths.join(&root, ".git"));
     match paths.followed_kind(as_str(&dot_git)) {
         EntryKind::File => {}
         EntryKind::Absent | EntryKind::Other => return None,
@@ -103,7 +85,7 @@ pub(crate) fn find_git_dir(paths: &PathGuard, directory: &Path) -> Option<PathBu
 
 /// The directory a linked worktree shares its references with, when it names one.
 pub(crate) fn common_dir(paths: &PathGuard, git_dir: &Path) -> Option<PathBuf> {
-    let file = git_dir.join("commondir");
+    let file = PathBuf::from(paths.join(as_str(git_dir), "commondir"));
     if !paths.walks(as_str(&file), as_str(git_dir))
         || matches!(
             paths.entry_kind(as_str(&file)),
@@ -118,7 +100,7 @@ pub(crate) fn common_dir(paths: &PathGuard, git_dir: &Path) -> Option<PathBuf> {
 
 /// Whether the repository stores its references in the table format, which is read by asking Git.
 fn is_reftable(paths: &PathGuard, repository: &Path) -> bool {
-    let head = repository.join("HEAD");
+    let head = PathBuf::from(paths.join(as_str(repository), "HEAD"));
     paths.walks(as_str(&head), as_str(repository))
         && read_text(&head)
             .is_some_and(|text| js_trim(&text).strip_prefix("ref:").map(js_trim) == Some(REFTABLE_MARKER))
@@ -153,7 +135,7 @@ async fn origin_head(context: &GitProbeContext, repository: &Path) -> Option<Str
         let name = js_trim(&target).strip_prefix(ORIGIN)?;
         return valid_ref_name(name).then(|| name.to_owned());
     }
-    let path = repository.join(format!("{ORIGIN}HEAD"));
+    let path = PathBuf::from(context.paths.join(as_str(repository), &format!("{ORIGIN}HEAD")));
     if !context.paths.walks(as_str(&path), as_str(repository)) {
         return None;
     }
@@ -195,7 +177,7 @@ fn resolves<'a>(context: &'a GitProbeContext, repository: &'a Path, name: &'a st
 }
 
 async fn read_ref(context: &GitProbeContext, directory: &Path, name: &str, depth: u32) -> bool {
-    let path = directory.join(name);
+    let path = PathBuf::from(context.paths.join(as_str(directory), name));
     if !context.paths.walks(as_str(&path), as_str(directory)) {
         return false;
     }
@@ -206,7 +188,7 @@ async fn read_ref(context: &GitProbeContext, directory: &Path, name: &str, depth
             None => is_object_id(text),
         };
     }
-    let packed = directory.join("packed-refs");
+    let packed = PathBuf::from(context.paths.join(as_str(directory), "packed-refs"));
     context.paths.walks(as_str(&packed), as_str(directory)) && packed_ref(&packed, name)
 }
 

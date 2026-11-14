@@ -1,10 +1,7 @@
-use std::path::Path;
-
 use serde_json::Value;
 
 use super::*;
 use crate::bridge_fake_probe::FakeProbe;
-use crate::bridge_refs::find_root;
 
 const PLATFORM_GOLDENS: &str = include_str!("../tests/fixtures/bridge_create_session/platform.json");
 
@@ -15,7 +12,7 @@ fn text(case: &Value, index: usize) -> &str {
 #[test]
 fn answers_path_checks_like_the_upstream_bridge_on_every_platform() {
     let cases: Vec<Value> = serde_json::from_str(PLATFORM_GOLDENS).unwrap_or_default();
-    assert!(cases.len() > 300);
+    assert!(cases.len() > 500);
     for case in &cases {
         let name = case["name"].as_str().unwrap_or_default();
         let guard = PathGuard::new(Arc::new(FakeProbe::from_case(case)));
@@ -56,10 +53,19 @@ fn answers_path_checks_like_the_upstream_bridge_on_every_platform() {
                 assert_eq!(Value::Array(answers), *expected, "{name}");
             }
             "root" => assert_eq!(
-                find_root(&guard, Path::new(text(case, 0))).map_or(Value::Null, Value::String),
+                guard.find_root(text(case, 0)).map_or(Value::Null, Value::String),
                 *expected,
                 "{name}"
             ),
+            "reach" => {
+                let refused = expected["refused"].as_bool() == Some(true);
+                let unreachable = expected["unreachable"].as_bool() == Some(true);
+                let reached = guard.reach(text(case, 1), text(case, 0));
+                assert_eq!(reached.is_some(), !refused && !unreachable, "{name}");
+                if let Some(resolved) = reached {
+                    assert_eq!(Value::String(resolved), expected["resolved"], "{name}");
+                }
+            }
             other => panic!("{name}: unknown function {other}"),
         }
     }
@@ -79,8 +85,10 @@ fn folds_path_text_the_way_the_path_module_does() {
     assert_eq!(resolve("/a/b", "../c"), "/a/c");
     assert_eq!(resolve("/a", "/x/./y"), "/x/y");
     assert_eq!(resolve("/a/b", ".."), "/a");
-    assert_eq!(split_runs("a//b/"), ["a", "b", ""]);
-    assert_eq!(split_runs(""), [""]);
+    assert_eq!(split_runs("a//b/", false), ["a", "b", ""]);
+    assert_eq!(split_runs("a\\b//c", false), ["a\\b", "c"]);
+    assert_eq!(split_runs("a\\b//c\\", true), ["a", "b", "c", ""]);
+    assert_eq!(split_runs("", true), [""]);
 }
 
 #[test]
