@@ -384,8 +384,15 @@ async function run(spec) {
     result.epoch = handle.getEpoch();
   }
   await sleep(120);
-  const log = fs.existsSync(debugLog) ? fs.readFileSync(debugLog, 'utf8').slice(logStart) : '';
-  const reasons = [...log.matchAll(/terminal request-path condition \((\w+)\)/g)].map((m) => m[1]);
+  // The bundle's debug log writer is buffered, so the line that names the mismatch reason lands some time after the
+  // close. A session that closed always ended on a mismatch or on a refusal that names none, so wait for the line
+  // itself (bounded) instead of reading after a fixed timer.
+  const readReasons = () => {
+    const log = fs.existsSync(debugLog) ? fs.readFileSync(debugLog, 'utf8').slice(logStart) : '';
+    return [...log.matchAll(/terminal request-path condition \((\w+)\)/g)].map((m) => m[1]);
+  };
+  if (closes.length > 0) await until(() => readReasons().length > 0, 6000);
+  const reasons = readReasons();
   let kept = requests;
   if (spec.waitClose || spec.beats !== undefined) {
     let seen = 0;
@@ -490,6 +497,20 @@ async function fetchFailureCase(mode) {
   try { handle.close(); } catch {}
   await stop(server);
   return result;
+}
+
+// `--only=<case name>` records just that case, as many times as `--times=<n>` says, and prints the results.
+const only = flags.find((flag) => flag.startsWith('--only='))?.slice('--only='.length);
+if (only !== undefined) {
+  const times = Number(flags.find((flag) => flag.startsWith('--times='))?.slice('--times='.length) ?? 1);
+  const spec = Object.values(cases).flat().find((candidate) => candidate.name === only);
+  if (!spec) throw new Error(`no case named ${only}`);
+  for (let i = 0; i < times; i += 1) {
+    const result = await run(spec);
+    process.stdout.write(`${JSON.stringify({ name: result.name, reason: result.reason, closes: result.closes, requests: result.requests.length })}\n`);
+  }
+  fs.rmSync(work, { recursive: true, force: true });
+  process.exit(0);
 }
 
 const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], network: [], fetch_failures: [] };
