@@ -3368,7 +3368,7 @@
         },
         {
           "path": "src/websocket_transport_tests.rs",
-          "name": "the_keep_alive_is_sent_every_fifty_seconds_while_reading"
+          "name": "the_keep_alive_is_sent_on_its_interval_while_reading"
         },
         {
           "path": "src/websocket_transport_tests.rs",

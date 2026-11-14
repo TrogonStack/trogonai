@@ -24,7 +24,9 @@ use crate::{
     settings_resolve_platform_kind::PlatformKind,
     settings_resolve_restrict::{js_equal, restrict_policy_document},
     settings_resolve_tier::{LoadState, TierRead},
-    settings_resolve_values::{SettingsMap, has_authored_value, has_policy_content, merge_with_union, omit, pick},
+    settings_resolve_values::{
+        SettingsMap, has_authored_value, has_policy_content, in_schema_order, merge_with_union, omit, pick,
+    },
     settings_resolve_writable::{DocumentProbe, user_can_write},
 };
 
@@ -251,6 +253,18 @@ pub(crate) struct Held {
     only_held_content: bool,
     /// Allow lists only the restricted documents set (`heldAllowLists`).
     allow_lists: Vec<&'static str>,
+    /// How the file tier orders its keys: restricted documents leave the order the restriction built.
+    key_order: PolicyKeyOrder,
+}
+
+/// How the policy settings order their keys. Upstream parses every document with the settings schema as it reads it,
+/// so a tier read as written lists its keys in schema order, while a tier the resolver builds afterwards (the
+/// parent's slice, or what a user-writable file may only restrict) keeps the order it was built in.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum PolicyKeyOrder {
+    #[default]
+    Schema,
+    Composed,
 }
 
 /// Whether the user could rewrite a managed document, asked only of a session that asks its organization (`n` in
@@ -300,7 +314,7 @@ fn read_managed_file<H: SettingsHost>(host: &H, kind: PlatformKind, mdm: &MdmEva
                 for (key, value) in pick(settings, &POLICY_META_KEYS) {
                     held_meta.insert(key, value);
                 }
-                return Some(settings.clone());
+                return Some(in_schema_order(settings));
             }
             restricts = true;
             Some(SettingsMap::new())
@@ -319,7 +333,8 @@ fn read_managed_file<H: SettingsHost>(host: &H, kind: PlatformKind, mdm: &MdmEva
             if !writes.allowed(rewritable) {
                 return None;
             }
-            Some(restrict_policy_document(settings).unwrap_or_else(|| settings.clone()))
+            let parsed = in_schema_order(settings);
+            Some(restrict_policy_document(&parsed).unwrap_or(parsed))
         },
     );
     let kept = held.settings.clone().unwrap_or_default();
@@ -331,6 +346,7 @@ fn read_managed_file<H: SettingsHost>(host: &H, kind: PlatformKind, mdm: &MdmEva
     if added.is_empty() {
         return (held, flags);
     }
+    flags.key_order = PolicyKeyOrder::Composed;
     let only_added = kept.is_empty();
     let mut settings = if only_added {
         added.clone()
@@ -383,6 +399,7 @@ impl PolicyOrigin {
 pub(crate) struct PolicyResolution {
     pub(crate) settings: Option<SettingsMap>,
     pub(crate) origin: Option<PolicyOrigin>,
+    pub(crate) key_order: PolicyKeyOrder,
     pub(crate) mdm_did_not_load: bool,
     pub(crate) file_did_not_load: bool,
 }
@@ -852,9 +869,17 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
     };
     let mdm_did_not_load = !evaluation.mdm.user_writable
         && (evaluation.mdm.load_state == LoadState::DidNotLoad || evaluation.mdm.unreadable);
+    let key_order = if origin == Some(PolicyOrigin::Parent) {
+        PolicyKeyOrder::Composed
+    } else if selection.file_index == Some(0) && admin.is_some() {
+        held.key_order
+    } else {
+        PolicyKeyOrder::Schema
+    };
     PolicyResolution {
         settings,
         origin,
+        key_order,
         mdm_did_not_load,
         file_did_not_load: file.load_state == LoadState::DidNotLoad,
     }

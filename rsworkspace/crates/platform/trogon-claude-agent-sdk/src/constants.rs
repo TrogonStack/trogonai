@@ -1178,3 +1178,21 @@ pub(crate) const RAW_JSON_MAX_DEPTH: usize = 200;
 
 /// The prefix of the placeholder text a request id that a `Value` cannot hold stands for until it is written.
 pub(crate) const PYTHON_ID_MARKER_PREFIX: &str = "\u{0}pyid:";
+
+/// TypeScript `oA`: how long the WebSocket transport's connection may take to open.
+pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_millis(15_000);
+
+/// TypeScript `g4`: the delay between the WebSocket transport's keep-alive frames.
+pub(crate) const WEBSOCKET_KEEP_ALIVE_INTERVAL: Duration = Duration::from_millis(50_000);
+
+/// The line the WebSocket transport sends as a keep-alive frame.
+pub(crate) const WEBSOCKET_KEEP_ALIVE_LINE: &str = "{\"type\":\"keep_alive\"}\n";
+
+/// The reason the WebSocket transport gives when it closes the connection.
+pub(crate) const WEBSOCKET_CLOSE_REASON: &str = "Normal closure";
+
+/// The code a browser reports for a close frame without a status.
+pub(crate) const WEBSOCKET_NO_STATUS_CODE: u16 = 1005;
+
+/// The code a browser reports when the connection drops without a close frame.
+pub(crate) const WEBSOCKET_ABNORMAL_CODE: u16 = 1006;

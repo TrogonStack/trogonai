@@ -602,7 +602,11 @@ async fn mcp_replacement_swaps_in_process_servers_before_the_response() -> TestR
         json!({"added":[],"removed":[],"errors":{"fresh":"reject fresh"}}),
     )
     .await?;
-    assert_eq!(replacing.await??.errors.len(), 1);
+    let replaced = replacing.await??;
+    assert_eq!(
+        replaced.as_json().map(|reply| &reply["errors"]),
+        Some(&json!({"fresh":"reject fresh"}))
+    );
     cli.send(json!({"type":"control_request","request_id":"lookup","request":{"subtype":"mcp_message","server_name":"fresh","message":{"jsonrpc":"2.0","id":2,"method":"ping"}}})).await?;
     let response = cli.read().await?;
     assert_eq!(response["response"]["error"], "SDK MCP request failed");
