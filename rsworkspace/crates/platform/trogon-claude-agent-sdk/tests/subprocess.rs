@@ -1016,7 +1016,7 @@ async fn a_failing_custom_spawner_is_a_spawn_error() -> TestResult {
     let mut options = options("normal")?;
     options.spawn_claude_code_process = Some(trogon_claude_agent_sdk::SpawnClaudeCodeProcess(Arc::new(
         |_: trogon_claude_agent_sdk::SpawnOptions| -> std::io::Result<tokio::process::Child> {
-            Err(std::io::Error::other("no machine"))
+            Err(std::io::Error::from(std::io::ErrorKind::HostUnreachable))
         },
     )));
     let error = ClaudeSdkClient::connect(options)
@@ -1024,7 +1024,7 @@ async fn a_failing_custom_spawner_is_a_spawn_error() -> TestResult {
         .err()
         .ok_or_else(|| std::io::Error::other("connect succeeded without a process"))?;
     assert!(
-        matches!(&error, Error::Spawn(source) if source.to_string() == "no machine"),
+        matches!(&error, Error::Spawn(source) if source.kind() == std::io::ErrorKind::HostUnreachable),
         "{error:?}"
     );
     Ok(())
