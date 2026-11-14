@@ -7,9 +7,7 @@ use trogon_claude_agent_sdk::{
     BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, EndWithoutResult, Error,
     FeatureSupport, FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages,
     PermissionDecision, Prompt, QueueCapacity, RunEndTimeout, SessionId, SessionStore, SessionStoreOptions,
-    SystemPrompt, Timeout, ToolPermissionRequest, ToolRule, ToolSet,
-    adapters::{EnvironmentVariable, SystemClock, SystemEnvironment},
-    query,
+    SystemPrompt, Timeout, ToolPermissionRequest, ToolRule, ToolSet, adapters::SystemClock, query,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -953,13 +951,6 @@ fn spawn_reporter(calls: Recorded<(u32, f64)>) -> trogon_claude_agent_sdk::OnPro
     ))
 }
 
-#[cfg_attr(
-    dylint_lib = "trogon_dylint_lints",
-    allow(
-        std_env_access,
-        reason = "The spawner must receive the inherited PATH, so the test reads the real process environment."
-    )
-)]
 #[tokio::test]
 async fn a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query() -> TestResult {
     let directory = tempfile::tempdir()?;
@@ -1000,10 +991,17 @@ async fn a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query()
         spawn.env.get(OsStr::new("SPAWN_MARKER")).map(|value| value.as_os_str()),
         Some(OsStr::new("custom"))
     );
-    // The spawner gets the whole environment, the caller's included, not only the SDK's changes.
-    if let Some(path) = SystemEnvironment.var_os(OsStr::new("PATH")) {
-        assert_eq!(spawn.env.get(OsStr::new("PATH")), Some(&path));
-    }
+    // The spawner gets the whole child environment, not only the SDK's changes. TypeScript builds it from
+    // `options.env` alone when that is given (`env ? {...env} : {...process.env}`), so the caller's entries arrive
+    // and the inherited `PATH` does not.
+    assert_eq!(
+        spawn
+            .env
+            .get(OsStr::new("LLVM_PROFILE_FILE"))
+            .map(|value| value.as_os_str()),
+        Some(OsStr::new("/dev/null"))
+    );
+    assert_eq!(spawn.env.get(OsStr::new("PATH")), None);
     assert_eq!(spawn.uid, None);
     // Closing without an abort leaves the forwarded signal alone, and TypeScript reports no spawn it did not make.
     assert!(!spawn.signal.is_cancelled());
