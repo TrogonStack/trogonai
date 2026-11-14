@@ -372,7 +372,7 @@ async fn run_case(case: &Value) -> TestResult {
     let (base, log) = serve_record(
         register.clone(),
         queue(case, "puts"),
-        queue(case, "beat"),
+        beat_answers(case),
         queue(case, "landing"),
         record,
         record_delay,
@@ -431,6 +431,13 @@ async fn run_case(case: &Value) -> TestResult {
     }
     if connected {
         for step in field(case, "steps").as_array().into_iter().flatten() {
+            if field(step, "op").as_str() == Some("beat") {
+                if let Err(reason) = worker.heartbeat().await {
+                    ending = Ending::mismatch(reason);
+                    break;
+                }
+                continue;
+            }
             if field(step, "op").as_str() == Some("events") {
                 match post_events(&mut worker, step).await? {
                     Ok(()) => continue,
@@ -536,6 +543,22 @@ async fn burst(
     Ok(worker.flush().await.map(|_| ()))
 }
 
+/// The heartbeat answers of a case: the `beat` queue, or the answers its `beat` steps serve in order.
+fn beat_answers(case: &Value) -> Vec<Value> {
+    let from_steps: Vec<Value> = field(case, "steps")
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|step| field(step, "op").as_str() == Some("beat"))
+        .map(|step| field(step, "answer").clone())
+        .collect();
+    if from_steps.is_empty() {
+        queue(case, "beat")
+    } else {
+        from_steps
+    }
+}
+
 /// Replaces every random uuid with `<uuid>`, as the recorder does for what it cannot repeat.
 fn hide_uuids(body: &str) -> String {
     let mut out = String::with_capacity(body.len());
@@ -632,6 +655,14 @@ async fn queued_reports_match_the_upstream_client() -> TestResult {
 #[tokio::test]
 async fn client_events_match_the_upstream_client() -> TestResult {
     replay("events", 12).await
+}
+
+/// `attachBridgeSession` never sets `followsServedPolicy`, `uploadHoldMarker` or `noSubscriberUploadHoldMs`, so the
+/// flush policy a heartbeat serves and the `has_subscribers` answer of an upload hold nothing: every post of these
+/// recorded runs leaves at once, the same as the runs without those answers.
+#[tokio::test]
+async fn served_hold_inputs_hold_nothing_like_the_upstream_client() -> TestResult {
+    replay("served", 15).await
 }
 
 #[test]

@@ -148,7 +148,7 @@ const pure = {
 const json = (status, value, headers = []) => ({ status, headers: [['content-type', 'application/json'], ...headers], body: JSON.stringify(value) });
 const raw = (status, body, headers = []) => ({ status, headers, body });
 const conflict = (reason) => json(409, {}, [['x-ccr-conflict-reason', reason]]);
-const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [] };
+const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], served: [] };
 const expired = jwt({ exp: 1 });
 const future = jwt({ exp: 99999999999 });
 const originRefusal = (status) => raw(status, '', [['request-id', 'req_abc']]);
@@ -288,6 +288,42 @@ add('events', 'an_ephemeral_batch_that_is_refused_is_dropped', { epoch: 6, event
 add('events', 'a_refused_resend_of_a_mixed_batch_is_dropped', { epoch: 6, events: [raw(500, ''), raw(400, ''), raw(400, ''), json(200, {})], steps: [post(3, [note('a', 'u1'), thinking('t1')]), post(1, [note('c', 'u3')])] });
 add('events', 'a_dropped_batch_does_not_stall_the_next', { epoch: 6, events: [raw(400, ''), json(200, {}), json(200, {})], steps: [post(1, [note('a', 'u1')]), post(1, [note('b', 'u2')])] });
 
+// ---- what the service can serve to hold uploads: the heartbeat policy and the has_subscribers answer ----
+// `attachBridgeSession` never sets followsServedPolicy, uploadHoldMarker or noSubscriberUploadHoldMs, so none of these
+// answers may hold a post. Every run here uses the default options, serves hold-shaped answers, and requires each post
+// to arrive promptly (a hold of the served age would show as a late post and fail the recording).
+// A `beat` step serves one heartbeat answer and waits for that beat; the other beats the short interval causes are
+// answered with the same body and left out of the request list, so the replay can make exactly the beats it records.
+const beat = (answer) => ({ op: 'beat', answer });
+const subscribers = (has) => json(200, { has_subscribers: has });
+const running = { op: 'state', state: 'running', sends: true };
+const policy = (extra = {}) => json(200, { event_flush_policy: { max_events: 3, max_age_ms: 1500, ...extra } });
+const fullPolicy = {
+  max_events: 5, max_age_ms: 1500, max_bytes: 4096, flush_on_sampling_end: true, flush_on_assistant: true, event_batch_upload: true,
+  hold_across_model_calls: true, hold_again: { soft_age_ms: 1000, soft_events: 3, after: ['Bash'], never_after_tools: ['Read'], tools_whose_results_wait: ['Bash'], later_worker_holds_first_turn: true },
+  may_wait_types: ['system/task_summary'], flush_after_tool_names: ['Write'], flush_on_call_of_tool_names: ['Bash'], settings_receipts_max_wait_ms: 2000,
+  messages_received_waits: true, receipts_ride_uploads: true, flush_before_tools_wait_ms: 1000, flush_after_tools: 'all', must_flush_types: ['assistant'],
+  live_twin_types: ['system/status'], live_only_types: ['system/task_summary'], transcript_max_age_ms: 3000, no_turn_max_age_ms: 1000, merge_worker_reports: true,
+  control_traffic_keeps_hold: true, empty_checkpoint_keeps_hold: true, first_turn_holds_each_call: true, settings_answers_max_wait_ms: 1000, init_max_wait_ms: 1000,
+  metadata_waits_for_status: ['task_summary'], metadata_never_sent: ['recap'], metadata_max_wait_ms: 1000, cost_report_max_wait_ms: 1000, policy_version: 'v1',
+};
+const served = (name, spec) => add('served', name, { epoch: 6, interval: 100, prompt: true, gated: true, ...spec });
+const burst3 = post(2, [note('b', 'u2'), note('c', 'u3'), note('d', 'u4')]);
+served('a_served_policy_holds_nothing', { steps: [beat(policy()), running, post(1, [note('a', 'u1')]), burst3, post(1, [note('e', 'u5')])] });
+served('a_served_policy_with_a_long_age_holds_nothing', { steps: [beat(policy({ max_age_ms: 120000, max_events: 90 })), running, post(1, [note('a', 'u1')]), burst3] });
+served('a_served_policy_that_holds_across_model_calls_holds_nothing', { steps: [beat(policy({ hold_across_model_calls: true, max_age_ms: 60000 })), running, post(1, [note('a', 'u1')]), burst3, post(2, [note('e', 'u5'), thinking('t1')])] });
+served('a_served_policy_with_every_field_holds_nothing', { steps: [beat(json(200, { event_flush_policy: fullPolicy })), running, post(1, [note('a', 'u1')]), burst3, post(2, [note('e', 'u5'), thinking('t1')])] });
+served('a_served_policy_with_every_field_leaves_metadata_alone', { steps: [beat(json(200, { event_flush_policy: fullPolicy })), running, { op: 'metadata', value: { task_summary: 's1' }, sends: true }, { op: 'metadata', value: { recap: 'r1' }, sends: true }, { op: 'state', state: 'idle', sends: true }] });
+served('a_served_policy_that_is_unreadable_holds_nothing', { steps: [beat(policy({ max_bytes: 'big' })), running, post(1, [note('a', 'u1')]), burst3] });
+served('a_served_policy_that_is_withdrawn_holds_nothing', { steps: [beat(policy()), running, post(1, [note('a', 'u1')]), beat(json(200, {})), burst3] });
+served('a_served_policy_that_changes_holds_nothing', { steps: [beat(policy()), running, post(1, [note('a', 'u1')]), beat(policy({ max_events: 2 })), burst3] });
+served('a_report_that_nobody_watches_holds_nothing', { events: [subscribers(false)], steps: [running, post(1, [note('a', 'u1')]), burst3, post(1, [note('e', 'u5')])] });
+served('a_report_that_somebody_watches_holds_nothing', { events: [subscribers(true)], steps: [running, post(1, [note('a', 'u1')]), burst3] });
+served('reports_that_flip_between_watched_and_not_hold_nothing', { events: [subscribers(false), subscribers(false), subscribers(true), subscribers(false)], steps: [running, post(1, [note('a', 'u1')]), post(1, [note('b', 'u2')]), post(1, [note('c', 'u3')]), post(1, [note('d', 'u4')])] });
+served('an_unreadable_report_holds_nothing', { events: [json(200, { has_subscribers: 'no' }), json(200, { has_subscribers: null })], steps: [running, post(1, [note('a', 'u1')]), burst3, post(1, [note('e', 'u5')])] });
+served('a_served_policy_and_an_unwatched_session_hold_nothing', { events: [subscribers(false), subscribers(false), subscribers(true)], steps: [beat(policy()), running, post(1, [note('a', 'u1')]), burst3, post(2, [note('e', 'u5'), thinking('t1')]), post(1, [note('f', 'u6')])] });
+served('a_full_policy_and_an_unwatched_session_hold_nothing', { events: [subscribers(false)], steps: [beat(json(200, { event_flush_policy: fullPolicy })), running, post(1, [note('a', 'u1')]), burst3, post(1, [note('e', 'u5')])] });
+
 // ---- runner ----
 const KEPT = new Set(['accept', 'content-type', 'authorization', 'anthropic-version', 'anthropic-client-platform', 'user-agent', 'x-ccr-ticket-rev', 'x-ccr-ticket-session', 'x-ccr-ticket-seq', 'x-ccr-upload-attempt']);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -298,6 +334,7 @@ const until = async (predicate, ms) => {
 
 async function run(spec) {
   const requests = [];
+  const gate = { on: spec.gated === true || (spec.steps ?? []).some((step) => step.op === 'beat'), pending: false, answer: null, current: null };
   const queues = { register: [...(spec.register === undefined ? [json(200, { worker_epoch: 5 })] : [spec.register])], put: [...(spec.puts ?? [])], beat: [...(spec.beat ?? [])], events: [...(spec.events ?? [])], landing: [...(spec.landing ?? [])] };
   const pick = (key) => {
     const queue = queues[key];
@@ -312,13 +349,19 @@ async function run(spec) {
       for (let i = 0; i < req.rawHeaders.length; i += 2) if (KEPT.has(req.rawHeaders[i].toLowerCase())) headers.push([req.rawHeaders[i], req.rawHeaders[i + 1]]);
       const route = req.url.replace(/^\/v1\/code\/sessions\/cse_abc/, '');
       const isRead = req.method === 'GET' && route === '/worker';
-      if (!isRead) requests.push({ method: req.method, path: req.url, headers, body: Buffer.concat(chunks).toString(), at: Date.now() });
+      const gated = gate.on && route === '/worker/heartbeat';
+      const background = gated && !gate.pending;
+      if (!isRead && !background) requests.push({ method: req.method, path: req.url, headers, body: Buffer.concat(chunks).toString(), at: Date.now() });
       let response = json(200, {});
       if (req.method === 'GET' && route === '/worker') response = spec.record ?? response;
       else if (route === '/worker/landing') response = pick('landing');
       else if (route === '/worker/register') response = pick('register');
       else if (req.method === 'PUT') response = pick('put');
-      else if (route === '/worker/heartbeat') response = pick('beat');
+      else if (gated) {
+        if (gate.pending) gate.current = gate.answer;
+        response = gate.current ?? json(200, {});
+        gate.pending = false;
+      } else if (route === '/worker/heartbeat') response = pick('beat');
       else if (route === '/worker/events') response = pick('events');
       res.statusCode = response.status;
       for (const [name, value] of response.headers) res.setHeader(name, value.replace('{base}', `http://127.0.0.1:${server.address().port}`));
@@ -349,10 +392,20 @@ async function run(spec) {
       if (step.op === 'events') {
         const seen = () => requests.filter((r) => r.path.endsWith('/worker/events')).length;
         const start = seen();
+        const wroteAt = Date.now();
         for (const item of step.writes) handle.write(item);
         await until(() => seen() >= start + step.expect, 12000);
+        if (spec.prompt && Date.now() - wroteAt > 600) throw new Error(`${spec.name}: a post was held for ${Date.now() - wroteAt} ms`);
         if (seen() < start + step.expect) throw new Error(`${spec.name}: expected ${step.expect} event posts`);
         await sleep(250);
+        continue;
+      }
+      if (step.op === 'beat') {
+        gate.answer = step.answer;
+        gate.pending = true;
+        await until(() => !gate.pending, 3000);
+        if (gate.pending) throw new Error(`${spec.name}: no heartbeat arrived`);
+        await sleep(150);
         continue;
       }
       if (step.op === 'burst') {
@@ -399,7 +452,7 @@ async function run(spec) {
     const limit = spec.waitClose ? Infinity : spec.beats;
     kept = requests.filter((r) => !r.path.endsWith('/worker/heartbeat') || ++seen <= limit);
   }
-  result.beats = kept.filter((r) => r.path.endsWith('/worker/heartbeat')).length;
+  result.beats = gate.on ? 0 : kept.filter((r) => r.path.endsWith('/worker/heartbeat')).length;
   if (spec.retryBases !== undefined) {
     const puts = requests.filter((r) => r.method === 'PUT').slice(1);
     const gaps = puts.slice(1).map((r, i) => r.at - puts[i].at);
@@ -513,8 +566,8 @@ if (only !== undefined) {
   process.exit(0);
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], network: [], fetch_failures: [] };
-for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events']) {
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], served: [], network: [], fetch_failures: [] };
+for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events', 'served']) {
   for (const spec of cases[section]) goldens[section].push(await run(spec));
 }
 for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));
