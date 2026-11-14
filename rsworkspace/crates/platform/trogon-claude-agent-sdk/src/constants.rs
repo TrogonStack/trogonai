@@ -1178,3 +1178,9 @@ pub(crate) const RAW_JSON_MAX_DEPTH: usize = 200;
 
 /// The prefix of the placeholder text a request id that a `Value` cannot hold stands for until it is written.
 pub(crate) const PYTHON_ID_MARKER_PREFIX: &str = "\u{0}pyid:";
+
+/// Python's precision in `invalid literal for int() with base 10: %.200R`.
+pub(crate) const PYTHON_INT_LITERAL_REPR_CHARS: usize = 200;
+
+/// Python's floor and default for the initialize wait, in seconds: `max(int(...) / 1000.0, 60.0)`.
+pub(crate) const PYTHON_INITIALIZE_TIMEOUT_SECONDS: f64 = 60.0;

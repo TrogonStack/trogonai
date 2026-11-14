@@ -452,7 +452,8 @@ environment values and HTTP or SSE header values follow the same rule.
 `ModelName` keeps the model out of debug output, so options debug output shows
 every other setting without listing fields by hand.
 A Windows `.bat` or `.cmd` CLI path starts, as in TypeScript;
-`WindowsBatchCli::Refuse` selects Python's refusal at process start.
+`WindowsBatchCli::Refuse` selects Python's refusal at process start, which
+fires only on Windows, as in Python.
 Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L93)
 and [`disconnect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L607)
 on an existing client. Rust intentionally uses an async factory for `connect`

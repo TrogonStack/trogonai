@@ -78,6 +78,7 @@ mod process_transport;
 mod prompt;
 mod python_json;
 mod python_json_value;
+mod python_text;
 mod queue_capacity;
 mod raw_json_id;
 #[cfg(unix)]

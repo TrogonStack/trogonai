@@ -14,7 +14,8 @@ use tokio::{
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
     PermissionDecision, ProtocolError, StderrTail, ToolPermissionHandler, Transport,
-    constants::TYPESCRIPT_INITIALIZE_TIMEOUT,
+    constants::{PYTHON_INITIALIZE_TIMEOUT_SECONDS, PYTHON_INT_LITERAL_REPR_CHARS, TYPESCRIPT_INITIALIZE_TIMEOUT},
+    python_text,
     wire::{
         self, ControlResponse, Frame, IncomingControl,
         runtime_payload::{
@@ -601,88 +602,37 @@ impl Initialization {
     }
 }
 
-/// Python: `max(int(os.environ.get("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT", "60000")) / 1000, 60)` seconds.
+/// Python: `max(int(os.environ.get("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT", "60000")) / 1000.0, 60.0)` seconds, handed
+/// to `anyio.fail_after`. A wait too long for `Duration` never ends, as Python's does not in practice.
 pub(crate) fn python_initialize_timeout(value: Option<std::ffi::OsString>) -> Result<Duration, Error> {
-    let floor = Duration::from_secs(60);
+    let seconds = python_initialize_seconds(value.as_deref())?;
+    Ok(Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX))
+}
+
+/// The float of seconds Python computes, with the error each step of that expression raises.
+pub(crate) fn python_initialize_seconds(value: Option<&std::ffi::OsStr>) -> Result<f64, Error> {
     let Some(value) = value else {
-        return Ok(floor);
+        return Ok(PYTHON_INITIALIZE_TIMEOUT_SECONDS);
     };
-    let text = value.to_string_lossy();
-    let milliseconds = python_int(&text).ok_or_else(|| Error::InvalidStreamCloseTimeout {
-        literal: python_repr(&text),
-    })?;
-    Ok(match milliseconds {
-        PythonInt::Negative => floor,
-        PythonInt::Positive(milliseconds) => Duration::from_millis(milliseconds).max(floor),
-    })
-}
-
-enum PythonInt {
-    Negative,
-    /// Saturated at `u64::MAX`, which is longer than any wait.
-    Positive(u64),
-}
-
-/// The values Python's `int(text)` accepts in base 10: surrounding whitespace, one sign, and ASCII digits with
-/// single underscores between them.
-fn python_int(text: &str) -> Option<PythonInt> {
-    let text = text.trim();
-    let (negative, digits) = match text.as_bytes().first() {
-        Some(b'-') => (true, &text[1..]),
-        Some(b'+') => (false, &text[1..]),
-        _ => (false, text),
-    };
-    if digits.is_empty() || digits.starts_with('_') || digits.ends_with('_') || digits.contains("__") {
-        return None;
-    }
-    let mut value = 0_u64;
-    for byte in digits.bytes() {
-        match byte {
-            b'_' => {}
-            b'0'..=b'9' => value = value.saturating_mul(10).saturating_add(u64::from(byte - b'0')),
-            _ => return None,
+    let text = python_text::from_os_str(value);
+    let milliseconds = match python_text::int(&text) {
+        Ok(milliseconds) => milliseconds.to_f64().ok_or(Error::StreamCloseTimeoutOverflow)?,
+        Err(python_text::IntError::InvalidLiteral) => {
+            return Err(Error::InvalidStreamCloseTimeout {
+                literal: python_text::repr(&text)
+                    .chars()
+                    .take(PYTHON_INT_LITERAL_REPR_CHARS)
+                    .collect(),
+            });
         }
-    }
-    Some(if negative && value > 0 {
-        PythonInt::Negative
-    } else {
-        PythonInt::Positive(value)
-    })
-}
-
-/// Python's `repr` of a string, as its `int()` error quotes it.
-fn python_repr(text: &str) -> String {
-    let quote = if text.contains('\'') && !text.contains('"') {
-        '"'
-    } else {
-        '\''
+        Err(python_text::IntError::TooManyDigits(digits)) => return Err(Error::StreamCloseTimeoutDigits { digits }),
     };
-    let mut repr = String::with_capacity(text.len() + 2);
-    repr.push(quote);
-    for character in text.chars() {
-        match character {
-            '\\' => repr.push_str("\\\\"),
-            '\n' => repr.push_str("\\n"),
-            '\r' => repr.push_str("\\r"),
-            '\t' => repr.push_str("\\t"),
-            character if character == quote => {
-                repr.push('\\');
-                repr.push(character);
-            }
-            character if u32::from(character) < 0x20 || character == '\u{7f}' => {
-                let code = u32::from(character);
-                repr.push_str("\\x");
-                repr.extend(
-                    [code >> 4, code & 0xf]
-                        .into_iter()
-                        .filter_map(|digit| char::from_digit(digit, 16)),
-                );
-            }
-            character => repr.push(character),
-        }
-    }
-    repr.push(quote);
-    repr
+    let seconds = milliseconds / 1000.0;
+    Ok(if PYTHON_INITIALIZE_TIMEOUT_SECONDS > seconds {
+        PYTHON_INITIALIZE_TIMEOUT_SECONDS
+    } else {
+        seconds
+    })
 }
 
 /// Connects the transport and starts the driver task.

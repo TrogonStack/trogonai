@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 use std::{
     sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
@@ -656,24 +658,62 @@ async fn a_duplicate_in_flight_request_is_skipped_or_run_by_policy() -> Result<(
 
 #[test]
 fn python_initialize_timeout_reads_the_stream_close_variable() -> Result<(), Error> {
-    let parse = |value: &str| python_initialize_timeout(Some(value.into()));
     assert_eq!(python_initialize_timeout(None)?, Duration::from_secs(60));
-    assert_eq!(parse("90000")?, Duration::from_secs(90));
-    assert_eq!(parse(" +120_500\n")?, Duration::from_millis(120_500));
-    assert_eq!(parse("1000")?, Duration::from_secs(60));
-    assert_eq!(parse("-5")?, Duration::from_secs(60));
-    assert_eq!(parse("99999999999999999999999")?, Duration::from_millis(u64::MAX));
-    for (value, message) in [
-        ("1.5", "invalid literal for int() with base 10: '1.5'"),
-        ("", "invalid literal for int() with base 10: ''"),
-        ("1__0", "invalid literal for int() with base 10: '1__0'"),
-        ("it's", "invalid literal for int() with base 10: \"it's\""),
-        ("a\tb\\", "invalid literal for int() with base 10: 'a\\tb\\\\'"),
-        ("\u{1}", "invalid literal for int() with base 10: '\\x01'"),
-    ] {
-        assert_eq!(parse(value).map_err(|error| error.to_string()), Err(message.to_owned()));
+    assert_eq!(
+        python_initialize_timeout(Some(" +120_500\n".into()))?,
+        Duration::from_millis(120_500)
+    );
+    assert_eq!(python_initialize_timeout(Some("1".repeat(308).into()))?, Duration::MAX);
+    assert!(matches!(
+        python_initialize_timeout(Some("1.5".into())),
+        Err(Error::InvalidStreamCloseTimeout { .. })
+    ));
+    Ok(())
+}
+
+/// Replays what the Python SDK's client computed for `initialize_timeout` from each captured variable value.
+#[cfg(unix)]
+#[test]
+fn python_initialize_seconds_match_the_captured_goldens() -> Result<(), Box<dyn std::error::Error>> {
+    let goldens: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/python_text/goldens.json"))?;
+    let cases = goldens["stream_close_timeout"]
+        .as_array()
+        .ok_or("no stream_close_timeout goldens")?;
+    assert_eq!(cases.len(), 61);
+    for case in cases {
+        let bytes = case["value"].as_str().map(hex_bytes).transpose()?;
+        let result = python_initialize_seconds(bytes.as_deref().map(OsStr::from_bytes));
+        if let Some(seconds) = case["seconds"].as_str() {
+            assert_eq!(
+                result.ok().map(f64::to_bits),
+                Some(seconds.parse::<f64>()?.to_bits()),
+                "{case}"
+            );
+            continue;
+        }
+        let kind = result.as_ref().err().map(|error| {
+            if matches!(error, Error::StreamCloseTimeoutOverflow) {
+                "OverflowError"
+            } else {
+                "ValueError"
+            }
+        });
+        assert_eq!(kind, case["error_type"].as_str(), "{case}");
+        assert_eq!(
+            result.err().map(|error| error.to_string()).as_deref(),
+            case["error"].as_str(),
+            "{case}"
+        );
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn hex_bytes(hex: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(hex.get(index..index + 2).unwrap_or_default(), 16))
+        .collect()
 }
 
 fn settings(text: &str) -> Option<crate::Settings> {

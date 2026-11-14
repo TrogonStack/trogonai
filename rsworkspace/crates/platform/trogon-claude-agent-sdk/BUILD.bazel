@@ -28,6 +28,7 @@ workspace_crate(
         "src/upstream/settings_schema.json",
         "tests/fixtures/connector_vetting/probes.json",
         "tests/fixtures/usd_budget/goldens.json",
+        "tests/fixtures/python_text/goldens.json",
     ] + glob([
         "tests/fixtures/fork_ts/*.jsonl",
         "tests/fixtures/oracle_ts/*.json",
@@ -248,6 +249,6 @@ workspace_crate(
         "user_message": {},
         "value_contracts": {},
         "websocket_remote_store": {},
-        "windows_batch_cli": {},
+        "windows_batch_cli": {"compile_data": ["tests/fixtures/python_text/goldens.json"]},
     },
 )
