@@ -323,7 +323,7 @@ const pure = {
 const json = (status, value, headers = []) => ({ status, headers: [['content-type', 'application/json'], ...headers], body: JSON.stringify(value) });
 const raw = (status, body, headers = []) => ({ status, headers, body });
 const conflict = (reason) => json(409, {}, [['x-ccr-conflict-reason', reason]]);
-const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [] };
+const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], attach: [] };
 const expired = jwt({ exp: 1 });
 const future = jwt({ exp: 99999999999 });
 const originRefusal = (status) => raw(status, '', [['request-id', 'req_abc']]);
@@ -902,8 +902,9 @@ async function run(spec) {
   const inbound = [];
   const permissions = [];
   const logStart = fs.existsSync(debugLog) ? fs.statSync(debugLog).size : 0;
-  const options = { sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: spec.stream === undefined, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code), onInboundMessage: (message) => inbound.push(JSON.parse(JSON.stringify(message))), onPermissionResponse: (message) => { permissions.push(JSON.parse(JSON.stringify(message))); return true; } };
+  const options = { sessionId: spec.sessionId ?? 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: spec.stream === undefined, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code), onInboundMessage: (message) => inbound.push(JSON.parse(JSON.stringify(message))), onPermissionResponse: (message) => { permissions.push(JSON.parse(JSON.stringify(message))); return true; } };
   if (spec.epoch !== null && spec.epoch !== undefined) options.epoch = spec.epoch;
+  if (spec.initialSequenceNum !== undefined) options.initialSequenceNum = spec.initialSequenceNum;
   // Host callbacks the control dispatch is handed (`spec.callbacks`): each records its arguments and returns what the
   // case says (`returns`), or nothing when the case names none. `undefined` arguments are written as "<undefined>".
   const calls = [];
@@ -929,7 +930,7 @@ async function run(spec) {
   if (spec.version !== undefined) options.claudeCodeVersion = spec.version;
   for (const [key, value] of Object.entries(spec.env ?? {})) process.env[key] = value;
   const count = (route) => requests.filter((r) => r.path.endsWith(route)).length;
-  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), ...(spec.deliveries !== undefined && { deliveries: spec.deliveries }), ...(spec.stream !== undefined && { stream: spec.stream }), ...(spec.clock !== undefined && { clock: spec.clock }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
+  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, ...(spec.sessionId !== undefined && { session_id: spec.sessionId }), ...(spec.initialSequenceNum !== undefined && { initial_sequence_num: spec.initialSequenceNum }), interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), ...(spec.deliveries !== undefined && { deliveries: spec.deliveries }), ...(spec.stream !== undefined && { stream: spec.stream }), ...(spec.clock !== undefined && { clock: spec.clock }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
   let handle;
   if (spec.sessionToken !== undefined) process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = spec.sessionToken;
   try {
@@ -959,6 +960,13 @@ async function run(spec) {
       if (step.op === 'write') {
         handle.write(step.frame);
         await sleep(150);
+        continue;
+      }
+      if (step.op === 'close') {
+        handle.close();
+        if (step.again) handle.close();
+        if (step.sends) await until(() => requests.filter((r) => r.method === 'PUT').length > before, 3000);
+        await sleep(300);
         continue;
       }
       if (step.op === 'delivery') {
@@ -1148,6 +1156,18 @@ async function fetchFailureCase(mode) {
   return result;
 }
 
+// ---- the attach entrypoint itself: what the options do and what closing the handle sends ----
+const attached = (name, spec) => add('attach', name, { epoch: 6, ...spec });
+const idleStream = [connection([])];
+for (const [label, seed] of [['a_positive', 7], ['zero', 0], ['a_negative', -3]]) attached(`${label}_initial_sequence_resumes_the_stream`, { initialSequenceNum: seed, stream: idleStream, waitFor: [['/worker/events/stream', 1]], settleMs: 200 });
+attached('a_seed_is_kept_when_older_events_arrive', { initialSequenceNum: 7, stream: [connection([clientEvent(3, 'e3', userPayload('u3'))], 'end'), connection([])], waitFor: [['/worker/events/stream', 2], delivered(2)], reconnectBases: [1000] });
+attached('a_session_id_with_unsafe_characters_is_refused', { sessionId: 'a/b', epoch: null });
+attached('closing_an_idle_worker_says_goodbye', { steps: [{ op: 'close', sends: true }] });
+attached('closing_twice_says_goodbye_once', { steps: [{ op: 'close', sends: true, again: true }] });
+attached('closing_a_running_worker_says_nothing', { steps: [running, { op: 'close', sends: false }] });
+attached('writes_after_closing_are_dropped', { steps: [{ op: 'close', sends: true }, post(0, [note('a', 'u1')])] });
+attached('closing_after_the_epoch_was_taken_over_says_nothing', { puts: [json(200, {}), conflict('superseded_by_worker')], steps: [{ op: 'metadata', value: { task_summary: 's1' }, sends: true }, { op: 'close', sends: false }], waitClose: true });
+
 // `--only=<case name>` records just that case, as many times as `--times=<n>` says, and prints the results.
 const only = flags.find((flag) => flag.startsWith('--only='))?.slice('--only='.length);
 if (only !== undefined) {
@@ -1162,13 +1182,20 @@ if (only !== undefined) {
   process.exit(0);
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], network: [], fetch_failures: [] };
-for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events', 'delivery', 'served', 'stream']) {
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], attach: [], network: [], fetch_failures: [] };
+// `--section=<name>` records only that section and keeps every other part of the existing goldens file as it is.
+const sectionOnly = flags.find((flag) => flag.startsWith('--section='))?.slice('--section='.length);
+const existing = sectionOnly === undefined ? null : JSON.parse(fs.readFileSync(out, 'utf8'));
+for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events', 'delivery', 'served', 'stream', 'attach']) {
+  if (sectionOnly !== undefined && section !== sectionOnly) {
+    goldens[section] = existing[section];
+    continue;
+  }
   for (const spec of cases[section]) goldens[section].push(await run(spec));
 }
 // A control case keeps the request, what the host callbacks saw and the control_response frames the session posted
 // (the posted uuid is replaced by `<uuid>` already; the process id is replaced by 0).
-for (const spec of cases.control) {
+for (const spec of sectionOnly === undefined ? cases.control : []) {
   const result = await run(spec);
   const frames = result.requests.filter((r) => r.method === 'POST' && r.path === '/worker/events')
     .flatMap((r) => JSON.parse(r.body).events.map((event) => event.payload)).filter((payload) => payload.type === 'control_response' || payload.type === 'system');
@@ -1178,8 +1205,12 @@ for (const spec of cases.control) {
   const prompts = (spec.steps ?? []).flatMap((step) => step.writes ?? []).map((write) => write.payload);
   goldens.control.push({ name: spec.name, request: first, later, version: spec.version ?? null, callbacks: spec.callbacks ?? {}, prompts, env: spec.env ?? {}, deadlines: result.deadlines ?? [], calls: result.calls ?? [], frames });
 }
-for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));
-for (const mode of ['destroy', 'truncated', 'hang']) goldens.fetch_failures.push(await fetchFailureCase(mode));
+if (existing === null) {
+  for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));
+  for (const mode of ['destroy', 'truncated', 'hang']) goldens.fetch_failures.push(await fetchFailureCase(mode));
+} else {
+  for (const key of ['pure', 'control', 'network', 'fetch_failures']) goldens[key] = existing[key];
+}
 fs.rmSync(work, { recursive: true, force: true });
 
 const compact = (key, value) => (Array.isArray(value) && key !== 'pure' ? `[\n${value.map((c) => JSON.stringify(c)).join(',\n')}\n]` : JSON.stringify(value));

@@ -14,6 +14,7 @@ mod auth_token;
 mod bridge_client;
 mod bridge_git;
 mod bridge_js;
+mod bridge_session;
 mod bridge_types;
 mod bridge_worker;
 mod bridge_worker_control;
@@ -188,6 +189,10 @@ pub use auth_token::{
 };
 pub use bridge_client::BridgeClient;
 pub use bridge_git::{BranchDropLogDedup, CodeSessionGitContext, DefaultGitProbe, GitContextProbe, GitRepository};
+pub use bridge_session::{
+    AttachBridgeSessionOptions, AttachCallbacks, AttachError, BridgeSession, CLOSE_INIT_FAILED, CloseCallback,
+    EnvironmentLookup, InboundMessageCallback, PermissionResponseCallback, attach_bridge_session,
+};
 pub use bridge_types::{
     CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
     DeviceRefusal, FailureSource, FetchRemoteCredentialsOptions, RemoteCredentials, RemoteCredentialsOutcome,

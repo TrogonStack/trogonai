@@ -70,6 +70,7 @@ const REGISTER_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const INIT_ATTEMPTS: u32 = 10;
 const GET_ATTEMPTS: u32 = 10;
+const GOODBYE_TIMEOUT: Duration = Duration::from_secs(2);
 const GET_TIMEOUT: Duration = Duration::from_secs(30);
 /// `initStateGetOrderingBoundMs` (bridge.mjs offset 1133 region, `dHe`): how long `initialize` waits for the stored
 /// record before it registers.
@@ -545,6 +546,7 @@ pub struct WorkerClient<H, P = TokioPacing> {
     reply_degraded: bool,
     init_state_get_ordering_bound: Duration,
     closed: bool,
+    epoch_superseded: bool,
     dropped_state_patches: u32,
     dropped_owed_metadata_patches: u32,
 }
@@ -578,6 +580,7 @@ impl<H, P> WorkerClient<H, P> {
             reply_degraded: false,
             init_state_get_ordering_bound: INIT_STATE_GET_ORDERING_BOUND,
             closed: false,
+            epoch_superseded: false,
             dropped_state_patches: 0,
             dropped_owed_metadata_patches: 0,
         })
@@ -1164,6 +1167,21 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         &self.deliveries
     }
 
+    /// The goodbye of a closing worker (`sendGoodbye`, offset 1061793): `PUT /worker` with the connection marked as
+    /// disconnected, so the service does not wait for a worker that left. It is not sent for a worker with no epoch,
+    /// one the service already replaced, or one in the middle of a turn. Whatever the service answers is ignored.
+    /// Returns whether the request was sent.
+    pub async fn goodbye(&mut self) -> bool {
+        if self.epoch <= 0 || self.epoch_superseded || self.state == SessionState::Running {
+            return false;
+        }
+        let body = json!({"worker_epoch": self.epoch, "connection_status": "disconnected"});
+        let _ = self
+            .request(Method::PUT, "/worker", &body, GOODBYE_TIMEOUT, false)
+            .await;
+        true
+    }
+
     /// One heartbeat. An accepted answer that advises a beat interval changes the interval the worker keeps.
     pub async fn heartbeat(&mut self) -> Result<RequestOutcome, MismatchReason> {
         let body = json!({"session_id": self.session_id, "worker_epoch": self.epoch});
@@ -1268,6 +1286,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             }));
         }
         if status == 409 {
+            self.epoch_superseded = true;
             return Err(conflict_reason(&reply.headers, reply.body.as_deref()).unwrap_or(MismatchReason::EpochConflict));
         }
         if status == 404 {

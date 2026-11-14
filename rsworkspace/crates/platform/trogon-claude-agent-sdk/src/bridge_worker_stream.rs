@@ -236,6 +236,16 @@ pub struct StreamSession {
 }
 
 impl StreamSession {
+    /// A session that resumes after `initial` (`initialSequenceNum`): a number above zero seeds the sequence the
+    /// first request resumes from, anything else starts from the beginning.
+    #[must_use]
+    pub fn seeded(initial: Option<i64>) -> Self {
+        Self {
+            last_sequence: initial.filter(|sequence| *sequence > 0).unwrap_or(0),
+            ..Self::default()
+        }
+    }
+
     /// The highest sequence number of a durable event seen (`getSequenceNum`).
     pub fn last_sequence(&self) -> i64 {
         self.last_sequence

@@ -177,6 +177,15 @@ impl AsyncControl {
         }
     }
 
+    /// Aborts every request still open and forgets them (the handle's `close`).
+    pub fn cancel_all(&self) {
+        let mut running = self.shared.running();
+        for token in running.values() {
+            token.cancel();
+        }
+        running.clear();
+    }
+
     /// Starts the host call of a deferred request. `None` means nothing is left to run: a side question whose id is
     /// already open is dropped without a reply.
     #[must_use]
