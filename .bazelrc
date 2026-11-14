@@ -19,8 +19,7 @@ test:ci --test_summary=terse
 
 # Lint checks run as aspects over the Rust targets. The checks are an output
 # group, so a build with this config also fails on unformatted sources.
-build:lint --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect
+build:lint --aspects=//.config/bazel:rustfmt.bzl%rustfmt_aspect
 build:lint --output_groups=+rustfmt_checks
-build:lint --@rules_rust//rust/settings:rustfmt.toml=//rsworkspace:rustfmt.toml
 
 try-import %workspace%/.bazelrc.local
