@@ -26,6 +26,9 @@ workspace_crate(
         "README.md",
         "src/upstream/settings_restrict_probes.json",
         "src/upstream/settings_schema.json",
+        "tests/fixtures/bridge_create_session/details.json",
+        "tests/fixtures/bridge_create_session/unicode.json",
+        "tests/fixtures/bridge_create_session/urls.json",
         "tests/fixtures/connector_vetting/probes.json",
         "tests/fixtures/usd_budget/goldens.json",
     ] + glob([

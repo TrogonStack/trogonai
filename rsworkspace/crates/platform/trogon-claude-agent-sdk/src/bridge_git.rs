@@ -5,6 +5,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::bridge_js::js_trim;
+use crate::bridge_url::rejected;
 
 static SCP: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^git@([^:/@]+):([^/]+)/([^/]+?)(?:\.git)?/?$").ok());
@@ -121,6 +122,9 @@ fn repository(host: &str, owner: &str, name: &str) -> Option<GitRepository> {
 
 pub(crate) fn parse_repository(input: &str) -> Option<GitRepository> {
     let text = js_trim(input);
+    if rejected(text) {
+        return None;
+    }
     if let Some(captures) = SCP.as_ref().and_then(|scp| scp.captures(text)) {
         let host = &captures[1];
         return valid_host(host)
