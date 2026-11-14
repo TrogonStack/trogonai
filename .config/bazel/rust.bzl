@@ -18,6 +18,7 @@ def workspace_crate(
         rustc_env = {},
         unit_test_args = [],
         deps = [],
+        proc_macro_deps = [],
         dev_deps = [],
         examples = {},
         integration_tests = {},
@@ -36,13 +37,15 @@ def workspace_crate(
             `crate_root` defaults to `src/main.rs`. The target is the binary name,
             with a `_bin` suffix when it matches the package name of a crate that
             also has a library. Each binary also gets a unit test target, as
-            `cargo test` runs the tests inside binaries too.
+            `cargo test` runs the tests inside binaries too; a `test_args` key
+            sets that test's arguments.
         crate_features: Cargo features enabled for the library and its tests.
         compile_data: Files read at compile time, such as `include_str!` inputs.
         data: Files read at test runtime.
         rustc_env: Environment for compiling the library, which its unit tests
             inherit.
         deps: Workspace crate labels the library depends on.
+        proc_macro_deps: Workspace procedural macro crate labels the library uses.
         dev_deps: Workspace crate labels only the tests and examples depend on.
         examples: Maps each `examples/<name>.rs` to extra `rust_binary` attributes.
         integration_tests: Maps each `tests/<name>.rs` to extra `rust_test` attributes.
@@ -58,6 +61,7 @@ def workspace_crate(
 
     for binary, attrs in binaries.items():
         binary_attrs = dict({"crate_root": "src/main.rs"}, **attrs)
+        binary_test_args = binary_attrs.pop("test_args", [])
 
         # A binary named after its package would clash with the library target.
         target = binary + "_bin" if library and binary == name else binary
@@ -68,7 +72,7 @@ def workspace_crate(
             crate_features = crate_features,
             crate_name = binary.replace("-", "_"),
             edition = edition,
-            proc_macro_deps = all_crate_deps(proc_macro = True),
+            proc_macro_deps = all_crate_deps(proc_macro = True) + proc_macro_deps,
             rustc_flags = _RUSTC_FLAGS,
             version = version,
             visibility = ["//visibility:public"],
@@ -77,6 +81,7 @@ def workspace_crate(
         )
         rust_test(
             name = target + "_unit_test",
+            args = binary_test_args,
             crate = ":" + target,
             compile_data = compile_data,
             crate_features = crate_features,
@@ -87,9 +92,35 @@ def workspace_crate(
             deps = test_deps,
         )
 
+    for test, attrs in integration_tests.items():
+        rust_test(
+            name = name + "_" + test + "_test",
+            srcs = native.glob(["tests/" + test + ".rs", "tests/" + test + "/**/*.rs"], allow_empty = True),
+            crate_features = crate_features,
+            crate_root = "tests/" + test + ".rs",
+            edition = edition,
+            proc_macro_deps = all_crate_deps(proc_macro = True) + proc_macro_deps + test_proc_macro_deps,
+            rustc_flags = _RUSTC_FLAGS,
+            deps = lib_deps + all_crate_deps(normal = True) + deps + test_deps,
+            **dict({"data": data, "version": version}, **attrs)
+        )
+
+    for example, attrs in examples.items():
+        rust_binary(
+            name = name + "_" + example + "_example",
+            srcs = native.glob(["examples/" + example + ".rs", "examples/" + example + "/**/*.rs"], allow_empty = True),
+            crate_features = crate_features,
+            crate_root = "examples/" + example + ".rs",
+            edition = edition,
+            proc_macro_deps = all_crate_deps(proc_macro = True) + proc_macro_deps + test_proc_macro_deps,
+            rustc_flags = _RUSTC_FLAGS,
+            # Examples link dev-dependencies, which only test code may use.
+            testonly = True,
+            deps = lib_deps + all_crate_deps(normal = True) + deps + test_deps,
+            **dict({"version": version}, **attrs)
+        )
+
     if not library:
-        if integration_tests or examples:
-            fail("integration tests and examples need a library target")
         return
 
     library_rule(
@@ -100,7 +131,7 @@ def workspace_crate(
         crate_name = crate_name,
         crate_root = "src/lib.rs",
         edition = edition,
-        proc_macro_deps = all_crate_deps(proc_macro = True),
+        proc_macro_deps = all_crate_deps(proc_macro = True) + proc_macro_deps,
         rustc_env = rustc_env,
         rustc_flags = _RUSTC_FLAGS,
         version = version,
@@ -122,19 +153,6 @@ def workspace_crate(
         deps = test_deps,
     )
 
-    for test, attrs in integration_tests.items():
-        rust_test(
-            name = name + "_" + test + "_test",
-            srcs = native.glob(["tests/" + test + ".rs", "tests/" + test + "/**/*.rs"], allow_empty = True),
-            crate_features = crate_features,
-            crate_root = "tests/" + test + ".rs",
-            edition = edition,
-            proc_macro_deps = all_crate_deps(proc_macro = True) + test_proc_macro_deps,
-            rustc_flags = _RUSTC_FLAGS,
-            deps = [":" + name] + all_crate_deps(normal = True) + deps + test_deps,
-            **dict({"data": data, "version": version}, **attrs)
-        )
-
     rust_doc_test(
         name = name + "_doc_test",
         crate = ":" + name,
@@ -142,18 +160,3 @@ def workspace_crate(
         proc_macro_deps = test_proc_macro_deps,
         deps = test_deps,
     )
-
-    for example, attrs in examples.items():
-        rust_binary(
-            name = name + "_" + example + "_example",
-            srcs = native.glob(["examples/" + example + ".rs", "examples/" + example + "/**/*.rs"], allow_empty = True),
-            crate_features = crate_features,
-            crate_root = "examples/" + example + ".rs",
-            edition = edition,
-            proc_macro_deps = all_crate_deps(proc_macro = True) + test_proc_macro_deps,
-            rustc_flags = _RUSTC_FLAGS,
-            # Examples link dev-dependencies, which only test code may use.
-            testonly = True,
-            deps = [":" + name] + all_crate_deps(normal = True) + deps + test_deps,
-            **dict({"version": version}, **attrs)
-        )

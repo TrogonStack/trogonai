@@ -1,5 +1,3 @@
-load("@crates//:defs.bzl", "all_crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_test")
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
@@ -12,6 +10,7 @@ workspace_crate(
     },
     data = glob(["tests/fixtures/**"]),
     dev_deps = ["//rsworkspace/crates/decider/trogon-decider"],
+    integration_tests = {"crypto_provider": {}},
     library = False,
     # Some unit tests start NATS and OpenBao servers in containers through Docker.
     unit_test_tags = ["requires-network"],
@@ -26,21 +25,4 @@ workspace_crate(
         "//rsworkspace/crates/platform/trogon-telemetry",
         "//rsworkspace/crates/platform/trogonai-proto",
     ],
-)
-
-# The package has no library target, so the macro cannot declare its integration test.
-rust_test(
-    name = "trogon-gateway_crypto_provider_test",
-    srcs = ["tests/crypto_provider.rs"],
-    crate_root = "tests/crypto_provider.rs",
-    edition = "2024",
-    proc_macro_deps = all_crate_deps(
-        proc_macro = True,
-        proc_macro_dev = True,
-    ),
-    rustc_flags = ["-Dwarnings"],
-    deps = all_crate_deps(
-        normal = True,
-        normal_dev = True,
-    ) + ["//rsworkspace/crates/platform/trogon-std"],
 )

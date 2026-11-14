@@ -18,5 +18,5 @@ workspace_crate(
     # WIT_DIR bakes this path into a constant that `export_decider!` reads while
     # other crates compile. The default points into this action's sandbox, which
     # no other action sees, so it points at the execution root instead.
-    rustc_env = {"CARGO_MANIFEST_DIR": "${exec_root}/" + package_name()},
+    rustc_env = {"CARGO_MANIFEST_DIR": "$${exec_root}/" + package_name()},
 )

@@ -5,14 +5,9 @@ workspace_crate(
     crate_features = ["test-support"],
     dev_deps = ["//rsworkspace/crates/platform/trogonai-proto"],
     integration_tests = {
-        "descriptor": {
-            # export_decider! reads trogon_decider_wit::WIT_DIR, an absolute path baked
-            # in from another build action's sandbox, so wit_bindgen cannot find the WIT.
-            "tags": ["manual"],
-        },
+        # export_decider! expands to wit_bindgen over the WIT contract.
+        "descriptor": {"compile_data": ["//rsworkspace/crates/decider/trogon-decider-wit:wit"]},
     },
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider",
-        "//rsworkspace/crates/decider/trogon-decider-guest-macros",
-    ],
+    proc_macro_deps = ["//rsworkspace/crates/decider/trogon-decider-guest-macros"],
+    deps = ["//rsworkspace/crates/decider/trogon-decider"],
 )

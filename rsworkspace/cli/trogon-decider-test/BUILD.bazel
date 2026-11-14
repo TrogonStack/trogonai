@@ -1,9 +1,18 @@
-load("@crates//:defs.bzl", "all_crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
     name = "trogon-decider-test",
+    binaries = {
+        "decider-test": {
+            # These tests load the wasm component built by cargo component outside Bazel.
+            "test_args": [
+                "--skip",
+                "tests::run_passes_the_checked_in_schedules_suite",
+                "--skip",
+                "tests::no_strict_allows_an_incomplete_suite_to_run",
+            ],
+        },
+    },
     # These tests load target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
     # built by cargo component outside Bazel.
     unit_test_args = [
@@ -28,38 +37,4 @@ workspace_crate(
         "//rsworkspace/crates/decider/trogon-decider-sim",
         "//rsworkspace/crates/platform/trogonai-proto",
     ],
-)
-
-# Declared by hand rather than through workspace_crate(binaries = ...) so its unit
-# tests can skip the ones that need the wasm component built outside Bazel.
-rust_binary(
-    name = "decider-test",
-    srcs = [
-        "src/main.rs",
-        "src/tests.rs",
-    ],
-    crate_root = "src/main.rs",
-    edition = "2024",
-    proc_macro_deps = all_crate_deps(proc_macro = True),
-    rustc_flags = ["-Dwarnings"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":trogon-decider-test",
-        "//rsworkspace/crates/decider/trogon-decider-sim",
-        "//rsworkspace/crates/platform/trogonai-proto",
-    ] + all_crate_deps(normal = True),
-)
-
-rust_test(
-    name = "decider-test_unit_test",
-    # These tests load the wasm component built by cargo component outside Bazel.
-    args = [
-        "--skip",
-        "tests::run_passes_the_checked_in_schedules_suite",
-        "--skip",
-        "tests::no_strict_allows_an_incomplete_suite_to_run",
-    ],
-    crate = ":decider-test",
-    rustc_flags = ["-Dwarnings"],
-    deps = all_crate_deps(normal_dev = True),
 )
